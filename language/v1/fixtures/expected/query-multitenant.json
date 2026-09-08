@@ -118,7 +118,9 @@
             "vectors": null
           }
         ],
-        "shard_key": "acme",
+        "shard_key": {
+          "Keyword": "acme"
+        },
         "wait": null
       }
     }

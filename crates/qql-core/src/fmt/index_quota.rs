@@ -42,8 +42,8 @@ pub(crate) fn render_drop_index(statement: &DropIndexStmt) -> String {
 
 pub(crate) fn render_create_shard_key(statement: &CreateShardKeyStmt) -> String {
     let mut out = format!(
-        "CREATE SHARD KEY '{}' ON COLLECTION {}",
-        escape_string(&statement.shard_key),
+        "CREATE SHARD KEY {} ON COLLECTION {}",
+        statement.shard_key,
         render_name(&statement.collection)
     );
     let mut options = Vec::new();

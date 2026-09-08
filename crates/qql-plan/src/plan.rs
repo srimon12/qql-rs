@@ -375,14 +375,16 @@ impl PlannedOperation {
             PlannedOperation::Scroll { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Facet { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::Upsert { request, .. } => {
+                request.shard_key.as_ref().and_then(|k| k.as_keyword())
+            }
             PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::CreateShardKey { request, .. } => Some(request.shard_key.as_str()),
+            PlannedOperation::CreateShardKey { request, .. } => request.shard_key.as_keyword(),
             PlannedOperation::DropShardKey { request, .. } => Some(request.shard_key.as_str()),
             _ => None,
         }
@@ -638,7 +640,7 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
         Stmt::CreateShardKey(sk) => Ok(PlannedOperation::CreateShardKey {
             collection: sk.collection.clone(),
             request: CreateShardKeyRequest {
-                shard_key: sk.shard_key.clone(),
+                shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
                 shards_number: sk.shards_number,
                 replication_factor: sk.replication_factor,
             },

@@ -43,5 +43,7 @@ pub use plan::{
     plan_template, statement_batch_key, to_rest_route, try_route, verify_batch_cardinality,
 };
 pub use routing::{CompiledStatement, compile_statement};
-pub use semantic::{PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue};
+pub use semantic::{
+    PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanShardKey, PlanVectorValue,
+};
 pub use types::*;

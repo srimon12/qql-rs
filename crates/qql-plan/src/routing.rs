@@ -159,7 +159,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 query.push(("wait".into(), "true".into()));
             }
             if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
+                query.push(("shard_key".into(), sk.to_string()));
             }
             Route {
                 method: Method::Put,

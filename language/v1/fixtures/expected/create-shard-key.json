@@ -5,7 +5,9 @@
       "CreateShardKey": {
         "collection": "docs",
         "replication_factor": null,
-        "shard_key": "acme",
+        "shard_key": {
+          "Keyword": "acme"
+        },
         "shards_number": 2
       }
     },
@@ -13,7 +15,9 @@
       "CreateShardKey": {
         "collection": "docs",
         "replication_factor": null,
-        "shard_key": "default",
+        "shard_key": {
+          "Keyword": "default"
+        },
         "shards_number": null
       }
     },

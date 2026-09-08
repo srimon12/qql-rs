@@ -187,7 +187,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             let _ = writeln!(output, "├── Collection: {}", statement.collection);
             let _ = writeln!(output, "├── Points: {}", statement.points.len());
             if let Some(shard) = &statement.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+                let _ = writeln!(output, "├── Shard Key: {}", shard);
             }
             if !statement.embed.is_empty() {
                 let _ = writeln!(output, "└── Embed Directives: {}", statement.embed.len());

@@ -1,5 +1,6 @@
 //! `qql` — Qdrant Query Language CLI: query exec, scripts, explain, REPL,
-//! REST→QQL conversion, collection dump, formatting, and edge configuration.
+//! REST→QQL conversion, collection dump, cluster migrate, formatting, and
+//! edge configuration.
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -10,6 +11,7 @@ mod commands;
 mod config;
 mod convert;
 mod dump;
+mod migrate;
 mod output;
 mod repl;
 mod script;
@@ -103,6 +105,8 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
     },
+    /// Migrate a collection between clusters (schema + points, not snapshots)
+    Migrate(Box<MigrateArgs>),
     /// Check Qdrant connection health
     Doctor {
         /// Output as JSON
@@ -119,6 +123,127 @@ enum Command {
     },
     /// Show version
     Version,
+}
+
+#[derive(clap::Args)]
+struct MigrateArgs {
+    /// Source collection
+    collection: String,
+    /// Target collection name (defaults to the source name)
+    #[arg(long = "to")]
+    to: Option<String>,
+    /// Target Qdrant URL (defaults to --url)
+    #[arg(long)]
+    target_url: Option<String>,
+    /// Use the local edge backend as the target
+    #[arg(long)]
+    target_edge: bool,
+    /// API key for the target cluster
+    #[arg(long, env = "QDRANT_TARGET_API_KEY")]
+    target_api_key: Option<String>,
+    /// Scroll / upsert batch size
+    #[arg(long, default_value_t = migrate::DEFAULT_BATCH_SIZE)]
+    batch_size: u32,
+    /// Concurrent upsert streams
+    #[arg(long, default_value_t = migrate::DEFAULT_WORKERS)]
+    workers: usize,
+    /// Override target shard_number
+    #[arg(long)]
+    shard_number: Option<u64>,
+    /// Override target replication_factor
+    #[arg(long)]
+    replication_factor: Option<u64>,
+    /// Override sharding method (`auto` or `custom`)
+    #[arg(long)]
+    sharding_method: Option<String>,
+    /// Apply quantization on CREATE (scalar, binary, product, turbo)
+    #[arg(long, value_enum)]
+    quantize: Option<CliQuantize>,
+    /// Store quantized vectors on disk instead of RAM
+    #[arg(long)]
+    no_always_ram: bool,
+    /// Scalar quantization quantile
+    #[arg(long, default_value_t = 0.99)]
+    quantize_quantile: f64,
+    /// Product quantization compression (`x4`/`x8`/`x16`/`x32`)
+    #[arg(long, default_value = "x16")]
+    quantize_compression: String,
+    /// Binary quantization encoding
+    #[arg(long, default_value = "one_bit")]
+    quantize_encoding: String,
+    /// Turbo quantization bits (`1`/`1.5`/`2`/`4`)
+    #[arg(long, default_value = "2")]
+    quantize_bits: String,
+    /// Fixed custom shard key for every upsert
+    #[arg(long)]
+    shard_key: Option<String>,
+    /// Payload field used as the per-point custom shard key
+    #[arg(long)]
+    shard_key_field: Option<String>,
+    /// Missing `--shard-key-field` policy: error, skip, or `default=<key>`
+    #[arg(long, default_value = "error")]
+    on_missing_shard_key: String,
+    /// Optimizer indexing_threshold (KB) during bulk load
+    #[arg(long, default_value_t = migrate::DEFAULT_BULK_INDEXING_THRESHOLD)]
+    bulk_threshold_kb: u64,
+    /// After verify, atomically point this alias at the target collection
+    #[arg(long = "cutover")]
+    cutover: Option<String>,
+    /// After a successful cutover, DROP the source collection
+    #[arg(long)]
+    drop_source_after_cutover: bool,
+    /// Restrict the source scroll (`city = 'berlin'`)
+    #[arg(long = "where")]
+    where_clause: Option<String>,
+    /// Checkpoint file (default `.qql-migrate/<src>__<dst>.json`)
+    #[arg(long)]
+    checkpoint: Option<String>,
+    /// Resume from an existing checkpoint
+    #[arg(long)]
+    resume: bool,
+    /// Ignore any existing checkpoint and start over
+    #[arg(long)]
+    restart: bool,
+    /// Print the plan and exit without writing
+    #[arg(long)]
+    dry_run: bool,
+    /// Do not suppress HNSW during ingest
+    #[arg(long)]
+    no_fast_bulk: bool,
+    /// Skip exact count verification
+    #[arg(long)]
+    no_verify: bool,
+    /// Skip WAIT true on upserts (faster, weaker durability)
+    #[arg(long)]
+    no_wait: bool,
+    /// DROP the target collection before creating it
+    #[arg(long)]
+    recreate: bool,
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+    /// Quiet mode
+    #[arg(long, short)]
+    quiet: bool,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum CliQuantize {
+    Scalar,
+    Binary,
+    Product,
+    Turbo,
+}
+
+impl From<CliQuantize> for migrate::QuantizeKind {
+    fn from(value: CliQuantize) -> Self {
+        match value {
+            CliQuantize::Scalar => Self::Scalar,
+            CliQuantize::Binary => Self::Binary,
+            CliQuantize::Product => Self::Product,
+            CliQuantize::Turbo => Self::Turbo,
+        }
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -245,6 +370,69 @@ fn resolve_query_params(
     Ok(bound)
 }
 
+fn print_migrate_result(
+    source: &str,
+    target: &str,
+    stats: &migrate::MigrateStats,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "operation": "migrate",
+                "source": source,
+                "target": target,
+                "written": stats.written,
+                "skipped": stats.skipped,
+                "batches": stats.batches,
+                "source_count": stats.source_count,
+                "target_count": stats.target_count,
+                "verified": stats.verified,
+                "resumed": stats.resumed,
+                "dry_run": stats.dry_run,
+                "cutover_alias": stats.cutover_alias,
+                "source_dropped": stats.source_dropped,
+                "create": stats.plan.create,
+                "indexes": stats.plan.indexes,
+                "shard_keys": stats.plan.shard_keys,
+                "restore_optimizers": stats.plan.restore_optimizers,
+            })
+        );
+        return Ok(());
+    }
+    if stats.dry_run {
+        println!(
+            "Dry-run migrate '{source}' → '{target}' ({} source points)",
+            stats.source_count
+        );
+        println!("{};", stats.plan.create);
+        for idx in &stats.plan.indexes {
+            println!("{};", idx);
+        }
+        for key in &stats.plan.shard_keys {
+            println!("{};", key);
+        }
+        if let Some(restore) = &stats.plan.restore_optimizers {
+            println!("-- after ingest:");
+            println!("{};", restore);
+        }
+        return Ok(());
+    }
+    let verified = if stats.verified {
+        "verified"
+    } else {
+        "unverified"
+    };
+    let resumed = if stats.resumed { ", resumed" } else { "" };
+    println!(
+        "Migrated '{source}' → '{target}' ({} written, {} skipped, {} batches, {verified}{resumed})",
+        stats.written, stats.skipped, stats.batches
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -332,6 +520,85 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 println!("{}", msg);
             }
+            Ok(())
+        }
+        Command::Migrate(args) => {
+            use std::io::Write;
+            let args = *args;
+            let target_collection = args.to.unwrap_or_else(|| args.collection.clone());
+            let target_url = args.target_url.unwrap_or_else(|| url.clone());
+            let checkpoint = args.checkpoint.unwrap_or_else(|| {
+                migrate::default_checkpoint_path(
+                    &url,
+                    &args.collection,
+                    &target_url,
+                    &target_collection,
+                )
+            });
+            let quantize = args.quantize.map(|kind| {
+                let mut spec = migrate::QuantizeSpec::new(kind.into());
+                spec.always_ram = !args.no_always_ram;
+                spec.quantile = args.quantize_quantile;
+                spec.compression = args.quantize_compression;
+                spec.encoding = args.quantize_encoding;
+                spec.bits = args.quantize_bits;
+                spec
+            });
+            let opts = migrate::MigrateOptions {
+                source_collection: args.collection.clone(),
+                target_collection: target_collection.clone(),
+                source_url: url.clone(),
+                target_url: target_url.clone(),
+                batch_size: args.batch_size,
+                workers: args.workers,
+                shard_number: args.shard_number,
+                replication_factor: args.replication_factor,
+                sharding_method: args.sharding_method,
+                quantize,
+                shard_key: args.shard_key,
+                shard_key_field: args.shard_key_field,
+                missing_shard_key: migrate::MissingShardKey::parse(&args.on_missing_shard_key)
+                    .map_err(|e| format!("--on-missing-shard-key: {e}"))?,
+                bulk_indexing_threshold: args.bulk_threshold_kb,
+                cutover_alias: args.cutover,
+                drop_source_after_cutover: args.drop_source_after_cutover,
+                where_clause: args.where_clause,
+                checkpoint_path: checkpoint,
+                resume: args.resume,
+                restart: args.restart,
+                dry_run: args.dry_run,
+                fast_bulk: !args.no_fast_bulk,
+                verify: !args.no_verify,
+                wait: !args.no_wait,
+                recreate: args.recreate,
+            };
+            let progress_fn = |p: migrate::MigrateProgress| {
+                eprint!(
+                    "\r[{}] {} — {} / {} points ({} batches)...",
+                    p.phase, p.collection, p.written, p.source_count, p.batches
+                );
+                let _ = std::io::stderr().flush();
+            };
+            let progress_cb: Option<&(dyn Fn(migrate::MigrateProgress) + Sync)> =
+                if !args.json && !args.quiet && !args.dry_run {
+                    Some(&progress_fn)
+                } else {
+                    None
+                };
+            let stats = commands::handle_migrate(
+                &url,
+                use_edge,
+                &target_url,
+                args.target_edge,
+                args.target_api_key,
+                opts,
+                progress_cb,
+            )
+            .await?;
+            if !args.json && !args.quiet && stats.batches > 0 {
+                eprintln!();
+            }
+            print_migrate_result(&args.collection, &target_collection, &stats, args.json)?;
             Ok(())
         }
         Command::Doctor { json, quiet } => {

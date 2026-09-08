@@ -125,7 +125,7 @@ pub struct UpsertRequest {
     pub points: Vec<UpsertPointRequest>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 impl UpsertRequest {

@@ -7,7 +7,7 @@ use serde_json::json;
 use super::escape::*;
 use super::point::*;
 use super::quant::*;
-use super::*;
+use super::{next_scroll_cursor, scroll_page_complete, *};
 
 fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> CollectionInfo {
     CollectionInfo {
@@ -281,6 +281,43 @@ fn extract_empty_page() {
 }
 
 #[test]
+fn next_scroll_cursor_falls_back_to_last_id() {
+    let points = vec![json!({"id": 7}), json!({"id": 8})];
+    assert_eq!(
+        next_scroll_cursor(None, &points),
+        Some(PlanPointId::Number(8))
+    );
+    assert_eq!(
+        next_scroll_cursor(Some(PlanPointId::Number(9)), &points),
+        Some(PlanPointId::Number(9))
+    );
+}
+
+#[test]
+fn scroll_page_complete_detects_short_and_stuck() {
+    let points = vec![json!({"id": 1})];
+    assert!(scroll_page_complete(
+        &points,
+        Some(&PlanPointId::Number(1)),
+        None,
+        10
+    ));
+    let full = vec![json!({"id": 1}), json!({"id": 2})];
+    assert!(scroll_page_complete(
+        &full,
+        Some(&PlanPointId::Number(1)),
+        Some(&PlanPointId::Number(1)),
+        2
+    ));
+    assert!(!scroll_page_complete(
+        &full,
+        Some(&PlanPointId::Number(2)),
+        Some(&PlanPointId::Number(1)),
+        2
+    ));
+}
+
+#[test]
 fn dumped_script_splits_cleanly() {
     let create = "CREATE COLLECTION docs (dense VECTOR(4, COSINE));";
     let index = "CREATE INDEX ON COLLECTION docs FOR title TYPE text;";
@@ -316,6 +353,44 @@ fn schema_from_rest_result_feeds_create() {
     let indexes = generate_index_statements("docs", &info.schema.payload_indexes);
     assert_eq!(indexes.len(), 1);
     qql_core::parser::Parser::parse(&format!("{};", indexes[0])).expect("index from rest");
+}
+
+#[test]
+fn create_omits_zero_positive_only_hnsw_and_optimizer_keys() {
+    let mut hnsw = serde_json::Map::new();
+    hnsw.insert("m".into(), json!(16));
+    hnsw.insert("max_indexing_threads".into(), json!(0));
+    let mut opts = serde_json::Map::new();
+    opts.insert("default_segment_number".into(), json!(0));
+    opts.insert("indexing_threshold".into(), json!(20000));
+    let mut info = info_with_vectors(
+        vec![VectorSpec {
+            name: Some("dense".into()),
+            size: 4,
+            distance: "Cosine".into(),
+            hnsw: Some(hnsw),
+            quantization: None,
+            multivector: None,
+            on_disk: None,
+            datatype: None,
+            memory: None,
+        }],
+        vec![],
+    );
+    info.schema.hnsw = None;
+    info.schema.optimizers = Some(opts);
+    let stmt = generate_create_statement("docs", &info);
+    assert!(
+        !stmt.contains("max_indexing_threads"),
+        "zero max_indexing_threads should be omitted: {stmt}"
+    );
+    assert!(
+        !stmt.contains("default_segment_number"),
+        "zero default_segment_number should be omitted: {stmt}"
+    );
+    assert!(stmt.contains("indexing_threshold = 20000"));
+    qql_core::parser::Parser::parse(&format!("{};", stmt))
+        .expect("CREATE with omitted auto-zeros should parse");
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # qql-cli
 
-CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, doctor, optional edge.
+CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, migrate, doctor, optional edge.
 
 ## Install
 
@@ -27,6 +27,7 @@ Binary: `target/release/qql`.
 | `qql connect` | REPL |
 | `qql convert [file.json]` | REST JSON → QQL |
 | `qql dump <coll> out.qql` | Export collection as QQL |
+| `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
 | `qql doctor` | Health + embed host snapshot |
 | `qql --edge …` | Use configured local edge backend |
 | `qql version` | Version |
@@ -36,6 +37,12 @@ qql exec "SHOW COLLECTIONS"
 qql exec --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
+
+# Cross-version / cross-cluster migrate (schema + points, not snapshots)
+qql migrate docs --url http://old:6333 --target-url http://new:6334 --to docs
+qql migrate docs --to docs_q --quantize scalar --shard-number 12 --dry-run
+qql migrate docs --to docs --restart   # discard a checkpoint and start over
+qql migrate docs --to docs_v2 --cutover docs --shard-key-field tenant_id --on-missing-shard-key skip
 
 # Cluster quotas (Qdrant ≥ 1.19, REST only — use :6333, not gRPC :6334)
 qql exec "SHOW QUOTAS"

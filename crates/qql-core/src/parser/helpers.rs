@@ -512,15 +512,36 @@ impl<'a> AstLowerer<'a> {
         }
     }
 
+    pub fn parse_shard_key_atom(&mut self) -> Result<crate::ast::ShardKey, QqlError> {
+        match self.peek()?.kind {
+            TokenKind::Integer => {
+                let n = self.parse_non_negative_u64("shard key")?;
+                Ok(crate::ast::ShardKey::Number(n))
+            }
+            _ => Ok(crate::ast::ShardKey::Keyword(self.parse_string()?)),
+        }
+    }
+
     pub fn parse_optional_shard_and_wait(
         &mut self,
     ) -> Result<(Option<String>, Option<bool>), QqlError> {
+        let (typed, wait) = self.parse_optional_typed_shard_and_wait()?;
+        let shard_key = typed.map(|k| match k {
+            crate::ast::ShardKey::Keyword(s) => s,
+            crate::ast::ShardKey::Number(n) => n.to_string(),
+        });
+        Ok((shard_key, wait))
+    }
+
+    pub fn parse_optional_typed_shard_and_wait(
+        &mut self,
+    ) -> Result<(Option<crate::ast::ShardKey>, Option<bool>), QqlError> {
         let mut shard_key = None;
         let mut wait = None;
         loop {
             if self.peek()?.kind == TokenKind::Shard && shard_key.is_none() {
                 self.advance()?;
-                shard_key = Some(self.parse_string()?);
+                shard_key = Some(self.parse_shard_key_atom()?);
             } else if let Some(w) = self.parse_optional_wait()? {
                 if wait.is_some() {
                     return Err(QqlError::parse(

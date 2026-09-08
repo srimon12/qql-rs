@@ -72,7 +72,7 @@ impl<'a> AstLowerer<'a> {
         } else {
             Vec::new()
         };
-        let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+        let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
 
         Ok(Stmt::Upsert(Box::new(UpsertStmt {
             collection,

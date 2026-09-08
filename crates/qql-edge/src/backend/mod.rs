@@ -328,7 +328,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::UpsertRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
         let collection_name = collection.to_string();
 

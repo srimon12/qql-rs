@@ -134,4 +134,34 @@ impl QdrantOps for GrpcQdrant {
     ) -> Result<Vec<serde_json::Value>, QqlError> {
         crate::grpc_route::execute_update_batch_grpc(self, collection, batch).await
     }
+
+    async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
+        use crate::client::AliasAction;
+        let grpc_actions = actions
+            .iter()
+            .map(|action| qdrant::AliasOperations {
+                action: Some(match action {
+                    AliasAction::Delete { alias } => {
+                        qdrant::alias_operations::Action::DeleteAlias(qdrant::DeleteAlias {
+                            alias_name: alias.clone(),
+                        })
+                    }
+                    AliasAction::Create { collection, alias } => {
+                        qdrant::alias_operations::Action::CreateAlias(qdrant::CreateAlias {
+                            collection_name: collection.clone(),
+                            alias_name: alias.clone(),
+                        })
+                    }
+                }),
+            })
+            .collect();
+        let mut cl = self.collections_client();
+        cl.update_aliases(qdrant::ChangeAliases {
+            actions: grpc_actions,
+            timeout: None,
+        })
+        .await
+        .map_err(|e| grpc_error("update_aliases", e, &self.current_request_id()))?;
+        Ok(())
+    }
 }
