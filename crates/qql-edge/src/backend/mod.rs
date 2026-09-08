@@ -1078,6 +1078,12 @@ impl QdrantOps for EdgeQdrant {
                             .await?,
                     );
                 }
+                PlanUpdateOperation::DeletePayload { delete_payload } => {
+                    results.push(
+                        self.execute_edge_delete_payload(collection, delete_payload)
+                            .await?,
+                    );
+                }
                 PlanUpdateOperation::UpdateVectors { update_vectors } => {
                     results.push(
                         self.execute_edge_update_vectors(collection, update_vectors)

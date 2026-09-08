@@ -713,7 +713,7 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(&cc);
-        let rest = create_collection_rest_body(&req);
+        let rest = create_collection_rest_body(&req).unwrap();
         assert_eq!(rest["replication_factor"], 2);
         assert_eq!(
             rest["vectors"]["v"]["quantization_config"]["scalar"]["quantile"],

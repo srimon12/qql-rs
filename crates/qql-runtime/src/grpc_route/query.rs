@@ -518,7 +518,7 @@ pub(crate) fn to_facet_counts(
         collection_name: collection.to_owned(),
         key: request.key.clone(),
         filter: to_filter_opt(request.filter.as_ref())?,
-        limit: request.limit.map(|l| l as u64),
+        limit: request.limit,
         exact: request.exact,
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()

@@ -17,8 +17,14 @@ pub fn lower_query_input(input: &QueryInput) -> PlanQueryInput {
 }
 
 /// Lower a formula expression tree to the OpenAPI `Expression` JSON shape.
-pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Value {
-    match expr {
+///
+/// Fallible: `CASE` conditions serialize through the shared plan body helper,
+/// so a `Serialize` regression surfaces as `QQL-PLAN-SERIALIZE` instead of
+/// panicking the host process.
+pub fn lower_formula_expr(
+    expr: &qql_core::ast::FormulaExpr,
+) -> Result<serde_json::Value, QqlError> {
+    Ok(match expr {
         qql_core::ast::FormulaExpr::Constant { value } => serde_json::json!(value),
         qql_core::ast::FormulaExpr::Variable { name } => {
             if name == "score" {
@@ -28,13 +34,13 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
             }
         }
         qql_core::ast::FormulaExpr::Sum { left, right } => serde_json::json!({
-            "sum": [lower_formula_expr(left), lower_formula_expr(right)]
+            "sum": [lower_formula_expr(left)?, lower_formula_expr(right)?]
         }),
         qql_core::ast::FormulaExpr::Sub { left, right } => serde_json::json!({
-            "sum": [lower_formula_expr(left), { "neg": lower_formula_expr(right) }]
+            "sum": [lower_formula_expr(left)?, { "neg": lower_formula_expr(right)? }]
         }),
         qql_core::ast::FormulaExpr::Mul { left, right } => serde_json::json!({
-            "mult": [lower_formula_expr(left), lower_formula_expr(right)]
+            "mult": [lower_formula_expr(left)?, lower_formula_expr(right)?]
         }),
         qql_core::ast::FormulaExpr::Div {
             left,
@@ -42,46 +48,52 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
             by_zero_default,
         } => {
             let mut div = serde_json::Map::new();
-            div.insert("left".into(), lower_formula_expr(left));
-            div.insert("right".into(), lower_formula_expr(right));
+            div.insert("left".into(), lower_formula_expr(left)?);
+            div.insert("right".into(), lower_formula_expr(right)?);
             if let Some(default) = by_zero_default {
                 div.insert("by_zero_default".into(), serde_json::json!(default));
             }
             serde_json::json!({ "div": div })
         }
         qql_core::ast::FormulaExpr::Neg { operand } => serde_json::json!({
-            "neg": lower_formula_expr(operand)
+            "neg": lower_formula_expr(operand)?
         }),
         qql_core::ast::FormulaExpr::Abs { x } => serde_json::json!({
-            "abs": lower_formula_expr(x)
+            "abs": lower_formula_expr(x)?
         }),
         qql_core::ast::FormulaExpr::Sqrt { x } => serde_json::json!({
-            "sqrt": lower_formula_expr(x)
+            "sqrt": lower_formula_expr(x)?
         }),
         qql_core::ast::FormulaExpr::Log { x } => serde_json::json!({
-            "log10": lower_formula_expr(x)
+            "log10": lower_formula_expr(x)?
         }),
         qql_core::ast::FormulaExpr::Ln { x } => serde_json::json!({
-            "ln": lower_formula_expr(x)
+            "ln": lower_formula_expr(x)?
         }),
         qql_core::ast::FormulaExpr::Exp { x } => serde_json::json!({
-            "exp": lower_formula_expr(x)
+            "exp": lower_formula_expr(x)?
         }),
         qql_core::ast::FormulaExpr::Acosh { x } => serde_json::json!({
-            "acosh": lower_formula_expr(x)
+            "acosh": lower_formula_expr(x)?
         }),
         qql_core::ast::FormulaExpr::Max { args } => {
-            let terms: Vec<_> = args.iter().map(lower_formula_expr).collect();
+            let terms: Vec<_> = args
+                .iter()
+                .map(lower_formula_expr)
+                .collect::<Result<Vec<_>, _>>()?;
             serde_json::json!({ "max": terms })
         }
         qql_core::ast::FormulaExpr::Min { args } => {
-            let terms: Vec<_> = args.iter().map(lower_formula_expr).collect();
+            let terms: Vec<_> = args
+                .iter()
+                .map(lower_formula_expr)
+                .collect::<Result<Vec<_>, _>>()?;
             serde_json::json!({ "min": terms })
         }
         qql_core::ast::FormulaExpr::Pow { base, exponent } => serde_json::json!({
             "pow": {
-                "base": lower_formula_expr(base),
-                "exponent": lower_formula_expr(exponent)
+                "base": lower_formula_expr(base)?,
+                "exponent": lower_formula_expr(exponent)?
             }
         }),
         qql_core::ast::FormulaExpr::GeoDistance { lat, lon, field } => serde_json::json!({
@@ -105,11 +117,11 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
                 (qql_core::ast::FormulaExpr::Variable { name }, true) => {
                     serde_json::json!({ "datetime_key": name })
                 }
-                _ => lower_formula_expr(x),
+                _ => lower_formula_expr(x)?,
             };
             params.insert("x".into(), x_val);
             if let Some(t) = target {
-                params.insert("target".into(), lower_formula_expr(t));
+                params.insert("target".into(), lower_formula_expr(t)?);
             }
             if let Some(s) = scale {
                 params.insert("scale".into(), serde_json::json!(s));
@@ -125,18 +137,35 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
             serde_json::json!({ key: params })
         }
         qql_core::ast::FormulaExpr::Case { cond, then_, else_ } => {
-            let cond_val = match lower_filter(cond) {
-                FilterExpression::Single(clause) => crate::plan::serialize_body(&*clause)
-                    .expect("formula CASE condition clause serialization failed"),
-                FilterExpression::Compound(comp) => crate::plan::serialize_body(&comp)
-                    .expect("formula CASE condition compound serialization failed"),
-            };
+            let cond_val =
+                match lower_filter(cond) {
+                    FilterExpression::Single(clause) => crate::plan::serialize_body(&*clause)
+                        .map_err(|e| {
+                            QqlError::execution(
+                                "QQL-PLAN-SERIALIZE",
+                                alloc::format!(
+                                    "formula CASE condition clause serialization failed: {e}"
+                                ),
+                                None,
+                            )
+                        })?,
+                    FilterExpression::Compound(comp) => crate::plan::serialize_body(&comp)
+                        .map_err(|e| {
+                            QqlError::execution(
+                                "QQL-PLAN-SERIALIZE",
+                                alloc::format!(
+                                    "formula CASE condition compound serialization failed: {e}"
+                                ),
+                                None,
+                            )
+                        })?,
+                };
             // OpenAPI Expression accepts a Condition as a boolean 0/1 term.
             // Encode CASE as: condition * then + (1 - condition) * else.
             serde_json::json!({
                 "sum": [
                     {
-                        "mult": [cond_val.clone(), lower_formula_expr(then_)]
+                        "mult": [cond_val.clone(), lower_formula_expr(then_)?]
                     },
                     {
                         "mult": [
@@ -146,7 +175,7 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
                                     { "neg": cond_val }
                                 ]
                             },
-                            lower_formula_expr(else_)
+                            lower_formula_expr(else_)?
                         ]
                     }
                 ]
@@ -175,7 +204,7 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
         qql_core::ast::FormulaExpr::DatetimeKey { key } => serde_json::json!({
             "datetime_key": key
         }),
-    }
+    })
 }
 
 /// Lower a `QueryExpr` to its wire `QueryVariant` representation.
@@ -478,10 +507,13 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
 ///
 /// User LIMIT and OFFSET fold into the wire `limit` + `group_offset` pair.
 pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
-    let group = query
-        .group
-        .as_ref()
-        .expect("group required for groups query");
+    let Some(group) = query.group.as_ref() else {
+        return Err(QqlError::validation(
+            "QQL-PLAN-GROUP",
+            "group required for groups query",
+            None,
+        ));
+    };
     let offset = query.page.offset.unwrap_or(0);
     let user_limit = query.page.limit.unwrap_or(10);
     let effective_limit = user_limit.checked_add(offset).ok_or_else(|| {

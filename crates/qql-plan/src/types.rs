@@ -112,6 +112,11 @@ pub enum UpdateOperation {
         /// Selector for the points whose payload is cleared.
         clear_payload: ClearPayloadRequest,
     },
+    /// `{ "delete_payload": … }` — remove payload keys.
+    DeletePayload {
+        /// Payload keys to delete from the targeted points.
+        delete_payload: DeletePayloadRequest,
+    },
     /// `{ "update_vectors": … }` — replace point vectors.
     UpdateVectors {
         /// Vector sets to replace.
@@ -132,6 +137,7 @@ impl UpdateOperation {
             UpdateOperation::Delete { .. } => "DELETE",
             UpdateOperation::SetPayload { .. } => "UPDATE_PAYLOAD",
             UpdateOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
+            UpdateOperation::DeletePayload { .. } => "DELETE_PAYLOAD",
             UpdateOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
             UpdateOperation::DeleteVectors { .. } => "DELETE_VECTOR",
         }
@@ -245,11 +251,6 @@ pub enum MatchValue {
     /// Full-text match on an indexed text field (`{"text": …}`).
     Text {
         /// Query text for the full-text index.
-        text: String,
-    },
-    /// Text-any match on a text field (`{"text": …}`; gRPC `TextAny` variant).
-    TextAny {
-        /// Query text for the text-any index.
         text: String,
     },
     /// Match any of the listed values (`{"any": [...]}`).
@@ -914,6 +915,17 @@ pub struct UpsertRequest {
     pub shard_key: Option<String>,
 }
 
+impl UpsertRequest {
+    /// Whether the request carries no points.
+    ///
+    /// Template planning (`plan_template`) skips whole-point placeholders
+    /// (`VALUES :p`), so a param-only template yields an empty plan that must
+    /// go through the point-splice path — never dispatch directly.
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty()
+    }
+}
+
 /// One point in an upsert: ID plus optional vectors and payload.
 #[derive(Debug, Clone, Serialize)]
 pub struct UpsertPointRequest {
@@ -1043,7 +1055,7 @@ pub struct FacetRequest {
     pub key: String,
     /// Maximum number of facet hits to return.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
+    pub limit: Option<u64>,
     /// Filter expression narrowing points considered for faceting.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,

@@ -299,6 +299,16 @@ pub(crate) fn to_points_update_operation(
                 shard_key_selector: shard_key_selector(&clear_payload.shard_key),
             })
         }
+        UpdateOperation::DeletePayload { delete_payload } => {
+            Operation::DeletePayload(points_update_operation::DeletePayload {
+                keys: delete_payload.keys.clone(),
+                points_selector: points_and_filter_selector(
+                    delete_payload.points.as_ref(),
+                    delete_payload.filter.as_ref(),
+                )?,
+                shard_key_selector: shard_key_selector(&delete_payload.shard_key),
+            })
+        }
         UpdateOperation::UpdateVectors { update_vectors } => {
             let points: Vec<qdrant::PointVectors> = update_vectors
                 .points

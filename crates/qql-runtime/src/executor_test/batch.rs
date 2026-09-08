@@ -78,18 +78,18 @@ async fn test_batch_mutations_same_collection() {
 }
 
 #[tokio::test]
-async fn test_delete_payload_in_mutation_batch_is_deliberately_isolated() {
-    // Regression (B-1): `DELETE PAYLOAD` has no `UpdateOperation` batch form.
-    // Mixed same-collection mutation batches must not abort the whole script
-    // with QQL-BATCH-INVARIANT; DELETE PAYLOAD is dispatched through the
-    // single-op path in statement order and every statement succeeds.
+async fn test_delete_payload_batches_with_mutations() {
+    // P1 full batch support: `DELETE PAYLOAD` has an `UpdateOperation` batch
+    // form (`delete_payload`), so same-collection runs batch instead of
+    // isolating. REST (`DeletePayloadOperation`) and gRPC
+    // (`PointsUpdateOperation.delete_payload = 5`) both carry it.
     let client = MockQdrantClient::default();
     let update_count = client.update_batch_call_count.clone();
     let individual_calls = client.execute_planned_call_count.clone();
 
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    // Two DELETE PAYLOAD statements, no other mutations.
+    // Two DELETE PAYLOAD statements batch into one update-batch RPC.
     let stmts = qql_core::parser::Parser::parse_all(
         "DELETE PAYLOAD draft FROM docs WHERE id = 1;\
          DELETE PAYLOAD final FROM docs WHERE id = 2;",
@@ -108,18 +108,19 @@ async fn test_delete_payload_in_mutation_batch_is_deliberately_isolated() {
     }
     assert_eq!(
         *update_count.lock().unwrap(),
-        0,
-        "DELETE PAYLOAD must not use update batch"
+        1,
+        "DELETE PAYLOAD run must use update batch"
     );
     assert_eq!(
         *individual_calls.lock().unwrap(),
-        2,
-        "each DELETE PAYLOAD should dispatch singly"
+        0,
+        "batched DELETE PAYLOAD must not dispatch singly"
     );
 
-    // UPSERT + DELETE PAYLOAD in one same-collection group.
+    // UPSERT + DELETE PAYLOAD in one same-collection group batch together.
     let client = MockQdrantClient::default();
     let update_count = client.update_batch_call_count.clone();
+    let ops_count = client.last_update_batch_ops_count.clone();
     let individual_calls = client.execute_planned_call_count.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
@@ -139,18 +140,18 @@ async fn test_delete_payload_in_mutation_batch_is_deliberately_isolated() {
     assert_eq!(results[1].operation, "DELETE_PAYLOAD");
     assert_eq!(
         *update_count.lock().unwrap(),
-        0,
-        "single batchable run is dispatched singly, not via update batch"
+        1,
+        "UPSERT + DELETE PAYLOAD must batch"
     );
+    assert_eq!(*ops_count.lock().unwrap(), 2);
     assert_eq!(
         *individual_calls.lock().unwrap(),
-        2,
-        "UPSERT + DELETE PAYLOAD both dispatch through execute_planned"
+        0,
+        "batched run must not dispatch singly"
     );
 
-    // DELETE PAYLOAD sandwiched between batchable mutations: the surrounding
-    // run is still batched, the DELETE PAYLOAD is isolated, and statement
-    // order is preserved in the response.
+    // DELETE PAYLOAD sandwiched between batchable mutations: the whole
+    // same-collection run batches as one update batch, order preserved.
     let client = MockQdrantClient::default();
     let update_count = client.update_batch_call_count.clone();
     let ops_count = client.last_update_batch_ops_count.clone();
@@ -172,18 +173,16 @@ async fn test_delete_payload_in_mutation_batch_is_deliberately_isolated() {
     for r in &results {
         assert!(r.ok, "all statements should succeed: {:?}", r);
     }
-    // run = [UPSERT, DELETE] batched as one update batch; the leading UPSERT
-    // and the DELETE PAYLOAD dispatch singly.
     assert_eq!(
         *update_count.lock().unwrap(),
         1,
-        "batchable run after DELETE PAYLOAD should batch"
+        "full same-collection run must batch once"
     );
-    assert_eq!(*ops_count.lock().unwrap(), 2);
+    assert_eq!(*ops_count.lock().unwrap(), 4);
     assert_eq!(
         *individual_calls.lock().unwrap(),
-        2,
-        "leading UPSERT and DELETE PAYLOAD dispatch singly"
+        0,
+        "batched run must not dispatch singly"
     );
 }
 

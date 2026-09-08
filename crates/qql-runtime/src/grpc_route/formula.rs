@@ -162,7 +162,10 @@ pub(crate) fn ast_formula_to_grpc(expr: &qql_core::ast::FormulaExpr) -> Option<q
                 variant: Some(variant),
             })
         }
-        _ => to_formula_expression(&qql_plan::query::lower_formula_expr(expr)),
+        _ => qql_plan::query::lower_formula_expr(expr)
+            .ok()
+            .as_ref()
+            .and_then(to_formula_expression),
     }
 }
 

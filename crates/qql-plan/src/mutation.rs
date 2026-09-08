@@ -3,7 +3,7 @@ use crate::query::lower_vector_value;
 use crate::types::*;
 use qql_core::ast::{
     ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointEntry, PointSelector,
-    Stmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
+    UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
 
 /// Lower `UPSERT INTO` to the `PUT /collections/{c}/points` request body.
@@ -236,50 +236,6 @@ pub fn lower_scroll_request(
     }
 }
 
-/// Lower a mutation statement into a collection name + wire `UpdateOperation`.
-/// Returns `None` for non-mutation statements (QUERY, DDL, SCROLL, COUNT, …).
-pub fn lower_update_operation(stmt: &Stmt) -> Option<(String, UpdateOperation)> {
-    match stmt {
-        Stmt::Upsert(u) => Some((
-            u.collection.clone(),
-            UpdateOperation::Upsert {
-                upsert: lower_upsert_request(u),
-            },
-        )),
-        Stmt::Delete(d) => Some((
-            d.collection.clone(),
-            UpdateOperation::Delete {
-                delete: lower_delete_request(d),
-            },
-        )),
-        Stmt::UpdatePayload(u) => Some((
-            u.collection.clone(),
-            UpdateOperation::SetPayload {
-                set_payload: lower_update_payload_request(u),
-            },
-        )),
-        Stmt::ClearPayload(c) => Some((
-            c.collection.clone(),
-            UpdateOperation::ClearPayload {
-                clear_payload: lower_clear_payload_request(c),
-            },
-        )),
-        Stmt::UpdateVector(u) => Some((
-            u.collection.clone(),
-            UpdateOperation::UpdateVectors {
-                update_vectors: lower_update_vector_request(u),
-            },
-        )),
-        Stmt::DeleteVector(d) => Some((
-            d.collection.clone(),
-            UpdateOperation::DeleteVectors {
-                delete_vectors: lower_delete_vector_request(d),
-            },
-        )),
-        _ => None,
-    }
-}
-
 /// Lower a planned mutation into a wire `UpdateOperation` for batching.
 pub fn planned_to_update_operation(
     op: &crate::plan::PlannedOperation,
@@ -324,6 +280,16 @@ pub fn planned_to_update_operation(
             collection.clone(),
             UpdateOperation::ClearPayload {
                 clear_payload: request.clone(),
+            },
+        )),
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection.clone(),
+            UpdateOperation::DeletePayload {
+                delete_payload: request.clone(),
             },
         )),
         PlannedOperation::UpdateVectors {

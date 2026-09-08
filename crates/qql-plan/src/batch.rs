@@ -24,7 +24,9 @@ pub enum BatchKey {
 pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
     match stmt {
         Stmt::Query(query)
-            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
+            if query.group.is_none()
+                && !matches!(query.expression, QueryExpr::Points { .. })
+                && !matches!(query.expression, QueryExpr::CrossRerank { .. }) =>
         {
             match &query.collection {
                 QueryCollection::Explicit(collection) => Some(BatchKey::Query(collection.clone())),
@@ -158,16 +160,7 @@ pub fn build_update_batch(
 }
 
 fn update_operation_label(operation: &PlannedOperation) -> &'static str {
-    match operation {
-        PlannedOperation::Upsert { .. } => "UPSERT",
-        PlannedOperation::Delete { .. } => "DELETE",
-        PlannedOperation::UpdatePayload { .. } => "UPDATE PAYLOAD",
-        PlannedOperation::ClearPayload { .. } => "CLEAR PAYLOAD",
-        PlannedOperation::DeletePayload { .. } => "DELETE PAYLOAD",
-        PlannedOperation::UpdateVectors { .. } => "UPDATE VECTOR",
-        PlannedOperation::DeleteVectors { .. } => "DELETE VECTOR",
-        _ => "MUTATION",
-    }
+    operation.operation_label()
 }
 
 /// State machine orchestrating contiguous batch grouping across statements.

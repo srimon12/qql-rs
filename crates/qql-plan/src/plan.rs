@@ -398,26 +398,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { request, .. } => {
                 for p in &mut request.points {
                     if let Some(ref mut pvs) = p.vector {
-                        match pvs {
-                            PlanPointVectors::Param(name) => {
-                                if let Some(new_v) = named(name) {
-                                    *pvs = PlanPointVectors::Unnamed(new_v);
-                                }
-                            }
-                            PlanPointVectors::PositionalParam(idx) => {
-                                if let Some(new_v) = positional(*idx) {
-                                    *pvs = PlanPointVectors::Unnamed(new_v);
-                                }
-                            }
-                            PlanPointVectors::Unnamed(v) => {
-                                Self::bind_vector_val(v, named, positional);
-                            }
-                            PlanPointVectors::Named(entries) => {
-                                for (_, v) in entries {
-                                    Self::bind_vector_val(v, named, positional);
-                                }
-                            }
-                        }
+                        Self::bind_point_vectors_val(pvs, named, positional);
                     }
                 }
             }
@@ -776,22 +757,11 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 .filter
                 .as_ref()
                 .map(|f| crate::filter::top_level_filter(f));
-            let limit = match facet.limit {
-                Some(n) if n > usize::MAX as u64 => {
-                    return Err(QqlError::validation(
-                        "QQL-VALIDATION-LIMIT-OVERFLOW",
-                        alloc::format!("facet limit {n} exceeds platform usize::MAX"),
-                        None,
-                    ));
-                }
-                Some(n) => Some(n as usize),
-                None => None,
-            };
             Ok(PlannedOperation::Facet {
                 collection,
                 request: FacetRequest {
                     key: facet.key.clone(),
-                    limit,
+                    limit: facet.limit,
                     filter,
                     exact: facet.exact,
                     shard_key: facet.shard_key.clone(),
@@ -1295,6 +1265,11 @@ pub enum RestProjectionError {
         /// Statement type name used in error messages.
         stmt_type: &'static str,
     },
+    /// Plan IR failed to serialize to JSON (a `Serialize` regression).
+    SerializeFailed {
+        /// Underlying serde error message.
+        message: String,
+    },
 }
 
 /// Serialize a plan struct to JSON for the REST body.
@@ -1318,10 +1293,17 @@ pub(crate) fn serialize_body<T: serde::Serialize>(
 /// Returns `RestProjectionError::ClientSideOnly` for operations that have no
 /// single Qdrant REST endpoint (e.g. CROSS RERANK).
 pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
-    /// Serialize a plan struct to JSON for the REST body, treating the
-    /// (provably unreachable) serialization failure as an invariant violation.
-    fn body<T: serde::Serialize>(req: &T) -> Option<serde_json::Value> {
-        Some(serialize_body(req).expect("plan IR REST request body serialization failed"))
+    /// Serialize a plan struct to JSON for the REST body, mapping the
+    /// (practically unreachable) serialization failure into the error channel
+    /// instead of panicking the host process.
+    fn body<T: serde::Serialize>(
+        req: &T,
+    ) -> Result<Option<serde_json::Value>, RestProjectionError> {
+        serialize_body(req)
+            .map(Some)
+            .map_err(|e| RestProjectionError::SerializeFailed {
+                message: e.to_string(),
+            })
     }
 
     /// Read-op query params: timeout, consistency.
@@ -1354,7 +1336,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/query"),
             query: read_query(request.timeout, request.consistency.as_ref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::QueryGroups {
             collection,
@@ -1363,7 +1345,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/query/groups"),
             query: read_query(request.timeout, request.consistency.as_ref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::GetPoints {
             collection,
@@ -1372,7 +1354,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points"),
             query: Vec::new(),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::Scroll {
             collection,
@@ -1381,7 +1363,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/scroll"),
             query: Vec::new(),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::Count {
             collection,
@@ -1390,7 +1372,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/count"),
             query: Vec::new(),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::Facet {
             collection,
@@ -1399,7 +1381,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/facet"),
             query: Vec::new(),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::Upsert {
             collection,
@@ -1417,7 +1399,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 method: Method::Put,
                 path: format!("/collections/{collection}/points"),
                 query,
-                body: body(request),
+                body: body(request)?,
             }
         }
         PlannedOperation::Delete {
@@ -1428,7 +1410,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/delete"),
             query: mut_query(*wait, request.shard_key.as_deref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::ClearPayload {
             collection,
@@ -1438,7 +1420,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/clear"),
             query: mut_query(*wait, request.shard_key.as_deref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::DeletePayload {
             collection,
@@ -1448,7 +1430,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/delete"),
             query: mut_query(*wait, request.shard_key.as_deref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::DeleteVectors {
             collection,
@@ -1458,7 +1440,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/vectors/delete"),
             query: mut_query(*wait, request.shard_key.as_deref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::UpdateVectors {
             collection,
@@ -1468,7 +1450,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}/points/vectors"),
             query: mut_query(*wait, request.shard_key.as_deref()),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::UpdatePayload {
             collection,
@@ -1478,7 +1460,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload"),
             query: mut_query(*wait, request.shard_key.as_deref()),
-            body: body(request),
+            body: body(request)?,
         },
         // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
         PlannedOperation::CreateCollection {
@@ -1488,7 +1470,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(crate::ddl::create_collection_rest_body(request)),
+            body: Some(crate::ddl::create_collection_rest_body(request)?),
         },
         PlannedOperation::UpdateCollection {
             collection,
@@ -1497,7 +1479,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Patch,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(crate::ddl::update_collection_rest_body(request)),
+            body: Some(crate::ddl::update_collection_rest_body(request)?),
         },
         PlannedOperation::CreateIndex {
             collection,
@@ -1520,7 +1502,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}/shards"),
             query: Vec::new(),
-            body: body(request),
+            body: body(request)?,
         },
         PlannedOperation::DropShardKey {
             collection,
@@ -1529,7 +1511,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/shards/delete"),
             query: Vec::new(),
-            body: body(request),
+            body: body(request)?,
         },
         // Bodyless
         PlannedOperation::DropCollection { collection } => Route {
@@ -1577,7 +1559,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 method: Method::Put,
                 path: "/quotas".into(),
                 query,
-                body: body(request),
+                body: body(request)?,
             }
         }
         PlannedOperation::CrossRerank { .. } => {
@@ -1600,6 +1582,11 @@ pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
                 "{stmt_type} is client-side and has no single Qdrant REST route; \
                  execute via the runtime CROSS RERANK path"
             ),
+            None,
+        ),
+        RestProjectionError::SerializeFailed { message } => QqlError::execution(
+            "QQL-PLAN-SERIALIZE",
+            format!("plan IR REST request body serialization failed: {message}"),
             None,
         ),
     })
@@ -1873,6 +1860,34 @@ mod tests {
     }
 
     #[test]
+    fn delete_payload_batches_with_mutations() {
+        // P1: DeletePayload is Mutation-batchable and has an UpdateOperation
+        // form, so contiguous same-collection runs build one update batch
+        // (REST DeletePayloadOperation / gRPC delete_payload = 5).
+        use crate::batch::statement_batch_key;
+        use crate::mutation::planned_to_update_operation;
+        let s1 =
+            qql_core::parser::Parser::parse("DELETE PAYLOAD a FROM docs WHERE id = 1;").unwrap();
+        let s2 =
+            qql_core::parser::Parser::parse("DELETE PAYLOAD b FROM docs WHERE id = 2;").unwrap();
+        assert!(statement_batch_key(&s1).is_some());
+        let op1 = plan(&s1).unwrap();
+        let op2 = plan(&s2).unwrap();
+        assert_eq!(op1.batch_key(), op2.batch_key());
+        assert!(planned_to_update_operation(&op1).is_some());
+        let (collection, labels, batch) = crate::batch::build_update_batch(&[op1, op2]).unwrap();
+        assert_eq!(collection, "docs");
+        assert_eq!(labels, vec!["DELETE_PAYLOAD", "DELETE_PAYLOAD"]);
+        assert_eq!(batch.operations.len(), 2);
+        let json = serde_json::to_value(&batch).unwrap();
+        assert!(json["operations"][0].get("delete_payload").is_some());
+        assert_eq!(
+            json["operations"][0]["delete_payload"]["keys"],
+            serde_json::json!(["a"])
+        );
+    }
+
+    #[test]
     fn delete_payload_planning_and_routing() {
         let stmt = qql_core::parser::Parser::parse(
             "DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived' SHARD 'tenant_1';",
@@ -1902,6 +1917,76 @@ mod tests {
         let route = crate::to_rest_route(&op).unwrap();
         assert_eq!(route.method, crate::Method::Post);
         assert_eq!(route.path, "/collections/docs/points/payload/delete");
+    }
+
+    #[test]
+    fn modelless_document_serializes_empty_model_placeholder() {
+        // P3: model-less plans keep "model": "" for the executor to fill;
+        // offline bodies require preparation before dispatch.
+        let stmt =
+            qql_core::parser::Parser::parse("QUERY TEXT 'hello' FROM docs LIMIT 5;").unwrap();
+        let op = plan(&stmt).unwrap();
+        let route = to_rest_route(&op).unwrap();
+        let body = route.body.unwrap();
+        assert_eq!(body["query"]["nearest"]["text"], "hello");
+        assert_eq!(body["query"]["nearest"]["model"], "");
+    }
+
+    #[test]
+    fn param_only_upsert_template_plans_empty_points_for_splice() {
+        // P5: whole-point placeholders splice at execution time; the template
+        // plan holds inline points only. An all-placeholder template is empty
+        // and must take the splice path, never dispatch directly.
+        let stmt = qql_core::parser::Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+        let op = plan_template(&stmt).unwrap();
+        let PlannedOperation::Upsert { request, .. } = &op else {
+            panic!("expected Upsert, got {op:?}");
+        };
+        assert!(
+            request.is_empty(),
+            "param-only template must plan no points"
+        );
+    }
+
+    #[test]
+    fn statement_and_planned_batch_keys_agree_on_queries() {
+        // P10: statement-level and planned keys must agree; CrossRerank is
+        // client-side Single on both levels, Points is never batched.
+        let cases = [
+            ("QUERY TEXT 'x' FROM docs LIMIT 1;", true),
+            ("QUERY POINTS (1) FROM docs;", false),
+            (
+                "QUERY CROSS RERANK TEXT 'q' MODEL 'm' ON FIELD body FROM docs PREFETCH (QUERY TEXT 'q' FROM docs USING dense LIMIT 5) LIMIT 10;",
+                false,
+            ),
+        ];
+        for (source, expect_batchable) in cases {
+            let stmt = qql_core::parser::Parser::parse(source).unwrap();
+            let ast_key = crate::batch::statement_batch_key(&stmt);
+            let planned = plan(&stmt).unwrap();
+            let plan_key = planned.batch_key();
+            assert_eq!(
+                ast_key.is_some(),
+                expect_batchable,
+                "statement key for {source}"
+            );
+            assert_eq!(
+                plan_key.is_some(),
+                expect_batchable,
+                "planned key for {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn group_query_without_group_is_an_error_not_a_panic() {
+        // P4: the groups lowerer is pub; a group-less call must error.
+        let stmt = qql_core::parser::Parser::parse("QUERY TEXT 'x' FROM docs LIMIT 1;").unwrap();
+        let qql_core::ast::Stmt::Query(query) = &stmt else {
+            panic!("expected query");
+        };
+        let err = crate::query::lower_query_groups_request(query).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-GROUP");
     }
 
     #[test]

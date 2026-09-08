@@ -290,9 +290,6 @@ pub(crate) fn to_match(mv: &MatchValue) -> Result<qdrant::Match, QqlError> {
         MatchValue::Text { text } => Ok(qdrant::Match {
             match_value: Some(Mv::Text(text.clone())),
         }),
-        MatchValue::TextAny { text } => Ok(qdrant::Match {
-            match_value: Some(Mv::TextAny(text.clone())),
-        }),
         MatchValue::Any { any } => exact_list_match(any, true),
         MatchValue::Except { except } => exact_list_match(except, false),
         MatchValue::Phrase { phrase } => Ok(qdrant::Match {

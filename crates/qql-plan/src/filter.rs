@@ -271,6 +271,14 @@ fn values_count_params(op: ComparisonOp, count: u64) -> ValuesCountParams {
 }
 
 /// Convert a dynamic AST `Value` into its JSON wire representation.
+///
+/// # Invariant
+///
+/// `Param` / `PositionalParam` arms panic: `plan()` runs
+/// `ensure_no_unbound_params` first and `plan_template()` runs
+/// `validate_no_unbound_scalar_params`, so no unbound placeholder reaches
+/// here through the supported entry points. Direct callers must preserve
+/// that gating order.
 pub fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Str(s) => serde_json::Value::String(s.clone()),
