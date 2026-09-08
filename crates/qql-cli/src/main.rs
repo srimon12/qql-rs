@@ -180,7 +180,7 @@ struct MigrateArgs {
     /// Payload field used as the per-point custom shard key
     #[arg(long)]
     shard_key_field: Option<String>,
-    /// Missing `--shard-key-field` policy: error, skip, or default=<key>
+    /// Missing `--shard-key-field` policy: error, skip, or `default=<key>`
     #[arg(long, default_value = "error")]
     on_missing_shard_key: String,
     /// Optimizer indexing_threshold (KB) during bulk load
