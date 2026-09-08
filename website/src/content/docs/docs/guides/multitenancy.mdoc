@@ -65,6 +65,26 @@ stmt.shard_key = "acme"
 report = client.execute(stmt)
 ```
 
+```javascript
+const { parse } = require("@veristamp/nqql");
+
+const [stmt] = parse(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+stmt.shardKey = "acme";
+
+const report = await client.execute(stmt);
+```
+
+```javascript
+import init, { Stmt } from "qql-wasm";
+await init();
+
+const stmt = new Stmt(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+stmt.shardKey = "acme"; // routing only — isolation comes from injectFilter
+const report = await client.executeStmt(stmt);
+```
+
 {% aside type="danger" title="Do not filter results after retrieval" %}
 Post-filtering leaks work across the tenant boundary and produces incorrect
 limits, groups, and scores. Enforce the predicate before planning.

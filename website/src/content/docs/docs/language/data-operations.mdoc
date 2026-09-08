@@ -48,6 +48,27 @@ When `ON FIELD` is omitted, the default payload text field resolves in the
 deterministic priority order `text`, `body`, `content`, `title`,
 `description`, `name`, `summary`, `document`.
 
+## Bulk ingest with `VALUES :rows`
+
+A whole-point placeholder binds one point dict — or a list of them, splicing
+N points — with the same `{id, vector, …payload}` shape as an inline row.
+Misshapen rows fail closed (`QQL-BIND-TYPE-MISMATCH`, missing `id` →
+`QQL-VALIDATION-UPSERT-ID`):
+
+{% qqlExample title="Inline rows and bound rows share one shape" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3]}, tag: 'a'},
+  {id: 2, vector: {dense: [0.4, 0.5, 0.6]}, tag: 'b'};
+```
+{% /qqlExample %}
+
+For application ingest, prefer the chunked helpers over hand-rolled batch
+loops — Python `client.upsert_many("docs", rows, batch_size=100)`, Node
+`client.upsertMany("docs", rows, { batchSize: 100 })`, Rust
+`exec.upsert_many("docs", rows, 100, …)`, WASM `client.upsertMany("docs",
+rows, { batchSize: 100 })`. They prepare one `:rows` template and splice
+each chunk with no re-parse.
+
 ## Update only what changed
 
 There are two `UPDATE` forms. The payload form sets `PAYLOAD` under any

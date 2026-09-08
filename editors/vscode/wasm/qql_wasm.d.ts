@@ -116,6 +116,15 @@ export class Client {
      */
     setRouteAffinity(affinity?: string | null): void;
     /**
+     * Bulk ingest: `rows` is an array of point objects
+     * (`{id, vector, …payload}`) spliced through the `:rows` point-splice
+     * path in `batchSize` chunks (default 100). Row vectors accept plain
+     * arrays, `Float32Array` / `Float64Array` (packed, one copy), integer
+     * typed arrays (sparse `indices`), and the flat `{data, dim}`
+     * multivector form — the same inputs as `bind`.
+     */
+    upsertMany(collection: string, rows: any, options?: any | null): Promise<ExecutionReport>;
+    /**
      * Current read-affinity key, or `null` when unset.
      */
     readonly routeAffinity: string | undefined;
@@ -216,5 +225,11 @@ export function inject_filter(query: string, field: string, op: string, value: a
 export function isValid(input: string): boolean;
 
 export function parse(input: string): unknown[];
+
+/**
+ * Parse to a raw JSON string of the AST array — no JS object allocation,
+ * mirroring `parseJson` on the Node SDK.
+ */
+export function parseJson(input: string): string;
 
 export function tokenize(input: string): any[];

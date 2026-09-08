@@ -37,6 +37,12 @@ QUERY 'portable query' FROM docs USING dense LIMIT 5;
 | Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
 | Explain and compile | planner/runtime | `explain`, `compile_query` | `explain`, `compileQuery` | `analyze`, `compile` |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
+| Parse to JSON string | — | `parse_json` | `parseJson` | `parseJson` |
+| Bulk ingest (`:rows`, chunked) | `Executor::upsert_many` | `Client.upsert_many` | `Client.upsertMany` | `Client.upsertMany` |
+| Typed hits shortcut | — | `Client.execute_hits` | `Client.executeHits` | `dx.js executeHits` |
+| Transferable bytes | — | — | — | `compileBytes` / `explainBytes` / `compileRouteBytes` |
+| Embedder config | trait impl | `HttpEmbedder` object | `HttpEmbedder` object | `setEmbedder` / `setHttpEmbedder` (+alias) / `hasEmbedder` |
+| Route affinity | `with_route_affinity` | `route_affinity=` | `routeAffinity` | `setRouteAffinity` / `routeAffinity` |
 
 {% aside type="caution" title="A shard key is not a security boundary" %}
 `SHARD` chooses routing. Enforce tenant isolation with `inject_filter` or the

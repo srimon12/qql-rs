@@ -34,7 +34,7 @@ The same structured fields are projected differently by each host binding.
 | Rust | `QqlError { kind, code, message, span: Option<Span { start, end }>, fields, source }`; the `kind` is one of `Lex`, `Parse`, `Validation`, `Execution`, `Transport`, `Backend` |
 | Python | Error attributes `code`, `kind`, and `span` |
 | Node.js | `error.code`, `error.kind`, `error.span` on the thrown error |
-| WebAssembly | `AnalysisError { code, message, start, end }` (nulls when a span is absent) |
+| WebAssembly | `AnalysisError { code, message, start, end }` offline; `dx.js buildError` maps thrown JSON to `Error` with `.code` / `.kind` / `.span` / `.fields` / `.request_id` |
 
 ## Lexical
 

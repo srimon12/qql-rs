@@ -117,3 +117,8 @@ export function wrapReport(data) {
   if (data instanceof ExecutionReport) return data;
   return new ExecutionReport(data);
 }
+
+export async function executeHits(client, query, options) {
+  const report = wrapReport(await client.execute(query, options));
+  return report.hits(0);
+}
