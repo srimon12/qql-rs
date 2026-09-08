@@ -1,0 +1,27 @@
+{
+  "url": "http://localhost:6333",
+  "limit": 10,
+  "scroll_pages": 3,
+  "scroll_batch": 256,
+  "berlin": {
+    "points": 8000,
+    "batch": 100,
+    "collections": { "official": "vsq_berlin_official", "qql": "vsq_berlin_qql" },
+    "read_filter": { "price_lt": 150.0, "guests_gte": 2 },
+    "update": { "district": "Mitte", "rating": 4.5 },
+    "delete": { "price_gt": 250.0 },
+    "facet": { "key": "district", "limit": 20 }
+  },
+  "legal": {
+    "points": 2000,
+    "batch": 32,
+    "collections": { "official": "vsq_legal_official", "qql": "vsq_legal_qql" },
+    "count_filter": { "year_gte": 2010 }
+  },
+  "timing": {
+    "reads_reps": 5,
+    "reads_iters": 25,
+    "prepared_iters": 100,
+    "cold_import_reps": 5
+  }
+}

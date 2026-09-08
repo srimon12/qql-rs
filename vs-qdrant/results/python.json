@@ -1,0 +1,252 @@
+{
+  "meta": {
+    "timestamp": "2026-09-08T06:00:04",
+    "python": "3.14.4",
+    "pyqql": "0.4.0",
+    "qdrant_client": "1.19.0",
+    "qdrant_server": "1.19.1",
+    "url": "http://localhost:6333"
+  },
+  "scenarios": {
+    "query_dense": {
+      "official": {
+        "ops_per_sec": 405,
+        "p50_ms": 2.472,
+        "p95_ms": 2.671,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 674,
+        "p50_ms": 1.485,
+        "p95_ms": 1.594,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "top1_match": true,
+        "jaccard_overlap": 1.0,
+        "max_score_diff": 0.0
+      }
+    },
+    "query_dense_filtered": {
+      "official": {
+        "ops_per_sec": 223,
+        "p50_ms": 4.483,
+        "p95_ms": 7.322,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 282,
+        "p50_ms": 3.549,
+        "p95_ms": 3.625,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "top1_match": true,
+        "jaccard_overlap": 1.0,
+        "max_score_diff": 0.0
+      }
+    },
+    "query_sparse": {
+      "official": {
+        "ops_per_sec": 745,
+        "p50_ms": 1.342,
+        "p95_ms": 1.355,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 1458,
+        "p50_ms": 0.686,
+        "p95_ms": 0.694,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "top1_match": true,
+        "jaccard_overlap": 1.0,
+        "max_score_diff": 0.0
+      }
+    },
+    "query_hybrid": {
+      "official": {
+        "ops_per_sec": 269,
+        "p50_ms": 3.72,
+        "p95_ms": 3.734,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 465,
+        "p50_ms": 2.149,
+        "p95_ms": 2.191,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "qql_vs_official": {
+          "top1_match": false,
+          "jaccard_overlap": 1.0,
+          "max_score_diff": 0.017859999999999987
+        },
+        "official_vs_official": {
+          "top1_match": false,
+          "jaccard_overlap": 0.818,
+          "max_score_diff": 0.0
+        }
+      }
+    },
+    "scroll_pages": {
+      "official": {
+        "ops_per_sec": 89,
+        "p50_ms": 11.246,
+        "p95_ms": 14.75,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 92,
+        "p50_ms": 10.829,
+        "p95_ms": 11.035,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "top1_match": true,
+        "jaccard_overlap": 1.0,
+        "max_score_diff": 0.0
+      }
+    },
+    "count_berlin": {
+      "official": {
+        "ops_per_sec": 626,
+        "p50_ms": 1.597,
+        "p95_ms": 1.611,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 1562,
+        "p50_ms": 0.64,
+        "p95_ms": 0.678,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "match": true,
+        "detail": ""
+      }
+    },
+    "facet_district": {
+      "official": {
+        "ops_per_sec": 762,
+        "p50_ms": 1.312,
+        "p95_ms": 1.378,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 2178,
+        "p50_ms": 0.459,
+        "p95_ms": 0.478,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "match": true,
+        "detail": ""
+      }
+    },
+    "query_colbert": {
+      "official": {
+        "ops_per_sec": 121,
+        "p50_ms": 8.245,
+        "p95_ms": 8.297,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 134,
+        "p50_ms": 7.466,
+        "p95_ms": 7.926,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "top1_match": true,
+        "jaccard_overlap": 1.0,
+        "max_score_diff": 0.0
+      }
+    },
+    "count_legal": {
+      "official": {
+        "ops_per_sec": 833,
+        "p50_ms": 1.201,
+        "p95_ms": 1.259,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 3033,
+        "p50_ms": 0.33,
+        "p95_ms": 0.351,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "match": true,
+        "detail": ""
+      }
+    },
+    "prepared_rerun": {
+      "official": {
+        "ops_per_sec": 102,
+        "p50_ms": 9.842,
+        "p95_ms": 10.441,
+        "reps": 5,
+        "iters": 25
+      },
+      "qql": {
+        "ops_per_sec": 165,
+        "p50_ms": 6.067,
+        "p95_ms": 6.2,
+        "reps": 5,
+        "iters": 25
+      },
+      "parity": {
+        "top1_match": true,
+        "jaccard_overlap": 1.0,
+        "max_score_diff": 0.0
+      }
+    }
+  },
+  "ingest": {
+    "official_sec": 7.931,
+    "qql_sec": 3.475,
+    "points": {
+      "berlin": 8000,
+      "legal": 2000,
+      "batch": {
+        "berlin": 100,
+        "legal": 32
+      }
+    }
+  },
+  "parity": {
+    "ingested_point_berlin": {
+      "match": true
+    },
+    "ingested_point_legal": {
+      "match": true
+    },
+    "update_payload": true,
+    "delete_by_filter": true
+  },
+  "cold_import": {
+    "qdrant_client": 1109.7,
+    "pyqql": 29.9
+  }
+}
