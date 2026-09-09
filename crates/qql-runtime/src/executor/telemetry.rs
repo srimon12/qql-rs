@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 /// Field-level `#[serde(default)]` keeps parsing total: a counter the server
 /// omits reads as zero rather than voiding the whole struct. A structurally
 /// wrong `hardware` value (non-object, float counters) still voids just this
-/// section — see [`UsageReport::from_json`].
+/// section — see [`ServerTelemetry::from_envelope`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareUsage {
     /// Raw CPU cycles (or abstract units) spent processing the request.

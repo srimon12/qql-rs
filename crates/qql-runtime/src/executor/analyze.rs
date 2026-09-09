@@ -3,8 +3,8 @@
 //! Single-statement only (Postgres semantics): `Parser::parse` already fails
 //! closed on multi-statement scripts, so scripts surface as parse errors
 //! rather than silently analyzing just the first statement. Every phase
-//! reuses the existing path — [`Executor::prepare_statement`], `plan()`,
-//! [`Executor::dispatch_raw`]/[`Executor::normalize_planned`] — timed with
+//! reuses the existing path — `Executor::prepare_statement`, `plan()`,
+//! `Executor::dispatch_raw`/`Executor::normalize_planned` — timed with
 //! client stopwatches around them; nothing here forks execution logic.
 
 use std::collections::HashMap;
