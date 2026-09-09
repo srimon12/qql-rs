@@ -5,6 +5,26 @@ sidebar:
   order: 2
 ---
 
+## Prerequisites
+
+QQL targets Qdrant 1.19.0 or newer. Pin the server version when running it
+in Docker:
+
+{% terminal title="Qdrant" %}
+docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.19.0
+{% /terminal %}
+
+Text embedding (any `USING` step) needs an OpenAI-compatible endpoint. With
+Ollama, start the server and pull the model before configuring QQL:
+
+{% terminal title="Ollama" %}
+ollama serve
+ollama pull all-minilm:l6-v2
+{% /terminal %}
+
+Then point QQL at both services (see Quickstart). Literal-vector queries skip
+the embedder entirely.
+
 ## CLI
 
 {% terminal title="Linux and macOS" %}
@@ -24,7 +44,7 @@ qql doctor --json
 
 {% aside type="note" title="Editors" %}
 Syntax highlighting, live diagnostics, and autocompletion are available from
-the `qql-lang` VS Code extension — see [Editors](/docs/tools/editors/).
+the `qql-lang` VS Code extension (see [Editors](/docs/tools/editors/)).
 {% /aside %}
 
 ## SDKs

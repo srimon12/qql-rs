@@ -51,7 +51,10 @@
 
     <footer class="flex flex-col items-stretch justify-between gap-3 border-t border-[var(--sl-color-gray-5)] p-4 sm:flex-row sm:items-center">
       <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
-      <button class="min-h-9 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="submit">Save connection</button>
+      <div class="flex shrink-0 gap-2">
+        <button class="min-h-9 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-xs font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-test-connection>Test connection</button>
+        <button class="min-h-9 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="submit">Save connection</button>
+      </div>
     </footer>
   </form>
 </dialog>

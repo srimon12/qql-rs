@@ -15,9 +15,9 @@ naming and object ownership.
 | Tokenize | lexer API | `tokenize` | `tokenize` | `tokenize` |
 | Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
 | Explain | planner/runtime | `explain` | `explain` | `explain` / `analyze` |
-| Execution profile (client timings + server time/usage) | `Executor::explain_analyze` | `Client.explain_analyze` | `Client.explainAnalyze` | — |
+| Execution profile (client timings plus server time and usage) | `Executor::explain_analyze` | `Client.explain_analyze` | `Client.explainAnalyze` | `Client.explainAnalyze` |
 | DB-API cursor (Python) | — | `pyqql.connect` + cursor (`execute`/`executemany`/`fetch*`/`nextset`, `description`, `rowcount`) | — | — |
-| Lazy scroll cursor | — | — | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | — |
+| Lazy scroll cursor | manual `SCROLL ... AFTER :cursor` loop (see Rust SDK page) | `Client.scroll_cursor` (sync generator) plus `Client.scroll_cursor_async` (async generator) | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | `dx.js scrollCursor` helper over `Client.execute` (see WASM SDK page) |
 | Compile | planner/runtime | `compile_query` | `compileQuery` | `compile` |
 | Bind parameters | `bind_named` / `bind_positional` (+ `*_readable`) | `bind`, `Stmt.bind`, `execute(…, params=)` | `bind`, `Stmt.bind`, `execute(…, { params })` | `bind`, `Stmt.bind`, `execute(…, { params })` — typed arrays convert directly |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
@@ -72,16 +72,106 @@ Token objects are consistent across hosts: Python, Node, and WASM bindings emit
 
 Execution returns a stable report with aggregate `ok`, ordered per-operation
 results, and succeeded/failed counts. `on_error` / `onError` selects stop or
-continue behavior for multi-operation inputs. Python and Node reports add
-typed accessors: `hits(stmt)` / `points(stmt)` return `ScoredPoint` objects
+continue behavior for multi-operation inputs. Python, Node, and WASM reports add
+typed accessors through `ExecutionReport` (`pyqql`, `dx-common.js`, `dx.js`):
+`hits(stmt)` / `points(stmt)` return `ScoredPoint` objects
 (`id`, `score`, `payload`, `text`, `collection`), `facet(stmt)` returns
-normalized `[{ value, count }]` hits, and `count(stmt)` returns an integer;
-Node accepts a negative statement index (Python list semantics). Python
-`execute_hits` / `execute_async_hits` and Node `executeHits` skip the report
+normalized `[{ value, count }]` hits, `count(stmt)` returns an integer, and
+`groups(stmt)` returns backend group objects (see below). Python
+`execute_hits` / `execute_async_hits`, Node `executeHits`, and WASM `dx.js`
+`executeHits(client, query, options)` skip the report
 entirely. Passing `params` as a list/array with one entry per statement binds
-parameters statement-scoped — the length must match the statement count
+parameters statement-scoped: the length must match the statement count
 exactly, and each entry is a dict/object (named) or a list/array of scalars
 (positional). The WASM `Client` is REST-only: it compiles to and executes
-Qdrant REST routes and does not open gRPC connections; its report stays a
-plain `{ ok, results, succeeded, failed }` object — wrap it with the `dx.js`
-`ExecutionReport` for typed `hits()` / `facet()` / `count()` accessors.
+Qdrant REST routes and does not open gRPC connections; wrap its plain
+`{ ok, results, succeeded, failed, telemetry }` object with the `dx.js`
+`ExecutionReport` for typed `hits()` / `facet()` / `count()` / `groups()`
+accessors, `telemetry` reads, and the `executeHits(client, query, options)`
+one-shot.
+
+### Statement indexing
+
+Every typed accessor takes an optional statement index with Python list
+semantics on all hosts: `0` is the first statement (the default), `-1` is the
+last statement, and any out-of-range index returns an empty list (`hits`,
+`points`, `ids`, `facet`, `groups`) or `0` (`count`) instead of raising. This
+applies to `pyqql.ExecutionReport`, Node `ExecutionReport`, and WASM `dx.js`
+`ExecutionReport` alike. Rust callers use `report.hits(0)` style helpers with
+`usize` indexes on `ExecutionReport`.
+
+### Groups shape
+
+`groups(stmt)` returns the raw backend group list for a `GROUP BY` query,
+normalized across the `{"result": {"groups": [...]}}` and bare
+`{"groups": [...]}` envelopes. Each entry is `{ "id": <group key>, "hits": [<point records>] }`
+where `id` is the group key value and `hits` holds the ordered point records
+for that group. Out-of-range indexes return `[]`. See the Python, Node, and
+WASM SDK pages for per-host examples.
+
+### Telemetry
+
+Every `ExecResponse` may carry `telemetry` with server time and usage when the
+backend reported it: `{ "time_s": <seconds or null>, "usage": <hardware and inference usage or null> }`.
+Missing telemetry reads as `None` (Python), `null` or `undefined` (Node, WASM),
+never as an error. The report also carries aggregated `telemetry` (server times
+summed, hardware counters and per-model tokens merged). `explainAnalyze` /
+`explain_analyze` returns the same telemetry plus `server_time_s` and `usage`
+top-level fields alongside `plan`, `phases`, and `results`. See the
+[Python SDK](/docs/sdks/python/), [Node.js SDK](/docs/sdks/node/),
+[WebAssembly SDK](/docs/sdks/wasm/), and [Rust SDK](/docs/sdks/rust/) pages.
+
+## Bulk ingest contract (`upsertMany` / `upsert_many`)
+
+One `:rows` template is prepared once, then each `batchSize` / `batch_size`
+chunk splices through the point-splice path with no re-parse and no per-batch
+schema fetch. The contract is identical on Python, Node, and WASM (see the
+per-SDK pages for call shapes):
+
+* `rows` must be an array or list of point objects (`{id, vector, ...payload}`).
+  Any other top-level shape fails closed with `QQL-BIND-TYPE-MISMATCH`.
+* Each point has the same shape as an inline `VALUES {...}` row. A missing `id`
+  fails with `QQL-VALIDATION-UPSERT-ID`; any other misshapen row fails with
+  `QQL-BIND-TYPE-MISMATCH` instead of landing partial data.
+* Row vectors accept the same shapes everywhere: plain lists or arrays of
+  numbers, packed 1-D float buffers or typed arrays (`numpy`, `array.array`,
+  `memoryview` on Python; `Float32Array` / `Float64Array` on Node and WASM,
+  one copy with no per-element walk), integer typed arrays or lists for sparse
+  `indices` (`Int32Array` / `Uint32Array` on Node and WASM), and the flat
+  `{data, dim}` (Python `{"data": [...], "dim": N}`) multivector form.
+* Raw binary without a float view fails closed with a wrap-first typed error:
+  wrap the bytes in a `Float32Array` or `Float64Array` view first (Python
+  `bytes` and `bytearray` take the same path: pass a float buffer instead).
+  On Node and WASM the code is `QQL-BIND-INVALID-PARAMS`; on Python it is a
+  `ValueError` with the same guidance.
+* `batchSize` / `batch_size` must be an integer greater than or equal to `1`.
+  Values below `1` fail closed with `QQL-VALIDATION-UPSERT-BATCH` before any I/O.
+* Empty `rows` returns an empty `ok` report without I/O.
+
+## Embedder capability ladder
+
+`HttpEmbedder` configuration is not portable across hosts. Use this table
+before assuming a dense config covers multi-vector, image, or rerank work:
+
+| Capability | Node `HttpEmbedder` | Python `HttpEmbedder` | WASM client |
+|---|---|---|---|
+| Dense text (`endpoint`, `model`, `dimension`) | yes | yes (dense-only class) | yes via `setHttpEmbedder(endpoint, model, dimension)` |
+| Multi or ColBERT (`multiEndpoint`, `multiModel`, `multiDimension`) | yes | no (use Node or Rust for multi-vector endpoints) | no |
+| Image or CLIP (`imageEndpoint`, `imageModel`, `imageDimension`) | yes | no | no |
+| Cross-encoder rerank (`rerankEndpoint`, `rerankModel`) | yes | no | no |
+| JS callback (`async (texts) => number[][]`, batched) | no (native transport) | no | yes via `setEmbedder(fn)` |
+
+WASM accepts one HTTP text embedder at a time plus one JS callback; multi-vector,
+image, and reranker endpoint configuration belongs in the Rust, Python dict, or
+Node SDKs. `setRemoteEmbedder` on WASM is an alias for `setHttpEmbedder`.
+
+## Error shape
+
+Every host surfaces the same typed error fields: `code` (stable
+`QQL-*` string), `kind` (`Lex`, `Parse`, `Validation`, `Execution`,
+`Transport`, `Backend`), `span` (byte offsets or null), plus structured
+`fields` and `request_id` when the transport provides them. Python raises
+`QqlError` subclasses (`QqlSyntaxError`, `QqlValidationError`,
+`QqlExecutionError`, `QqlTransportError`, `QqlBackendError`); Node and WASM
+reject or throw `Error` objects with `.code` / `.kind` / `.span` / `.fields` /
+`.request_id` via `buildError`; Rust returns `QqlError` values.

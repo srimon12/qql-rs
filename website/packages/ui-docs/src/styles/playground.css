@@ -161,8 +161,17 @@ input[role="switch"].switch:focus-visible {
 
 /* Runtime status dot in the playground top strip. Colors are set from
    playground.ts so the dot reflects real WASM state, not a constant. */
-[data-runtime-dot].is-ready { background: #31b276; }
-[data-runtime-dot].is-failed { background: #dd675a; }
+[data-runtime-dot].is-ready,
+[data-connected-dot].is-ready { background: #31b276; }
+[data-runtime-dot].is-failed,
+[data-connected-dot].is-failed { background: #dd675a; }
+
+/* Error code link in the editor status summary. */
+[data-analysis-summary] a {
+	color: var(--sl-color-accent-high);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
 
 /* Draggable split between editor and inspector (desktop only). */
 [data-split-handle] { min-height: 2rem; }

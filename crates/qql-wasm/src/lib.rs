@@ -3,9 +3,12 @@
 //! Module layout: [`params`] (options + bind contracts), [`stmt`] (the `Stmt`
 //! handle), [`functions`] (free parse/compile/bind entry points),
 //! [`report`] (execution envelopes), [`response`] (REST response shaping),
-//! [`client`] (browser transport + embedders), [`execute`] (execution entry
-//! points and batching), [`embed`] (the `qql-embed` adapter).
+//! [`telemetry`] (server time and usage), [`client`] (browser transport +
+//! embedders), [`execute`] (execution entry points and batching),
+//! [`analyze`] (execution profiling), [`embed`] (the `qql-embed` adapter).
 
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+mod analyze;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 mod client;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -21,6 +24,8 @@ mod report;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 mod response;
 mod stmt;
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+mod telemetry;
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 pub use client::Client;
@@ -38,11 +43,44 @@ export interface ExecuteOptions {
   params?: Record<string, unknown> | unknown[];
 }
 
+export interface ServerTelemetry {
+  time_s?: number | null;
+  usage?: ServerUsage | null;
+}
+
+export interface ServerUsage {
+  hardware?: HardwareUsage | null;
+  inference?: InferenceUsage | null;
+}
+
+export interface HardwareUsage {
+  cpu: number;
+  payload_io_read: number;
+  payload_io_write: number;
+  payload_index_io_read: number;
+  payload_index_io_write: number;
+  vector_io_read: number;
+  vector_io_write: number;
+}
+
+export interface InferenceUsage {
+  models: Record<string, { tokens: number }>;
+}
+
+export interface PhaseTimings {
+  parse_ms: number;
+  prepare_plan_ms: number;
+  dispatch_ms: number;
+  decode_ms: number;
+  total_ms: number;
+}
+
 export interface ExecResponse {
   ok: boolean;
   operation: string;
   message: string;
   data: unknown | null;
+  telemetry?: ServerTelemetry | null;
 }
 
 export interface ExecutionReport {
@@ -50,12 +88,22 @@ export interface ExecutionReport {
   results: ExecResponse[];
   succeeded: number;
   failed: number;
+  telemetry?: ServerTelemetry | null;
   hits(stmt?: number): Array<Record<string, unknown>>;
   points(stmt?: number): Array<Record<string, unknown>>;
   ids(stmt?: number): Array<string | number>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
-  groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;
+  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
+}
+
+export interface AnalyzeReport {
+  ok: boolean;
+  plan: string;
+  phases: PhaseTimings;
+  server_time_s: number | null;
+  usage: ServerUsage | null;
+  results: ExecResponse[];
 }
 
 export interface Token {

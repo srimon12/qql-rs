@@ -89,12 +89,14 @@ export class ExecutionReport {
   results: ExecResponse[];
   succeeded: number;
   failed: number;
+  /** Aggregated server telemetry when the backend reported it; absent otherwise. */
+  telemetry?: ServerTelemetry | null;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
   ids(stmt?: number): Array<string | number>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
-  groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;
+  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
 }
 
 export interface ExecuteOptions {
@@ -183,9 +185,9 @@ export class Client {
   /**
    * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
    * chunks (default 100). One `:rows` template is prepared once — no
-   * re-parse, no per-batch schema fetch. Vectors take plain arrays or the
-   * flat `{data, dim}` multivector form; `Float32Array`/`Float64Array`
-   * need the sync `Stmt.bind` surface instead, then `execute`.
+   * re-parse, no per-batch schema fetch. Vectors take plain arrays, packed
+   * `Float32Array` / `Float64Array`, integer typed arrays for sparse
+   * `indices`, or the flat `{data, dim}` multivector form.
    */
   upsertMany(
     collection: string,

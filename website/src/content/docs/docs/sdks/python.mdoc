@@ -166,11 +166,15 @@ print(report["succeeded"], report["failed"])
 ```
 
 Row vectors accept plain lists, 1-D float buffers (numpy, `array.array`,
-memoryviews — one copy, no per-element walk), and the flat
+memoryviews: one copy, no per-element walk), integer lists for sparse
+`indices`, and the flat
 `{"data": [...], "dim": N}` multivector form. Each dict has the same shape
 as an inline `VALUES {…}` row, so a misshapen row fails closed with
 `QQL-BIND-TYPE-MISMATCH` (missing `id` → `QQL-VALIDATION-UPSERT-ID`)
-instead of landing partial data.
+instead of landing partial data. The full typed-array contract lives once in
+the [API surface reference](/docs/reference/api-surface/): same row shapes on
+Python, Node, and WASM, same `QQL-BIND-TYPE-MISMATCH` for a non-array `rows`,
+same `QQL-VALIDATION-UPSERT-BATCH` for `batch_size < 1`.
 
 ## Typed results
 
@@ -187,18 +191,54 @@ client = Client("http://localhost:6333")
 for hit in client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5"):
     print(hit.id, hit.score, hit["title"])  # payload access via hit["key"]
 
-# 2. Facet / count / point accessors per statement index
+# 2. Facet, count, point, and group accessors per statement index
+# Negative indexes count from the end (-1 is the last statement).
+# Out-of-range reads return [] (or 0 for count) instead of raising.
 report = client.execute("FACET category FROM docs LIMIT 10")
 print(report.facet())        # [{value: ..., count: ...}, ...]
 report = client.execute("COUNT FROM docs WHERE category = 'tech'")
 print(report.count())
 report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
 print(report.points())
+print(report.groups(-1))     # [{"id": <group key>, "hits": [...]}, ...]
 
-# 7. Per-result server telemetry (Qdrant time + hardware/inference usage
+# 3. Per-result server telemetry (Qdrant time plus hardware and inference usage
 # when reported; None where the route reports nothing)
-print(report.telemetry)      # {"time_s": ..., "usage": {...} | None}
+print(report.telemetry)      # {"time_s": ..., "usage": {...}} or None
 ```
+
+## Lazy scroll
+
+`Client.scroll_cursor` pages lazily through a collection with `SCROLL ... AFTER :cursor`.
+At most one page is buffered, so memory stays bounded. Use `scroll_cursor_async`
+with `async for` when your host flow is async. This is the Python equivalent of
+Node `scrollCursor` and the documented Rust manual loop.
+
+```python
+from pyqql import Client
+
+client = Client("http://localhost:6333")
+
+for point in client.scroll_cursor(
+    "docs",
+    batch_size=500,
+    where="status = :status",
+    params={"status": "active"},
+    shard_key="tenant-a",
+):
+    process_point(point)
+
+# Async variant
+async for point in client.scroll_cursor_async("docs", batch_size=500):
+    await process_point_async(point)
+```
+
+Options: `batch_size` (default 100, must be at least 1), `where` (QQL filter
+fragment), `params` (named bindings for the `where` fragment; `cursor` is
+reserved), `shard_key` (custom shard routing), `with_payload` (default True;
+False strips `payload` client-side before yielding, since `SCROLL` has no
+server-side payload exclusion), `with_vector` (default False; True appends
+`WITH VECTOR`). Collection names are quoted automatically when needed.
 
 ## DB-API cursor
 
@@ -281,8 +321,9 @@ print(tokenize(query))
 | `Client(url, api_key, use_grpc, embedder, route_affinity)` | client | Configure remote execution once |
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
 | `Client.execute_hits` / `execute_async_hits` | `list[ScoredPoint]` | Skip the report when you only need typed hits |
-| `report.hits(stmt)` / `points` / `facet` / `count` | typed accessors | Read results per statement index without digging into `results` |
-| `report.telemetry` | per-result server telemetry | Qdrant `time_s` + hardware/inference `usage` when reported |
+| `report.hits(stmt)` / `points` / `facet` / `count` / `groups` | typed accessors | Read results per statement index without digging into `results` (negative index counts from the end; see the API surface reference) |
+| `report.telemetry` | per-result server telemetry | Qdrant `time_s` plus hardware and inference `usage` when reported |
+| `Client.scroll_cursor` / `Client.scroll_cursor_async` | sync and async generators of `ScoredPoint` | Lazily page a collection with `SCROLL ... AFTER :cursor` (at most one page buffered) |
 | `Client.explain_analyze` | plan + measured timings | Static plan, client phases, and server telemetry for one statement |
 | `pyqql.connect` + cursor | PEP 249-style driver | `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/`nextset`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
 | `ScoredPoint` | typed hit | `id`, `score`, `payload`, `text`, `collection`, and `hit["key"]` payload access |
@@ -297,7 +338,7 @@ print(tokenize(query))
 | `compile_query(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
 | `bind(query, params, *, truncate_vectors=False)` | bound string or `Stmt` | Substitute `:name` / `?` parameters; `Stmt` + `truncate_vectors=True` returns a readable string |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
-| `HttpEmbedder` | embedder object | Supply a remote embedding model |
+| `HttpEmbedder` | embedder object | Supply a remote dense embedding model (dense-only class; see the embedder ladder in the API surface reference) |
 
 ## Pin reads with route affinity
 

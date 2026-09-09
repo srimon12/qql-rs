@@ -113,12 +113,14 @@ const report = await client.upsertMany("docs", rows, { batchSize: 100 });
 console.log(report.succeeded, report.failed);
 ```
 
-Row vectors accept plain arrays and the flat `{ data: [...], dim: N }`
-multivector form. (`Float32Array`/`Float64Array` only convert on the sync
-`Stmt.bind` surface — bind there, then `execute` the bound statement.)
-Each object has the same shape as an inline `VALUES {…}` row, so a
+Row vectors accept plain arrays, packed `Float32Array` / `Float64Array`,
+integer typed arrays for sparse `indices`, and the flat `{ data: [...], dim: N }`
+multivector form (same contract as Python and WASM). Raw binary without a float
+view fails closed with a wrap-first `TypeError`. Each object has the same shape
+as an inline `VALUES {…}` row, so a
 misshapen row fails closed with `QQL-BIND-TYPE-MISMATCH` (missing `id` →
-`QQL-VALIDATION-UPSERT-ID`) instead of landing partial data.
+`QQL-VALIDATION-UPSERT-ID`) instead of landing partial data. The full contract
+lives once in the [API surface reference](/docs/reference/api-surface/).
 
 ## Typed results
 
@@ -135,17 +137,20 @@ for (const hit of await client.executeHits("QUERY TEXT 'incident' FROM runbooks 
   console.log(hit.id, hit.score, hit.get("severity")); // payload access via hit.get(key)
 }
 
-// 2. Facet / count / point accessors per statement index (negative index counts from the end)
+// 2. Facet, count, point, and group accessors per statement index
+// Negative indexes count from the end (-1 is the last statement).
+// Out-of-range reads return [] (or 0 for count) instead of throwing.
 const report = await client.execute("FACET severity FROM runbooks LIMIT 10");
 console.log(report.facet()); // [{ value: ..., count: ... }, ...]
 const countReport = await client.execute("COUNT FROM runbooks WHERE status = 'open'");
 console.log(countReport.count());
 const pointReport = await client.execute("QUERY POINTS (1, 2, 3) FROM runbooks");
 console.log(pointReport.points());
+console.log(pointReport.groups(-1)); // [{ id: <group key>, hits: [...] }, ...]
 
-// 3. Per-result server telemetry (Qdrant time + hardware/inference usage
+// 3. Per-result server telemetry (Qdrant time plus hardware and inference usage
 // when reported; null where the route reports nothing)
-console.log(pointReport.telemetry); // { time_s, usage } | null
+console.log(pointReport.telemetry); // { time_s, usage } or null
 ```
 
 ## Lazy scroll cursor & streams
@@ -241,10 +246,10 @@ const report = await client.execute([
 |---|---|---|
 | `new Client({ url, apiKey, useGrpc, routeAffinity, embedder })` | Configure a reusable native client |
 | `Client.execute`, `executeStmt` | Source, statement, script, or array execution |
-| `Client.execute_hits`, module `executeHits` | Typed `ScoredPoint[]` hits without the report |
-| `report.hits(stmt)` / `points` / `facet` / `count` | Typed accessors per statement index (negative index counts from the end) |
-| `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
-| `Client.explainAnalyze` | Static plan plus measured client/server timings for one statement |
+| `Client.executeHits`, module `executeHits` | Typed `ScoredPoint[]` hits without the report |
+| `report.hits(stmt)` / `points` / `facet` / `count` / `groups` | Typed accessors per statement index (negative index counts from the end; `groups` returns `[{ id, hits }]`; see the API surface reference) |
+| `report.telemetry` | Per-result server telemetry (`time_s` plus hardware and inference `usage`) when reported |
+| `Client.explainAnalyze` | Static plan plus measured client and server timings for one statement |
 | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration and pull-driven WHATWG stream |
 | `ScoredPoint` | Typed hit with `id`, `score`, `payload`, `text`, `collection` |
 | `Client.explain`, `explainStmt`, `compile` | Plan and route inspection (`compile` accepts `params`) |
@@ -259,7 +264,7 @@ const report = await client.execute([
 | `bind(query, params?, { truncateVectors })` | Substitute `:name` / `?` placeholders into a string or `Stmt` |
 | `parseJson` | High-throughput JSON forwarding |
 | `injectFilter`, `execute` | One-shot host convenience functions |
-| `HttpEmbedder` | A reusable HTTP embedder configuration |
+| `HttpEmbedder` | A reusable HTTP embedder configuration (dense plus multi, image, and rerank endpoints; see the embedder ladder in the API surface reference) |
 
 ## Pin reads with route affinity
 

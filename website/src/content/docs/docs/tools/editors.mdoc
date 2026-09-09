@@ -1,6 +1,6 @@
 ---
 title: "Editors"
-description: "Install the QQL VS Code extension for syntax highlighting, live diagnostics, and autocompletion."
+description: "Install the QQL VS Code extension for syntax highlighting, live diagnostics, hover plans, CodeLens actions, and formatting."
 sidebar:
   order: 3
 ---
@@ -8,10 +8,11 @@ sidebar:
 ## VS Code extension
 
 The official extension is `qql-lang` (publisher `srimon12`), displayed as
-"QQL — Qdrant Query Language" (extension version **0.4.0**, bundling the QQL
-**1.7** parser). It is published on the Visual Studio Code marketplace; VSIX
-binaries are not committed to the repository — build one locally with
-`npm run package` inside `editors/vscode/` (requires `@vscode/vsce`).
+"QQL: Qdrant Query Language" (extension version **0.4.0**, bundling the QQL
+**1.7** parser). It is published on the Visual Studio Code marketplace. VSIX
+binaries are not committed to the repository. Build one locally with
+`npm run package` inside `editors/vscode/` (requires `@vscode/vsce`), or
+download the release asset that matches your version.
 
 {% terminal title="Install from the marketplace" %}
 code --install-extension srimon12.qql-lang
@@ -34,13 +35,69 @@ external language runtime is needed.
 The TextMate grammar highlights `.qql` files with 130+ keywords across 9
 scopes, covering statements, operators, parameter placeholders (`:name`, `?`),
 punctuation, strings, and comments. The same grammar powers the syntax
-highlighting on this website.
+highlighting on this website. Fenced `qql` code blocks in Markdown files are
+highlighted as well.
 
 ### Live diagnostics
 
 The extension runs the bundled `qql-wasm` parser on every change, debounced at
-~300 ms, and reports grammar errors with precise spans and stable error codes.
-Invalid statements are underlined directly in the editor.
+~300 ms (configurable with `qql.diagnostics.debounceMs`), and reports grammar
+errors with precise spans and stable error codes. Invalid statements are
+underlined directly in the editor. The status bar shows a valid statement
+count, or the failing error code, and clicking it re-analyzes the document.
+
+### Hover plan
+
+Hovering a keyword shows its reference doc (statement, mode, clause, filter,
+or formula helper). Hovering a statement also shows its live execution plan:
+the plan for the enclosing statement, plus the compiled REST route (`method`
+and `path`) when the statement compiles. Plans come from the same local
+analysis that drives diagnostics, so they never need a server round trip.
+
+### CodeLens actions
+
+Each top-level statement gets inline actions above its first line:
+
+| Lens | Action |
+|---|---|
+| **Explain** | Open the execution plan for this statement |
+| **REST** | Open the compiled Qdrant REST route as JSON |
+| **curl** | Copy a ready to run curl command using `qql.baseUrl` |
+
+Scripts with more than one statement also get a label lens with the statement
+kind. Disable all lenses with `qql.codeLens.enabled`.
+
+### Commands
+
+All commands work on the current document, or on the selection when text is
+selected. Output opens in a single reusable `QQL` output channel.
+
+| Command | Default keybinding | Description |
+|---|---|---|
+| **QQL: Explain Document / Selection** | `Ctrl+K Ctrl+E` | Plan for the document or selection |
+| **QQL: Compile to REST Route** | `Ctrl+K Ctrl+R` | Compiled route JSON |
+| **QQL: Copy as curl** | `Ctrl+K Ctrl+C` | Clipboard curl command using `qql.baseUrl` |
+| **QQL: Show AST** | None | Parsed AST as JSON |
+| **QQL: Re-analyze Document** | None (click the status bar) | Force a fresh parse |
+
+The title bar and the right click `QQL` submenu expose the same commands.
+
+### Format Document
+
+The extension registers a document formatter (Shift+Alt+F, or **Format
+Document** from the command palette). It runs the source through the bundled
+canonical formatter, the same AST-based formatter as `qql fmt` and the WASM
+`formatQuery()`, so clause order, keyword casing, whitespace, and escaping are
+normalized. Unparseable documents are left untouched; diagnostics report the
+syntax error instead.
+
+### Outline, folding, and definition
+
+The outline and breadcrumbs list every top-level statement with its kind and
+collection, with CTE definitions nested underneath. Folding covers multiline
+statements, parenthesized regions, comment blocks, and `-- #region` markers.
+Go to Definition jumps from a CTE reference inside `PREFETCH` back to its
+`name AS (` definition.
 
 ### Autocompletion
 
@@ -53,14 +110,20 @@ Completions cover 130+ keywords and 28 statement snippet templates, including:
 - `UPSERT INTO`, `CREATE COLLECTION`, `CREATE INDEX`
 - `SCROLL`, `COUNT`, `COUNT EXACT`, `DELETE`, `DELETE PAYLOAD`
 
-### Format Document
+Suggestions are contextual: modes after `QUERY`, fusion methods after
+`FUSION`, index types after `TYPE`. Collection names are harvested from the
+open file, and CTE names are suggested inside `PREFETCH`. Snippet prefixes
+include `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`,
+`qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, and
+`qslice`.
 
-The extension registers a document formatter (Shift+Alt+F, or **Format
-Document** from the command palette). It runs the source through the bundled
-canonical formatter — the same AST-based formatter as `qql fmt` and the WASM
-`formatQuery()` — so clause order, keyword casing, whitespace, and escaping are
-normalized. Unparseable documents are left untouched; diagnostics report the
-syntax error instead.
+### Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| `qql.diagnostics.debounceMs` | `300` | Delay in ms before re-analyzing after edits |
+| `qql.codeLens.enabled` | `true` | Statement CodeLens actions |
+| `qql.baseUrl` | `http://localhost:6333` | Base URL used when generating curl commands |
 
 ### Language configuration
 

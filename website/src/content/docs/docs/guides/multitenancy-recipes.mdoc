@@ -1,0 +1,198 @@
+---
+title: "Multitenancy recipes"
+description: "Per-stack middleware wiring request tenants to inject_filter, SHARD routing, and tenant indexes."
+sidebar:
+  order: 8
+---
+
+Production tenants need three wiring steps on every request: a trusted tenant
+value from auth, an injected predicate for isolation, and optional shard
+routing for locality. This page gives copy-ready middleware for Python and
+Node plus the schema that makes both fast. For the underlying model, see the
+[Multitenancy guide](/docs/guides/multitenancy/) and the
+[Filter injection guide](/docs/guides/filter-injection/).
+
+## Tenant-aware schema
+
+Create the collection once with custom sharding, then add a tenant index with
+`is_tenant = true` so Qdrant organizes tenant data efficiently.
+
+{% qqlExample title="Tenant-aware schema with shard keys" %}
+```sql
+CREATE COLLECTION documents (
+  dense VECTOR(384, COSINE)
+)
+WITH PARAMS (shard_number = 8, sharding_method = 'custom', shard_keys = ['acme', 'globex']);
+
+CREATE INDEX ON COLLECTION documents FOR tenant_id TYPE keyword WITH (is_tenant = true);
+```
+{% /qqlExample %}
+
+{% qqlExample title="Isolation plus routing on every read" %}
+```sql
+QUERY 'risk factors'
+FROM documents
+USING dense
+WHERE tenant_id = 'acme'
+SHARD 'acme'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Tenant-scoped scroll for backfills" %}
+```sql
+SCROLL FROM documents WHERE tenant_id = 'acme' SHARD 'acme' LIMIT 500;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Tenant-scoped count for quotas" %}
+```sql
+COUNT FROM documents WHERE tenant_id = 'acme';
+```
+{% /qqlExample %}
+
+`SHARD` selects routing only. Isolation always comes from the injected
+`WHERE tenant_id = ...` predicate. Numeric shard keys stay numeric end to end;
+see the multitenancy guide for the keyword versus number split.
+
+## Python middleware (FastAPI and Starlette style)
+
+Read the tenant from authenticated request state, never from the query body.
+Parse once, inject the trusted value, set routing, then execute the rewritten
+statement.
+
+```python
+from fastapi import Request
+from pyqql import Client, parse
+
+client = Client("http://localhost:6333")
+
+async def tenant_search(request: Request, query: str):
+    tenant = request.state.tenant_id  # set by auth middleware from a verified token
+    if not tenant:
+        raise ValueError("missing tenant in request state")
+
+    stmt = parse(query)[0]
+    stmt.inject_filter("tenant_id", "=", tenant)
+    stmt.shard_key = tenant  # routing only; isolation is the injected predicate
+
+    report = await client.execute_async(stmt)
+    return report
+```
+
+Starlette without FastAPI uses the same three calls:
+
+```python
+from starlette.requests import Request
+from pyqql import Client, parse
+
+client = Client("http://localhost:6333")
+
+async def tenant_search(request: Request, query: str):
+    tenant = request.headers.get("x-tenant-id", "")
+    if not tenant:
+        raise ValueError("missing x-tenant-id header")
+
+    stmt = parse(query)[0]
+    stmt.inject_filter("tenant_id", "=", tenant)
+    stmt.shard_key = tenant
+
+    return client.execute(stmt)
+```
+
+For paginated backfills, reuse the same pattern with the Python scroll helper,
+which keeps the injected predicate on every page:
+
+```python
+for point in client.scroll_cursor(
+    "documents",
+    batch_size=500,
+    where="tenant_id = :tenant",
+    params={"tenant": tenant},
+    shard_key=tenant,
+):
+    process_point(point)
+```
+
+## Node middleware (Express style)
+
+The same lifecycle in Express: tenant from verified auth state, inject, route,
+execute the rewritten statement.
+
+```javascript
+const { Client, parse } = require("@veristamp/nqql");
+
+const client = new Client({ url: "http://localhost:6333" });
+
+async function tenantSearch(req, res) {
+  const tenant = req.auth?.tenantId; // set by auth middleware from a verified token
+  if (!tenant) {
+    res.status(401).send("missing tenant");
+    return;
+  }
+
+  const [stmt] = parse(req.body.query);
+  stmt.injectFilter("tenant_id", "=", tenant);
+  stmt.shardKey = tenant; // routing only; isolation is the injected predicate
+
+  const report = await client.execute(stmt);
+  res.json(report);
+}
+```
+
+Paginated reads use the same predicate on every page:
+
+```javascript
+for await (const point of client.scrollCursor("documents", {
+  batchSize: 500,
+  where: "tenant_id = :tenant",
+  params: { tenant },
+  shardKey: tenant,
+})) {
+  await processPoint(point);
+}
+```
+
+## Cross-tenant check
+
+A tenant predicate must make cross-tenant reads return zero rows. The offline
+check below parses a query, injects `tenant_id = 'acme'`, and applies the same
+predicate in memory to two points. The `globex` point is excluded, so a read
+scoped to `acme` never sees it. The runnable test lives in
+`crates/pyqql/tests/test_tenant_isolation.py`.
+
+{% qqlExample title="Tenant predicate excludes other tenants" %}
+```sql
+QUERY 'risk factors'
+FROM documents
+USING dense
+WHERE tenant_id = 'acme'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+```python
+from pyqql import parse
+
+stmt = parse("QUERY 'risk factors' FROM documents USING dense LIMIT 10")[0]
+stmt.inject_filter("tenant_id", "=", "acme")
+assert "tenant_id" in str(stmt) and "acme" in str(stmt)
+
+points = [
+    {"id": 1, "tenant_id": "acme"},
+    {"id": 2, "tenant_id": "globex"},
+]
+visible = [p for p in points if p["tenant_id"] == "acme"]
+assert [p["id"] for p in visible] == [1]
+
+cross = [p for p in points if p["tenant_id"] == "acme" and p["tenant_id"] == "globex"]
+assert cross == []
+```
+
+## Related documentation
+
+- [Multitenancy guide](/docs/guides/multitenancy/)
+- [Filter injection guide](/docs/guides/filter-injection/)
+- [API surface reference](/docs/reference/api-surface/)
+- [Python SDK](/docs/sdks/python/)
+- [Node.js SDK](/docs/sdks/node/)

@@ -422,6 +422,68 @@ function scrollStream(client, collection, options) {
   });
 }
 
+/**
+ * Normalize `upsertMany` rows so typed arrays behave the same on every SDK.
+ * `Float32Array` / `Float64Array` become plain arrays (one copy, same vector
+ * semantics as the packed `F32Array` bind path); `Int32Array` / `Uint32Array`
+ * become integer lists for sparse `indices`. Raw binary (`Buffer`,
+ * `ArrayBuffer`, `DataView`) fails closed with wrap-first guidance, matching
+ * the `bind` surface. Plain values pass through untouched. Non-array top-level
+ * input passes through so the native layer fails with
+ * `QQL-BIND-TYPE-MISMATCH`.
+ */
+function normalizeUpsertValue(value) {
+  if (typeof Float32Array !== 'undefined' && value instanceof Float32Array) {
+    return Array.from(value);
+  }
+  if (typeof Float64Array !== 'undefined' && value instanceof Float64Array) {
+    return Array.from(value);
+  }
+  if (typeof Int32Array !== 'undefined' && value instanceof Int32Array) {
+    return Array.from(value);
+  }
+  if (typeof Uint32Array !== 'undefined' && value instanceof Uint32Array) {
+    return Array.from(value);
+  }
+  if (
+    typeof Buffer !== 'undefined' &&
+    typeof Buffer.isBuffer === 'function' &&
+    Buffer.isBuffer(value)
+  ) {
+    throw new TypeError(
+      'binary Buffer must be wrapped in a Float32Array or Float64Array view first (e.g. new Float64Array(buf.buffer, buf.byteOffset, buf.length / 8))',
+    );
+  }
+  if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+    throw new TypeError(
+      'binary ArrayBuffer must be wrapped in a Float32Array or Float64Array view first',
+    );
+  }
+  if (typeof DataView !== 'undefined' && value instanceof DataView) {
+    throw new TypeError(
+      'binary ArrayBuffer must be wrapped in a Float32Array or Float64Array view first',
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeUpsertValue);
+  }
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value)) {
+      out[key] = normalizeUpsertValue(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function normalizeUpsertRows(rows) {
+  if (!Array.isArray(rows)) {
+    return rows;
+  }
+  return rows.map(normalizeUpsertValue);
+}
+
 module.exports = {
   installStmtToJSON,
   buildError,
@@ -435,4 +497,6 @@ module.exports = {
   buildScrollStatement,
   scrollCursor,
   scrollStream,
+  normalizeUpsertValue,
+  normalizeUpsertRows,
 };

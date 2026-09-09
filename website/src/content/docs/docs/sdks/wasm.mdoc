@@ -203,13 +203,18 @@ and `params` is an object for `:name` or an array for `?` — the same shape as
 entry per statement; the length must match the statement count exactly.
 `executeStmt(stmt, options)` runs a pre-parsed `Stmt` handle. `compile(query)`
 and `explain(query)` inspect a route or plan without touching the network.
+`explainAnalyze(query, options)` runs one statement and returns the static plan
+plus measured client timings and server telemetry (see below).
 
-The report is a plain `{ ok, results, succeeded, failed }` object — wrap it
-with the [`dx.js` helpers](#typed-dx-layer-dxjs) for typed `hits()` /
-`facet()` / `count()` accessors and the `executeHits(client, query, options)`
-one-shot. Row vectors accept plain arrays, `Float32Array` / `Float64Array`
+The report is a plain `{ ok, results, succeeded, failed, telemetry }` object.
+Wrap it with the [`dx.js` helpers](#typed-dx-layer-dxjs) for typed `hits()` /
+`facet()` / `count()` / `groups()` accessors, `telemetry` reads, and the
+`executeHits(client, query, options)` one-shot instead of hand-rolling either.
+Row vectors accept plain arrays, `Float32Array` / `Float64Array`
 (packed, one copy), integer typed arrays, and the flat `{ data, dim }`
-multivector form everywhere params enter.
+multivector form everywhere params enter. Statement indexes in the typed
+accessors use Python list semantics on all hosts (`-1` is the last statement;
+out-of-range returns `[]` or `0`).
 
 ## Bulk ingest
 
@@ -222,8 +227,10 @@ const report = await client.upsertMany("docs", rows, { batchSize: 100 });
 ```
 
 One `:rows` template is prepared once, then each chunk splices through the
-point-splice path with no re-parse — the same helper contract as
-`upsert_many` / `upsertMany` on the Python and Node SDKs.
+point-splice path with no re-parse. The full typed-array contract lives once in
+the [API surface reference](/docs/reference/api-surface/): same row shapes on
+Python, Node, and WASM, same `QQL-BIND-TYPE-MISMATCH` for a non-array `rows`,
+same `QQL-VALIDATION-UPSERT-BATCH` for `batchSize < 1`.
 
 ```javascript
 await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
@@ -308,11 +315,31 @@ for (const hit of report.hits(0)) {
 ```
 
 The module exports:
-- **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)`).
+- **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)` returning `[{ id, hits }]`). Negative indexes count from the end. `report.telemetry` reads aggregated server time and usage (`{ time_s, usage }` or `null`) so browser code never hand-rolls the sum.
 - **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text`, `.collection`, `.vector`, `.shard_key`, plus `.get(key, default)`.
 - **`buildError`**: Unpacks JSON error strings into `Error` objects carrying `.code`, `.kind`, `.span`, plus `.fields` and `.request_id` when present.
 - **`wrapReport`**: Returns the input if already an `ExecutionReport`, else wraps the plain object.
-- **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly.
+- **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly. Prefer this over manual `execute` plus `hits(0)` when only hits are needed.
+- **`scrollCursor(client, collection, options)`**: Lazy async generator over `SCROLL ... AFTER :cursor` (at most one page buffered). Same options shape as Node (`batchSize`, `where`, `params`, `withPayload`, `withVector`, `shardKey`).
+
+```javascript
+import init, { Client } from "qql-wasm";
+import { ExecutionReport, executeHits } from "qql-wasm/dx";
+
+await init();
+const client = new Client("http://localhost:6333");
+
+// One-shot hits without touching the report
+const hits = await executeHits(client, "QUERY 'search text' FROM docs LIMIT 5");
+
+// Telemetry without hand-rolled aggregation
+const report = new ExecutionReport(await client.execute("QUERY 'x' FROM docs LIMIT 5"));
+console.log(report.telemetry); // { time_s, usage } or null
+
+// Profile before optimizing: static plan plus client phases and server telemetry
+const analysis = await client.explainAnalyze("QUERY 'x' FROM docs USING dense LIMIT 5");
+console.log(analysis.plan, analysis.phases, analysis.server_time_s, analysis.usage);
+```
 
 ## Memory
 
@@ -336,10 +363,12 @@ releases it automatically.
 | `Stmt.toString`, `Stmt.toReadableString`, `Stmt.explain` | text | Canonical form, readable preview, and per-statement plan |
 | `Stmt.toObject`, `toJSON`, `compileRoute` | AST or route | Inspect a single owned statement |
 | `Stmt.compileRouteBytes` | `Uint8Array` | Transferable single-statement route |
-| `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls |
+| `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls (report carries `telemetry`; wrap with `dx.js` for typed accessors) |
 | `Client.compile`, `Client.explain` | route, plan text | Inspect work before sending traffic |
-| `setEmbedder`, `setHttpEmbedder`, `hasEmbedder` | configured client | Resolve text input from JavaScript or HTTP |
+| `Client.explainAnalyze` | plan plus measured timings | Static plan, client phases, and server telemetry for one statement |
+| `setEmbedder`, `setHttpEmbedder`, `hasEmbedder` | configured client | Resolve text input from JavaScript or HTTP (single text model; see the embedder ladder in the API surface reference) |
 | `Client.setRemoteEmbedder` | configured client | Alias for `setHttpEmbedder` |
+| `dx.js ExecutionReport` | typed accessors plus `telemetry` | `hits` / `points` / `ids` / `facet` / `count` / `groups` (negative index counts from the end; `groups` returns `[{ id, hits }]`), `telemetry`, `wrapReport`, `executeHits`, `scrollCursor` |
 | `setRouteAffinity`, `routeAffinity` | configured client, key | Pin reads via `X-Qdrant-Route-Affinity` (Qdrant 1.19+) |
 | `free()` / `[Symbol.dispose]` | released WASM allocation | Dispose `Client` and `Stmt` handles |
 

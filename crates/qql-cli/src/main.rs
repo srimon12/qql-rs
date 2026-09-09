@@ -18,7 +18,7 @@ mod script;
 mod table;
 
 #[derive(Parser)]
-#[command(name = "qql", about = "Qdrant Query Language CLI")]
+#[command(name = "qql", about = "Qdrant Query Language CLI", version)]
 struct Cli {
     /// Qdrant REST URL. Overrides QDRANT_URL when supplied.
     #[arg(long, global = true)]
@@ -109,6 +109,23 @@ enum Command {
     Migrate(Box<MigrateArgs>),
     /// Check Qdrant connection health
     Doctor {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Triage one statement: format, explain, embed probe, topology, doctor
+    Check {
+        /// QQL query string (e.g., "QUERY 'hello' FROM docs LIMIT 5")
+        query: String,
+        /// Parameter in key=value format (can be specified multiple times)
+        #[arg(long = "param", short = 'p')]
+        params: Vec<String>,
+        /// Path to JSON file containing parameter map or positional array
+        #[arg(long = "params-file")]
+        params_file: Option<PathBuf>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -596,6 +613,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Doctor { json, quiet } => {
             commands::handle_doctor(&url, use_edge, json, quiet).await
+        }
+        Command::Check {
+            query,
+            params,
+            params_file,
+            json,
+            quiet,
+        } => {
+            let check_params = collect_exec_params(&params, params_file.as_ref())?;
+            commands::handle_check(&url, use_edge, &query, check_params.as_ref(), json, quiet).await
         }
         Command::Config { command } => match *command {
             ConfigCommand::Edge {

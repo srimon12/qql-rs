@@ -5,18 +5,54 @@ sidebar:
   order: 3
 ---
 
-This path uses Qdrant REST on port `6333` and an OpenAI-compatible embedding
-endpoint. If you already store vectors, omit the embedder and use vector input.
+This path uses Qdrant REST on port `6333`. Start with literal vectors, which
+need no embedder, then add text embeddings once Ollama is running.
 
 {% steps %}
 
 1. Start Qdrant
 
    {% terminal title="Qdrant" %}
-   docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant
+   docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.19.0
    {% /terminal %}
 
-2. Configure execution
+   QQL requires Qdrant 1.19.0 or newer. The tag above pins the version.
+
+2. Query with literal vectors (no embedder)
+
+   {% qqlExample title="Dense collection and filter index" %}
+   ```sql
+   CREATE COLLECTION quickstart_vectors (
+     dense VECTOR(3, COSINE)
+   )
+   WITH HNSW (m = 16, ef_construct = 100);
+
+   CREATE INDEX ON COLLECTION quickstart_vectors FOR category TYPE keyword;
+   ```
+   {% /qqlExample %}
+
+   {% qqlExample title="Upsert and search with literal vectors" %}
+   ```sql
+   UPSERT INTO quickstart_vectors VALUES
+     {id: 1, vector: [0.9, 0.1, 0.2], category: 'qql'},
+     {id: 2, vector: [0.1, 0.8, 0.3], category: 'qdrant'};
+
+   QUERY [0.9, 0.1, 0.2]
+   FROM quickstart_vectors
+   WHERE category = 'qql'
+   LIMIT 5;
+   ```
+   {% /qqlExample %}
+
+3. Start the embedder for text queries
+
+   Text steps (`USING`) need an OpenAI-compatible endpoint. Start Ollama and
+   pull the model before configuring QQL:
+
+   {% terminal title="Ollama" %}
+   ollama serve
+   ollama pull all-minilm:l6-v2
+   {% /terminal %}
 
    {% terminal title="Environment" %}
    export QDRANT_URL=http://localhost:6333
@@ -25,9 +61,15 @@ endpoint. If you already store vectors, omit the embedder and use vector input.
    export EMBED_DIM=384
    {% /terminal %}
 
-3. Create a collection
+   Confirm the endpoint dim matches the config before loading data:
 
-   {% qqlExample title="Dense collection and filter index" %}
+   {% terminal title="Doctor" %}
+   qql doctor
+   {% /terminal %}
+
+4. Upsert text content
+
+   {% qqlExample title="Embed text into the dense vector" %}
    ```sql
    CREATE COLLECTION docs (
      dense VECTOR(384, COSINE)
@@ -35,13 +77,7 @@ endpoint. If you already store vectors, omit the embedder and use vector input.
    WITH HNSW (m = 16, ef_construct = 100);
 
    CREATE INDEX ON COLLECTION docs FOR category TYPE keyword;
-   ```
-   {% /qqlExample %}
 
-4. Upsert content
-
-   {% qqlExample title="Embed text into the dense vector" %}
-   ```sql
    UPSERT INTO docs VALUES
      {id: 1, text: 'QQL provides typed vector retrieval', category: 'qql'},
      {id: 2, text: 'Qdrant stores dense and sparse vectors', category: 'qdrant'} USING DENSE MODEL 'all-minilm:l6-v2';
@@ -69,3 +105,5 @@ qql execute quickstart.qql
 {% /terminal %}
 
 Use `qql explain "QUERY ..."` to inspect a plan without sending it to Qdrant.
+Use `qql check "QUERY ..."` to triage format, explain, embedder dim, vector
+topology, and backend health in one pass.

@@ -100,6 +100,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             exe: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            exe: ""
           - os: macos-15-intel
             target: x86_64-apple-darwin
             exe: ""
@@ -128,6 +131,16 @@ jobs:
           cp LICENSE README.md "dist/$archive/"
           tar -C dist -czf "dist/$archive.tar.gz" "$archive"
 
+      - name: Smoke test CLI binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="qql-${{ needs.gate.outputs.version }}-${{ matrix.target }}"
+          bin="dist/$archive/qql${{ matrix.exe }}"
+          chmod +x "$bin"
+          "$bin" version
+          "$bin" explain "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+
       - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.target }}
@@ -144,6 +157,9 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
             manylinux: "2_28"
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -168,6 +184,13 @@ jobs:
           command: build
           args: --release --locked --out dist --manifest-path crates/pyqql/Cargo.toml
 
+      - name: Smoke test pyqql wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --force-reinstall dist/*.whl
+          python3 -c "import pyqql; print(pyqql.parse('SHOW COLLECTIONS'))"
+
       - uses: actions/upload-artifact@v7
         with:
           name: python-core-${{ matrix.target }}
@@ -184,6 +207,9 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
             manylinux: "2_28"
           - os: macos-15
             target: aarch64-apple-darwin
@@ -205,6 +231,13 @@ jobs:
           command: build
           args: --release --locked --out dist --manifest-path crates/pyqql-edge/Cargo.toml
 
+      - name: Smoke test pyqql-edge wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --force-reinstall dist/*.whl
+          python3 -c "import pyqql_edge; print(pyqql_edge.parse('SHOW COLLECTIONS'))"
+
       - uses: actions/upload-artifact@v7
         with:
           name: python-edge-${{ matrix.target }}
@@ -221,6 +254,9 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            rustflags: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
             rustflags: ""
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -251,6 +287,14 @@ jobs:
         shell: bash
         run: npx napi build --platform --no-js --release --dts native.d.ts --target ${{ matrix.target }}
 
+      - name: Smoke test nqql addon
+        working-directory: crates/nqql
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="$(ls index.*.node | head -n 1)"
+          node -e "const b=require('./$file');const s=b.parseAllJson?b.parseAllJson('SHOW COLLECTIONS'):JSON.stringify(b.parseAll('SHOW COLLECTIONS'));console.log(s.slice(0,120))"
+
       - uses: actions/upload-artifact@v7
         with:
           name: node-core-${{ matrix.target }}
@@ -267,6 +311,9 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            rustflags: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
             rustflags: ""
           - os: macos-15
             target: aarch64-apple-darwin
@@ -293,6 +340,14 @@ jobs:
         working-directory: crates/nqql-edge
         shell: bash
         run: npx napi build --platform --no-js --release --dts native.d.ts --target ${{ matrix.target }}
+
+      - name: Smoke test nqql-edge addon
+        working-directory: crates/nqql-edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="$(ls index.*.node | head -n 1)"
+          node -e "const b=require('./$file');const s=b.parseAllJson?b.parseAllJson('SHOW COLLECTIONS'):JSON.stringify(b.parseAll('SHOW COLLECTIONS'));console.log(s.slice(0,120))"
 
       - uses: actions/upload-artifact@v7
         with:

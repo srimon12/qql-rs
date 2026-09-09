@@ -76,8 +76,11 @@ const presets = readdirSync(validRoot)
 const categories = [
 	...new Set(presets.map((preset) => preset.category)),
 ].sort();
-const defaultPreset =
-	presets.find((preset) => preset.id === "query-hybrid") ?? presets[0];
+// Small canned landing query with explicit vectors: it analyzes offline with
+// zero config, needs no embedder, and needs no localhost Qdrant.
+const verifiedQqlDefault = String.raw`QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;`;
+const landingQuery = verifiedQqlDefault;
+const landingLabel = "Quick demo";
 const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
 const pageDescription =
 	"Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
@@ -170,9 +173,17 @@ const pageDescription =
         </span>
         <button class="app-chip min-w-0 max-w-[min(24rem,100%)]" type="button" data-open-presets title="Load a fixture">
           <span class="app-chip__label">Example</span>
-          <span class="app-chip__value" data-active-fixture>{defaultPreset.label}</span>
+          <span class="app-chip__value" data-active-fixture>{landingLabel}</span>
           <span class="app-chip__caret" aria-hidden="true">▾</span>
         </button>
+        <span class="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-2.5 font-mono text-[0.68rem] font-semibold text-[var(--sl-color-gray-2)]" data-mode-offline title="Offline analyze: parse, plan, wire, AST, Explain, and export run in this browser with no backend.">
+          <span class="size-1.5 rounded-full bg-emerald-400" aria-hidden="true"></span>
+          Offline analyze
+        </span>
+        <span class="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-2.5 font-mono text-[0.68rem] font-semibold text-[var(--sl-color-gray-2)]" data-mode-connected title="Connected execution: the Result tab needs a reachable Qdrant.">
+          <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-4)] transition-colors" data-connected-dot aria-hidden="true"></span>
+          <span data-connected-label>Connected: not checked</span>
+        </span>
         <button class="app-chip ml-auto min-w-0 max-w-[min(28rem,100%)]" type="button" data-open-settings title="Edit Qdrant URL and embeddings">
           <span class="app-chip__label">Connection</span>
           <span class="app-chip__value" data-connection-value>localhost:6333 · MiniLM</span>
@@ -183,10 +194,19 @@ const pageDescription =
           <span class="app-chip__caret" aria-hidden="true">→</span>
         </a>
       </div>
+      <p class="m-0 px-1 font-mono text-[0.7rem] leading-5 text-[var(--sl-color-gray-3)]">
+        Offline analyze runs in this browser with no backend and covers Plan, Wire, AST, Explain, Tokens, and Metrics. Connected execution in the Result tab needs a reachable Qdrant, default http://localhost:6333.
+      </p>
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-1 px-1 font-mono text-[0.7rem] text-[var(--sl-color-gray-3)]" data-status-panel role="status" aria-live="polite" aria-label="Backend status">
+        <span>Endpoint <strong class="font-semibold text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong></span>
+        <span>Embeddings <strong class="font-semibold text-[var(--sl-color-gray-1)]" data-status-embed>MiniLM (browser)</strong></span>
+        <span>Engine <strong class="font-semibold text-[var(--sl-color-gray-1)]" data-status-wasm>Loading WASM</strong></span>
+      </div>
+      <p class="m-0 px-1 font-mono text-[0.7rem] leading-5 text-[var(--sl-color-gray-3)]" data-status-detail hidden></p>
 
       <div
         class="grid h-[calc(100dvh-9rem)] min-h-[36rem] grid-cols-1 grid-rows-[minmax(0,3fr)_minmax(0,2fr)] overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] shadow-[0_1.5rem_5rem_color-mix(in_srgb,black_18%,transparent)] lg:h-auto lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--split-a,1.08fr)_0.5rem_var(--split-b,0.92fr)] lg:grid-rows-[minmax(0,1fr)]"
-        data-default-query={defaultPreset.query}
+        data-default-query={landingQuery}
         data-workspace
       >
         <EditorPanel />

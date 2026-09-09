@@ -94,6 +94,8 @@ class ExecutionReport(Dict[str, Any]):
     def succeeded(self) -> int: ...
     @property
     def failed(self) -> int: ...
+    @property
+    def telemetry(self) -> Optional[Dict[str, Any]]: ...
     def hits(self, stmt: int = 0) -> List[ScoredPoint]: ...
     def points(self, stmt: int = 0) -> List[ScoredPoint]: ...
     def ids(self, stmt: int = 0) -> List[Any]: ...
@@ -187,6 +189,28 @@ class Client:
         batch_size: int = 100,
         on_error: str = "stop",
     ) -> ExecutionReport: ...
+    def scroll_cursor(
+        self,
+        collection: str,
+        *,
+        batch_size: int = 100,
+        where: str = "",
+        params: Optional[Dict[str, Any]] = None,
+        with_payload: bool = True,
+        with_vector: bool = False,
+        shard_key: Optional[Union[str, int]] = None,
+    ) -> Any: ...
+    async def scroll_cursor_async(
+        self,
+        collection: str,
+        *,
+        batch_size: int = 100,
+        where: str = "",
+        params: Optional[Dict[str, Any]] = None,
+        with_payload: bool = True,
+        with_vector: bool = False,
+        shard_key: Optional[Union[str, int]] = None,
+    ) -> Any: ...
     def close(self) -> None: ...
     @property
     def is_closed(self) -> bool: ...
