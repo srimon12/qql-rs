@@ -80,16 +80,19 @@ def timed_read(fn, reps: int, iters: int) -> dict:
 
 
 def wait_until_ready(client_url: str, collection: str, expected: int) -> None:
-    """Untimed durability barrier: block until the server reports the count."""
+    """Untimed barrier: block until the count is visible AND the collection
+    is green (optimizer idle). Points-count alone races background segment
+    merges/HNSW indexing, which makes early read scenarios slower than later
+    ones on the same data — pure run-to-run variance, not engine signal."""
     import urllib.request
-    deadline = time.time() + 120
+    deadline = time.time() + 180
     while time.time() < deadline:
         with urllib.request.urlopen(f"{client_url}/collections/{collection}") as r:
             info = json.loads(r.read())["result"]
-        if info.get("points_count") == expected:
+        if info.get("points_count") == expected and info.get("status") == "green":
             return
-        time.sleep(0.25)
-    raise RuntimeError(f"{collection} never reached {expected} points")
+        time.sleep(0.5)
+    raise RuntimeError(f"{collection} never reached {expected} points + green")
 
 
 # --------------------------------------------------------------- parity ----

@@ -48,11 +48,15 @@ export declare class Stmt {
   toObject(): any
   toJson(): string
   /**
-   * QQL `SHARD '…'` routing key (request-level). Prefer `SHARD` in the query;
-   * set after parse only when the host resolves the key dynamically.
+   * QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+   *
+   * Reads back `string` for keyword keys, `bigint` for numeric keys, and
+   * `null` when unset (placeholders also read as `null` — bind first).
+   * The setter accepts `string | number | bigint | null`: numbers must be
+   * exact non-negative integers (larger keys need `BigInt`).
    */
-  get shardKey(): string | null
-  set shardKey(key: string | undefined | null)
+  get shardKey(): string | bigint | null
+  set shardKeystring | number | bigint | null | undefined
   /** Whether parameters have already been bound into this statement. */
   get bound(): boolean
   /**
