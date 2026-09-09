@@ -214,12 +214,60 @@ class TestDbapiModule(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_connect_positional_url(self):
+        conn = pyqql.connect("http://localhost:6333")
+        try:
+            self.assertIsInstance(conn, pyqql.Connection)
+            self.assertIsInstance(conn.client, pyqql.Client)
+        finally:
+            conn.close()
+
     def test_connect_rejects_client_plus_args(self):
         with self.assertRaises(TypeError):
             pyqql.Connection(client=FakeClient(), url="http://localhost:6333")
 
 
 class TestDbapiCursorOffline(unittest.TestCase):
+    def test_nextset_multi_statement(self):
+        report = pyqql.ExecutionReport({
+            "ok": True,
+            "results": [
+                {
+                    "ok": True,
+                    "operation": "QUERY",
+                    "message": "Found 2 hits",
+                    "data": POINTS,
+                },
+                {
+                    "ok": True,
+                    "operation": "COUNT",
+                    "message": "Found 42 points",
+                    "data": {"count": 42},
+                }
+            ],
+            "succeeded": 2,
+            "failed": 0,
+        })
+        conn = pyqql.Connection(client=FakeClient(reports=[report]))
+        cur = conn.cursor()
+        cur.execute("QUERY [0.1] FROM docs; COUNT FROM docs;")
+        
+        # Set 0: QUERY
+        self.assertEqual([d[0] for d in cur.description], ["id", "score", "payload"])
+        rows0 = cur.fetchall()
+        self.assertEqual(len(rows0), 2)
+        
+        # Advance to Set 1: COUNT
+        self.assertTrue(cur.nextset())
+        self.assertEqual([d[0] for d in cur.description], ["count"])
+        rows1 = cur.fetchall()
+        self.assertEqual(rows1, [(42,)])
+        
+        # No more sets
+        self.assertIsNone(cur.nextset())
+        self.assertIsNone(cur.description)
+        self.assertEqual(cur.fetchall(), [])
+
     def test_execute_fetch_flow(self):
         conn = pyqql.Connection(client=FakeClient(reports=[_point_report(POINTS)]))
         cur = conn.cursor()

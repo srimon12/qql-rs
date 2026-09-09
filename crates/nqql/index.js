@@ -260,6 +260,14 @@ class Client {
     return callNative(() => this._inner.compile(query, params));
   }
 
+  scrollCursor(collection, options) {
+    return scrollCursor(this, collection, options);
+  }
+
+  scrollStream(collection, options) {
+    return scrollStream(this, collection, options);
+  }
+
   async close() {
     if (typeof this._inner.close === "function") {
       await this._inner.close();

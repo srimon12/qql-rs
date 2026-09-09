@@ -307,6 +307,14 @@ class Client {
   compile(query, params) {
     return callNative(() => this._inner.compile(query, params));
   }
+
+  scrollCursor(collection, options) {
+    return scrollCursor(this, collection, options);
+  }
+
+  scrollStream(collection, options) {
+    return scrollStream(this, collection, options);
+  }
 }
 
 /**

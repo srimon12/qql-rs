@@ -229,6 +229,18 @@ export class Client {
   /** Compile a QQL query to its transport route (non-executing). */
   compile(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
 
+  /** Lazily page through a collection with SCROLL, yielding one ScoredPoint per point. */
+  scrollCursor(
+    collection: string,
+    options?: ScrollCursorOptions,
+  ): AsyncGenerator<ScoredPoint>;
+
+  /** WHATWG stream over `scrollCursor` (pull-driven; honors backpressure). */
+  scrollStream(
+    collection: string,
+    options?: ScrollCursorOptions,
+  ): ReadableStream<ScoredPoint>;
+
   /** Flush and release local edge storage. Idempotent. */
   close(): Promise<void>;
 }
@@ -324,6 +336,8 @@ export interface ScrollCursorOptions {
   batchSize?: number;
   /** Raw QQL filter fragment appended as `WHERE …` (default none). */
   where?: string;
+  /** Optional parameters to bind into the `where` filter fragment. */
+  params?: Record<string, unknown>;
   /** Payloads are included by default; `false` strips `payload`
    * client-side before yielding (SCROLL has no server-side payload
    * exclusion in the grammar). */
@@ -331,6 +345,8 @@ export interface ScrollCursorOptions {
   /** Append `WITH VECTOR` so yielded points carry vectors (default false;
    * SCROLL omits vectors unless asked). */
   withVector?: boolean;
+  /** Optional custom shard key partition routing (keyword or number). */
+  shardKey?: string | number | bigint;
 }
 /** Lazily page through a collection with SCROLL, yielding one ScoredPoint
  * per point. At most one page is ever buffered. Works with any client

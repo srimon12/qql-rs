@@ -185,3 +185,101 @@ test('option validation fails closed', async () => {
   assert.throws(() => sdk.scrollStream(good, ''), TypeError);
   assert.throws(() => sdk.scrollStream(good, 'docs', { batchSize: 0 }), TypeError);
 });
+
+test('escapes hyphenated and special collection names safely', async () => {
+  const client = fakeClient([[]]);
+  await collect(sdk.scrollCursor(client, 'my-hyphenated-collection'));
+  assert.strictEqual(client.calls.length, 1);
+  assert.ok(client.calls[0].sql.startsWith('SCROLL FROM "my-hyphenated-collection"'));
+});
+
+test('shardKey routes to string or numeric partition', async () => {
+  const c1 = fakeClient([[]]);
+  await collect(sdk.scrollCursor(c1, 'docs', { shardKey: 'tenant-a' }));
+  assert.ok(c1.calls[0].sql.includes("SHARD 'tenant-a'"));
+
+  const c2 = fakeClient([[]]);
+  await collect(sdk.scrollCursor(c2, 'docs', { shardKey: 42 }));
+  assert.ok(c2.calls[0].sql.includes('SHARD 42'));
+
+  const c3 = fakeClient([[]]);
+  await collect(sdk.scrollCursor(c3, 'docs', { shardKey: 100n }));
+  assert.ok(c3.calls[0].sql.includes('SHARD 100'));
+
+  const c4 = fakeClient([[]]);
+  await assert.rejects(
+    collect(sdk.scrollCursor(c4, 'docs', { shardKey: {} })),
+    TypeError,
+  );
+  await assert.rejects(
+    collect(sdk.scrollCursor(c4, 'docs', { shardKey: true })),
+    TypeError,
+  );
+});
+
+test('infinite loop guard terminates when cursor does not advance', async () => {
+  const client = fakeClient([rows([1]), rows([1]), rows([1])]);
+  const points = await collect(sdk.scrollCursor(client, 'docs'));
+  assert.strictEqual(points.length, 1);
+  assert.strictEqual(client.calls.length, 2);
+});
+
+test('Client prototype has scrollCursor and scrollStream delegates', async () => {
+  assert.strictEqual(typeof sdk.Client.prototype.scrollCursor, 'function');
+  assert.strictEqual(typeof sdk.Client.prototype.scrollStream, 'function');
+
+  const client = fakeClient([rows([1]), []]);
+  const points = await collect(sdk.Client.prototype.scrollCursor.call(client, 'docs'));
+  assert.strictEqual(points.length, 1);
+  assert.strictEqual(points[0].id, 1);
+
+  const streamClient = fakeClient([rows([2]), []]);
+  const stream = sdk.Client.prototype.scrollStream.call(streamClient, 'docs');
+  assert.ok(stream instanceof ReadableStream);
+  const ids = [];
+  for await (const p of stream) {
+    ids.push(p.id);
+  }
+  assert.deepStrictEqual(ids, [2]);
+});
+
+test('params option binds into where clause across pages', async () => {
+  const client = fakeClient([rows([1]), rows([2]), []]);
+  const points = await collect(
+    sdk.scrollCursor(client, 'docs', {
+      where: 'price < :max_price',
+      params: { max_price: 150 },
+      batchSize: 1,
+    }),
+  );
+  assert.deepStrictEqual(points.map((p) => p.id), [1, 2]);
+  assert.strictEqual(client.calls.length, 3);
+  // Page 1: params contain max_price, no cursor
+  assert.deepStrictEqual(client.calls[0].options, { params: { max_price: 150 } });
+  // Page 2: params contain both max_price and cursor
+  assert.deepStrictEqual(client.calls[1].options, {
+    params: { max_price: 150, cursor: 1 },
+  });
+  // Page 3: params contain max_price and next cursor
+  assert.deepStrictEqual(client.calls[2].options, {
+    params: { max_price: 150, cursor: 2 },
+  });
+});
+
+test('params validation fails on invalid types or reserved cursor key', async () => {
+  const client = fakeClient([[]]);
+  await assert.rejects(
+    collect(sdk.scrollCursor(client, 'docs', { params: 'invalid' })),
+    TypeError,
+  );
+  await assert.rejects(
+    collect(sdk.scrollCursor(client, 'docs', { params: [1, 2] })),
+    TypeError,
+  );
+  await assert.rejects(
+    collect(sdk.scrollCursor(client, 'docs', { params: { cursor: 123 } })),
+    TypeError,
+  );
+});
+
+

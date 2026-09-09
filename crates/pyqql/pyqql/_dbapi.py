@@ -101,13 +101,15 @@ class Connection:
     """DB-API connection: owns a :class:`pyqql.Client` (auto-commit)."""
 
     def __init__(self, client: Any = None, *args: Any, **kwargs: Any) -> None:
-        if client is None:
+        if client is not None and hasattr(client, "execute") and callable(getattr(client, "execute")):
+            if args or kwargs:
+                raise TypeError("pass either a client or Client() arguments, not both")
+            self.client = client
+        else:
             from pyqql import Client  # deferred: breaks the package-init cycle
 
-            client = Client(*args, **kwargs)
-        elif args or kwargs:
-            raise TypeError("pass either a client or Client() arguments, not both")
-        self.client = client
+            all_args = (client, *args) if client is not None else args
+            self.client = Client(*all_args, **kwargs)
         self._closed = False
 
     def cursor(self) -> "Cursor":
@@ -153,6 +155,8 @@ class Cursor:
         self._pos = 0
         self.description: Optional[List[Tuple]] = None
         self.rowcount: int = -1
+        self._result_sets: List[Tuple[List[Tuple], Optional[List[Tuple]], int]] = []
+        self._set_idx = 0
 
     # -- internals ---------------------------------------------------
 
@@ -167,41 +171,73 @@ class Cursor:
         self._pos = 0
         self.description = None
         self.rowcount = -1
+        self._result_sets = []
+        self._set_idx = 0
 
-    def _ingest(self, raw: Any) -> None:
+    def _ingest(self, raw: Any, is_executemany: bool = False) -> None:
         rep = raw if isinstance(raw, ExecutionReport) else ExecutionReport(raw)
-        rows: List[Tuple] = []
-        description: Optional[List[Tuple]] = None
-        upsert_total = 0
-        saw_upsert = False
-        for idx, res in enumerate(rep.get("results", [])):
+        results = rep.get("results", [])
+        for idx, res in enumerate(results):
             if not res.get("ok", False):
                 raise OperationalError(
                     "statement {} failed [{}]: {}".format(
                         idx, res.get("operation", "?"), res.get("message", "")
                     )
                 )
-            if res.get("operation") == "UPSERT":
-                saw_upsert = True
+
+        if is_executemany:
+            rows: List[Tuple] = []
+            description: Optional[List[Tuple]] = None
+            upsert_total = 0
+            saw_upsert = False
+            for idx, res in enumerate(results):
+                if res.get("operation") == "UPSERT":
+                    saw_upsert = True
+                    data = res.get("data") or {}
+                    try:
+                        upsert_total += int(data.get("count", 0))
+                    except (TypeError, ValueError):
+                        pass
+                    continue
+                part_rows, part_desc = map_result(rep, idx)
+                rows.extend(part_rows)
+                if description is None and part_desc is not None:
+                    description = part_desc
+            self._rows = rows
+            self._pos = 0
+            self.description = description
+            if description is not None:
+                self.rowcount = len(rows)
+            elif saw_upsert:
+                self.rowcount = upsert_total
+            else:
+                self.rowcount = -1
+            self._result_sets = [(self._rows, self.description, self.rowcount)]
+            self._set_idx = 0
+            return
+
+        self._result_sets = []
+        for idx, res in enumerate(results):
+            op = res.get("operation")
+            if op == "UPSERT":
                 data = res.get("data") or {}
+                count = 0
                 try:
-                    upsert_total += int(data.get("count", 0))
+                    count = int(data.get("count", 0))
                 except (TypeError, ValueError):
                     pass
+                self._result_sets.append(([], None, count))
                 continue
             part_rows, part_desc = map_result(rep, idx)
-            rows.extend(part_rows)
-            if description is None and part_desc is not None:
-                description = part_desc
-        self._rows = rows
+            rc = len(part_rows) if part_desc is not None else -1
+            self._result_sets.append((part_rows, part_desc, rc))
+
+        if not self._result_sets:
+            self._result_sets = [([], None, -1)]
+
+        self._set_idx = 0
+        self._rows, self.description, self.rowcount = self._result_sets[0]
         self._pos = 0
-        self.description = description
-        if description is not None:
-            self.rowcount = len(rows)
-        elif saw_upsert:
-            self.rowcount = upsert_total
-        else:
-            self.rowcount = -1
 
     def _run(self, sql: Any, params: Any) -> None:
         self._ensure_open()
@@ -212,7 +248,7 @@ class Cursor:
             )
         except QqlExecutionError as exc:
             _reraise_closed_as_interface(exc)
-        self._ingest(raw)
+        self._ingest(raw, is_executemany=False)
 
     # -- execution ---------------------------------------------------
 
@@ -251,7 +287,7 @@ class Cursor:
                 self._executemany_upsert(upsert, items)
             else:
                 raw = self.connection.client.execute([sql] * len(items), params=items)
-                self._ingest(raw)
+                self._ingest(raw, is_executemany=True)
         except QqlExecutionError as exc:
             _reraise_closed_as_interface(exc)
         return self
@@ -319,7 +355,7 @@ class Cursor:
         report = self.connection.client.upsert_many(
             collection, rows, batch_size=100, on_error="stop"
         )
-        self._ingest(report)
+        self._ingest(report, is_executemany=True)
         self.rowcount = len(rows)
 
     # -- fetching ----------------------------------------------------
@@ -347,6 +383,23 @@ class Cursor:
         out = self._rows[self._pos :]
         self._pos = len(self._rows)
         return out
+
+    def nextset(self) -> Optional[bool]:
+        """Skip to the next available result set from a multi-statement script.
+
+        Returns True if a new set is available, or None if no more sets exist.
+        """
+        self._ensure_open()
+        self._set_idx += 1
+        if self._set_idx >= len(self._result_sets):
+            self._rows = []
+            self._pos = 0
+            self.description = None
+            self.rowcount = -1
+            return None
+        self._rows, self.description, self.rowcount = self._result_sets[self._set_idx]
+        self._pos = 0
+        return True
 
     def __iter__(self):  # lazy: yields one row at a time via fetchone
         self._ensure_open()

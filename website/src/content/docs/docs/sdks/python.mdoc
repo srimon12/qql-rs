@@ -217,6 +217,13 @@ print(cursor.description)  # (("id", ...), ("score", ...), ("payload", ...))
 for row in cursor:         # (id, score, payload) tuples; fetchone() -> None when drained
     print(row)
 cursor.executemany("UPSERT INTO docs VALUES :rows", [{"rows": batch} for batch in batches])
+
+# Multi-statement scripts isolate result sets; navigate via nextset():
+cursor.execute("SCROLL FROM docs LIMIT 5; COUNT FROM docs;")
+scroll_rows = cursor.fetchall()  # description: (id, score, payload)
+if cursor.nextset():
+    count_rows = cursor.fetchall()  # description: (count,)
+
 conn.close()
 ```
 
@@ -277,7 +284,7 @@ print(tokenize(query))
 | `report.hits(stmt)` / `points` / `facet` / `count` | typed accessors | Read results per statement index without digging into `results` |
 | `report.telemetry` | per-result server telemetry | Qdrant `time_s` + hardware/inference `usage` when reported |
 | `Client.explain_analyze` | plan + measured timings | Static plan, client phases, and server telemetry for one statement |
-| `pyqql.connect` + cursor | PEP 249-style driver | `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
+| `pyqql.connect` + cursor | PEP 249-style driver | `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/`nextset`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
 | `ScoredPoint` | typed hit | `id`, `score`, `payload`, `text`, `collection`, and `hit["key"]` payload access |
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |

@@ -488,6 +488,12 @@ print(cursor.rowcount)     # hit count, or -1 when indeterminate
 # Bulk ingest delegates to upsert_many (prepared once, chunked transport)
 cursor.executemany("UPSERT INTO docs VALUES :rows", [{"rows": batch} for batch in batches])
 
+# Multi-statement scripts isolate result sets; navigate with nextset():
+cursor.execute("SCROLL FROM docs LIMIT 5; COUNT FROM docs;")
+scroll_rows = cursor.fetchall()  # description: (id, score, payload)
+if cursor.nextset():
+    count_rows = cursor.fetchall()  # description: (count,)
+
 conn.commit()    # no-op
 conn.close()
 ```

@@ -284,12 +284,41 @@ function resolveScrollArgs(client, collection, options) {
   if (typeof withVector !== 'boolean') {
     throw new TypeError('options.withVector must be a boolean');
   }
-  return { batchSize, where: where.trim(), withPayload, withVector };
+  const shardKey = options?.shardKey;
+  if (
+    shardKey !== undefined &&
+    typeof shardKey !== 'string' &&
+    typeof shardKey !== 'number' &&
+    typeof shardKey !== 'bigint'
+  ) {
+    throw new TypeError('options.shardKey must be a string, number, or bigint');
+  }
+  const params = options?.params;
+  if (params !== undefined) {
+    if (typeof params !== 'object' || params === null || Array.isArray(params)) {
+      throw new TypeError('options.params must be an object with named parameters');
+    }
+    if (Object.prototype.hasOwnProperty.call(params, 'cursor')) {
+      throw new TypeError('options.params cannot contain reserved parameter "cursor"');
+    }
+  }
+  return { batchSize, where: where.trim(), params, withPayload, withVector, shardKey };
+}
+
+function formatCollection(name) {
+  if (typeof name !== 'string') return name;
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    return name;
+  }
+  if ((name.startsWith('"') && name.endsWith('"')) || (name.startsWith("'") && name.endsWith("'"))) {
+    return name;
+  }
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**
  * Render one SCROLL page statement. Clause order follows the grammar
- * (`parse_scroll`): WHERE → AFTER → WITH VECTOR → LIMIT. The cursor always
+ * (`parse_scroll`): WHERE → AFTER → SHARD → WITH VECTOR → LIMIT. The cursor always
  * binds as `:cursor` (AFTER accepts named point-ID params); the first page
  * omits AFTER entirely. `WITH VECTOR` is appended only when requested —
  * SCROLL omits vectors by default, and payloads are included by default so
@@ -299,14 +328,21 @@ function resolveScrollArgs(client, collection, options) {
  * is applied client-side by nulling `payload` before yielding.
  */
 function buildScrollStatement(collection, resolved, cursor) {
-  let sql = `SCROLL FROM ${collection}`;
+  let sql = `SCROLL FROM ${formatCollection(collection)}`;
   if (resolved.where) {
     sql += ` WHERE ${resolved.where}`;
   }
-  let params;
+  let params = resolved.params ? { ...resolved.params } : undefined;
   if (cursor !== undefined) {
     sql += ' AFTER :cursor';
-    params = { cursor };
+    params = params ? { ...params, cursor } : { cursor };
+  }
+  if (resolved.shardKey !== undefined) {
+    if (typeof resolved.shardKey === 'number' || typeof resolved.shardKey === 'bigint') {
+      sql += ` SHARD ${resolved.shardKey}`;
+    } else {
+      sql += ` SHARD '${String(resolved.shardKey).replace(/'/g, "''")}'`;
+    }
   }
   if (resolved.withVector) {
     sql += ' WITH VECTOR';
@@ -336,6 +372,10 @@ async function* scrollCursor(client, collection, options) {
     if (hits.length === 0) {
       return;
     }
+    const nextCursor = hits[hits.length - 1]?.id;
+    if (cursor !== undefined && nextCursor === cursor) {
+      return;
+    }
     for (const hit of hits) {
       if (resolved.withPayload) {
         yield hit;
@@ -343,7 +383,7 @@ async function* scrollCursor(client, collection, options) {
         yield new ScoredPoint({ ...hit, payload: null });
       }
     }
-    cursor = hits[hits.length - 1].id;
+    cursor = nextCursor;
   }
 }
 

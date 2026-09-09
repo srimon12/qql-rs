@@ -152,27 +152,31 @@ console.log(pointReport.telemetry); // { time_s, usage } | null
 
 `scrollCursor` pages lazily through a collection — at most one page is ever
 buffered. `scrollStream` wraps it in a pull-driven WHATWG `ReadableStream`
-with native backpressure:
+with native backpressure. Available as `Client` methods or standalone functions:
 
 ```javascript
 const { Client, scrollCursor, scrollStream } = require("@veristamp/nqql");
 
 const client = new Client({ url: "http://localhost:6333" });
 
-for await (const point of scrollCursor(client, "docs", {
+// Async iteration with parameterized filter and shard routing
+for await (const point of client.scrollCursor("docs", {
   batchSize: 500,
-  where: "status = 'active'",
+  where: "status = :status AND price < :max_price",
+  params: { status: "active", max_price: 150.0 },
+  shardKey: "tenant-a",
 })) {
   await processPoint(point);
 }
 
-scrollStream(client, "docs", { batchSize: 500 }).pipeTo(writableStream);
+// WHATWG ReadableStream piping
+client.scrollStream("docs", { batchSize: 500 }).pipeTo(writableStream);
 ```
 
-Options: `batchSize` (default 100), `where` (QQL filter fragment),
-`withPayload` (default true — payloads are included unless stripped
-client-side, since `SCROLL` has no `WITH PAYLOAD` spelling),
-`withVector` (default false — appends `WITH VECTOR`).
+Options: `batchSize` (default 100), `where` (QQL filter fragment), `params` (named parameter bindings),
+`shardKey` (custom shard partition routing), `withPayload` (default true — payloads are included unless stripped
+client-side, since `SCROLL` has no `WITH PAYLOAD` spelling), `withVector` (default false — appends `WITH VECTOR`).
+Non-standard and hyphenated collection names are safely escaped automatically.
 
 ## Profile before you optimize
 
@@ -241,6 +245,7 @@ const report = await client.execute([
 | `report.hits(stmt)` / `points` / `facet` / `count` | Typed accessors per statement index (negative index counts from the end) |
 | `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
 | `Client.explainAnalyze` | Static plan plus measured client/server timings for one statement |
+| `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration and pull-driven WHATWG stream |
 | `ScoredPoint` | Typed hit with `id`, `score`, `payload`, `text`, `collection` |
 | `Client.explain`, `explainStmt`, `compile` | Plan and route inspection (`compile` accepts `params`) |
 | `parse(source)` | Native `Stmt` handles for AST mutation |

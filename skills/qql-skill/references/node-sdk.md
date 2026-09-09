@@ -390,28 +390,37 @@ const result = await execute("QUERY TEXT :q FROM docs USING dense LIMIT :lim", {
 
 ## 9. Lazy Scroll Cursor & Streams
 
-`scrollCursor` pages lazily through a collection with `SCROLL` over the existing `execute` path — at most one page is ever buffered, so a slow consumer never OOMs the heap. `scrollStream` wraps it in a pull-driven WHATWG `ReadableStream` (native backpressure). Module-level functions taking any object exposing `execute(sql, { params })`:
+`scrollCursor` pages lazily through a collection with `SCROLL` over the existing `execute` path — at most one page is ever buffered, so a slow consumer never OOMs the heap. `scrollStream` wraps it in a pull-driven WHATWG `ReadableStream` (native backpressure). Available as `Client` instance methods or module-level functions taking any object exposing `execute(sql, { params })`:
 
 ```js
 const { Client, scrollCursor, scrollStream } = require('@veristamp/nqql');
 
 const client = new Client({ url: "http://localhost:6333" });
 
-// 1. Memory-bounded async iteration (stops on the first empty page)
-for await (const point of scrollCursor(client, "docs", {
+// 1. Client method form with parameterized filter
+for await (const point of client.scrollCursor("docs", {
   batchSize: 500,
-  where: "status = 'active'",
+  where: "status = :status AND price < :max_price",
+  params: { status: "active", max_price: 150.0 },
+  shardKey: "tenant-a",
 })) {
   await processPoint(point); // next page fetches only when the buffer drains
 }
 
-// 2. Direct piping with backpressure
-scrollStream(client, "docs", { batchSize: 500 })
+// 2. Direct WHATWG stream piping with backpressure
+client.scrollStream("docs", { batchSize: 500 })
   .pipeThrough(ndjsonTransform)
   .pipeTo(writableStream);
 ```
 
-Options: `batchSize` (default 100), `where` (QQL filter fragment, default ""), `withPayload` (default true — payloads are included by default, the flag only strips client-side when false since `SCROLL` has no `WITH PAYLOAD` spelling), `withVector` (default false — appends `WITH VECTOR`).
+Options:
+- `batchSize` (default 100): Points per page.
+- `where` (default ""): QQL filter fragment (e.g. `"status = :status"`).
+- `params`: Named parameters object bound safely into the `where` filter fragment.
+- `shardKey`: Custom shard partition routing (`string | number | bigint`).
+- `withPayload` (default true): Set `false` to strip payloads client-side.
+- `withVector` (default false): Appends `WITH VECTOR` to include point vectors.
+Collection identifiers are safely quoted automatically (`"my-collection"`).
 
 ---
 
