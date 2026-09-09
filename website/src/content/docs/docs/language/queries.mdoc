@@ -25,7 +25,7 @@ QUERY 'vector database' FROM docs USING dense LIMIT 10;
 QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
 
 -- Implicit vector input (VECTOR keyword is optional for array literals)
-QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
+QUERY [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
 
 QUERY POINT 42 FROM docs USING dense LIMIT 10;
 
@@ -258,8 +258,20 @@ WHERE tenant_id = 'acme'
 SHARD 'acme'
 PARAMS (idf = WHERE tenant_id = 'acme')
 LIMIT 10;
+
+QUERY 'search'
+FROM docs
+USING sparse
+WHERE tenant_id = 101
+SHARD 101
+PARAMS (idf = WHERE tenant_id = 101)
+LIMIT 10;
 ```
 {% /qqlExample %}
+
+Shard keys bind like any other placeholder: `SHARD :tenant` takes its value
+from SDK `params`, with strings routed as keywords and non-negative integers
+as numbers.
 
 ## Parameter binding & prepared queries
 

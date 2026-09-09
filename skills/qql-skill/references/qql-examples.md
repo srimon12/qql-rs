@@ -1,6 +1,6 @@
 # QQL Canonical Query Examples
 
-Golden examples for crafting complex QQL queries. Every example presents a real retrieval problem, explains why the approach works, lists key architectural decisions, and provides pure canonical QQL code blocks.
+Canonical QQL examples. Each example states a retrieval problem, why the approach works, and the key decisions, with pure QQL code blocks.
 
 All examples are valid against the current QQL parser (function names are case-insensitive).
 
@@ -8,9 +8,9 @@ All examples are valid against the current QQL parser (function names are case-i
 
 ## 1. Multi-Stage Hybrid Retrieval with Per-Prefetch Tuning
 
-**Problem:** You need semantic understanding and exact keyword matching for a technical documentation search engine. The dense semantic search must focus only on recent tech articles, while the sparse keyword search casts a wider net with a lower quality bar.
+**Problem:** Technical documentation search needs semantic understanding plus exact keyword matching, with dense search scoped to recent tech articles.
 
-**Why this works:** Common Table Expressions (CTEs) define independent candidate retrieval streams with their own filters, limits, and score thresholds. The top-level `QUERY FUSION RRF` merges candidate streams using Reciprocal Rank Fusion.
+**Why this works:** CTEs define independent candidate streams with their own filters, limits, and thresholds; `QUERY FUSION RRF` merges them with Reciprocal Rank Fusion.
 
 ```sql
 WITH
@@ -31,13 +31,13 @@ QUERY FUSION RRF FROM articles
 **Key decisions:**
 - `dense`: High-precision leg retrieving 200 candidates filtered to tech articles.
 - `sparse`: Wide-net keyword leg retrieving 300 candidates with a lower score threshold (0.3).
-- `QUERY FUSION RRF`: Merges rankings seamlessly without requiring raw score normalization.
+- `QUERY FUSION RRF`: Merges rankings without requiring raw score normalization.
 
 ---
 
 ## 2. Tiered Retrieval with Nested CTEs
 
-**Problem:** In a clinical RAG pipeline, you want a broad first pass to retrieve 500 semantically relevant emergency department documents, followed by a narrow second pass that performs keyword matching *only* within those 500 candidates.
+**Problem:** A clinical RAG pipeline needs a broad first pass (500 emergency department documents) followed by keyword matching only within those candidates.
 
 **Why this works:** CTEs can reference preceding CTEs inside their `PREFETCH` clause, enabling multi-stage coarse-to-fine filtering directly inside Qdrant.
 
@@ -58,9 +58,9 @@ QUERY FUSION RRF FROM clinical_docs
 
 ## 3. Hybrid Search with Per-Prefetch Filtering
 
-**Problem:** You want hybrid retrieval, but results from a specific category or priority level should be retrieved via a dedicated high-priority prefetch stream.
+**Problem:** Hybrid retrieval needs a dedicated high-priority prefetch stream for a specific category or priority level.
 
-**Why this works:** Instead of a single hybrid query, you split into multiple CTEs with different filters and score thresholds. RRF merges candidate streams into a single ranked list.
+**Why this works:** Multiple CTEs with different filters and thresholds replace a single hybrid query; RRF merges the streams into one ranked list.
 
 For the simple dense+sparse case without per-leg filters, prefer the hybrid
 shorthand (same plan expand as `QUERY HYBRID`):
@@ -103,16 +103,16 @@ QUERY FUSION RRF FROM incidents
 - `high_priority`: High-precision leg retrieving 50 critical open incidents with threshold 0.7.
 - `general`: Dense semantic retrieval for 200 candidates.
 - `keyword`: BM25 sparse keyword retrieval for 200 candidates.
-- `QUERY FUSION RRF`: Merges rankings seamlessly using reciprocal rank fusion.
+- `QUERY FUSION RRF`: Merges rankings using reciprocal rank fusion.
 - `PARAMS (rrf_k = 60, rrf_weights = [...])`: Configure the RRF smoothing constant `k` and per-prefetch weights directly in `PARAMS (...)` (never in `WITH (...)`).
 
 ---
 
 ## 4. Grouped Retrieval with Cross-Collection Lookup
 
-**Problem:** You search in collection `research_papers`, but the group IDs (e.g. author names) live in a separate `author_metadata` collection. You want top-5 results per author without duplicate author dominance in the result feed.
+**Problem:** Top-5 results per author are needed, but the group IDs live in a separate `author_metadata` collection.
 
-**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection. `OFFSET` is supported with `GROUP BY` (maps to `group_offset`). Edge rejects `GROUP BY` entirely — use remote Qdrant for grouped search.
+**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection. `OFFSET` is supported with `GROUP BY` (maps to `group_offset`). Edge rejects `GROUP BY` entirely; use remote Qdrant for grouped search.
 
 ```sql
 QUERY TEXT 'machine learning optimization' FROM research_papers
@@ -232,7 +232,7 @@ UPSERT INTO docs VALUES {
 
 ### 6c. Cross-encoder pair rerank (`CROSS RERANK`)
 
-**Problem:** Reorder dense candidates with a pair scorer `(query, doc_text)` — not MaxSim multivector.
+**Problem:** Reorder dense candidates with a pair scorer `(query, doc_text)`, not MaxSim multivector.
 
 **Why this works:** `CROSS RERANK` runs PREFETCH, reads document text from `ON FIELD` (default `text`), scores pairs client-side. Distinct from late-interaction `RERANK … USING colbert`. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
 
@@ -268,7 +268,7 @@ QUERY RECOMMEND POSITIVE (101, 102, 103) NEGATIVE (201) STRATEGY average_vector
 
 ## 8. Full RAG Pipeline: Retrieve, Group, Limit
 
-**Problem:** You're building a RAG pipeline. You want to retrieve relevant documents, group them by source (so you don't return 10 chunks from the same document), and limit per-group diversity.
+**Problem:** A RAG pipeline needs relevant documents grouped by source (no single-document dominance) with per-group limits.
 
 ```sql
 WITH
@@ -591,13 +591,9 @@ server-side override on remote Qdrant (client HTTP timeout is separate).
 
 ## 26. Cluster resource quotas (`SHOW QUOTAS` / `SET QUOTA`)
 
-**Problem:** You operate a shared Qdrant cluster and need to inspect global
-resource limits, then cap resident memory (and optionally disk) so a noisy
-workload cannot starve the node.
+**Problem:** A shared Qdrant cluster needs global resource limits inspected and capped so one workload cannot starve the node.
 
-**Why this works:** Qdrant 1.19 exposes a cluster-wide quota API at
-`GET|PUT /quotas`. QQL maps `SHOW QUOTAS` / `SET QUOTA (…)` directly. `WAIT true`
-is a query param (consensus wait), not a body field.
+**Why this works:** Qdrant 1.19 exposes quotas at `GET|PUT /quotas`; QQL maps `SHOW QUOTAS` / `SET QUOTA (…)` directly. `WAIT true` is a query param, not a body field.
 
 ```sql
 -- Inspect current config + utilization
@@ -611,7 +607,7 @@ SET QUOTA (
   release_margin_percent = 5
 ) WAIT true;
 
--- Disable quotas (still a full replace — omitted keys are unset)
+-- Disable quotas (still a full replace; omitted keys are unset)
 SET QUOTA (enabled = false);
 
 -- Clear a single limit with null in a replace body
@@ -621,15 +617,14 @@ SET QUOTA (max_disk_usage_percent = null);
 **Key decisions:**
 - `SET QUOTA` is a **full replace**, not a merge of previous limits.
 - Percent fields must be valid ranges (`QQL-PLAN-QUOTA` on out-of-range / unknown keys).
-- **REST only** — gRPC returns `QQL-GRPC-QUOTA`; edge returns `QQL-EDGE-UNSUPPORTED-QUOTA`.
+- **REST only**: gRPC returns `QQL-GRPC-QUOTA`; edge returns `QQL-EDGE-UNSUPPORTED-QUOTA`.
 - Prefer REST client for quota admin; DML can stay on gRPC.
 
 ---
 
 ## 27. Memory placement tiers + TurboQuant (`turbo4`)
 
-**Problem:** You want cold/cached/pinned placement for vectors, HNSW, payload, and
-quantization, plus 4-bit TurboQuant dense storage for a large document corpus.
+**Problem:** Vectors, HNSW, payload, and quantization need cold/cached/pinned placement, plus 4-bit TurboQuant dense storage.
 
 **Why this works:** Qdrant 1.19 adds `memory = 'cold'|'cached'|'pinned'` on vector,
 HNSW, sparse, quantization, and indexes, plus `payload_memory` in collection
@@ -680,7 +675,7 @@ QUERY TEXT 'x' FROM docs
 ```
 
 **Key decisions:**
-- `MATCH PREFIX` is for **keyword** (or similar exact) fields with a prefix-capable index — not a substitute for `MATCH PHRASE` on text indexes.
+- `MATCH PREFIX` is for **keyword** (or similar exact) fields with a prefix-capable index, not a substitute for `MATCH PHRASE` on text indexes.
 - Combine with tenant filters as usual: `WHERE title MATCH PREFIX 'Comp' AND tenant_id = 'acme'`.
 
 ---
@@ -688,12 +683,10 @@ QUERY TEXT 'x' FROM docs
 ## 29. Deterministic `SLICE` sampling filter
 
 **Problem:** You need a stable, hash-based subset of points (e.g. 1 of 4 shards of
-the ID space) for canary ranking, A/B sampling, or tenant-agnostic load tests —
+the ID space) for canary ranking, A/B sampling, or tenant-agnostic load tests,
 without random `SAMPLE` each time.
 
-**Why this works:** `WHERE SLICE (total, index)` is a Qdrant filter condition:
-points are partitioned into `total` buckets (`total >= 1`); only bucket `index`
-(`0 <= index < total`) matches. Validation fails closed (`QQL-VALIDATION-SLICE`).
+**Why this works:** `WHERE SLICE (total, index)` partitions points into `total` buckets and matches bucket `index`; invalid pairs fail closed (`QQL-VALIDATION-SLICE`).
 
 ```sql
 -- 25% of the collection (bucket 1 of 4)
@@ -716,12 +709,9 @@ QUERY TEXT 'x' FROM docs
 
 ## 30. Per-query sparse IDF corpus
 
-**Problem:** Sparse / BM25-style retrieval should use either global IDF stats or a
-tenant-scoped corpus so term rarity reflects only that tenant’s documents.
+**Problem:** Sparse retrieval needs global or tenant-scoped IDF stats so term rarity reflects the right corpus.
 
-**Why this works:** Search `PARAMS (idf = …)` lowers to Qdrant’s per-query IDF
-options: `'global'` or a QQL `WHERE` filter. Isolation is still statement
-`WHERE` / `inject_filter`. IDF only scopes term statistics. Supported on remote
+**Why this works:** Search `PARAMS (idf = …)` lowers to per-query IDF (`'global'` or a `WHERE` filter). Isolation stays in statement `WHERE` / `inject_filter`; IDF only scopes term statistics. Supported on remote
 Qdrant and **qdrant-edge 0.8+**.
 
 ```sql
@@ -741,7 +731,7 @@ QUERY TEXT 'hello' FROM docs USING sparse
 **Key decisions:**
 - Collection sparse vectors often use `modifier = 'idf'` at create time; query
   `PARAMS (idf = …)` overrides / scopes the corpus for **this** request.
-- Write `idf = WHERE <filter>` — not a Qdrant JSON `{must: […]}` object.
+- Write `idf = WHERE <filter>`, not a Qdrant JSON `{must: […]}` object.
 - Pair with `WHERE tenant_id = 'acme'` (and `SHARD 'acme'` when custom-sharded) so
   both **retrieval isolation** and **IDF stats** stay tenant-local.
 
@@ -749,7 +739,7 @@ QUERY TEXT 'hello' FROM docs USING sparse
 
 ## 31. In-Database Categorical Aggregations (FACET)
 
-**Problem:** You need value counts for categorical payload fields (e.g. room types, legal precedent jurisdictions, tags) filtered by metadata or tenant partitions, without pulling thousands of records into your application layer.
+**Problem:** Value counts for categorical payload fields are needed without pulling thousands of records into the application.
 
 **Why this works:** QQL's native `FACET` statement compiles to Qdrant's `/collections/{collection}/facet` API, performing aggregation directly in-engine.
 
@@ -777,7 +767,7 @@ LIMIT 10;
 
 ## 32. Compact Vector Array Literals & Payload Defaults
 
-**Problem:** Embedding vectors are already computed by an external model service or local embedder. You want concise queries without boilerplate `VECTOR` keywords or manual `WITH PAYLOAD true` clauses.
+**Problem:** Precomputed embedding vectors need concise queries without `VECTOR` boilerplate or manual payload clauses.
 
 **Why this works:** `QUERY [0.1, 0.2, ...]` auto-recognizes array literals as vector queries, and queries automatically include payloads (`WITH PAYLOAD true` is the default).
 
@@ -800,9 +790,9 @@ LIMIT 10;
 
 ## 33. Parameterized Templates (QQL 1.7)
 
-**Problem:** A service keeps re-issuing the same search shape with different user-supplied text, categories, and limits. Concatenating strings risks injection and defeats prepared-statement reuse.
+**Problem:** A service re-issues the same search shape with different inputs; string concatenation risks injection and defeats statement reuse.
 
-**Why this works:** Placeholders (`:name` named, `?` positional) are inert until the host binder substitutes safely escaped literals (`bind`, `Stmt.bind`, `Client.execute(..., params=...)`). Comments and string literals in the template are never substituted; mixed styles fail with `QQL-BIND-MIXED-STYLE`.
+**Why this works:** Placeholders (`:name`, `?`) stay inert until the host binder substitutes escaped literals. Comments and string literals are never substituted; mixed styles fail with `QQL-BIND-MIXED-STYLE`.
 
 ```sql
 -- Named placeholders (bind with an object/dict: {"q": "...", "cat": "...", "lim": 10})
@@ -828,4 +818,4 @@ OFFSET :offset;
 **Key decisions:**
 - `:name` is matched by identifier name; `?` maps 1-to-1 sequentially with the positional list.
 - Nested dict params expand to dotted keys (`{"loc": {"lat": 1.0}}` binds `:loc.lat`); flat dotted keys work identically.
-- Colons in compact dicts (`{a:b}`) are separators, not placeholders — write `{key: :val}` to bind a dict value.
+- Colons in compact dicts (`{a:b}`) are separators, not placeholders; write `{key: :val}` to bind a dict value.

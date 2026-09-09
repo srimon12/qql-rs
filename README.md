@@ -20,9 +20,9 @@
 
 ---
 
-### ⚡ Quick Install
+### Quick Install
 
-#### 💻 CLI One-Liner (Linux, macOS, Windows)
+#### CLI One-Liner (Linux, macOS, Windows)
 
 ```bash
 # Linux & macOS (Shell)
@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/instal
 irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
 ```
 
-#### 📦 Language SDKs
+#### Language SDKs
 
 ```bash
 # Edge SDKs are heavier but bundle qdrant_edge and fastembed-rs in a single
@@ -55,7 +55,7 @@ npm install qql-wasm
 cargo add qql qql-core
 ```
 
-#### 🧩 VS Code / Cursor Extension
+#### VS Code / Cursor Extension
 
 ```bash
 # Marketplace
@@ -67,7 +67,7 @@ code --install-extension srimon12.qql-lang
 
 Syntax highlighting, live WASM diagnostics, hover plans, CodeLens, outline, and smart completions for `.qql` files. See [`editors/vscode`](editors/vscode).
 
-#### 🤖 AI Agent Skill (Cursor, Claude Code, codex etc)
+#### AI Agent Skill (Cursor, Claude Code, codex etc)
 
 ```bash
 npx skills add srimon12/qql-rs --skill qql-skill
@@ -75,7 +75,7 @@ npx skills add srimon12/qql-rs --skill qql-skill
 
 ---
 
-### 💡 Example
+### Example
 
 ```sql
 QUERY TEXT 'chest pain'
@@ -92,20 +92,20 @@ Partition DDL: `CREATE SHARD KEY '…' ON COLLECTION …`.
 
 ---
 
-### 📚 Documentation
+### Documentation
 
 Targets **Qdrant ≥ 1.19.0** (quotas, `memory` placement, `MATCH PREFIX` / `SLICE`, sparse `idf`, `turbo4`).
 
-- 📖 **Docs index**: [`docs/README.md`](docs/README.md)
-- 📐 **Syntax**: [`docs/syntax.md`](docs/syntax.md) · **Filters**: [`docs/filters.md`](docs/filters.md)
-- 🔒 **inject_filter / multitenancy**: [`docs/inject_filter.md`](docs/inject_filter.md) · [`skills/qql-skill/references/qql-multitenancy.md`](skills/qql-skill/references/qql-multitenancy.md)
-- 🤖 **Agent skill**: [`skills/qql-skill/README.md`](skills/qql-skill/README.md)
-- 🗺️ **Gaps**: [`skills/qql-skill/references/qql-gaps.md`](skills/qql-skill/references/qql-gaps.md)
-- ⚙️ **Spec**: [`language/v1/spec/semantics.md`](language/v1/spec/semantics.md)
-- 🛠️ **Releasing**: [`RELEASING.md`](RELEASING.md)
+- **Docs index**: [`docs/README.md`](docs/README.md)
+- **Syntax**: [`docs/syntax.md`](docs/syntax.md) · **Filters**: [`docs/filters.md`](docs/filters.md)
+- **inject_filter / multitenancy**: [`docs/inject_filter.md`](docs/inject_filter.md) · [`skills/qql-skill/references/qql-multitenancy.md`](skills/qql-skill/references/qql-multitenancy.md)
+- **Agent skill**: [`skills/qql-skill/README.md`](skills/qql-skill/README.md)
+- **Gaps**: [`skills/qql-skill/references/qql-gaps.md`](skills/qql-skill/references/qql-gaps.md)
+- **Spec**: [`language/v1/spec/semantics.md`](language/v1/spec/semantics.md)
+- **Releasing**: [`RELEASING.md`](RELEASING.md)
 
 ---
 
 <div align="center">
-  <sub>Built with 🦀 Rust for Qdrant and Edge Vector DBs. Licensed under MIT.</sub>
+  <sub>Built with Rust for Qdrant and Edge Vector DBs. Licensed under MIT.</sub>
 </div>

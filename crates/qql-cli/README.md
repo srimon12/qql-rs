@@ -40,6 +40,8 @@ qql exec "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
 
+# Guide: /docs/operations/cluster-migration/ (migrate)
+# Guide: /docs/operations/backup-restore/ (dump)
 # Cross-version / cross-cluster migrate (schema + points, not snapshots)
 qql migrate docs --url http://old:6333 --target-url http://new:6334 --to docs
 qql migrate docs --to docs_q --quantize scalar --shard-number 12 --dry-run

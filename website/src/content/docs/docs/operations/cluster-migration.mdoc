@@ -1,0 +1,318 @@
+---
+title: "Cluster migration"
+description: "Copy schema and points between clusters with qql migrate, including dry runs, sharded targets, verification, and alias cutover."
+sidebar:
+  order: 2
+---
+
+`qql migrate <collection>` copies one collection as schema plus points to
+another cluster or another collection. The target can run a different minor
+version, use a different shard count, or carry different quantization. Use
+it for version leaps, resharding, tenant splits, filtered extracts, and
+cluster moves.
+
+## What migrate is and is not
+
+Migrate is a logical streaming copy: it scrolls points from the source and
+upserts them into a freshly created target, which rebuilds its HNSW graph
+from the ingested points. It is not a snapshot. No segment files move, no
+graph is preserved, and the target pays the indexing cost of a fresh build
+(about twice the working memory during ingest). In return the copy can
+cross minor versions in one pass, change shard counts, switch quantization,
+and select a subset of points. When the source and target are identical in
+version and topology and you need the fastest restore, take a Qdrant
+native snapshot instead. See [Operations](/docs/operations/) for the
+chooser.
+
+## Source and target selection
+
+The source is `--url` (or `QDRANT_URL`, default `http://localhost:6333`).
+The target defaults to the same endpoint unless `--target-url` points
+elsewhere, with `--target-api-key` (or `QDRANT_TARGET_API_KEY`) for a
+protected target. `--to` renames the target collection; without it the
+target keeps the source name. A URL containing `:6334` selects the gRPC
+transport, which is the recommended ingest path. `--target-edge` uses the
+local edge backend as the target.
+
+{% terminal title="Same-cluster copy and cross-cluster copy" %}
+qql --url grpc://localhost:6334 migrate docs --to docs_copy --recreate
+qql --url grpc://old-host:6334 migrate docs --target-url grpc://new-host:6334 --to docs --target-api-key "$QDRANT_TARGET_API_KEY"
+{% /terminal %}
+
+Migrating onto the same endpoint with the same collection name is
+rejected. Pass `--to`, `--recreate`, or a different `--target-url`.
+
+## Dry-run, run, and resume loop
+
+Preview first, run, and re-run the same command after a crash:
+
+{% terminal title="Preview, run, and resume a migration" %}
+qql migrate docs --to docs_copy --dry-run
+qql migrate docs --to docs_copy --recreate --workers 4 --batch-size 128
+qql migrate docs --to docs_copy --resume
+{% /terminal %}
+
+`--dry-run` prints the `CREATE COLLECTION`, `CREATE INDEX`, `CREATE SHARD KEY`,
+and `ALTER COLLECTION` plan with source counts and writes nothing.
+`--resume` continues from an existing checkpoint and errors when none
+exists. `--restart` discards any checkpoint and starts over. `--resume`
+and `--restart` cannot be combined.
+
+## The six phases
+
+Every run passes through the same phase machine, and the checkpoint
+records which phase was reached:
+
+1. **Validate.** Option checks run before any I/O: `batch_size` and
+   `workers` at least `1`, `--bulk-threshold-kb` at least `1`,
+   `--shard-key` and `--shard-key-field` mutually exclusive, and
+   `--drop-source-after-cutover` only with `--cutover`. The source
+   collection must exist. `--where` is parsed into a filter here.
+2. **Schema.** The target collection is created from the source schema plus
+   overrides, payload indexes are created first, discovered shard keys are
+   created, and the optimizer threshold is raised when fast-bulk is on.
+3. **Ingest.** The source scroll streams through a concurrent upsert window
+   with a checkpoint write after each window. Late shard keys (values
+   missed by discovery) are created on demand.
+4. **Optimize restore.** The original `indexing_threshold` is restored with
+   `ALTER COLLECTION` so the target indexes the ingested points. Skipped
+   when `--no-fast-bulk` is set.
+5. **Verify.** Exact source and target counts are compared, polling when
+   ingest skipped durability waits.
+6. **Cutover.** The alias is pointed at the target, and the source is
+   optionally dropped. Runs only with `--cutover`.
+
+Interrupting with Ctrl+C stops ingest; the optimizer threshold is still
+restored before exit, and re-running the same command resumes from the
+stored cursor.
+
+## Crash-safety checkpoint
+
+Checkpoints live under `.qql-migrate/` by default with both cluster
+identities in the name so parallel migrations cannot collide:
+
+{% terminal title="Checkpoint path template" %}
+.qql-migrate/<source_url>__<source>__<target_url>__<target>.json
+{% /terminal %}
+
+Names are sanitized (anything outside letters, digits, `_`, and `-`
+becomes `_`), so `grpc://localhost:6334` becomes
+`grpc___localhost_6334`. Override with `--checkpoint` when durable storage
+lives elsewhere. Each save is atomic (write `.tmp`, then rename, with a
+copy fallback) and stores the phase, the next scroll cursor, written,
+skipped, and batch counters, the exact source count, the original
+indexing threshold, and the fast-bulk flag. The file is removed after a
+successful run.
+
+Resume is compatibility-checked, not blind. The stored source collection,
+target collection, both URLs, and the options fingerprint must match the
+new command. The fingerprint covers the target name, shard number,
+replication factor, sharding method, quantization kind, both shard-key
+options, the missing-key policy, the bulk threshold, the cutover alias,
+the `--where` clause, and the fast-bulk flag. A mismatch fails with a
+message telling you to pass `--restart`, so a changed plan can never
+silently continue an old copy.
+
+## Shard discovery
+
+With `--shard-key-field <field>`, migrate discovers every distinct payload
+value before ingest and creates one custom shard key per value in the
+schema phase. Discovery runs this probe first:
+
+{% qqlExample title="Shard discovery probe" %}
+```sql
+FACET neighbourhood_group FROM stays LIMIT 10000 EXACT true;
+```
+{% /qqlExample %}
+
+A `--where` clause narrows the probe the same way it narrows ingest. The
+scroll fallback (a payload-only scroll over the field, `512` points per
+page, vectors off) triggers in three cases: the facet returns `10000` or
+more hits and may be truncated, the facet returns no keys at all, or the
+facet fails because the field has no payload index. Any other facet error
+aborts the run.
+
+The shard-key field gets tenant-grade indexing in the plan. An existing
+index on the field is promoted with `is_tenant = true`; when no index
+exists, a keyword index with `is_tenant = true` is added:
+
+{% qqlExample title="Tenant index for the shard-key field" %}
+```sql
+CREATE COLLECTION stays_copy (
+  dense VECTOR(384, COSINE)
+)
+WITH PARAMS (shard_number = 4, sharding_method = 'custom');
+
+CREATE INDEX ON COLLECTION stays_copy FOR neighbourhood_group TYPE keyword WITH (is_tenant = true);
+```
+{% /qqlExample %}
+
+Points written after discovery, or values hidden by a truncated facet, are
+still handled: ingest creates any missing key on demand, treating
+already-exists as success, and routes the point there. Points without the
+field follow `--on-missing-shard-key` (`error` aborts, `skip` drops the
+point and counts it, `default=<key>` routes it to the given key). Use
+`--shard-key <literal>` instead when every point shares one key.
+
+On standalone Qdrant, custom shard keys cannot exist, and migrate fails in
+the schema phase instead of hanging ingest. Even with empty discovery it
+probes a temporary key with a 15-second RPC timeout, and backend errors
+are mapped to a hint telling you to drop the shard-key flags or point
+`--target-url` at a clustered Qdrant. Do not wait for ingest on standalone:
+the failure arrives in milliseconds.
+
+## Typed shard keys
+
+Shard keys are typed end to end, from parse to plan to the wire, and the
+two kinds hash to different partitions. All-digit literals are numeric,
+everything else is a keyword:
+
+{% qqlExample title="Numeric and keyword shard keys" %}
+```sql
+CREATE SHARD KEY 101 ON COLLECTION docs;
+
+CREATE SHARD KEY 'acme' ON COLLECTION docs;
+```
+{% /qqlExample %}
+
+Upserts carry the same literal form, so `SHARD 101` reaches the numeric
+partition and `SHARD 'acme'` reaches the keyword partition:
+
+{% qqlExample title="Shard-routed upserts" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3]}, tenant_id: 'acme'} SHARD 'acme';
+
+UPSERT INTO docs VALUES {id: 101, vector: {dense: [0.4, 0.5, 0.6]}, tenant_id: 101} SHARD 101;
+```
+{% /qqlExample %}
+
+A bound placeholder (`SHARD :tenant` in prepared statements) follows
+normal parameter binding: strings become keywords and non-negative
+integers become numbers. Reads route the same way:
+
+{% qqlExample title="Shard-routed reads" %}
+```sql
+COUNT FROM docs WHERE tenant_id = 'acme' SHARD 'acme';
+
+SCROLL FROM docs WHERE tenant_id = 'acme' SHARD 'acme' LIMIT 50;
+```
+{% /qqlExample %}
+
+## Quantization and fast-bulk tradeoffs
+
+`--quantize` rewrites the vector spec on `CREATE COLLECTION`, shrinking
+the target footprint at the cost of recall you should measure before
+cutting over:
+
+{% terminal title="Preview in-flight quantization" %}
+qql migrate docs --to docs_q --quantize scalar --dry-run
+{% /terminal %}
+
+| Family | Flag | Defaults on CREATE |
+|---|---|---|
+| Scalar int8 | `--quantize scalar` | `always_ram = true`, `quantile = 0.99` (tune with `--quantize-quantile`) |
+| Binary | `--quantize binary` | `always_ram = true`, `encoding = one_bit` (tune with `--quantize-encoding`) |
+| Product | `--quantize product` | `always_ram = true`, `compression = x16` (tune with `--quantize-compression`: `x4`, `x8`, `x16`, `x32`) |
+| Turbo | `--quantize turbo` | `always_ram = true`, `bits = 2` (tune with `--quantize-bits`: `1`, `1.5`, `2`, `4`) |
+
+`--no-always-ram` stores quantized vectors on disk instead of RAM. Without
+`--quantize`, the source quantization config is copied unchanged.
+
+Fast-bulk (on by default) raises `indexing_threshold` to
+`--bulk-threshold-kb` (default `2000000`, about 2 GB) during ingest so the
+target buffers points instead of building small HNSW graphs mid-stream,
+then restores the original threshold (or the Qdrant default `20000`) with
+`ALTER COLLECTION` in the optimize phase. A very high threshold pins RAM,
+so lower `--bulk-threshold-kb` on small nodes. `--no-fast-bulk` keeps
+indexing active during ingest for small collections where the restore
+round trip is not worth it.
+
+Batch sizing follows Qdrant bulk-upload guidance: batches of `64` to
+`256` points with `2` to `4` parallel streams (defaults `--batch-size
+128`, `--workers 2`). Multivector collections carry per-point token
+matrices, so use `--batch-size 64 --workers 2`; the client accepts scroll
+pages up to 64 MiB because the 4 MiB default is too small for those
+pages. Narrow dense collections on a fast link can try `256`.
+
+## Verify semantics
+
+Verification compares the filtered source count against the target count.
+The source side applies `--where` (a filtered copy verifies against the
+filtered count, e.g. 1982 of 8317). The target side is always unfiltered:
+a migration writes only the selected points into a dedicated collection,
+so filtering the target would double-apply the predicate.
+
+{% qqlExample title="What verify compares" %}
+```sql
+COUNT FROM stays WHERE neighbourhood_group = 'Mitte' WITH (exact = true);
+
+COUNT FROM stays_mitte WITH (exact = true);
+```
+{% /qqlExample %}
+
+With the durable default (`WAIT true` on every upsert), one exact read
+per side suffices. With `--no-wait`, upserts return before WAL apply, so
+verify polls the target up to 40 times at 50 ms intervals until the
+counts match instead of racing the WAL. `--no-verify` skips the
+comparison and records an informational target count only; prefer to keep
+verification on for any cutover.
+
+## Cutover and the drop-source guard
+
+After verification, `--cutover <alias>` points the alias at the target in
+one `change_aliases` batch (delete plus create), falling back to create
+when the alias does not exist yet:
+
+{% terminal title="Migrate and cut traffic over" %}
+qql --url grpc://localhost:6334 migrate docs --to docs_v2 --recreate --cutover docs
+qql --url grpc://old:6334 migrate docs --target-url grpc://new:6334 --to docs_v2 --cutover docs --drop-source-after-cutover
+{% /terminal %}
+
+`--drop-source-after-cutover` drops the source collection after a
+successful cutover and is rejected without `--cutover`, so a bare
+migration can never delete its own source. Do not pass it against a
+collection you still need. `--json` reports `written`, `source_count`,
+`target_count`, `verified`, `resumed`, `cutover_alias`, `source_dropped`,
+and the `create` / `indexes` / `shard_keys` / `restore_optimizers` plan
+for scripting.
+
+## Full flag table
+
+| Flag | Purpose |
+|---|---|
+| `--to <name>` | Target collection name (defaults to the source name) |
+| `--target-url <URL>` | Target endpoint (defaults to `--url`) |
+| `--target-edge` | Use the local edge backend as the target |
+| `--target-api-key <key>` | API key for the target cluster (`QDRANT_TARGET_API_KEY` also works) |
+| `--batch-size N` | Scroll and upsert batch size (default `128`) |
+| `--workers N` | Concurrent upsert streams (default `2`) |
+| `--shard-number N` | Override the target `shard_number` |
+| `--replication-factor N` | Override the target `replication_factor` |
+| `--sharding-method auto\|custom` | Override the sharding method |
+| `--quantize scalar\|binary\|product\|turbo` | Apply quantization on `CREATE COLLECTION` |
+| `--no-always-ram` | Store quantized vectors on disk instead of RAM |
+| `--quantize-quantile F` | Scalar quantile (default `0.99`) |
+| `--quantize-compression x4\|x8\|x16\|x32` | Product compression (default `x16`) |
+| `--quantize-encoding <enc>` | Binary encoding (default `one_bit`) |
+| `--quantize-bits 1\|1.5\|2\|4` | Turbo bit width (default `2`) |
+| `--shard-key <key>` | Route every upsert to one literal shard key |
+| `--shard-key-field <field>` | Route each point by its payload value for the field |
+| `--on-missing-shard-key error\|skip\|default=<key>` | Policy for points without the field (default `error`) |
+| `--bulk-threshold-kb N` | `indexing_threshold` (KB) during bulk load (default `2000000`) |
+| `--cutover <alias>` | Point an alias at the target after verification |
+| `--drop-source-after-cutover` | Drop the source after cutover (requires `--cutover`) |
+| `--where "<filter>"` | Migrate only points matching a QQL filter |
+| `--checkpoint <path>` | Checkpoint file (default under `.qql-migrate/`) |
+| `--resume` | Resume from an existing checkpoint (errors when none exists) |
+| `--restart` | Discard any checkpoint and start over |
+| `--dry-run` | Print the plan and exit without writing |
+| `--no-fast-bulk` | Keep HNSW indexing active during ingest |
+| `--no-verify` | Skip exact count verification |
+| `--no-wait` | Skip `WAIT true` on upserts (faster, weaker durability) |
+| `--recreate` | Drop the target collection before creating it |
+| `--json` | JSON output for scripting |
+| `-q`, `--quiet` | Quiet mode |
+
+Related references: [Dump and restore](/docs/operations/backup-restore/),
+[CLI](/docs/tools/cli/),
+[Multitenancy](/docs/guides/multitenancy/).
