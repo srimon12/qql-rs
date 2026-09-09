@@ -64,6 +64,9 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | `execute` / `executeStmt` | Free-function execute (`options.params` same as `bind`) |
 | `executeHits` | Free-function execute returning `ScoredPoint[]` |
 | `ExecutionReport.hits/points/facet/count/groups` | Typed result accessors on every report |
+| `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration + pull-driven WHATWG stream (one page buffered max) |
+| `Client.explainAnalyze` | Static plan + measured client/server timings for one statement |
+| `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
 
 ### Isolation vs routing
 

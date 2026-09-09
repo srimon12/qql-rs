@@ -55,6 +55,7 @@ console.log(version, listEmbeddingModels().length);
 | `stmt.shardKey` | AST property; edge **rejects** SHARD at execute |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
 | `compileQuery` / `explain` / `execute` | Plan / run (`options.params` same as `bind`) |
+| `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration + pull-driven WHATWG stream |
 
 Quotas, custom sharding, and `GROUP BY` require remote Qdrant. Offline sparse
 IDF works: `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.

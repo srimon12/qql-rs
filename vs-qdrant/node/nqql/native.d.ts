@@ -20,6 +20,13 @@ export declare class Client {
    */
   execute(query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }): Promise<string>
   explain(query: string): string
+  /**
+   * Analyze a single query string or Stmt: static plan plus measured
+   * execution (phase timings, server time, hardware/inference usage).
+   * Returns a stable AnalyzeReport JSON string for the JavaScript wrapper
+   * to deserialize into an object. Batches fail closed.
+   */
+  explainAnalyze(query: string | Stmt, options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }): Promise<string>
   explainStmt(stmt: Stmt): string
   /** Compile a QQL query to its transport route (non-executing). */
   compile(query: string, params: unknown): any

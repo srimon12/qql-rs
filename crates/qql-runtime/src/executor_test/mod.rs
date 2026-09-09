@@ -6,4 +6,6 @@ pub(crate) mod mock;
 mod prepared;
 mod query;
 mod response;
+mod telemetry;
+mod typed_hits;
 mod upsert;

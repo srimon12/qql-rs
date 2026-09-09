@@ -13,7 +13,7 @@ use super::query::{
 };
 use super::responses::{
     batch_result_to_json, facet_hit_to_json, get_points_envelope, groups_result_to_json,
-    point_id_to_json, retrieved_point_to_json, scored_point_to_json,
+    point_id_to_json, retrieved_point_to_json, scored_point_to_json, usage_to_json,
 };
 
 /// Run a single query request via `Points.Query`.
@@ -35,6 +35,7 @@ pub(crate) async fn execute_query(
         },
         "status": "ok",
         "time": resp.time,
+        "usage": usage_to_json(resp.usage.as_ref()),
     }))
 }
 
@@ -55,6 +56,7 @@ pub(crate) async fn execute_query_groups(
         ))?),
         "status": "ok",
         "time": resp.time,
+        "usage": usage_to_json(resp.usage.as_ref()),
     }))
 }
 
@@ -81,7 +83,11 @@ pub(crate) async fn execute_get_points(
         .into_iter()
         .map(retrieved_point_to_json)
         .collect();
-    Ok(get_points_envelope(points, resp.time))
+    let mut envelope = get_points_envelope(points, resp.time);
+    if let Some(obj) = envelope.as_object_mut() {
+        obj.insert("usage".into(), usage_to_json(resp.usage.as_ref()));
+    }
+    Ok(envelope)
 }
 
 /// Paginate points via `Points.Scroll`.
@@ -110,6 +116,7 @@ pub(crate) async fn execute_scroll(
     obj.insert("result".into(), serde_json::Value::Object(result_map));
     obj.insert("status".into(), serde_json::json!("ok"));
     obj.insert("time".into(), serde_json::json!(resp.time));
+    obj.insert("usage".into(), usage_to_json(resp.usage.as_ref()));
     Ok(serde_json::Value::Object(obj))
 }
 
@@ -134,6 +141,7 @@ pub(crate) async fn execute_count(
         "result": { "count": resp.result.unwrap_or_default().count },
         "status": "ok",
         "time": resp.time,
+        "usage": usage_to_json(resp.usage.as_ref()),
     }))
 }
 
@@ -155,6 +163,7 @@ pub(crate) async fn execute_facet(
         },
         "status": "ok",
         "time": resp.time,
+        "usage": usage_to_json(resp.usage.as_ref()),
     }))
 }
 

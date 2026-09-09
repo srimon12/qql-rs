@@ -194,6 +194,54 @@ report = client.execute("COUNT FROM docs WHERE category = 'tech'")
 print(report.count())
 report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
 print(report.points())
+
+# 7. Per-result server telemetry (Qdrant time + hardware/inference usage
+# when reported; None where the route reports nothing)
+print(report.telemetry)      # {"time_s": ..., "usage": {...} | None}
+```
+
+## DB-API cursor
+
+`pyqql.connect()` returns a PEP 249-style connection for pipeline and
+analytics interop (`pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in
+cursor.description])` works). Qdrant is not relational: `commit()` is a
+no-op, `rollback()` raises `NotSupportedError`, and there is no `callproc`.
+
+```python
+import pyqql
+
+conn = pyqql.connect("http://localhost:6333")
+cursor = conn.cursor()
+cursor.execute("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "neural nets", "lim": 10})
+print(cursor.description)  # (("id", ...), ("score", ...), ("payload", ...))
+for row in cursor:         # (id, score, payload) tuples; fetchone() -> None when drained
+    print(row)
+cursor.executemany("UPSERT INTO docs VALUES :rows", [{"rows": batch} for batch in batches])
+
+# Multi-statement scripts isolate result sets; navigate via nextset():
+cursor.execute("SCROLL FROM docs LIMIT 5; COUNT FROM docs;")
+scroll_rows = cursor.fetchall()  # description: (id, score, payload)
+if cursor.nextset():
+    count_rows = cursor.fetchall()  # description: (count,)
+
+conn.close()
+```
+
+Native errors *are* the DB-API classes: `QqlSyntaxError` is a
+`ProgrammingError`, `QqlTransportError` an `OperationalError`, and
+`except QqlError` still catches everything.
+
+## Profile before you optimize
+
+`client.explain_analyze()` runs one statement and returns the static plan
+plus measured client phase timings and honest server telemetry (absent on a
+route means `None`, never an error):
+
+```python
+report = client.explain_analyze("QUERY TEXT 'q' FROM docs USING dense LIMIT 10")
+print(report["plan"])
+print(report["phases"])         # parse_ms / prepare_plan_ms / dispatch_ms / ...
+print(report["server_time_s"])  # seconds Qdrant spent, when reported
 ```
 
 ## Parse, isolate, and route
@@ -234,6 +282,9 @@ print(tokenize(query))
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
 | `Client.execute_hits` / `execute_async_hits` | `list[ScoredPoint]` | Skip the report when you only need typed hits |
 | `report.hits(stmt)` / `points` / `facet` / `count` | typed accessors | Read results per statement index without digging into `results` |
+| `report.telemetry` | per-result server telemetry | Qdrant `time_s` + hardware/inference `usage` when reported |
+| `Client.explain_analyze` | plan + measured timings | Static plan, client phases, and server telemetry for one statement |
+| `pyqql.connect` + cursor | PEP 249-style driver | `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/`nextset`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
 | `ScoredPoint` | typed hit | `id`, `score`, `payload`, `text`, `collection`, and `hit["key"]` payload access |
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |

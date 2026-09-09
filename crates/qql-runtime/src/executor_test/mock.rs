@@ -166,7 +166,26 @@ impl QdrantOps for MockQdrantClient {
         {
             return Ok(points.clone());
         }
-        Ok(serde_json::json!({"result": {"points": []}}))
+        // Default envelope carries server telemetry so telemetry extraction
+        // is exercised end-to-end; the `point_map` path above stays bare on
+        // purpose (None-where-absent coverage).
+        Ok(serde_json::json!({
+            "result": {"points": []},
+            "status": "ok",
+            "time": 0.0025,
+            "usage": {
+                "hardware": {
+                    "cpu": 10,
+                    "payload_io_read": 1,
+                    "payload_io_write": 2,
+                    "payload_index_io_read": 3,
+                    "payload_index_io_write": 4,
+                    "vector_io_read": 5,
+                    "vector_io_write": 6
+                },
+                "inference": {"models": {"mock-model": {"tokens": 7}}}
+            }
+        }))
     }
 
     async fn execute_query_batch(

@@ -218,6 +218,53 @@ pub async fn run_async(
     }
 }
 
+/// Run a normalized [`Input`] through `explain_analyze` on the blocking
+/// Tokio runtime. Single-statement only (like Postgres `EXPLAIN ANALYZE`):
+/// batch inputs fail closed instead of silently analyzing one entry.
+pub fn run_analyze_input(
+    executor: &qql::executor::Executor,
+    runtime: &tokio::runtime::Runtime,
+    input: Input,
+    on_error: OnError,
+) -> PyResult<serde_json::Value> {
+    let report = match input {
+        Input::String(s) => runtime
+            .block_on(executor.explain_analyze(&s, on_error))
+            .map_err(crate::qql_py_error)?,
+        Input::Stmt(s) => runtime
+            .block_on(executor.explain_analyze_node(s, on_error))
+            .map_err(crate::qql_py_error)?,
+        Input::StrList(_) | Input::StmtList(_) => {
+            return Err(crate::qql_py_value_error(QqlError::validation(
+                "QQL-VALIDATION-ANALYZE-BATCH",
+                "explain_analyze accepts a single statement (string or Stmt), not a batch; analyze each entry separately",
+                None,
+            )));
+        }
+    };
+    Ok(serde_json::to_value(&report).unwrap_or_default())
+}
+
+/// Run a normalized [`Input`] through `explain_analyze` on an existing async
+/// context. Same single-statement contract as [`run_analyze_input`].
+pub async fn run_analyze_async(
+    executor: &qql::executor::Executor,
+    input: Input,
+    on_error: OnError,
+) -> Result<serde_json::Value, QqlError> {
+    let report = match input {
+        Input::String(s) => executor.explain_analyze(&s, on_error).await?,
+        Input::Stmt(s) => executor.explain_analyze_node(s, on_error).await?,
+        Input::StrList(_) | Input::StmtList(_) => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-ANALYZE-BATCH",
+                "explain_analyze accepts a single statement (string or Stmt), not a batch; analyze each entry separately",
+                None,
+            ));
+        }
+    };
+    Ok(serde_json::to_value(&report).unwrap_or_default())
+}
 /// Wrap a serialized report dict in the host module's Python-level
 /// `ExecutionReport` class (typed accessors), falling back to the plain dict
 /// when the import fails (e.g. during interpreter teardown).

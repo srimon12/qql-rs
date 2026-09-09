@@ -142,6 +142,56 @@ const countReport = await client.execute("COUNT FROM runbooks WHERE status = 'op
 console.log(countReport.count());
 const pointReport = await client.execute("QUERY POINTS (1, 2, 3) FROM runbooks");
 console.log(pointReport.points());
+
+// 3. Per-result server telemetry (Qdrant time + hardware/inference usage
+// when reported; null where the route reports nothing)
+console.log(pointReport.telemetry); // { time_s, usage } | null
+```
+
+## Lazy scroll cursor & streams
+
+`scrollCursor` pages lazily through a collection — at most one page is ever
+buffered. `scrollStream` wraps it in a pull-driven WHATWG `ReadableStream`
+with native backpressure. Available as `Client` methods or standalone functions:
+
+```javascript
+const { Client, scrollCursor, scrollStream } = require("@veristamp/nqql");
+
+const client = new Client({ url: "http://localhost:6333" });
+
+// Async iteration with parameterized filter and shard routing
+for await (const point of client.scrollCursor("docs", {
+  batchSize: 500,
+  where: "status = :status AND price < :max_price",
+  params: { status: "active", max_price: 150.0 },
+  shardKey: "tenant-a",
+})) {
+  await processPoint(point);
+}
+
+// WHATWG ReadableStream piping
+client.scrollStream("docs", { batchSize: 500 }).pipeTo(writableStream);
+```
+
+Options: `batchSize` (default 100), `where` (QQL filter fragment), `params` (named parameter bindings),
+`shardKey` (custom shard partition routing), `withPayload` (default true — payloads are included unless stripped
+client-side, since `SCROLL` has no `WITH PAYLOAD` spelling), `withVector` (default false — appends `WITH VECTOR`).
+Non-standard and hyphenated collection names are safely escaped automatically.
+
+## Profile before you optimize
+
+`client.explainAnalyze()` runs one statement and returns the static plan
+plus measured client phase timings and honest server telemetry (absent
+means `null`, never an error):
+
+```javascript
+const analysis = await client.explainAnalyze(
+  "QUERY TEXT :q FROM docs USING dense LIMIT :lim",
+  { params: { q: "neural nets", lim: 10 } }
+);
+console.log(analysis.plan);
+console.log(analysis.phases);         // parse_ms / dispatch_ms / ...
+console.log(analysis.server_time_s);  // seconds Qdrant spent, when reported
 ```
 
 ## Retain the parsed statement for policy
@@ -191,8 +241,11 @@ const report = await client.execute([
 |---|---|---|
 | `new Client({ url, apiKey, useGrpc, routeAffinity, embedder })` | Configure a reusable native client |
 | `Client.execute`, `executeStmt` | Source, statement, script, or array execution |
-| `Client.executeHits`, module `executeHits` | Typed `ScoredPoint[]` hits without the report |
+| `Client.execute_hits`, module `executeHits` | Typed `ScoredPoint[]` hits without the report |
 | `report.hits(stmt)` / `points` / `facet` / `count` | Typed accessors per statement index (negative index counts from the end) |
+| `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
+| `Client.explainAnalyze` | Static plan plus measured client/server timings for one statement |
+| `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration and pull-driven WHATWG stream |
 | `ScoredPoint` | Typed hit with `id`, `score`, `payload`, `text`, `collection` |
 | `Client.explain`, `explainStmt`, `compile` | Plan and route inspection (`compile` accepts `params`) |
 | `parse(source)` | Native `Stmt` handles for AST mutation |

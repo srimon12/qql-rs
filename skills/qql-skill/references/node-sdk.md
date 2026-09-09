@@ -385,3 +385,55 @@ const result = await execute("QUERY TEXT :q FROM docs USING dense LIMIT :lim", {
     params: { q: "search", lim: 10 },
 });
 ```
+
+---
+
+## 9. Lazy Scroll Cursor & Streams
+
+`scrollCursor` pages lazily through a collection with `SCROLL` over the existing `execute` path — at most one page is ever buffered, so a slow consumer never OOMs the heap. `scrollStream` wraps it in a pull-driven WHATWG `ReadableStream` (native backpressure). Available as `Client` instance methods or module-level functions taking any object exposing `execute(sql, { params })`:
+
+```js
+const { Client, scrollCursor, scrollStream } = require('@veristamp/nqql');
+
+const client = new Client({ url: "http://localhost:6333" });
+
+// 1. Client method form with parameterized filter
+for await (const point of client.scrollCursor("docs", {
+  batchSize: 500,
+  where: "status = :status AND price < :max_price",
+  params: { status: "active", max_price: 150.0 },
+  shardKey: "tenant-a",
+})) {
+  await processPoint(point); // next page fetches only when the buffer drains
+}
+
+// 2. Direct WHATWG stream piping with backpressure
+client.scrollStream("docs", { batchSize: 500 })
+  .pipeThrough(ndjsonTransform)
+  .pipeTo(writableStream);
+```
+
+Options:
+- `batchSize` (default 100): Points per page.
+- `where` (default ""): QQL filter fragment (e.g. `"status = :status"`).
+- `params`: Named parameters object bound safely into the `where` filter fragment.
+- `shardKey`: Custom shard partition routing (`string | number | bigint`).
+- `withPayload` (default true): Set `false` to strip payloads client-side.
+- `withVector` (default false): Appends `WITH VECTOR` to include point vectors.
+Collection identifiers are safely quoted automatically (`"my-collection"`).
+
+---
+
+## 10. Execution Profiling (`explainAnalyze` + Telemetry)
+
+`client.explainAnalyze()` runs one statement and returns the static plan plus measured timings — client phases (`parse_ms`, `prepare_plan_ms`, `dispatch_ms`, `decode_ms`, `total_ms`) and honest server telemetry (`server_time_s` from Qdrant's `time` field, `usage` hardware/inference counters when reported; absent means `null`, never an error). Every report result also carries a per-result `telemetry` object. Batches fail closed — analyze entries separately.
+
+```js
+const analysis = await client.explainAnalyze(
+  "QUERY TEXT :q FROM docs USING dense LIMIT :lim",
+  { params: { q: "neural nets", lim: 10 } }
+);
+console.log(analysis.plan);           // static plan summary
+console.log(analysis.phases);         // { parse_ms, dispatch_ms, ... }
+console.log(analysis.server_time_s);  // seconds Qdrant spent, when reported
+```

@@ -272,6 +272,30 @@ impl JsClient {
         qql::executor::Executor::explain(&query).map_err(common::to_napi_err)
     }
 
+    /// Analyze a single query string or Stmt: static plan plus measured
+    /// execution (phase timings, server time, hardware/inference usage).
+    /// Returns a stable AnalyzeReport JSON string for the JavaScript wrapper
+    /// to deserialize into an object. Batches fail closed.
+    /// (Parity with `nqql` `Client.explainAnalyze`.)
+    #[napi(
+        catch_unwind,
+        ts_args_type = "query: string | Stmt, options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
+    )]
+    pub async fn explain_analyze(
+        &self,
+        query: serde_json::Value,
+        options: Option<serde_json::Value>,
+    ) -> napi::Result<String> {
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(napi::Error::from_reason("client is closed"));
+        }
+        let report =
+            common::execute::explain_analyze_dispatch(&self.inner, query, options.as_ref())
+                .await
+                .map_err(common::to_napi_err)?;
+        serde_json::to_string(&report).map_err(common::serde_napi_err)
+    }
+
     #[napi(catch_unwind)]
     pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
         qql::executor::Executor::explain_node(&stmt.inner).map_err(common::to_napi_err)

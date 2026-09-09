@@ -366,3 +366,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+---
+
+## 7. Execution Profiling (`explain_analyze` + Telemetry)
+
+`Executor::explain_analyze` (plus `_with_named_params` / `_with_params` twins mirroring `execute`) runs one statement and returns an `AnalyzeReport`: the static plan summary plus measured client phase timings (`parse_ms`, `prepare_plan_ms`, `dispatch_ms`, `decode_ms`, `total_ms`) and honest server telemetry (`server_time_s` from Qdrant's `time` field, `usage` hardware/inference counters when the backend reports them). Instrumentation wraps the existing execute path — no forked logic, no grammar change, no trait change. Batches fail closed (`QQL-VALIDATION-MULTI-STMT`) — analyze entries separately.
+
+```rust
+use qql::executor::{Executor, OnError};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let exec = Executor::rest("http://localhost:6333", None)?;
+
+    let report = exec.explain_analyze(
+        "QUERY TEXT 'chest pain' FROM docs USING dense LIMIT 10",
+        OnError::Stop,
+    ).await?;
+    println!("server: {:?}s", report.server_time_s);
+    println!("dispatch: {}ms", report.phases.dispatch_ms);
+
+    Ok(())
+}
+```
+
+Every `ExecResponse` also carries `telemetry: Option<ServerTelemetry>` (`time_s` + `usage`, `None` where the route reports nothing — batch items genuinely lack envelopes on both transports, so per-item telemetry there is `None` rather than attributed totals), and `ExecutionReport.telemetry` aggregates the totals. Typed result accessors (`hits()`, `facet()`, `count()`, …) read from a cached typed representation — no SearchHit→JSON round-trip on the gRPC leg; the `*_json` / raw shapes are unchanged for back-compat.
+
+For bulk ingest, `upsert_many` moves (never clones) each chunk through the point-splice path; the peak live-set is the caller's `rows` vector by construction — for million-row ingests, chunk the *calls*, since `upsert_many` chunks transport, not memory.

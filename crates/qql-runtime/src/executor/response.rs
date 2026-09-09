@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use qql_core::error::QqlError;
 use qql_plan::PlanPointId;
 
-/// Single-statement execution outcome: status, operation label, message, and data.
+use super::telemetry::{PhaseTimings, ServerTelemetry, ServerUsage};
+
+/// Single-statement execution outcome: status, operation label, message, data,
+/// and optional server telemetry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecResponse {
     /// Whether the statement succeeded.
@@ -16,6 +19,22 @@ pub struct ExecResponse {
     pub message: String,
     /// JSON payload (search hits, raw result, or counts), when the operation returns data.
     pub data: Option<serde_json::Value>,
+    /// Server telemetry (`time` + hardware/inference `usage`) when the
+    /// backend reported it. `None` where the route/transport carries none
+    /// (batch items, collection DDL over gRPC, mocks without timing).
+    /// `skip_serializing_if` keeps the pre-telemetry JSON shape byte-identical
+    /// when no telemetry was reported; `default` reads old payloads back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<ServerTelemetry>,
+    /// Client-side typed-hit cache, skipped on the wire. Normalization
+    /// attaches the `Vec<SearchHit>` it already built (no re-parse), and
+    /// [`ExecResponse::hits`] parses `data` at most once otherwise — Rust
+    /// callers get typed access without a per-call JSON clone + parse while
+    /// `hits_json()` keeps borrowing the raw payload. `#[serde(skip)]` keeps
+    /// the JSON shape byte-identical; `OnceLock` is `Send + Sync` so
+    /// responses stay shareable across threads.
+    #[serde(skip)]
+    pub typed_hits: std::sync::OnceLock<Option<Vec<SearchHit>>>,
 }
 
 /// Canonical cross-SDK execution result. Every `client.execute(…)` call
@@ -30,29 +49,42 @@ pub struct ExecutionReport {
     pub succeeded: usize,
     /// Number of failed statements.
     pub failed: usize,
+    /// Report-level telemetry totals (server times summed, hardware counters
+    /// summed, per-model tokens summed). `None` when no response reported
+    /// telemetry. Same back-compat serde contract as
+    /// [`ExecResponse::telemetry`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<ServerTelemetry>,
 }
 
 impl ExecutionReport {
-    /// Create from a collection of `ExecResponse`s. `ok` is `failed == 0`.
+    /// Create from a collection of `ExecResponse`s. `ok` is `failed == 0`;
+    /// `telemetry` aggregates the per-response telemetry (see
+    /// [`ServerTelemetry::aggregate`]).
     pub fn from_results(results: Vec<ExecResponse>) -> Self {
         let succeeded = results.iter().filter(|r| r.ok).count();
         let failed = results.len() - succeeded;
+        let telemetry =
+            ServerTelemetry::aggregate(results.iter().filter_map(|r| r.telemetry.as_ref()));
         Self {
             ok: failed == 0,
             results,
             succeeded,
             failed,
+            telemetry,
         }
     }
 
     /// Convenience wrapper for a single `ExecResponse`.
     pub fn single(resp: ExecResponse) -> Self {
         let ok = resp.ok;
+        let telemetry = resp.telemetry.clone();
         Self {
             ok,
             results: vec![resp],
             succeeded: if ok { 1 } else { 0 },
             failed: if ok { 0 } else { 1 },
+            telemetry,
         }
     }
 
@@ -119,6 +151,30 @@ impl ExecutionReport {
     }
 }
 
+/// Structured `EXPLAIN ANALYZE` report: the static plan summary plus the
+/// measured execution. JSON-serializable; returned by
+/// [`Executor::explain_analyze`](super::Executor::explain_analyze).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyzeReport {
+    /// Whether the analyzed statement succeeded (errors surface as `Err`).
+    pub ok: bool,
+    /// Static plan summary — the same tree [`Executor::explain`](super::Executor::explain)
+    /// renders, captured before execution.
+    pub plan: String,
+    /// Per-phase client timings (milliseconds).
+    pub phases: PhaseTimings,
+    /// Total server time in seconds (summed per-response `time`); `None`
+    /// when the backend reported none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_time_s: Option<f64>,
+    /// Merged hardware/inference usage; `None` when the backend reported none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ServerUsage>,
+    /// The statement's execution response(s), in order (one entry: analyze
+    /// is single-statement, like Postgres `EXPLAIN ANALYZE`).
+    pub results: Vec<ExecResponse>,
+}
+
 /// Controls batch-execution behaviour when a statement fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -163,6 +219,13 @@ pub struct GroupedSearchResult {
 }
 
 impl ExecResponse {
+    /// Attach an already-built typed hit list (normalization path): `hits()`
+    /// serves these without touching the JSON `data` copy.
+    pub(crate) fn with_typed_hits(self, hits: Vec<SearchHit>) -> Self {
+        let _ = self.typed_hits.set(Some(hits));
+        self
+    }
+
     /// Return search hits as a slice of JSON values if this response contains hits data.
     pub fn hits_json(&self) -> Option<&[serde_json::Value]> {
         self.data
@@ -170,11 +233,20 @@ impl ExecResponse {
             .and_then(|d| d.as_array().map(|v| v.as_slice()))
     }
 
-    /// Deserialize hits into typed `Vec<SearchHit>` if present.
+    /// Typed search hits: served from the normalization cache when present,
+    /// parsed from `data` at most once otherwise (borrowed parse — the JSON
+    /// payload is never cloned). Non-hits payloads (counts, facets, status
+    /// envelopes) yield `None`, exactly as before.
     pub fn hits(&self) -> Option<Vec<SearchHit>> {
-        self.data
-            .as_ref()
-            .and_then(|d| serde_json::from_value(d.clone()).ok())
+        self.typed_hits
+            .get_or_init(|| {
+                self.data.as_ref().and_then(|d| {
+                    // Borrowed `&Value` deserialization: identical result to
+                    // `from_value(d.clone())` with one fewer full-payload copy.
+                    <Vec<SearchHit>>::deserialize(d).ok()
+                })
+            })
+            .clone()
     }
 
     /// Return point IDs as u64 from hits or scroll results.

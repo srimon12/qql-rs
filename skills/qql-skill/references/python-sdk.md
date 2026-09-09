@@ -463,3 +463,56 @@ print(plan_dict["plan"])
 # Standalone parameter binding
 bound = pyqql.bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "test", "lim": 10})
 ```
+
+---
+
+## 11. PEP 249 Cursor (`pyqql.connect`)
+
+A pragmatic DB-API 2.0 subset for pipeline and analytics interop (`pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in cursor.description])` works out of the box). Pure-Python wrapper over `Client` — no new engine path. Qdrant is not relational: `commit()` is a documented no-op (operations auto-commit; use `WAIT true`), `rollback()` raises `NotSupportedError`, and there is no `callproc` / `setinputsizes` / `setoutputsize`.
+
+```python
+import pyqql
+
+conn = pyqql.connect("http://localhost:6333")
+cursor = conn.cursor()
+
+cursor.execute(
+    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+    {"q": "neural nets", "cat": "ai", "lim": 10},
+)
+print(cursor.description)  # (("id", ...), ("score", ...), ("payload", ...)) 7-tuples
+for row in cursor:         # lazy iteration; fetchone() returns None when drained
+    print(row)             # (id, score, payload) tuples aligned with description
+print(cursor.rowcount)     # hit count, or -1 when indeterminate
+
+# Bulk ingest delegates to upsert_many (prepared once, chunked transport)
+cursor.executemany("UPSERT INTO docs VALUES :rows", [{"rows": batch} for batch in batches])
+
+# Multi-statement scripts isolate result sets; navigate with nextset():
+cursor.execute("SCROLL FROM docs LIMIT 5; COUNT FROM docs;")
+scroll_rows = cursor.fetchall()  # description: (id, score, payload)
+if cursor.nextset():
+    count_rows = cursor.fetchall()  # description: (count,)
+
+conn.commit()    # no-op
+conn.close()
+```
+
+Exception mapping (single hierarchy — native errors *are* these classes, no translation): `QqlSyntaxError` → `ProgrammingError`, `QqlValidationError` → `ProgrammingError` + `DataError`, `QqlTransportError` → `OperationalError`, `QqlBackendError` → `OperationalError`, closed-handle misuse → `InterfaceError`. `except QqlError` still catches everything.
+
+---
+
+## 12. Execution Profiling (`explain_analyze` + Telemetry)
+
+`client.explain_analyze()` runs one statement and returns the static plan plus measured timings — client phases (`parse_ms`, `prepare_plan_ms`, `dispatch_ms`, `decode_ms`, `total_ms`) and honest server telemetry (`server_time_s` from Qdrant's `time` field, `usage` hardware/inference counters when the backend reports them; absent on a route means `None`, never an error). Every `ExecutionReport` result also carries a per-result `telemetry` object with the same shape. Batches fail closed — analyze entries separately.
+
+```python
+report = client.explain_analyze(
+    "QUERY TEXT :q FROM docs USING dense LIMIT :lim",
+    params={"q": "neural nets", "lim": 10},
+)
+print(report["plan"])            # static plan summary
+print(report["phases"])          # {"parse_ms": ..., "dispatch_ms": ..., ...}
+print(report["server_time_s"])   # seconds Qdrant spent, when reported
+print(report["results"][0]["telemetry"])  # {"time_s": ..., "usage": {...} | None}
+```

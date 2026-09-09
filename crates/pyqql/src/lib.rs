@@ -128,6 +128,24 @@ impl PyClient {
         common::do_explain(py, query)
     }
 
+    /// Analyze a single QQL query string or pre-parsed Stmt: static plan
+    /// plus measured execution (per-phase client timings, server time, and
+    /// hardware/inference usage). Returns a plain dict (no `ExecutionReport`
+    /// wrapper — the shape differs). Batch inputs fail closed.
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
+    fn explain_analyze<'py>(
+        &self,
+        py: Python<'py>,
+        query: &Bound<'_, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
+        on_error: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let oe = common::parse_on_error(on_error)?;
+        let input = common::prepare_input(query, params)?;
+        let out = py.detach(|| common::run_analyze_input(&self.inner, &self.runtime, input, oe))?;
+        pythonize::pythonize(py, &out).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     /// Compile a QQL query to its transport route without executing (parity with nqql).
     /// Optionally accepts `params` to bind before compiling.
     #[pyo3(signature = (query, params=None))]

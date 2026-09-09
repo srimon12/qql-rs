@@ -8,12 +8,16 @@ fn test_execution_report_counts_mixed_results() {
             operation: "QUERY".to_string(),
             message: "ok".to_string(),
             data: None,
+            telemetry: None,
+            typed_hits: std::sync::OnceLock::new(),
         },
         ExecResponse {
             ok: false,
             operation: "QUERY".to_string(),
             message: "failed".to_string(),
             data: None,
+            telemetry: None,
+            typed_hits: std::sync::OnceLock::new(),
         },
     ]);
 
@@ -81,6 +85,8 @@ fn test_exec_response_and_report_helpers() {
         operation: "QUERY".into(),
         message: "Found 1 hits".into(),
         data: Some(hits_json),
+        telemetry: None,
+        typed_hits: std::sync::OnceLock::new(),
     };
 
     assert_eq!(query_resp.ids(), vec![42]);
@@ -96,6 +102,8 @@ fn test_exec_response_and_report_helpers() {
         data: Some(serde_json::json!({
             "result": { "count": 15 }
         })),
+        telemetry: None,
+        typed_hits: std::sync::OnceLock::new(),
     };
     assert_eq!(count_resp.count(), Some(15));
 
@@ -107,6 +115,8 @@ fn test_exec_response_and_report_helpers() {
             { "value": "Mitte", "count": 10 },
             { "value": "Pankow", "count": 5 }
         ])),
+        telemetry: None,
+        typed_hits: std::sync::OnceLock::new(),
     };
     let facet_pairs = facet_resp.facet().expect("should parse facet pairs");
     assert_eq!(facet_pairs.len(), 2);

@@ -120,6 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Language Conformance** — Synchronized language v1.7 specification with 40 conformance suites (276 valid statements, 62 invalid cases pinned).
 - **Editor Integration** — Bundled VS Code extension updated to 0.4.0 with the latest QQL 1.7 WASM engine.
 
+### 🐍 Driver Ergonomics, Profiling & Ingest Hot Path
+- **Python DB-API subset** — pure-Python `pyqql.connect()` `Connection`/`Cursor` (`execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/iteration, 7-tuple `description`, `rowcount`; `executemany` on `VALUES :rows` delegates to `upsert_many`). Supports positional URL connection (`pyqql.connect("http://...")`), multi-statement result set isolation via `cursor.nextset()`, and native parameter binding. `commit()` is a documented no-op, `rollback()`/`callproc`/`setinputsizes` raise `NotSupportedError`. Single hierarchy: native errors *are* the DB-API classes (`except QqlError` still catches everything); mirrored in `pyqql-edge`.
+- **Lazy scroll cursor (Node)** — `scrollCursor`/`scrollStream`: memory-bounded async `SCROLL` iteration (one page buffered max) plus pull-driven WHATWG stream; available as module exports and `Client` methods (`client.scrollCursor`, `client.scrollStream`). Supports parameterized `where` clauses (`options.params`), custom partition routing (`options.shardKey`), automatic collection identifier escaping, and unadvancing cursor loop prevention; pure JS over `execute`, mirrored in `nqql-edge`.
+- **Execution profiling** — `Executor::explain_analyze` (+ named/positional twins) / `Client.explain_analyze` / `Client.explainAnalyze`: static plan plus measured client phases and honest server telemetry (`server_time_s`, hardware/inference `usage`; absent means `None`/`null`, never an error). Every report result also carries `telemetry`. Additive only.
+- **Upsert chunk moves, never clones** — `upsert_many` point-splice drops the per-batch deep clone (~7% faster on the 10k-point leg); Rust reports serve typed accessors from a cached typed representation instead of a SearchHit→JSON round-trip (`*_json`/raw shapes unchanged).
+
 
 
 ## [0.3.1] - 2026-09-04
