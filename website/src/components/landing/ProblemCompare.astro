@@ -346,16 +346,41 @@ const goFilters = `res, err := client.Query(ctx, &qdrant.QueryPoints{
 })`;
 
 const FORMATS = [
-	{ id: "python", label: "Python", lang: "python", badge: "qdrant-client" },
+	{
+		id: "python",
+		label: "Python",
+		lang: "python",
+		badge: "qdrant-client",
+		warn: "Nested model graph · Vectors embedded out-of-band",
+	},
 	{
 		id: "typescript",
 		label: "TypeScript",
 		lang: "typescript",
 		badge: "@qdrant/js-client-rest",
+		warn: "Nested request objects · Vectors embedded out-of-band",
 	},
-	{ id: "rust", label: "Rust", lang: "rust", badge: "qdrant-client crate" },
-	{ id: "go", label: "Go", lang: "go", badge: "go-client/qdrant" },
-	{ id: "rest", label: "REST JSON", lang: "json", badge: "HTTP REST API" },
+	{
+		id: "rust",
+		label: "Rust",
+		lang: "rust",
+		badge: "qdrant-client crate",
+		warn: "Builder + protobuf plumbing · Vectors embedded out-of-band",
+	},
+	{
+		id: "go",
+		label: "Go",
+		lang: "go",
+		badge: "go-client/qdrant",
+		warn: "Protobuf request graph · Vectors embedded out-of-band",
+	},
+	{
+		id: "rest",
+		label: "REST JSON",
+		lang: "json",
+		badge: "HTTP REST API",
+		warn: "Hand-built JSON · 384-float vector pasted inline",
+	},
 ] as const;
 
 const presets = [
@@ -365,7 +390,11 @@ const presets = [
 		badge: "Dense + Sparse",
 		qql: hybridQql,
 		playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
-		planTime: "0.8ms compile",
+		perf: "query_hybrid",
+		perfExact: true,
+		honesty:
+			"Native panes paste precomputed 384-float vectors from an out-of-band embedding pipeline the official SDKs can't express — QQL resolves TEXT + BM25 in-process. Line counts exclude that pipeline on both sides.",
+		footNote: "1 declarative statement · Planned client-side, fused in Qdrant",
 		planSteps: [
 			{ glyph: "↳", text: "Prefetch 1: dense_vec nearest (limit: 100)" },
 			{ glyph: "↳", text: "Prefetch 2: bm25_vec sparse (limit: 100)" },
@@ -386,7 +415,11 @@ const presets = [
 		badge: "Multi-tenancy",
 		qql: tenantQql,
 		playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
-		planTime: "0.6ms compile",
+		perf: "query_dense_filtered",
+		perfExact: false,
+		honesty:
+			"dense_vector arrives precomputed from an out-of-band embedding step the official SDKs can't express — QQL resolves TEXT in-process. Shard routing itself is unmeasured; line counts exclude the pipeline.",
+		footNote: "1 declarative statement · Shard-routed, filter pushed down",
 		planSteps: [
 			{
 				glyph: "↳",
@@ -410,7 +443,11 @@ const presets = [
 		badge: "Compound logic",
 		qql: filtersQql,
 		playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
-		planTime: "0.7ms compile",
+		perf: "query_dense_filtered",
+		perfExact: false,
+		honesty:
+			"productVector arrives precomputed from an out-of-band embedding step the official SDKs can't express — QQL resolves TEXT in-process. Compound-filter lowering beyond the proxy below is unmeasured.",
+		footNote: "1 declarative statement · Boolean tree lowered to one filter",
 		planSteps: [
 			{ glyph: "↳", text: "Query vector: nearest candidates (limit: 20)" },
 			{ glyph: "↳", text: "Should filter: category IN ('hardware', 'tools')" },
@@ -432,6 +469,55 @@ const presets = [
 		},
 	},
 ] as const;
+
+// ── Measured read throughput (vs-qdrant run 6, Qdrant 1.19.1 localhost,
+// median of 5×25, parity-checked). Source: vs-qdrant/README.md +
+// results/tables.md. REST-vs-REST for Python/Node, gRPC-vs-gRPC for Rust.
+// Go and raw REST JSON have no harness leg — the strip says so.
+
+const PERF_ROWS = {
+	query_hybrid: {
+		label: "query_hybrid",
+		python: { official: 260, qql: 485 },
+		typescript: { official: 252, qql: 439 },
+		rust: { official: 660, qql: 619 },
+	},
+	query_dense_filtered: {
+		label: "query_dense_filtered",
+		python: { official: 224, qql: 287 },
+		typescript: { official: 184, qql: 276 },
+		rust: { official: 327, qql: 311 },
+	},
+} as const;
+
+const HARNESS_LOC = {
+	python: { qql: 134, official: 170, ratio: "0.79×", name: "pyqql" },
+	typescript: { qql: 126, official: 152, ratio: "0.83×", name: "nqql" },
+	rust: { qql: 253, official: 421, ratio: "0.6×", name: "qql" },
+} as const;
+
+type PerfRowId = keyof typeof PERF_ROWS;
+type MeasuredFormat = keyof typeof HARNESS_LOC;
+
+const perfEntry = (row: PerfRowId, format: MeasuredFormat) => {
+	const entry = PERF_ROWS[row][format];
+	const ratio = `${(entry.qql / entry.official).toFixed(2)}×`;
+	return {
+		official: entry.official,
+		qql: entry.qql,
+		ratio,
+		win: entry.qql >= entry.official,
+	};
+};
+
+// Width floor keeps the slower side visible at a glance.
+const barWidth = (value: number, max: number) =>
+	`${Math.max(5, Math.round((value / max) * 100))}%`;
+
+// Server-rendered default (hybrid tab + Python format); the client script
+// re-renders from the same tables when tabs or formats change.
+const defaultPerf = perfEntry("query_hybrid", "python");
+const defaultPerfMax = Math.max(defaultPerf.official, defaultPerf.qql);
 
 const lines = (source: string) => source.trim().split("\n").length;
 ---
@@ -455,6 +541,7 @@ const lines = (source: string) => source.trim().split("\n").length;
               class:list={["landing-compare__tab", { "is-active": idx === 0 }]}
               aria-selected={idx === 0 ? "true" : "false"}
               aria-controls={`compare-panel-${preset.id}`}
+              tabindex={idx === 0 ? 0 : -1}
               data-preset={preset.id}
             >
               <span class="landing-compare__tab-title">{preset.title}</span>
@@ -481,10 +568,41 @@ const lines = (source: string) => source.trim().split("\n").length;
           }
         </div>
 
+        <label
+          class="landing-compare__balance"
+          for="compare-balance"
+          title="Resize the QQL / native panes"
+        >
+          <span class="landing-compare__balance-label">Pane balance</span>
+          <input
+            id="compare-balance"
+            class="landing-compare__balance-input"
+            type="range"
+            min="30"
+            max="65"
+            value="44"
+            step="1"
+            data-balance
+            aria-describedby="compare-balance-readout"
+          />
+          <output
+            id="compare-balance-readout"
+            class="landing-compare__balance-readout"
+            data-balance-readout
+            for="compare-balance"
+          >
+            44 / 56
+          </output>
+        </label>
+
         <div class="landing-compare__toolbar-right">
-          <div class="landing-compare__stats-badge" data-stat-container>
+          <div
+            class="landing-compare__stats-badge"
+            data-stat-container
+            title="This example's snippet lines only — the strip below shows whole benchmark-app LOC instead; embedding pipeline excluded on both sides"
+          >
             <span class="landing-compare__stat" data-stat>
-              {lines(presets[0].qql)} lines vs {lines(presets[0].codes.python)} in Python
+              This example: {lines(presets[0].qql)} lines vs {lines(presets[0].codes.python)} in Python
             </span>
             <span class="landing-compare__reduction" data-reduction>
               −{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.python)) * 100)}%
@@ -507,6 +625,8 @@ const lines = (source: string) => source.trim().split("\n").length;
             aria-labelledby={`compare-tab-${preset.id}`}
             data-panel={preset.id}
             data-play={preset.playgroundHref}
+            data-perf={preset.perf}
+            data-perf-exact={preset.perfExact ? "true" : "false"}
             data-qql-lines={lines(preset.qql)}
             data-rest-lines={lines(preset.codes.rest)}
             data-python-lines={lines(preset.codes.python)}
@@ -515,6 +635,7 @@ const lines = (source: string) => source.trim().split("\n").length;
             data-go-lines={lines(preset.codes.go)}
             hidden={idx !== 0}
           >
+            <p class="landing-compare__honesty" role="note">{preset.honesty}</p>
             <div class="landing-compare__split">
               {/* Left Pane: Declarative QQL + Compiled Plan */}
               <div class="landing-compare__pane landing-compare__pane--qql">
@@ -546,7 +667,7 @@ const lines = (source: string) => source.trim().split("\n").length;
                 <div class="landing-compare__plan-box">
                   <div class="landing-compare__plan-header">
                     <span class="landing-compare__plan-title">Engine Plan Breakdown</span>
-                    <span class="landing-compare__plan-time">{preset.planTime}</span>
+                    <span class="landing-compare__plan-time">plan · local, no I/O</span>
                   </div>
                   <ul class="landing-compare__plan-items">
                     {
@@ -562,7 +683,7 @@ const lines = (source: string) => source.trim().split("\n").length;
 
                 <footer class="landing-compare__pane-foot landing-compare__pane-foot--success">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                  <span>1 declarative statement · Server-side fusion & planning</span>
+                  <span>{preset.footNote}</span>
                 </footer>
               </div>
 
@@ -603,7 +724,7 @@ const lines = (source: string) => source.trim().split("\n").length;
 
                       <footer class="landing-compare__pane-foot landing-compare__pane-foot--warn">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                        <span>Deeply nested model structures · Manual parameter binding</span>
+                        <span>{f.warn}</span>
                       </footer>
                     </div>
                   ))
@@ -613,11 +734,99 @@ const lines = (source: string) => source.trim().split("\n").length;
           </div>
         ))
       }
-    </div>
 
-    <p class="landing-section__foot">
-      <a href={guideHref}>{guideLabel} →</a>
-    </p>
+      {/* ── Outcome strip (SSR default: hybrid + Python). Methodology lives
+          in the <details> below — the strip scans as bars + ratio only. ── */}
+      <div class="landing-compare__perf" data-perf>
+        <div class="landing-compare__perf-head">
+          <span class="landing-compare__perf-title" data-perf-title>
+            Hybrid RRF · Python SDK
+          </span>
+          <span class="landing-compare__perf-ratio is-win" data-perf-ratio>
+            1.87× qql
+          </span>
+        </div>
+        <div class="landing-compare__perf-rows" data-perf-rows>
+          <div class="landing-compare__perf-row">
+            <span class="landing-compare__perf-name" data-perf-name-official>
+              qdrant-client
+            </span>
+            <span class="landing-compare__perf-track" aria-hidden="true">
+              <span
+                class="landing-compare__perf-bar"
+                data-perf-bar-official
+                style={`width: ${barWidth(defaultPerf.official, defaultPerfMax)}`}
+              ></span>
+            </span>
+            <span class="landing-compare__perf-val" data-perf-val-official>
+              {defaultPerf.official} ops/s
+            </span>
+          </div>
+          <div class="landing-compare__perf-row">
+            <span class="landing-compare__perf-name" data-perf-name-qql>pyqql</span>
+            <span class="landing-compare__perf-track" aria-hidden="true">
+              <span
+                class="landing-compare__perf-bar is-lead"
+                data-perf-bar-qql
+                style={`width: ${barWidth(defaultPerf.qql, defaultPerfMax)}`}
+              ></span>
+            </span>
+            <span class="landing-compare__perf-val" data-perf-val-qql>
+              {defaultPerf.qql} ops/s
+            </span>
+          </div>
+        </div>
+        <p class="landing-compare__perf-empty" data-perf-empty hidden></p>
+      </div>
+
+      <details class="landing-compare__method">
+        <summary class="landing-compare__method-summary">
+          Methodology & caveats
+        </summary>
+        <div class="landing-compare__method-body">
+          <p class="landing-compare__perf-note" data-perf-note>
+            Exact harness scenario · query_hybrid · both REST · median 5×25,
+            parity-checked.
+          </p>
+          <p class="landing-compare__perf-loc" data-perf-loc>
+            Pair reads 1.28–3.77× (10/10 scenarios) · full benchmark app (10
+            scenarios): pyqql 134 vs 170 (0.79×).
+          </p>
+          <p class="landing-compare__perf-src">
+            vs-qdrant run 6 · Qdrant 1.19.1 localhost · source:
+            vs-qdrant/README.md + results/tables.md
+          </p>
+          <ul class="landing-compare__caveats">
+            <li>
+              <strong>Line counts leave out the embedding pipeline.</strong>{" "}
+              Official SDKs ship no embedder — every vector above was
+              precomputed out-of-band; QQL resolves TEXT + BM25 in-process.
+            </li>
+            <li>
+              <strong>Ingest is not a qql sweep:</strong> pyqql 1.5× slower ·
+              nqql 1.22× faster · qql (Rust) 1.25× slower — 10k pts, wait=false.
+            </li>
+            <li>
+              <strong>Compile ≈1.8 µs</strong> parse→bind→plan
+              (bench/bench_rust bench_bind, release, pinned core). Rust reads
+              are protobuf-vs-protobuf parity ±10% — the Rust claim is LOC
+              0.6×, not speed.
+            </li>
+          </ul>
+          <p class="landing-compare__method-foot">
+            <a href={guideHref}>{guideLabel} →</a>
+          </p>
+        </div>
+      </details>
+
+      <script
+        is:inline
+        type="application/json"
+        data-perf-data
+        set:html={JSON.stringify({ rows: PERF_ROWS, loc: HARNESS_LOC })}
+      />
+
+    </div>
   </div>
 </section>
 
@@ -641,7 +850,107 @@ const lines = (source: string) => source.trim().split("\n").length;
       go: "Go SDK",
     };
 
+    const sdkNames: Record<string, { official: string; qql: string }> = {
+      python: { official: "qdrant-client", qql: "pyqql" },
+      typescript: { official: "js-client-rest", qql: "nqql" },
+      rust: { official: "qdrant-client (gRPC)", qql: "qql" },
+    };
+
+    const perfTitles: Record<string, string> = {
+      query_hybrid: "Hybrid RRF",
+      query_dense_filtered: "Filtered dense read",
+    };
+
+    const pairContext: Record<string, string> = {
+      python: "Pair reads 1.28–3.77× (10/10 scenarios)",
+      typescript: "Pair reads 1.50–6.30× (10/10 scenarios)",
+      rust: "Pair reads at parity ±10% (2/10 marginal qql wins)",
+    };
+
+    interface PerfEntry {
+      official: number;
+      qql: number;
+    }
+    interface PerfRow {
+      label: string;
+      python?: PerfEntry;
+      typescript?: PerfEntry;
+      rust?: PerfEntry;
+    }
+    interface PerfData {
+      rows: Record<string, PerfRow>;
+      loc: Record<string, { qql: number; official: number; ratio: string; name: string }>;
+    }
+
+    const perfDataEl = root.querySelector<HTMLScriptElement>("[data-perf-data]");
+    let perfData: PerfData | null = null;
+    try {
+      perfData = perfDataEl ? (JSON.parse(perfDataEl.textContent ?? "") as PerfData) : null;
+    } catch {
+      perfData = null;
+    }
+
+    const perfTitle = root.querySelector("[data-perf-title]");
+    const perfRatio = root.querySelector("[data-perf-ratio]");
+    const perfRows = root.querySelector("[data-perf-rows]");
+    const perfEmpty = root.querySelector<HTMLElement>("[data-perf-empty]");
+    const perfNameOfficial = root.querySelector("[data-perf-name-official]");
+    const perfNameQql = root.querySelector("[data-perf-name-qql]");
+    const perfBarOfficial = root.querySelector<HTMLElement>("[data-perf-bar-official]");
+    const perfBarQql = root.querySelector<HTMLElement>("[data-perf-bar-qql]");
+    const perfValOfficial = root.querySelector("[data-perf-val-official]");
+    const perfValQql = root.querySelector("[data-perf-val-qql]");
+    const perfNote = root.querySelector("[data-perf-note]");
+    const perfLoc = root.querySelector("[data-perf-loc]");
+    const balance = root.querySelector<HTMLInputElement>("[data-balance]");
+    const balanceReadout = root.querySelector("[data-balance-readout]");
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
     let format = "python";
+    // Last rendered numbers, so tab/format switches count from truth.
+    let shownQqlLines = 0;
+    let shownTargetLines = 0;
+    let shownOfficialOps = 0;
+    let shownQqlOps = 0;
+    let firstSync = true;
+
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+    const tween = (duration: number, render: (eased: number) => void) => {
+      if (reduceMotion.matches) {
+        render(1);
+        return;
+      }
+      const start = performance.now();
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - start) / duration);
+        render(easeOut(t));
+        if (t < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+
+    const countPair = (
+      el: Element | null,
+      fromA: number,
+      toA: number,
+      fromB: number,
+      toB: number,
+      render: (a: number, b: number) => string,
+    ) => {
+      if (!el) return;
+      if (firstSync || reduceMotion.matches || (fromA === toA && fromB === toB)) {
+        el.textContent = render(toA, toB);
+        return;
+      }
+      tween(380, (eased) => {
+        el.textContent = render(
+          Math.round(fromA + (toA - fromA) * eased),
+          Math.round(fromB + (toB - fromB) * eased),
+        );
+      });
+    };
 
     // Scrollable code regions must stay keyboard-reachable (WCAG 2.1): long
     // target lines sit behind horizontal scroll, so focus them when they
@@ -654,15 +963,119 @@ const lines = (source: string) => source.trim().split("\n").length;
 
     const activePanel = () => panels.find((panel) => !panel.hidden) ?? panels[0];
 
-    const sync = () => {
+    const barWidth = (value: number, max: number) =>
+      `${Math.max(5, Math.round((value / max) * 100))}%`;
+
+    const syncPerf = (instant: boolean) => {
+      const panel = activePanel();
+      if (
+        !perfData ||
+        !perfTitle ||
+        !perfRatio ||
+        !perfRows ||
+        !perfEmpty ||
+        !perfNameOfficial ||
+        !perfNameQql ||
+        !perfBarOfficial ||
+        !perfBarQql ||
+        !perfValOfficial ||
+        !perfValQql ||
+        !perfNote ||
+        !perfLoc
+      ) {
+        return;
+      }
+      const rowId = panel.dataset.perf ?? "query_hybrid";
+      const row = perfData.rows[rowId];
+      const names = sdkNames[format];
+      const loc = perfData.loc[format];
+      const entry = row?.[format as keyof PerfRow] as PerfEntry | undefined;
+      const exact = panel.dataset.perfExact === "true";
+
+      // No harness leg for raw REST JSON or Go: say so, don't invent numbers.
+      if (!row || !names || !loc || !entry) {
+        perfRows.setAttribute("hidden", "");
+        perfEmpty.hidden = false;
+        perfEmpty.textContent =
+          "No harness numbers for this target — vs-qdrant run 6 covers Python, Node and Rust only. Switch format for a measured pair.";
+        perfTitle.textContent = "Unmeasured target";
+        perfRatio.textContent = "n/a";
+        perfRatio.classList.remove("is-win");
+        perfRatio.classList.add("is-parity");
+        perfNote.textContent =
+          "Latency ratios are portable; absolutes are hardware-specific (harness caveat #3).";
+        perfLoc.textContent =
+          "Full benchmark app LOC (10 scenarios): pyqql 134 vs 170 · nqql 126 vs 152 · qql 253 vs 421.";
+        return;
+      }
+
+      const max = Math.max(entry.official, entry.qql);
+      const ratio = `${(entry.qql / entry.official).toFixed(2)}×`;
+      const win = entry.qql >= entry.official;
+      const transport = format === "rust" ? "gRPC" : "REST";
+
+      perfRows.removeAttribute("hidden");
+      perfEmpty.hidden = true;
+      perfTitle.textContent =
+        `${perfTitles[rowId] ?? row.label} · ${formatLabels[format] ?? format}`;
+      perfRatio.textContent = win ? `${ratio} qql` : `${ratio} · parity`;
+      perfRatio.classList.toggle("is-win", win);
+      perfRatio.classList.toggle("is-parity", !win);
+      perfNameOfficial.textContent = names.official;
+      perfNameQql.textContent = loc.name;
+
+      if (instant || reduceMotion.matches) {
+        perfBarOfficial.style.width = barWidth(entry.official, max);
+        perfBarQql.style.width = barWidth(entry.qql, max);
+        perfValOfficial.textContent = `${entry.official.toLocaleString("en-US")} ops/s`;
+        perfValQql.textContent = `${entry.qql.toLocaleString("en-US")} ops/s`;
+      } else {
+        // Width eases via CSS; numbers count up alongside.
+        requestAnimationFrame(() => {
+          perfBarOfficial.style.width = barWidth(entry.official, max);
+          perfBarQql.style.width = barWidth(entry.qql, max);
+        });
+        const fromOfficial = shownOfficialOps;
+        const fromQql = shownQqlOps;
+        tween(450, (eased) => {
+          const official = Math.round(fromOfficial + (entry.official - fromOfficial) * eased);
+          const qql = Math.round(fromQql + (entry.qql - fromQql) * eased);
+          perfValOfficial.textContent = `${official.toLocaleString("en-US")} ops/s`;
+          perfValQql.textContent = `${qql.toLocaleString("en-US")} ops/s`;
+        });
+      }
+      perfBarOfficial.classList.toggle("is-lead", !win);
+      perfBarQql.classList.toggle("is-lead", win);
+      shownOfficialOps = entry.official;
+      shownQqlOps = entry.qql;
+
+      perfNote.textContent = exact
+        ? `Exact harness scenario · ${row.label} · both ${transport} · median 5×25, parity-checked.`
+        : `Nearest measured proxy · ${row.label} (filtered dense read) · both ${transport} · median 5×25, parity-checked.`;
+      const pairReads = pairContext[format] ?? "";
+      perfLoc.textContent =
+        `${pairReads} · full benchmark app (10 scenarios): ${loc.name} ${loc.qql} vs ${loc.official} (${loc.ratio}).`;
+    };
+
+    const sync = (instant = false) => {
       const panel = activePanel();
       const qqlLines = Number(panel.dataset.qqlLines ?? "5");
       const targetLinesAttr = `${format}Lines`;
       const targetLines = Number(panel.dataset[targetLinesAttr] ?? "20");
 
       if (stat) {
-        stat.textContent = `${qqlLines} lines vs ${targetLines} in ${formatLabels[format] ?? format.toUpperCase()}`;
+        const label = formatLabels[format] ?? format.toUpperCase();
+        countPair(
+          stat,
+          shownQqlLines || qqlLines,
+          qqlLines,
+          shownTargetLines || targetLines,
+          targetLines,
+          (a, b) => `This example: ${a} lines vs ${b} in ${label}`,
+        );
       }
+      shownQqlLines = qqlLines;
+      shownTargetLines = targetLines;
 
       if (reduction && targetLines > qqlLines) {
         const pct = Math.round((1 - qqlLines / targetLines) * 100);
@@ -677,22 +1090,39 @@ const lines = (source: string) => source.trim().split("\n").length;
         pane.hidden = pane.dataset.raw !== format;
       });
 
+      syncPerf(instant || firstSync);
+      firstSync = false;
+
       syncScrollable();
     };
 
-    // Preset / Scenario Tab Click
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const id = tab.dataset.preset;
-        tabs.forEach((item) => {
-          const on = item === tab;
-          item.classList.toggle("is-active", on);
-          item.setAttribute("aria-selected", String(on));
-        });
-        panels.forEach((panel) => {
-          panel.hidden = panel.dataset.panel !== id;
-        });
-        sync();
+    // Preset / Scenario tabs (roving tabindex + arrow-key nav per APG tabs)
+    const activatePreset = (tab: HTMLButtonElement) => {
+      const id = tab.dataset.preset;
+      tabs.forEach((item) => {
+        const on = item === tab;
+        item.classList.toggle("is-active", on);
+        item.setAttribute("aria-selected", String(on));
+        item.tabIndex = on ? 0 : -1;
+      });
+      panels.forEach((panel) => {
+        panel.hidden = panel.dataset.panel !== id;
+      });
+      sync();
+    };
+
+    tabs.forEach((tab, idx) => {
+      tab.addEventListener("click", () => activatePreset(tab));
+      tab.addEventListener("keydown", (event) => {
+        let next: number | null = null;
+        if (event.key === "ArrowRight") next = (idx + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = tabs.length - 1;
+        if (next === null) return;
+        event.preventDefault();
+        tabs[next].focus();
+        activatePreset(tabs[next]);
       });
     });
 
@@ -739,6 +1169,19 @@ const lines = (source: string) => source.trim().split("\n").length;
     });
 
     syncScrollable();
+    sync(true);
     window.addEventListener("resize", syncScrollable);
+
+    // Pane-balance slider: resizes the QQL / native split via an inherited
+    // custom property (desktop two-column layout only; hidden below it).
+    if (balance) {
+      const applyBalance = () => {
+        const value = Number(balance.value);
+        root.style.setProperty("--cq-pct", `${value}%`);
+        if (balanceReadout) balanceReadout.textContent = `${value} / ${100 - value}`;
+      };
+      balance.addEventListener("input", applyBalance);
+      applyBalance();
+    }
   }
 </script>

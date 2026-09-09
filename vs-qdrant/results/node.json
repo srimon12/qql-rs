@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-09-08T09:01:09.995Z",
+    "timestamp": "2026-09-09T00:22:56.373Z",
     "node": "v24.18.0",
     "nqql": "0.4.0",
     "js_client_rest": "1.19.0",
@@ -10,16 +10,16 @@
   "scenarios": {
     "query_dense": {
       "official": {
-        "ops_per_sec": 293,
-        "p50_ms": 3.417,
-        "p95_ms": 3.533,
+        "ops_per_sec": 292,
+        "p50_ms": 3.429,
+        "p95_ms": 3.507,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 850,
-        "p50_ms": 1.176,
-        "p95_ms": 1.241,
+        "ops_per_sec": 707,
+        "p50_ms": 1.414,
+        "p95_ms": 1.681,
         "reps": 5,
         "iters": 25
       },
@@ -31,16 +31,16 @@
     },
     "query_dense_filtered": {
       "official": {
-        "ops_per_sec": 203,
-        "p50_ms": 4.919,
-        "p95_ms": 5.22,
+        "ops_per_sec": 184,
+        "p50_ms": 5.43,
+        "p95_ms": 5.445,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 309,
-        "p50_ms": 3.238,
-        "p95_ms": 3.261,
+        "ops_per_sec": 276,
+        "p50_ms": 3.619,
+        "p95_ms": 3.696,
         "reps": 5,
         "iters": 25
       },
@@ -52,37 +52,37 @@
     },
     "query_sparse": {
       "official": {
-        "ops_per_sec": 450,
-        "p50_ms": 2.222,
-        "p95_ms": 2.422,
+        "ops_per_sec": 401,
+        "p50_ms": 2.493,
+        "p95_ms": 2.578,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 2339,
-        "p50_ms": 0.427,
-        "p95_ms": 0.446,
+        "ops_per_sec": 2159,
+        "p50_ms": 0.463,
+        "p95_ms": 0.495,
         "reps": 5,
         "iters": 25
       },
       "parity": {
         "top1_match": true,
         "jaccard_overlap": 1,
-        "max_score_diff": 0.000005
+        "max_score_diff": 0.000006
       }
     },
     "query_hybrid": {
       "official": {
-        "ops_per_sec": 247,
-        "p50_ms": 4.045,
-        "p95_ms": 4.21,
+        "ops_per_sec": 252,
+        "p50_ms": 3.962,
+        "p95_ms": 4.106,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 556,
-        "p50_ms": 1.798,
-        "p95_ms": 1.863,
+        "ops_per_sec": 439,
+        "p50_ms": 2.275,
+        "p95_ms": 2.391,
         "reps": 5,
         "iters": 25
       },
@@ -93,24 +93,24 @@
           "max_score_diff": 0.05
         },
         "official_vs_official": {
-          "top1_match": true,
-          "jaccard_overlap": 1,
+          "top1_match": false,
+          "jaccard_overlap": 0.818,
           "max_score_diff": 0.000005
         }
       }
     },
     "scroll_pages": {
       "official": {
-        "ops_per_sec": 59,
-        "p50_ms": 16.863,
-        "p95_ms": 17.851,
+        "ops_per_sec": 56,
+        "p50_ms": 17.745,
+        "p95_ms": 18.07,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 140,
-        "p50_ms": 7.16,
-        "p95_ms": 7.189,
+        "ops_per_sec": 130,
+        "p50_ms": 7.705,
+        "p95_ms": 8.167,
         "reps": 5,
         "iters": 25
       },
@@ -122,16 +122,16 @@
     },
     "count_berlin": {
       "official": {
-        "ops_per_sec": 410,
-        "p50_ms": 2.436,
-        "p95_ms": 2.612,
+        "ops_per_sec": 371,
+        "p50_ms": 2.695,
+        "p95_ms": 2.816,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 1497,
-        "p50_ms": 0.668,
-        "p95_ms": 0.707,
+        "ops_per_sec": 1201,
+        "p50_ms": 0.833,
+        "p95_ms": 0.845,
         "reps": 5,
         "iters": 25
       },
@@ -142,16 +142,16 @@
     },
     "facet_district": {
       "official": {
-        "ops_per_sec": 484,
-        "p50_ms": 2.068,
-        "p95_ms": 2.292,
+        "ops_per_sec": 404,
+        "p50_ms": 2.477,
+        "p95_ms": 2.63,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 2144,
-        "p50_ms": 0.466,
-        "p95_ms": 0.514,
+        "ops_per_sec": 1776,
+        "p50_ms": 0.563,
+        "p95_ms": 0.639,
         "reps": 5,
         "iters": 25
       },
@@ -162,16 +162,16 @@
     },
     "query_colbert": {
       "official": {
-        "ops_per_sec": 118,
-        "p50_ms": 8.49,
-        "p95_ms": 8.941,
+        "ops_per_sec": 105,
+        "p50_ms": 9.508,
+        "p95_ms": 9.657,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 145,
-        "p50_ms": 6.916,
-        "p95_ms": 7.027,
+        "ops_per_sec": 128,
+        "p50_ms": 7.813,
+        "p95_ms": 9.154,
         "reps": 5,
         "iters": 25
       },
@@ -183,16 +183,16 @@
     },
     "count_legal": {
       "official": {
-        "ops_per_sec": 505,
-        "p50_ms": 1.98,
-        "p95_ms": 2.323,
+        "ops_per_sec": 419,
+        "p50_ms": 2.385,
+        "p95_ms": 3.733,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 3077,
-        "p50_ms": 0.325,
-        "p95_ms": 0.371,
+        "ops_per_sec": 2639,
+        "p50_ms": 0.379,
+        "p95_ms": 0.398,
         "reps": 5,
         "iters": 25
       },
@@ -203,16 +203,16 @@
     },
     "prepared_rerun": {
       "official": {
-        "ops_per_sec": 82,
-        "p50_ms": 12.254,
-        "p95_ms": 12.586,
+        "ops_per_sec": 75,
+        "p50_ms": 13.311,
+        "p95_ms": 13.896,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 206,
-        "p50_ms": 4.856,
-        "p95_ms": 5.25,
+        "ops_per_sec": 185,
+        "p50_ms": 5.411,
+        "p95_ms": 5.546,
         "reps": 5,
         "iters": 25
       },
@@ -225,7 +225,7 @@
   },
   "ingest": {
     "official_sec": 8.803,
-    "qql_sec": 7.223,
+    "qql_sec": 7.193,
     "points": {
       "berlin": 8000,
       "legal": 2000,
@@ -246,7 +246,7 @@
     "delete_by_filter": true
   },
   "cold_import": {
-    "qdrant/js-client-rest": 107.3,
-    "nqql": 38.3
+    "qdrant/js-client-rest": 108.1,
+    "nqql": 37
   }
 }

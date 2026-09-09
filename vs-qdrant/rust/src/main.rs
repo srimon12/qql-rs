@@ -122,16 +122,21 @@ async fn http_get_json(url: &str) -> Result<Value> {
 }
 
 async fn wait_until_ready(collection: &str, expected: u64) -> Result<()> {
+    // Untimed barrier: count visible AND collection green (optimizer idle).
+    // Points-count alone races background merges/HNSW indexing, which makes
+    // early scenarios slower than later ones on identical data (variance).
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     loop {
         let body = http_get_json(&format!("{URL}/collections/{collection}")).await?;
-        if body["result"]["points_count"].as_u64() == Some(expected) {
+        if body["result"]["points_count"].as_u64() == Some(expected)
+            && body["result"]["status"].as_str() == Some("green")
+        {
             return Ok(());
         }
         if std::time::Instant::now() > deadline {
-            anyhow::bail!("{collection} never reached {expected} points");
+            anyhow::bail!("{collection} never reached {expected} points + green");
         }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
 

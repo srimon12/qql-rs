@@ -88,14 +88,17 @@ async function timedRead(fn, reps, iters) {
 }
 
 async function waitUntilReady(collection, expected) {
-  const deadline = Date.now() + 120_000;
+  // Untimed barrier: count visible AND collection green (optimizer idle).
+  // Points-count alone races background merges/HNSW indexing, which makes
+  // early scenarios slower than later ones on identical data (variance).
+  const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
     const res = await fetch(`${URL}/collections/${collection}`);
     const info = (await res.json()).result;
-    if (info.points_count === expected) return;
-    await new Promise((r) => setTimeout(r, 250));
+    if (info.points_count === expected && info.status === "green") return;
+    await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error(`${collection} never reached ${expected} points`);
+  throw new Error(`${collection} never reached ${expected} points + green`);
 }
 
 // --------------------------------------------------------------- parity ----

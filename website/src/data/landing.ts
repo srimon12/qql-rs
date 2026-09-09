@@ -17,7 +17,10 @@ export const stats = [
 	{ value: "12", label: "Query forms" },
 	{ value: "276", label: "Conformance statements" },
 	{ value: "6", label: "Runtimes & tools" },
-	{ value: "1.4 MB", label: "WASM parser, in-browser" },
+	// WASM size = release browser pack crates/qql-wasm/pkg/qql_wasm_bg.wasm
+	// (wasm-pack release with wasm-opt). Rebuild + re-verify when the wasm
+	// crate changes; do not quote gzipped transfer size unless measured.
+	{ value: "1.9 MB", label: "WASM parser, in-browser" },
 ] as const;
 
 export const problem = {
@@ -101,8 +104,10 @@ export const faq = {
 		},
 		{
 			question: "Which runtimes ship today?",
+			// ~1.9 MB = release browser pack crates/qql-wasm/pkg/qql_wasm_bg.wasm
+			// (wasm-pack release with wasm-opt); re-verify on wasm crate changes.
 			answer:
-				"Rust crates, native Python and Node.js bindings, a ~1.4 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
+				"Rust crates, native Python and Node.js bindings, a ~1.9 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
 		},
 		{
 			question: "How does multitenancy work?",
