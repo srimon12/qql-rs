@@ -37,7 +37,7 @@ Any solution for parser generation or parser alignment must satisfy the followin
 1. **`no_std` Compatibility**: Must compile with `#![no_std]` when default features are disabled.
 2. **Zero Dependencies**: Must not introduce runtime dependencies (such as heavy parser generator runtime crates) to `qql-core`.
 3. **AST Parity & Performance**: Zero-allocation token matching and deterministic error spans.
-4. **100% Conformance**: Must pass all 39 valid fixture groups (265 statements) and 56 invalid test cases in `language/v1/fixtures`, compared against 39 canonical AST snapshots.
+4. **100% Conformance**: Must pass all 40 valid fixture groups (289 statements) and 63 invalid test cases in `language/v1/fixtures`, compared against 40 canonical AST snapshots.
 
 ---
 
@@ -74,7 +74,7 @@ Any solution for parser generation or parser alignment must satisfy the followin
 - **Mechanism**: 
   1. Keep the production parser hand-written (lexer + `AstLowerer` in `qql-core`); pest is never a `qql-core` runtime dependency.
   2. Automatically generate the keyword map (`keywords.generated.rs`) from `grammar.pest`. Adding a keyword without updating `TokenKind` causes a compile error.
-  3. Enforce **Forward-Drift Test**: Asserts all 163 keywords in `grammar.pest` exist in `keywords.generated.rs`.
+  3. Enforce **Forward-Drift Test**: Asserts all 174 keywords in `grammar.pest` exist in `keywords.generated.rs`.
   4. Enforce **Reverse-Drift Test**: Statically scans `crates/qql-core/src/parser/` for `ascii_equal`, `peek_word`, `expect_word`, `eq_ignore_ascii_case` calls and asserts every referenced keyword is declared in `grammar.pest`.
   5. **Execute `grammar.pest` itself in a test-only pest harness**: `qql-conformance` compiles the canonical grammar via `pest_derive` (dev-dependencies only) and runs the valid fixture corpus through it, plus every grammar-rejected invalid case through the runtime — so structural grammar↔runtime drift fails CI, not just keyword vocabulary.
   6. Enforce **Exhaustive Conformance Corpus**: CI validates all valid statements and invalid cases against canonical AST snapshots.
@@ -100,7 +100,7 @@ flowchart TD
     F -->|Forward Test| G["grammar_keywords_in_token_rs"]
     F -->|Reverse Test| H["parser_keywords_exist_in_grammar"]
     F -->|Pest Gate| I["qql-conformance grammar_gate (test-only)"]
-    F -->|Conformance| J["35 Valid / 53 Invalid Fixtures / 35 Snapshots"]
+    F -->|Conformance| J["40 Valid / 63 Invalid Cases / 40 Snapshots"]
 ```
 
 ### Phase 1: Generated Lexer, Bi-Directional Gates & Executable Grammar Gate (Completed)

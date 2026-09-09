@@ -164,7 +164,7 @@ Methods:
 |---|---|---|
 | `new Stmt(source)` | owned handle | Parse exactly one statement |
 | `injectFilter(field, op, value)` | void | Inject a trusted predicate (mutates in place) |
-| `shardKey` getter / setter | string or null | Assign or read QQL `SHARD` routing |
+| `shardKey` getter / setter | string, integer (`BigInt`), or null | Assign or read QQL `SHARD` routing (integers stay numeric keys) |
 | `bind(params?)` | bound `Stmt` | Substitute `:name` / `?` parameters; params optional |
 | `bound` | boolean | Whether params were already bound; passing new params to a bound `Stmt` throws `QQL-BIND-ALREADY-BOUND` |
 | `toJSON()` | string | Serialize the AST to JSON |

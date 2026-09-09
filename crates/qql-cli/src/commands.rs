@@ -298,10 +298,11 @@ pub async fn handle_execute_file(
 
 pub fn handle_explain(
     query: &str,
+    params: Option<&serde_json::Value>,
     json: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let plan = explain_query(query)?;
+    let plan = explain_query_bound(query, params)?;
     if quiet {
         return Ok(());
     }
@@ -317,6 +318,19 @@ pub fn handle_explain(
         println!("{}", plan);
     }
     Ok(())
+}
+
+/// Explain a query, binding `params` on the AST — the same binding `exec`
+/// uses — so placeholders (`:rows`, `:q`, `?`) explain exactly as executed.
+fn explain_query_bound(query: &str, params: Option<&serde_json::Value>) -> Result<String, String> {
+    let Some(params) = params else {
+        return explain_query(query);
+    };
+    let mut statements = qql_core::parser::Parser::parse_all(query).map_err(|e| e.to_string())?;
+    for stmt in &mut statements {
+        qql_core::params_json::bind_stmt_with_params(stmt, params).map_err(|e| e.to_string())?;
+    }
+    Ok(qql_core::explain::explain_nodes(&statements))
 }
 
 pub async fn handle_connect(url: &str, use_edge: bool) -> Result<(), Box<dyn std::error::Error>> {

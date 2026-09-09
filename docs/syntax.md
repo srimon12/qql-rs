@@ -33,7 +33,7 @@ cte-query    = "QUERY", query-expr, [ "FROM", collection ], query-tail ;
 query-tail   = [ "USING", hybrid-using | vector-target ],
                [ "PREFETCH", "(", prefetch, { ",", prefetch }, ")" ],
                [ "WHERE", filter ],
-               [ "SHARD", param | string ],
+               [ "SHARD", param | string | non-negative-integer ],
                [ "PARAMS", search-params ],
                [ "SCORE", "THRESHOLD", param | number ],
                [ "GROUP", "BY", field,
@@ -446,7 +446,7 @@ Keys in payload objects, configuration blocks, formula defaults, and search para
 upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
                [ embedding-options ],
-               [ "SHARD", string ],
+               [ "SHARD", param | string | non-negative-integer ],
                [ "WAIT", boolean ] ;
 embedding-options = ( dense-embed | sparse-embed | hybrid-embed ) ;
 dense-embed  = "USING",
@@ -460,34 +460,36 @@ hybrid-embed = "USING", "HYBRID",
                [ "SPARSE", [ "MODEL", string ], [ "VECTOR", vector-name ] ] ;
 scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
-               [ "SHARD", string ],
+               [ "SHARD", param | string | non-negative-integer ],
                [ "WITH", "VECTOR", [ vector-selector ] ],
-               "LIMIT", positive-integer ;
+               "LIMIT", param | positive-integer ;
 count        = "COUNT", "FROM", collection,
                [ "WHERE", filter ],
-               [ "SHARD", string ] ;
+               [ "SHARD", param | string | non-negative-integer ] ;
 facet        = "FACET", ( field, "FROM", collection | "FROM", collection, [ "KEY" ], field ),
                 [ "WHERE", filter ],
-                [ "LIMIT", positive-integer ],
+                [ "LIMIT", param | positive-integer ],
                 [ "EXACT", boolean ],
-                [ "SHARD", string ],
+                [ "SHARD", param | string | non-negative-integer ],
                 [ "WITH", "(", facet-config, ")" ] ;
+facet-config = facet-entry, { ",", facet-entry } ;
+facet-entry  = ( "exact" | "limit" | string ), "=", ( boolean | integer ) ;
 delete       = "DELETE", "FROM", collection, "WHERE", filter,
-               [ "SHARD", string ],
+               [ "SHARD", param | string | non-negative-integer ],
                [ "WAIT", boolean ] ;
 clear-payload = "CLEAR", "PAYLOAD", "FROM", collection,
                 "WHERE", filter,
-                [ "SHARD", string ],
+                [ "SHARD", param | string | non-negative-integer ],
                 [ "WAIT", boolean ] ;
 delete-vectors = "DELETE", "VECTOR", name, { ",", name },
                  "FROM", collection, "WHERE", filter,
-                 [ "SHARD", string ],
+                 [ "SHARD", param | string | non-negative-integer ],
                  [ "WAIT", boolean ] ;
 update       = "UPDATE", collection, "SET",
                ( "VECTOR", [ vector-name ], "=", vector-value,
-                 "WHERE", "id", "=", point-id, [ "SHARD", string ]
+                 "WHERE", "id", "=", point-id, [ "SHARD", param | string | non-negative-integer ]
                | "PAYLOAD", "=", object, "WHERE", filter,
-                 [ "SHARD", string ] ),
+                 [ "SHARD", param | string | non-negative-integer ] ),
                [ "WAIT", boolean ] ;
 
 vector-value = dense-vector | sparse-vector | multidense-vector ;
@@ -510,7 +512,7 @@ upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
                [ embedding-options ],
                [ embed-directive, { ",", embed-directive } ],
-               [ "SHARD", string ],
+               [ "SHARD", param | string | non-negative-integer ],
                [ "WAIT", boolean ] ;
 embed-directive = "EMBED", field, "INTO", vector-name,
                   [ "USING",
@@ -554,11 +556,11 @@ create-index    = "CREATE", "INDEX", "ON", "COLLECTION", name,
 drop-index      = "DROP", "INDEX", "ON", "COLLECTION", name,
                   "FOR", field ;
 
-create-shard-key = "CREATE", "SHARD", "KEY", string,
+create-shard-key = "CREATE", "SHARD", "KEY", param | string | non-negative-integer,
                    "ON", "COLLECTION", name,
                    [ "WITH", config-block ] ;
 
-drop-shard-key  = "DROP", "SHARD", "KEY", string,
+drop-shard-key  = "DROP", "SHARD", "KEY", param | string | non-negative-integer,
                   "ON", "COLLECTION", name ;
 
 show-shard-keys = "SHOW", "SHARD", "KEYS", "ON", "COLLECTION", name ;
@@ -694,7 +696,7 @@ WITH PARAMS (
 | `payload_memory` | string | `'cold'` or `'cached'` (Qdrant ≥ 1.19; `pinned` rejected) |
 | `shard_number` | integer | Total shard count |
 | `sharding_method` | string | `'auto'` or `'custom'` |
-| `shard_keys` | string list | Tenant identifiers for custom sharding |
+| `shard_keys` | string / integer list | Tenant identifiers for custom sharding (integers route to numeric partitions) |
 | `read_fan_out_factor` | integer | Read fan-out factor |
 | `read_fan_out_delay_ms` | integer | Read fan-out delay |
 
@@ -753,6 +755,10 @@ FACET FROM catalog KEY tags
 SHARD 'tenant_1'
 LIMIT 10;
 ```
+
+`WITH (exact = …, limit = …)` spells the same options as the `EXACT` /
+`LIMIT` keywords — use one form; combining both for the same option is a
+duplicate-clause error (`QQL-PARSE-DUPLICATE-CLAUSE`).
 
 ### Point Mutations
 

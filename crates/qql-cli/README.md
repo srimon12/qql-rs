@@ -21,12 +21,12 @@ Binary: `target/release/qql`.
 
 | Command | Role |
 |---------|------|
-| `qql exec "…"` | One statement (`--json`, `--quiet`) |
+| `qql exec "…"` | One statement (`--json`, `--quiet`, `--param`, `--params-file`) |
 | `qql execute file.qql` | Script |
 | `qql explain "…"` | Plan without Qdrant |
 | `qql connect` | REPL |
 | `qql convert [file.json]` | REST JSON → QQL |
-| `qql dump <coll> out.qql` | Export collection as QQL |
+| `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql execute`) |
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
 | `qql doctor` | Health + embed host snapshot |
 | `qql --edge …` | Use configured local edge backend |
@@ -35,6 +35,8 @@ Binary: `target/release/qql`.
 ```bash
 qql exec "SHOW COLLECTIONS"
 qql exec --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
+qql exec "QUERY TEXT :q FROM docs LIMIT :lim" -p q=ml -p lim=5
+qql exec "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
 

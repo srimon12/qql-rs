@@ -28,12 +28,13 @@ the `grpc` feature. Otherwise the REST transport is used.
 | Command | Purpose |
 |---|---|
 | `qql [repl\|connect]` | Interactive REPL shell with multiline continuation and live diagnostics (default when run without arguments in a TTY) |
-| `qql exec "<query>"` | Execute one statement or an inline semicolon-delimited script (`--json` for JSON output, `-q`/`--quiet`) |
+| `qql exec "<query>"` | Execute one statement or an inline semicolon-delimited script (`--json` for JSON output, `-q`/`--quiet`; `--param key=value` / `--params-file params.json` bind `:name` / `?` on the AST) |
 | `qql execute file.qql` | Execute a script file (`--stop-on-error`; prints a JSON summary `{ok, command, path, succeeded, failed, message}`) |
-| `qql explain "<query>"` | Show the hierarchical execution plan tree without a backend (ASCII tree; JSON with `--json`) |
+| `qql explain "<query>"` | Show the hierarchical execution plan tree without a backend (ASCII tree; JSON with `--json`; accepts the same `--param` / `--params-file` bindings) |
 | `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file) |
 | `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
-| `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; typed `CREATE COLLECTION` + `CREATE INDEX` + batched `UPSERT`) |
+| `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; typed `CREATE COLLECTION` + `CREATE INDEX` + batched `UPSERT`; custom-sharded collections also emit `CREATE SHARD KEY` plus per-shard `SHARD`-routed upserts, so the file replays with exact counts) |
+| `qql migrate <collection>` | Copy schema + points to another cluster or collection (see below) |
 | `qql doctor` | Check backend, model hosts, and embedder health (`--json`) |
 | `qql config edge` | Configure persistent edge settings (see below) |
 | `qql version` | Print version as JSON |
@@ -48,9 +49,46 @@ SHOW COLLECTIONS;
 qql exec "SHOW COLLECTIONS"
 qql exec --json "SHOW COLLECTIONS"
 qql explain "QUERY 'quantum' FROM papers USING dense LIMIT 5"
+qql exec "QUERY TEXT :q FROM docs LIMIT :lim" -p q=text-search -p lim=5
+qql exec "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
 qql doctor --json
 qql version
 {% /terminal %}
+
+## Migrate a collection
+
+`qql migrate <collection>` copies schema + points to another cluster or
+collection — not a Qdrant snapshot. The source is `--url`; the target defaults
+to the same endpoint unless `--target-url` (plus `--target-api-key`) points
+elsewhere. `--to` renames the target collection.
+
+{% terminal title="Preview, run, and resume a migration" %}
+qql migrate docs --to docs_copy --dry-run
+qql migrate docs --to docs_copy --recreate --workers 4 --batch-size 128
+qql migrate docs --to docs_copy --resume
+{% /terminal %}
+
+| Flag | Purpose |
+|---|---|
+| `--dry-run` | Print the `CREATE COLLECTION` / `CREATE INDEX` / `ALTER COLLECTION` plan and exit without writing |
+| `--recreate` | `DROP` the target collection before creating it |
+| `--workers N`, `--batch-size N` | Parallel upsert window |
+| `--where "<filter>"` | Migrate only points matching a QQL filter |
+| `--shard-number`, `--replication-factor`, `--sharding-method`, `--quantize scalar\|binary\|product\|turbo` | Reshape the target schema on create |
+| `--shard-key <key>` | Route every upsert to one literal shard key |
+| `--shard-key-field <field>` | Discover per-point shard keys and route each point by its payload value |
+| `--on-missing-shard-key error\|skip\|default=<key>` | Policy for points without the field (default `error`) |
+| `--checkpoint`, `--resume`, `--restart` | Crash recovery under `.qql-migrate/` (resume the same command; `--restart` starts over) |
+| `--cutover <alias>` | Point an alias at the target collection after verification |
+| `--no-fast-bulk`, `--no-verify`, `--no-wait` | Keep indexing during ingest, skip exact `COUNT` verification, or skip `WAIT true` on upserts |
+
+With `--shard-key-field`, migrate discovers custom shard keys with
+`FACET <field> … LIMIT 10000 EXACT true` (payload-only scroll fallback past
+truncation or without an index), creates them in the schema phase with an
+`is_tenant = true` index, and routes each point with `SHARD` — payload
+integers stay numeric keys, strings stay keywords. On standalone Qdrant,
+which cannot create shard keys, migrate fails in the schema phase instead of
+hanging ingest.
 
 ## Configuring the edge backend
 
@@ -135,6 +173,7 @@ edge backend overview](/docs/edge/) and [the edge CLI reference](/docs/edge/cli/
 | `doctor`, `\d` | Run backend and embedder health diagnostics |
 | `explain <query>` | Show the hierarchical ASCII execution plan tree |
 | `execute <file>`, `\e <file>` | Run a `.qql` script file statement-by-statement with timing |
+| `\param [key=value \| clear]`, `\p` | Inspect, set, or clear session-scoped parameter bindings applied to later statements |
 | `dump <collection> <output.qql>` | Dump a collection (schema + vectors + payload) to `.qql` |
 | `exit`, `quit`, `\q`, `:q` | Leave the shell |
 

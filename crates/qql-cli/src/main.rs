@@ -363,57 +363,6 @@ fn collect_exec_params(
     Ok(Some(serde_json::Value::Object(map)))
 }
 
-fn resolve_query_params(
-    query: &str,
-    params: &[String],
-    params_file: Option<&PathBuf>,
-) -> Result<String, Box<dyn std::error::Error>> {
-    if params.is_empty() && params_file.is_none() {
-        return Ok(query.to_string());
-    }
-
-    let mut map = serde_json::Map::new();
-
-    if let Some(file_path) = params_file {
-        let content = std::fs::read_to_string(file_path)?;
-        let parsed: serde_json::Value = serde_json::from_str(&content)?;
-        match parsed {
-            serde_json::Value::Object(obj) => {
-                for (k, v) in obj {
-                    let key = k.strip_prefix(':').unwrap_or(&k).to_string();
-                    map.insert(key, v);
-                }
-            }
-            serde_json::Value::Array(_) => {
-                let bound = qql_core::params_json::bind_str_with_params(query, &parsed, false)?;
-                return Ok(bound);
-            }
-            _ => {
-                return Err("--params-file must contain a JSON object or array".into());
-            }
-        }
-    }
-
-    for p in params {
-        let (key_raw, val_raw) = p
-            .split_once('=')
-            .ok_or_else(|| format!("parameter must be in key=value format, got '{p}'"))?;
-        let key = key_raw
-            .trim()
-            .strip_prefix(':')
-            .unwrap_or(key_raw.trim())
-            .to_string();
-        let val_trimmed = val_raw.trim();
-        let parsed_val: serde_json::Value = serde_json::from_str(val_trimmed)
-            .unwrap_or_else(|_| serde_json::Value::String(val_trimmed.to_string()));
-        map.insert(key, parsed_val);
-    }
-
-    let bound =
-        qql_core::params_json::bind_str_with_params(query, &serde_json::Value::Object(map), false)?;
-    Ok(bound)
-}
-
 fn print_migrate_result(
     source: &str,
     target: &str,
@@ -508,8 +457,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
             quiet,
         } => {
-            let bound = resolve_query_params(&query, &params, params_file.as_ref())?;
-            commands::handle_explain(&bound, json, quiet)
+            let exec_params = collect_exec_params(&params, params_file.as_ref())?;
+            commands::handle_explain(&query, exec_params.as_ref(), json, quiet)
         }
         Command::Connect => commands::handle_connect(&url, use_edge).await,
         Command::Convert { file } => commands::handle_convert(file.as_deref()),
@@ -706,22 +655,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_resolve_query_params_named() {
-        let query = "QUERY TEXT :q FROM docs WHERE price < :p LIMIT :l;";
+    fn test_collect_exec_params_named() {
         let params = vec![
             "q=laptop".to_string(),
             ":p=999.50".to_string(),
             "l=5".to_string(),
         ];
-        let bound = resolve_query_params(query, &params, None).unwrap();
-        assert!(bound.contains("QUERY TEXT 'laptop' FROM docs WHERE price < 999.5"));
-        assert!(bound.contains("LIMIT 5"));
+        let out = collect_exec_params(&params, None).unwrap().unwrap();
+        assert_eq!(out["q"], serde_json::json!("laptop"));
+        assert_eq!(out["p"], serde_json::json!(999.5));
+        assert_eq!(out["l"], serde_json::json!(5));
     }
 
     #[test]
-    fn test_resolve_query_params_empty() {
-        let query = "QUERY TEXT 'test' FROM docs LIMIT 10;";
-        let bound = resolve_query_params(query, &[], None).unwrap();
-        assert_eq!(bound, query);
+    fn test_collect_exec_params_empty() {
+        assert!(collect_exec_params(&[], None).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_explain_binds_rows_params() {
+        // Whole-point placeholders bind on the AST, so explain accepts the
+        // same `:rows` batch files as exec (no string splicing).
+        let params = serde_json::json!({"rows": [{"id": 1}]});
+        commands::handle_explain(
+            "UPSERT INTO docs VALUES :rows WAIT true;",
+            Some(&params),
+            true,
+            true,
+        )
+        .unwrap();
     }
 }
