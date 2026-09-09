@@ -338,7 +338,28 @@ print(tokenize(query))
 | `compile_query(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
 | `bind(query, params, *, truncate_vectors=False)` | bound string or `Stmt` | Substitute `:name` / `?` parameters; `Stmt` + `truncate_vectors=True` returns a readable string |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
-| `HttpEmbedder` | embedder object | Supply a remote dense embedding model (dense-only class; see the embedder ladder in the API surface reference) |
+| `HttpEmbedder` | embedder object | Supply remote dense, multi, image, and rerank endpoints (sparse resolves to local BM25; see the embedder ladder in the API surface reference) |
+
+`HttpEmbedder` accepts dense plus optional multi, image, and rerank groups:
+
+```python
+from pyqql import Client, HttpEmbedder
+
+embedder = HttpEmbedder(
+    endpoint="http://localhost:11434/v1/embeddings",
+    model="dense-m",
+    dimension=8,
+    multi_endpoint="http://localhost:11434/v1/multi",
+    multi_model="colbert",
+    multi_dimension=4,
+    image_endpoint="http://localhost:11434/v1/image",
+    image_model="clip",
+    image_dimension=8,
+    rerank_endpoint="http://localhost:11434/rerank",
+    rerank_model="bge",
+)
+client = Client("http://localhost:6333", embedder=embedder)
+```
 
 ## Pin reads with route affinity
 

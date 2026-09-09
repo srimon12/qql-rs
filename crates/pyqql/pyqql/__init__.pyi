@@ -131,6 +131,17 @@ class HttpEmbedder:
         model: str,
         dimension: int,
         api_key: Optional[str] = None,
+        multi_endpoint: Optional[str] = None,
+        multi_api_key: Optional[str] = None,
+        multi_model: Optional[str] = None,
+        multi_dimension: Optional[int] = None,
+        image_endpoint: Optional[str] = None,
+        image_api_key: Optional[str] = None,
+        image_model: Optional[str] = None,
+        image_dimension: Optional[int] = None,
+        rerank_endpoint: Optional[str] = None,
+        rerank_api_key: Optional[str] = None,
+        rerank_model: Optional[str] = None,
     ) -> None: ...
 
 class Client:

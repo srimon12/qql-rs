@@ -66,4 +66,98 @@ impl Embedder for Client {
         }
         Ok(qql_embed::sparse::embed_document(text))
     }
+
+    async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
+        let bags = self
+            .embed_multi_texts(vec![text.to_string()], model)
+            .await
+            .map_err(|e| {
+                let msg = e.as_string().unwrap_or_else(|| "multi embed failed".into());
+                if msg.contains("not available") {
+                    qql_embed::multi_unsupported_error(model)
+                } else {
+                    QqlError::execution("QQL-EMBEDDING-MULTI", msg, None)
+                }
+            })?;
+        bags.into_iter().next().ok_or_else(|| {
+            QqlError::execution(
+                "QQL-EMBEDDING-MULTI",
+                "multi embedding response was empty",
+                None,
+            )
+        })
+    }
+
+    async fn embed_multi_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<Vec<f32>>>, QqlError> {
+        self.embed_multi_texts(texts.to_vec(), model)
+            .await
+            .map_err(|e| {
+                let msg = e.as_string().unwrap_or_else(|| "multi embed failed".into());
+                if msg.contains("not available") {
+                    qql_embed::multi_unsupported_error(model)
+                } else {
+                    QqlError::execution("QQL-EMBEDDING-MULTI", msg, None)
+                }
+            })
+    }
+
+    async fn embed_image(&self, source: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        let batch = self
+            .embed_image_sources(vec![source.to_string()], model)
+            .await
+            .map_err(|e| {
+                let msg = e.as_string().unwrap_or_else(|| "image embed failed".into());
+                if msg.contains("not available") {
+                    qql_embed::image_unsupported_error(model)
+                } else {
+                    QqlError::execution("QQL-EMBEDDING-IMAGE", msg, None)
+                }
+            })?;
+        batch.into_iter().next().ok_or_else(|| {
+            QqlError::execution(
+                "QQL-EMBEDDING-IMAGE",
+                "image embedding response was empty",
+                None,
+            )
+        })
+    }
+
+    async fn embed_image_batch(
+        &self,
+        sources: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        self.embed_image_sources(sources.to_vec(), model)
+            .await
+            .map_err(|e| {
+                let msg = e.as_string().unwrap_or_else(|| "image embed failed".into());
+                if msg.contains("not available") {
+                    qql_embed::image_unsupported_error(model)
+                } else {
+                    QqlError::execution("QQL-EMBEDDING-IMAGE", msg, None)
+                }
+            })
+    }
+
+    async fn rerank_pairs(
+        &self,
+        query: &str,
+        documents: &[String],
+        model: &str,
+    ) -> Result<Vec<f32>, QqlError> {
+        self.rerank_pair_scores(query, documents, model)
+            .await
+            .map_err(|e| {
+                let msg = e.as_string().unwrap_or_else(|| "rerank failed".into());
+                if msg.contains("not available") {
+                    qql_embed::cross_rerank_unsupported_error(model)
+                } else {
+                    QqlError::execution("QQL-RERANK-CROSS", msg, None)
+                }
+            })
+    }
 }

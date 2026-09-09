@@ -155,15 +155,14 @@ before assuming a dense config covers multi-vector, image, or rerank work:
 
 | Capability | Node `HttpEmbedder` | Python `HttpEmbedder` | WASM client |
 |---|---|---|---|
-| Dense text (`endpoint`, `model`, `dimension`) | yes | yes (dense-only class) | yes via `setHttpEmbedder(endpoint, model, dimension)` |
-| Multi or ColBERT (`multiEndpoint`, `multiModel`, `multiDimension`) | yes | no (use Node or Rust for multi-vector endpoints) | no |
-| Image or CLIP (`imageEndpoint`, `imageModel`, `imageDimension`) | yes | no | no |
-| Cross-encoder rerank (`rerankEndpoint`, `rerankModel`) | yes | no | no |
+| Dense text (`endpoint`, `model`, `dimension`) | yes | yes (dense settings; sparse resolves to local BM25) | yes via `setHttpEmbedder(endpoint, model, dimension)` |
+| Multi or ColBERT (`multiEndpoint`, `multiModel`, `multiDimension`) | yes | yes | yes via `setHttpMultiEmbedder(endpoint, model, dimension)` |
+| Image or CLIP (`imageEndpoint`, `imageModel`, `imageDimension`) | yes | yes | yes via `setHttpImageEmbedder(endpoint, model, dimension)` |
+| Cross-encoder rerank (`rerankEndpoint`, `rerankModel`) | yes | yes | yes via `setHttpReranker(endpoint, model)` |
 | JS callback (`async (texts) => number[][]`, batched) | no (native transport) | no | yes via `setEmbedder(fn)` |
 
-WASM accepts one HTTP text embedder at a time plus one JS callback; multi-vector,
-image, and reranker endpoint configuration belongs in the Rust, Python dict, or
-Node SDKs. `setRemoteEmbedder` on WASM is an alias for `setHttpEmbedder`.
+WASM accepts HTTP dense, multi-vector, image, and reranker endpoints plus one JS callback; use one setter per group.
+`setRemoteEmbedder` on WASM is an alias for `setHttpEmbedder`.
 
 ## Error shape
 
