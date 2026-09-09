@@ -40,6 +40,13 @@ The command:
 This detects grammar drift — and plan-level regressions — without depending on
 a previously generated or published SDK package.
 
+## Error-code check
+
+`scripts/check-error-codes.sh` runs in CI on every PR. It scans the
+implementation crates for `QQL-*` literals and diffs them against the
+reference page. Undocumented codes, unemitted codes, missing table rows,
+and an unsorted set block all fail the gate.
+
 ## Full site check
 
 {% terminal title="Validate and build" %}

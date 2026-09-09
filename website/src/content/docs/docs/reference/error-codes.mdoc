@@ -311,6 +311,13 @@ below, test doubles excluded, `QQL-BIND-ALREADY-BOUND` allowlisted from the
 bindings) and keep every code's per-section table row alongside it. CI runs
 the script on every PR:
 
+{% aside type="note" title="CI gate" %}
+`scripts/check-error-codes.sh` runs in CI on every PR. It fails on
+emitted-but-undocumented codes, documented-but-unemitted codes, codes missing
+a per-section table row, and an unsorted complete set block. Curated
+exceptions live in the script allowlist with reasons attached.
+{% /aside %}
+
 ```text
 QQL-BACKEND
 QQL-BACKEND-AUTH

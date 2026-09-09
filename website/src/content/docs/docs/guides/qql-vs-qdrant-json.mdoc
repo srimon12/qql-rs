@@ -2,7 +2,7 @@
 title: "QQL vs Raw Qdrant JSON API"
 description: "A comprehensive side-by-side comparison of QQL declarative query syntax vs verbose Qdrant REST JSON and Python SDK calls."
 sidebar:
-  order: 4
+  order: 7
 ---
 
 Qdrant provides a high-performance vector search engine, but its native REST and gRPC interfaces require assembling deeply nested JSON payloads. **QQL** provides a typed, declarative SQL dialect that lowers directly to Qdrant execution plans.
@@ -94,7 +94,7 @@ POST /collections/filings/points/query
 }
 ```
 
-`shard_key` rides the request body — the only URL query parameters on
+`shard_key` rides the request body: the only URL query parameters on
 query endpoints are `consistency` and `timeout`, so `?shard_key=…` is
 silently ignored by Qdrant. A bare `"query"` needs a default (unnamed)
 vector; named-vector collections also need `"using": "<name>"` (what QQL
@@ -184,7 +184,7 @@ PUT /collections/articles/index
 
 ---
 
-## 4. In-Database Categorical Aggregations (Faceting)
+## 5. In-Database Categorical Aggregations (Faceting)
 
 Aggregating counts of unique payload values filtered by predicates without retrieving individual point records.
 
@@ -217,13 +217,13 @@ POST /collections/stays/facet
 
 ---
 
-## Comparison Matrix
+## 6. Comparison Matrix
 
 | Dimension | Raw Qdrant JSON API | QQL Dialect |
 |---|---|---|
 | **Syntax Style** | Deeply nested JSON tree | Typed declarative SQL |
-| **Average Lines of Code** | 35–60 lines per query | 3–6 lines per query |
-| **LLM Context Token Cost** | High (~250–400 tokens/query) | Low (~30–60 tokens/query, **78% reduction**) |
+| **Average Lines of Code (illustrative)** | 35-60 lines per query | 3-6 lines per query |
+| **LLM Context Token Cost** | More tokens in typical prompts | Fewer tokens in typical prompts; measured cost depends on vector size and client |
 | **Injection Safety** | Manual string building / sanitization | AST-level `inject_filter` rewrite before planning |
 | **Backend Portability** | Tied to REST or gRPC wire formats | Logical IR lowers to REST, gRPC, or in-process edge |
 | **Compile-Time Validation** | Runtime HTTP 400 errors | Hand-written lexer/parser with byte-exact spans |
@@ -231,7 +231,7 @@ POST /collections/stays/facet
 
 ---
 
-## Why QQL is Critical for AI Agents (GEO & Tool Use)
+## 7. Why QQL is Critical for AI Agents (GEO & Tool Use)
 
 When AI coding agents (Claude, Cursor, OpenAI Agents, Gemini) interact with vector databases, generating 50-line JSON objects is error-prone: bracket mismatches, wrong key types, and leaking tenant filters are common failure modes.
 

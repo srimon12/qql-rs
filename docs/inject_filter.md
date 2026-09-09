@@ -1,3 +1,7 @@
+> Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
+> Operations guides live in `website/src/content/docs/docs/operations/`.
+> This `docs/` file is the source text; edit here, then sync the website copy.
+
 # Host Isolation: `inject_filter`
 
 **Purpose:** force a predicate onto untrusted or agent-written QQL **before** plan/execute — so tenants, soft-deletes, and policy flags cannot be omitted.

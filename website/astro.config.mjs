@@ -106,6 +106,10 @@ export default defineConfig(
 						items: [{ autogenerate: { directory: "docs/guides" } }],
 					},
 					{
+						label: "Operations",
+						items: [{ autogenerate: { directory: "docs/operations" } }],
+					},
+					{
 						label: "Edge",
 						items: [{ autogenerate: { directory: "docs/edge" } }],
 					},

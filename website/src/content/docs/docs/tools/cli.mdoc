@@ -6,8 +6,8 @@ sidebar:
 ---
 
 The `qql` binary is the operational interface to the same runtime used by the
-SDKs. It parses, plans, and executes QQL against a Qdrant instance — or against
-the in-process edge backend — from a terminal or a script.
+SDKs. It parses, plans, and executes QQL against a Qdrant instance, or against
+the in-process edge backend, from a terminal or a script.
 
 ## Global flags
 
@@ -33,7 +33,7 @@ the `grpc` feature. Otherwise the REST transport is used.
 | `qql explain "<query>"` | Show the hierarchical execution plan tree without a backend (ASCII tree; JSON with `--json`; accepts the same `--param` / `--params-file` bindings) |
 | `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file) |
 | `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
-| `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; typed `CREATE COLLECTION` + `CREATE INDEX` + batched `UPSERT`; custom-sharded collections also emit `CREATE SHARD KEY` plus per-shard `SHARD`-routed upserts, so the file replays with exact counts) |
+| `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; see Operations > [Dump and restore](/docs/operations/backup-restore/)) |
 | `qql migrate <collection>` | Copy schema + points to another cluster or collection (see below) |
 | `qql doctor` | Check backend, model hosts, and embedder health (`--json`) |
 | `qql config edge` | Configure persistent edge settings (see below) |
@@ -57,10 +57,7 @@ qql version
 
 ## Migrate a collection
 
-`qql migrate <collection>` copies schema + points to another cluster or
-collection — not a Qdrant snapshot. The source is `--url`; the target defaults
-to the same endpoint unless `--target-url` (plus `--target-api-key`) points
-elsewhere. `--to` renames the target collection.
+`qql migrate <collection>` copies schema and points to another cluster or collection. Use `--target-url` for a remote target and `--to` to rename.
 
 {% terminal title="Preview, run, and resume a migration" %}
 qql migrate docs --to docs_copy --dry-run
@@ -70,25 +67,14 @@ qql migrate docs --to docs_copy --resume
 
 | Flag | Purpose |
 |---|---|
-| `--dry-run` | Print the `CREATE COLLECTION` / `CREATE INDEX` / `ALTER COLLECTION` plan and exit without writing |
-| `--recreate` | `DROP` the target collection before creating it |
+| `--dry-run` | Print the create plan and exit without writing |
+| `--recreate` | Drop and recreate the target collection |
 | `--workers N`, `--batch-size N` | Parallel upsert window |
-| `--where "<filter>"` | Migrate only points matching a QQL filter |
-| `--shard-number`, `--replication-factor`, `--sharding-method`, `--quantize scalar\|binary\|product\|turbo` | Reshape the target schema on create |
-| `--shard-key <key>` | Route every upsert to one literal shard key |
-| `--shard-key-field <field>` | Discover per-point shard keys and route each point by its payload value |
-| `--on-missing-shard-key error\|skip\|default=<key>` | Policy for points without the field (default `error`) |
-| `--checkpoint`, `--resume`, `--restart` | Crash recovery under `.qql-migrate/` (resume the same command; `--restart` starts over) |
-| `--cutover <alias>` | Point an alias at the target collection after verification |
-| `--no-fast-bulk`, `--no-verify`, `--no-wait` | Keep indexing during ingest, skip exact `COUNT` verification, or skip `WAIT true` on upserts |
+| `--where "<filter>"` | Migrate only matching points |
+| `--shard-key-field <field>` | Route each point by its payload value |
+| `--resume`, `--restart`, `--cutover <alias>` | Resume recovery or point an alias at the target |
 
-With `--shard-key-field`, migrate discovers custom shard keys with
-`FACET <field> … LIMIT 10000 EXACT true` (payload-only scroll fallback past
-truncation or without an index), creates them in the schema phase with an
-`is_tenant = true` index, and routes each point with `SHARD` — payload
-integers stay numeric keys, strings stay keywords. On standalone Qdrant,
-which cannot create shard keys, migrate fails in the schema phase instead of
-hanging ingest.
+The full operator guide lives at [Cluster migration](/docs/operations/cluster-migration/) and dump detail at [Dump and restore](/docs/operations/backup-restore/).
 
 ## Configuring the edge backend
 

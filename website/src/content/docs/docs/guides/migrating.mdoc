@@ -1,9 +1,15 @@
 ---
-title: "Migrating to QQL 0.4.0"
-description: "Breaking changes, behavioral updates, and migration guidance for upgrading from QQL 0.3.x to 0.4.0."
+title: "Upgrading from QQL 0.3 to 0.4"
+description: "SDK version upgrade notes for moving from QQL 0.3.x to 0.4.0."
 sidebar:
   order: 9
 ---
+
+{% aside type="note" title="Scope: SDK upgrade only" %}
+Cluster or collection data migration lives in Operations > Cluster migration
+([/docs/operations/cluster-migration/](/docs/operations/cluster-migration/)).
+This page covers the SDK version upgrade only.
+{% /aside %}
 
 QQL 0.4.0 hardens the compiler, query planner, and host SDKs for production stability,
 unifies batch parameter semantics across all language bindings, and introduces typed

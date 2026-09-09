@@ -5,8 +5,8 @@ sidebar:
   order: 2
 ---
 
-Vector names answer “which vector?” Vector roles answer “what input shape and
-embedding path?” QQL keeps those decisions separate.
+Vector names answer "which vector?" Vector roles answer "what input shape and
+embedding path?" QQL keeps those decisions separate.
 
 | Form | Role |
 |---|---|
@@ -21,22 +21,51 @@ QUERY 'late interaction' FROM papers USING colbert AS MULTI LIMIT 10;
 ```
 {% /qqlExample %}
 
-## Late-interaction reranking
+## Schema with MULTIVECTOR
 
-{% qqlExample title="ColBERT-style rerank" %}
+Token-level multivector storage uses `MULTIVECTOR` with a comparator. The
+example below keeps a dense vector for candidate generation and a 128
+dimension multivector for late interaction.
+
+{% qqlExample title="Create multi-vector collection for ColBERT" %}
+```sql
+CREATE COLLECTION kb_articles (
+  dense VECTOR(384, COSINE),
+  colbert VECTOR(128, COSINE) WITH HNSW (m = 0) WITH MULTIVECTOR (comparator = 'max_sim')
+);
+```
+{% /qqlExample %}
+
+## Direct multivector search
+
+Search a multivector space directly with `USING ... AS MULTI`.
+
+{% qqlExample title="Direct ColBERT token-level search" %}
+```sql
+QUERY 'late interaction vector retrieval'
+FROM kb_articles
+USING colbert AS MULTI
+WHERE category = 'search'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Two-stage dense retrieval plus rerank
+
+At scale, retrieve candidates with dense search, then rerank with
+late-interaction MaxSim over the prefetched set.
+
+{% qqlExample title="Two-stage prefetch and ColBERT reranking" %}
 ```sql
 WITH
-  candidates AS (QUERY 'vector compression' USING dense LIMIT 100)
-QUERY RERANK TEXT 'vector compression' MODEL 'colbert-v2'
-FROM papers
+  candidates AS (QUERY 'late interaction vector retrieval' USING dense LIMIT 100)
+QUERY RERANK TEXT 'late interaction vector retrieval' MODEL 'colbert-v2'
+FROM kb_articles
 USING colbert AS MULTI
 PREFETCH (candidates)
 LIMIT 10;
 ```
 {% /qqlExample %}
-
-This embeds the query as a dense multivector and uses Qdrant MaxSim against the
-stored multivector target.
 
 ## Cross-encoder reranking
 
@@ -51,6 +80,14 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
-Cross reranking reads candidate text from the payload, calls the host's
-pair-scoring capability, and reorders hits client-side. It does not use a Qdrant
+Cross reranking reads candidate text from the payload, calls the host pair
+scoring capability, and reorders hits client-side. It does not use a Qdrant
 multivector target.
+
+## Architecture
+
+| Architecture | Retrieval latency | Storage footprint | Interaction depth | Best used for |
+|---|---|---|---|---|
+| Single dense vector | 1-5 ms | Low (1 vector per doc) | Coarse chunk level | First-stage candidate generation |
+| ColBERT late interaction | 10-25 ms | Medium (N vectors per doc) | Fine-grained token MaxSim | High-precision candidate reranking |
+| Cross-encoder model | 50-200 ms | None (re-evaluates text) | Full cross-attention | Final top-10 scoring and reranking |

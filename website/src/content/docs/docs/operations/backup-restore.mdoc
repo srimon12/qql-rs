@@ -1,0 +1,164 @@
+---
+title: "Dump and restore"
+description: "Export a collection to a replayable .qql script with qql dump and restore it with qql execute."
+sidebar:
+  order: 1
+---
+
+`qql dump` exports one collection as schema plus points in a plain `.qql`
+script. Restore is a replay: `qql execute` runs the file statement by
+statement. Nothing in the file is a stub. Vectors are literal values, so the
+script replans and replays on any cluster that accepts the schema.
+
+## Command shape
+
+{% terminal title="Dump a collection" %}
+qql dump docs docs.qql
+qql dump docs docs.qql --batch-size 100
+qql dump docs docs.qql --json
+{% /terminal %}
+
+| Flag | Purpose |
+|---|---|
+| `--batch-size N` | Points per emitted `UPSERT` batch (default `100`, must be at least `1`) |
+| `--json` | Print a JSON summary instead of a human-readable line |
+| `-q`, `--quiet` | Suppress progress output |
+| `--url <URL>` | Source endpoint (global flag, defaults to `http://localhost:6333`) |
+| `--edge` | Dump from the configured in-process edge backend (global flag) |
+
+Dumping a missing collection fails before any file is written.
+
+## Atomic output guarantee
+
+The dump streams to `<output>.tmp` and only renames it to the final path
+after the last page is written (copy fallback on cross-device renames). A
+failed dump leaves any pre-existing file at the output path untouched and
+removes the temporary file. Treat the output path as all or nothing: either
+it holds a finished script with a footer, or it was never replaced.
+
+## Emitted file layout
+
+Every file has the same four parts in order:
+
+1. `CREATE COLLECTION` rebuilt from the typed vector schema, with
+   `WITH PARAMS`, `WITH HNSW`, `WITH OPTIMIZERS`, and `WITH QUANTIZATION`
+   blocks as reported by the source. Qdrant reports `0` for unset
+   positive-only tuning keys (`ef_construct`, `max_indexing_threads`,
+   `payload_m`, and similar); those zeros are omitted because `key = 0`
+   does not parse.
+2. One `CREATE INDEX` per payload index on the source.
+3. One `CREATE SHARD KEY` per custom shard key (custom-sharded collections
+   only).
+4. One `UPSERT` per batch of points, each carrying its `SHARD` key on
+   custom-sharded collections, followed by a `-- Written / Skipped / Batches`
+   footer.
+
+{% qqlExample title="Dumped schema header" %}
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+)
+WITH HNSW (m = 16, ef_construct = 100);
+
+CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+```
+{% /qqlExample %}
+
+{% qqlExample title="Dumped shard keys" %}
+```sql
+CREATE SHARD KEY 'acme' ON COLLECTION docs;
+
+CREATE SHARD KEY 101 ON COLLECTION docs;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Dumped point batches" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3]}, tenant_id: 'acme', title: 'QQL'};
+
+UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.4, 0.5, 0.6]}, tenant_id: 'acme'} SHARD 'acme';
+```
+{% /qqlExample %}
+
+Points without a usable `id` are skipped and counted in the footer, never
+emitted as half rows.
+
+## Cursor semantics
+
+The dump pages through the collection with cursor scrolls that request full
+payloads and full vectors. It prefers the server `next_page_offset` and
+falls back to the last point id on the page when the backend omits a cursor.
+Scroll offsets are inclusive, so the fallback page repeats the resume point
+first and the dump drops that duplicate before writing. Point ids are unique
+per page, so the drop is a no-op on backends with exclusive offsets.
+
+## Restore
+
+Restore replays the file with the script runner. `--stop-on-error` halts at
+the first failing statement instead of continuing through the rest of the
+file.
+
+{% terminal title="Restore a dump" %}
+qql execute docs.qql --stop-on-error
+{% /terminal %}
+
+The runner prints a JSON summary with `ok`, `command`, `path`,
+`succeeded`, `failed`, and `message` fields. Replay the schema statements
+first by keeping the file order: collection, then indexes, then shard keys,
+then point batches. Point batches for one shard key stay grouped under
+their `SHARD` clause, so a partial replay that keeps whole statements is
+still routed correctly.
+
+{% qqlExample title="Verify the restore" %}
+```sql
+COUNT FROM docs WITH (exact = true);
+
+SCROLL FROM docs WITH VECTOR false LIMIT 100;
+```
+{% /qqlExample %}
+
+## REPL dump
+
+Inside the interactive shell (`qql repl`), the same exporter runs as a
+built-in:
+
+{% terminal title="Dump from the REPL" %}
+qql repl
+qql> dump docs docs.qql
+qql> dump collection docs docs.qql
+{% /terminal %}
+
+Both forms take the collection name and the output path.
+
+## Edge dump
+
+With an edge-enabled build, `dump` reads from the in-process backend:
+
+{% terminal title="Dump from the edge backend" %}
+qql --edge dump listings out.qql
+{% /terminal %}
+
+The file format is identical, so an edge dump replays against a server
+collection and a server dump replays against edge wherever the statements
+are in the edge capability surface (no `GROUP BY`, `SHARD` keys,
+`ALTER COLLECTION`, or ACORN).
+
+## Batch-size sizing
+
+`--batch-size` sets points per `UPSERT` statement in the file. Small values
+produce many small statements that replay slowly; large values produce a
+few large statements that cost more memory per statement on replay. The
+default of `100` suits dense collections. Lower it toward `64` for
+multivector collections whose per-point token matrices are large, and raise
+it toward `256` for narrow dense collections on a fast link. Whatever value
+you pick, replay in similar-sized windows.
+
+## Sharded round-trip replay
+
+On a custom-sharded collection the dump scrolls each shard key separately
+and routes every emitted batch with its key. Replaying that file against a
+fresh `custom` collection (create the collection and the `CREATE SHARD KEY`
+lines first) restores exact counts per shard. Replaying a sharded file
+without routing fails with `Shard key not specified`, which is the backend
+telling you the target collection expects a key you did not send. Keep the
+emitted `SHARD` clauses intact and the round trip preserves the layout.

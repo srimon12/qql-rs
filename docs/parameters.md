@@ -1,3 +1,7 @@
+> Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
+> Operations guides live in `website/src/content/docs/docs/operations/`.
+> This `docs/` file is the source text; edit here, then sync the website copy.
+
 # Parameter Binding & Prepared Statements
 
 QQL provides type-safe parameter binding and prepared query templates through `qql_core::params` and `qql::executor::Executor`.
