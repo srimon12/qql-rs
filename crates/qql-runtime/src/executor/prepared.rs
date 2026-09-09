@@ -89,6 +89,16 @@ impl Executor {
     /// The template is built as AST (never interpolated SQL), so collection
     /// names are data, not syntax. `batch_size == 0` fails closed;
     /// empty `rows` returns an empty `ok` report without I/O.
+    ///
+    /// Peak live set is the caller's `rows` vec plus one in-flight batch:
+    /// each chunk moves (never clones) through bind, and the plan/proto
+    /// layers copy one batch at a time. For larger-than-memory datasets,
+    /// partition client-side into multiple `upsert_many` calls — each extra
+    /// call costs one metadata round-trip plus a template plan (no re-parse,
+    /// schema served from cache), negligible next to a round-trip per batch.
+    /// No streaming iterator API is provided: the harness and all current
+    /// callers already hold `rows` by construction, so one would add surface
+    /// without moving any measured number.
     pub async fn upsert_many(
         &self,
         collection: &str,
@@ -121,24 +131,44 @@ impl Executor {
             .await?;
         let stop_on_error = matches!(on_error, OnError::Stop);
         let mut results = Vec::new();
-        // Move (never clone) each chunk out of `rows`: the point dicts are
-        // already owned, and a deep clone here would duplicate every vector
-        // element once more for no reason.
+        // Move (never clone) each chunk out of `rows` and straight through
+        // bind: the chunk sits in a one-shot slot behind the `Fn` lookup
+        // `bind_stmt` demands, so the point splice takes ownership with zero
+        // deep clones. Routing through `execute_prepared`'s generic
+        // `params.get(k).cloned()` map lookup instead would duplicate every
+        // vector element once more (~8ms per 10k 128-dim points, measured).
+        // `std::sync::Mutex` — not `RefCell` — keeps the future `Send`.
+        // `bind_stmt`'s public `Fn` bound is untouched.
         let mut rows = rows.into_iter();
         loop {
             let chunk: Vec<Value> = rows.by_ref().take(batch_size).collect();
             if chunk.is_empty() {
                 break;
             }
-            let mut params = HashMap::with_capacity(1);
-            params.insert("rows".to_string(), Value::List(chunk));
-            match self.execute_prepared(&prepared, &params).await {
+            let slot = std::sync::Mutex::new(Some(Value::List(chunk)));
+            let lookup = |name: &str| {
+                if name == "rows" {
+                    slot.lock().expect("upsert_many param slot").take()
+                } else {
+                    None
+                }
+            };
+            // Bypass `execute_prepared`: template and param are both built
+            // here, so its no-placeholder/unused-param checks hold by
+            // construction (`:rows` is the template's only param).
+            debug_assert!(prepared.named_params.contains("rows"));
+            match self
+                .execute_prepared_upsert_points(&prepared, &lookup, &[])
+                .await
+            {
                 Ok(resp) => results.push(resp),
                 Err(e) if !stop_on_error => results.push(ExecResponse {
                     ok: false,
                     operation: "UPSERT".to_string(),
                     message: e.to_string(),
                     data: None,
+                    telemetry: None,
+                    typed_hits: std::sync::OnceLock::new(),
                 }),
                 Err(e) => return Err(e),
             }

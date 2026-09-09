@@ -109,6 +109,28 @@ let rows: Vec<qql_core::ast::Value> = vec![
 let report = executor.upsert_many("docs", rows, 100, OnError::Stop).await?;
 ```
 
+Chunks move (never clone) through the point-splice path; the peak live-set
+is the caller's `rows` vector by construction — for million-row ingests,
+chunk the *calls*, since `upsert_many` chunks transport, not memory.
+
+## Profile before you optimize
+
+`Executor::explain_analyze` (plus `_with_named_params` / `_with_params`
+twins) runs one statement and returns the static plan plus measured client
+phase timings and honest server telemetry. Every `ExecResponse` also carries
+`telemetry: Option<ServerTelemetry>` (`time_s` + hardware/inference `usage`,
+`None` where the route reports nothing), and typed result accessors read
+from a cached typed representation — no JSON round-trip on the gRPC leg:
+
+```rust
+let analysis = executor.explain_analyze(
+    "QUERY 'ultrabook' FROM products USING dense LIMIT 10",
+    OnError::Stop,
+).await?;
+println!("server: {:?}s", analysis.server_time_s);
+println!("dispatch: {}ms", analysis.phases.dispatch_ms);
+```
+
 ## Pin reads with route affinity
 
 Qdrant 1.19+ can pin subsequent reads to a stable replica using the

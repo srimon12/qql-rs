@@ -48,7 +48,7 @@ try {
 const dx = require('./dx-common.js');
 dx.installStmtToJSON(nativeBinding.Stmt);
 
-const { buildError, callNative, validateOptions, ScoredPoint, ExecutionReport } = dx;
+const { buildError, callNative, validateOptions, ScoredPoint, ExecutionReport, scrollCursor, scrollStream } = dx;
 
 const normalizeQuery = (query) => dx.normalizeQuery(nativeBinding.Stmt, query);
 
@@ -238,6 +238,24 @@ class Client {
     return callNative(() => this._inner.explainStmt(stmt));
   }
 
+  /**
+   * Analyze a single query string or Stmt: static plan plus measured
+   * execution (per-phase client timings, server time, hardware/inference
+   * usage). Returns the AnalyzeReport as a plain object. Batches fail
+   * closed — analyze each entry separately.
+   */
+  async explainAnalyze(query, options) {
+    try {
+      const raw = await this._inner.explainAnalyze(
+        normalizeQuery(query),
+        validateOptions(options) || undefined,
+      );
+      return JSON.parse(raw);
+    } catch (error) {
+      throw buildError(error);
+    }
+  }
+
   compile(query, params) {
     return callNative(() => this._inner.compile(query, params));
   }
@@ -270,6 +288,8 @@ module.exports = {
   execute,
   executeHits,
   executeStmt,
+  scrollCursor,
+  scrollStream,
   Client,
   Stmt: nativeBinding.Stmt,
   ScoredPoint,

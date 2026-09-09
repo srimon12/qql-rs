@@ -33,6 +33,54 @@ export interface ExecResponse {
   operation: string;
   message: string;
   data: unknown | null;
+  /** Server telemetry when the backend reported it; absent otherwise. */
+  telemetry?: ServerTelemetry | null;
+}
+
+export interface HardwareUsage {
+  cpu: number;
+  payload_io_read: number;
+  payload_io_write: number;
+  payload_index_io_read: number;
+  payload_index_io_write: number;
+  vector_io_read: number;
+  vector_io_write: number;
+}
+
+export interface ModelUsage {
+  tokens: number;
+}
+
+export interface InferenceUsage {
+  models: Record<string, ModelUsage>;
+}
+
+export interface ServerUsage {
+  hardware?: HardwareUsage | null;
+  inference?: InferenceUsage | null;
+}
+
+export interface ServerTelemetry {
+  time_s?: number | null;
+  usage?: ServerUsage | null;
+}
+
+export interface PhaseTimings {
+  parse_ms: number;
+  prepare_plan_ms: number;
+  dispatch_ms: number;
+  decode_ms: number;
+  total_ms: number;
+}
+
+/** Structured `EXPLAIN ANALYZE` report (see `Client.explainAnalyze`). */
+export interface AnalyzeReport {
+  ok: boolean;
+  plan: string;
+  phases: PhaseTimings;
+  server_time_s?: number | null;
+  usage?: ServerUsage | null;
+  results: ExecResponse[];
 }
 
 export class ExecutionReport {
@@ -151,6 +199,15 @@ export class Client {
     options?: ExecuteOptions,
   ): Promise<ScoredPoint[]>;
   /**
+   * Analyze a single query string or Stmt: static plan plus measured
+   * execution (per-phase client timings, server time, hardware/inference
+   * usage). Batches fail closed — analyze each entry separately.
+   */
+  explainAnalyze(
+    query: string | Stmt,
+    options?: ExecuteOptions,
+  ): Promise<AnalyzeReport>;
+  /**
    * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
    * chunks (default 100). One `:rows` template is prepared once — no
    * re-parse, no per-batch schema fetch. Vectors take plain arrays or the
@@ -261,6 +318,34 @@ export function executeStmt(
   stmt: Stmt,
   options?: StandaloneOptions,
 ): Promise<ExecutionReport>;
+
+export interface ScrollCursorOptions {
+  /** Points per SCROLL page; a positive integer (default 100). */
+  batchSize?: number;
+  /** Raw QQL filter fragment appended as `WHERE …` (default none). */
+  where?: string;
+  /** Payloads are included by default; `false` strips `payload`
+   * client-side before yielding (SCROLL has no server-side payload
+   * exclusion in the grammar). */
+  withPayload?: boolean;
+  /** Append `WITH VECTOR` so yielded points carry vectors (default false;
+   * SCROLL omits vectors unless asked). */
+  withVector?: boolean;
+}
+/** Lazily page through a collection with SCROLL, yielding one ScoredPoint
+ * per point. At most one page is ever buffered. Works with any client
+ * exposing `execute(sql, { params })`. */
+export function scrollCursor(
+  client: Client,
+  collection: string,
+  options?: ScrollCursorOptions,
+): AsyncGenerator<ScoredPoint>;
+/** WHATWG stream over `scrollCursor` (pull-driven; honors backpressure). */
+export function scrollStream(
+  client: Client,
+  collection: string,
+  options?: ScrollCursorOptions,
+): ReadableStream<ScoredPoint>;
 
 export const version: string;
 export const __version__: string;

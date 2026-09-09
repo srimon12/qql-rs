@@ -385,3 +385,46 @@ const result = await execute("QUERY TEXT :q FROM docs USING dense LIMIT :lim", {
     params: { q: "search", lim: 10 },
 });
 ```
+
+---
+
+## 9. Lazy Scroll Cursor & Streams
+
+`scrollCursor` pages lazily through a collection with `SCROLL` over the existing `execute` path — at most one page is ever buffered, so a slow consumer never OOMs the heap. `scrollStream` wraps it in a pull-driven WHATWG `ReadableStream` (native backpressure). Module-level functions taking any object exposing `execute(sql, { params })`:
+
+```js
+const { Client, scrollCursor, scrollStream } = require('@veristamp/nqql');
+
+const client = new Client({ url: "http://localhost:6333" });
+
+// 1. Memory-bounded async iteration (stops on the first empty page)
+for await (const point of scrollCursor(client, "docs", {
+  batchSize: 500,
+  where: "status = 'active'",
+})) {
+  await processPoint(point); // next page fetches only when the buffer drains
+}
+
+// 2. Direct piping with backpressure
+scrollStream(client, "docs", { batchSize: 500 })
+  .pipeThrough(ndjsonTransform)
+  .pipeTo(writableStream);
+```
+
+Options: `batchSize` (default 100), `where` (QQL filter fragment, default ""), `withPayload` (default true — payloads are included by default, the flag only strips client-side when false since `SCROLL` has no `WITH PAYLOAD` spelling), `withVector` (default false — appends `WITH VECTOR`).
+
+---
+
+## 10. Execution Profiling (`explainAnalyze` + Telemetry)
+
+`client.explainAnalyze()` runs one statement and returns the static plan plus measured timings — client phases (`parse_ms`, `prepare_plan_ms`, `dispatch_ms`, `decode_ms`, `total_ms`) and honest server telemetry (`server_time_s` from Qdrant's `time` field, `usage` hardware/inference counters when reported; absent means `null`, never an error). Every report result also carries a per-result `telemetry` object. Batches fail closed — analyze entries separately.
+
+```js
+const analysis = await client.explainAnalyze(
+  "QUERY TEXT :q FROM docs USING dense LIMIT :lim",
+  { params: { q: "neural nets", lim: 10 } }
+);
+console.log(analysis.plan);           // static plan summary
+console.log(analysis.phases);         // { parse_ms, dispatch_ms, ... }
+console.log(analysis.server_time_s);  // seconds Qdrant spent, when reported
+```

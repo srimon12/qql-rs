@@ -38,6 +38,8 @@ impl Executor {
                         operation: "PARSE".to_string(),
                         message: error.to_string(),
                         data: None,
+                        telemetry: None,
+                        typed_hits: std::sync::OnceLock::new(),
                     });
                 }
             }
@@ -104,6 +106,8 @@ impl Executor {
                     operation: "BIND".to_string(),
                     message: e.to_string(),
                     data: None,
+                    telemetry: None,
+                    typed_hits: std::sync::OnceLock::new(),
                 });
                 continue;
             }
@@ -128,6 +132,8 @@ impl Executor {
                         operation: "PREPARE".to_string(),
                         message: e.to_string(),
                         data: None,
+                        telemetry: None,
+                        typed_hits: std::sync::OnceLock::new(),
                     });
                     continue;
                 }
@@ -148,6 +154,8 @@ impl Executor {
                         operation: "PLAN".to_string(),
                         message: e.to_string(),
                         data: None,
+                        telemetry: None,
+                        typed_hits: std::sync::OnceLock::new(),
                     });
                     continue;
                 }
@@ -185,6 +193,8 @@ impl Executor {
                 operation: planned.operation_label().to_string(),
                 message: error.to_string(),
                 data: None,
+                telemetry: None,
+                typed_hits: std::sync::OnceLock::new(),
             }),
         }
         Ok(())
@@ -220,10 +230,12 @@ impl Executor {
                                 operation: "QUERY".to_string(),
                                 message,
                                 data: None,
+                                telemetry: None,
+                                typed_hits: std::sync::OnceLock::new(),
                             });
                             continue;
                         }
-                        let (hits_val, count) = {
+                        let (hits_val, count, typed) = {
                             let pts_opt = if let Some(serde_json::Value::Object(obj)) =
                                 value.get_mut("result")
                             {
@@ -237,19 +249,26 @@ impl Executor {
                             };
                             if let Some(pts) = pts_opt {
                                 let c = pts.as_array().map(|a| a.len()).unwrap_or(0);
-                                (pts, c)
+                                (pts, c, None)
                             } else {
                                 let hits = extract_search_hits(&value);
                                 let c = hits.len();
-                                (serialize_hits(&hits)?, c)
+                                let data = serialize_hits(&hits)?;
+                                (data, c, Some(hits))
                             }
                         };
-                        results.push(ExecResponse {
+                        let mut response = ExecResponse {
                             ok: true,
                             operation: "QUERY".to_string(),
                             message: format!("Found {} hits", count),
                             data: Some(hits_val),
-                        });
+                            telemetry: None,
+                            typed_hits: std::sync::OnceLock::new(),
+                        };
+                        if let Some(hits) = typed {
+                            response = response.with_typed_hits(hits);
+                        }
+                        results.push(response);
                     }
                 }
                 Ok(responses) => {
@@ -330,6 +349,8 @@ impl Executor {
                             operation: (*label).to_string(),
                             message,
                             data: None,
+                            telemetry: None,
+                            typed_hits: std::sync::OnceLock::new(),
                         });
                         continue;
                     }
@@ -338,6 +359,8 @@ impl Executor {
                         operation: (*label).to_string(),
                         message: format!("{label} ok (batched)"),
                         data: Some(value),
+                        telemetry: None,
+                        typed_hits: std::sync::OnceLock::new(),
                     });
                 }
             }

@@ -15,6 +15,9 @@ naming and object ownership.
 | Tokenize | lexer API | `tokenize` | `tokenize` | `tokenize` |
 | Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
 | Explain | planner/runtime | `explain` | `explain` | `explain` / `analyze` |
+| Execution profile (client timings + server time/usage) | `Executor::explain_analyze` | `Client.explain_analyze` | `Client.explainAnalyze` | — |
+| DB-API cursor (Python) | — | `pyqql.connect` + cursor (`execute`/`executemany`/`fetch*`, `description`, `rowcount`) | — | — |
+| Lazy scroll cursor | — | — | `scrollCursor` / `scrollStream` | — |
 | Compile | planner/runtime | `compile_query` | `compileQuery` | `compile` |
 | Bind parameters | `bind_named` / `bind_positional` (+ `*_readable`) | `bind`, `Stmt.bind`, `execute(…, params=)` | `bind`, `Stmt.bind`, `execute(…, { params })` | `bind`, `Stmt.bind`, `execute(…, { params })` — typed arrays convert directly |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |

@@ -23,7 +23,8 @@ use qql_core::parser::Parser;
 pub mod dispatch;
 
 pub use dispatch::{
-    Input, OnError, parse_on_error, prepare_input, run_async, run_input, wrap_execution_report,
+    Input, OnError, parse_on_error, prepare_input, run_analyze_async, run_analyze_input, run_async,
+    run_input, wrap_execution_report,
 };
 
 // ═══════════════════════════════════════════════════════════════════

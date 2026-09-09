@@ -58,6 +58,9 @@ client.execute(stmt)
 | `execute` / `execute_async` | One-shot free functions (`params=` same as `bind`) |
 | `execute_hits` / `execute_async_hits` | One-shot free functions returning `List[ScoredPoint]` |
 | `ExecutionReport.hits/points/facet/count/groups` | Typed result accessors on every report |
+| `connect(url, ...)` + cursor | PEP 249-style driver: `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
+| `Client.explain_analyze` | Static plan + measured client/server timings for one statement |
+| `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
 
 ### `inject_filter` operators
 

@@ -6,6 +6,7 @@ use qql_plan::{PlannedOperation, plan};
 
 use crate::executor::dml::query::extract_search_hits;
 use crate::executor::response::serialize_hits;
+use crate::executor::telemetry::ServerTelemetry;
 use crate::executor::{ExecResponse, Executor, SearchHit};
 
 impl Executor {
@@ -59,8 +60,19 @@ impl Executor {
                 .await;
         }
 
-        let label = op.operation_label();
-        let mut result = self.client.execute_planned(op).await?;
+        let result = self.dispatch_raw(op).await?;
+        Self::normalize_planned(op, result)
+    }
+
+    /// Raw backend round-trip for one planned operation plus post-write
+    /// schema-cache invalidation. Returns the untouched backend envelope
+    /// (`{result, status, time, usage?}`) so callers can time the RTT
+    /// separately from decode/normalize.
+    pub(crate) async fn dispatch_raw(
+        &self,
+        op: &PlannedOperation,
+    ) -> Result<serde_json::Value, QqlError> {
+        let result = self.client.execute_planned(op).await?;
         match op {
             PlannedOperation::CreateCollection { collection, .. }
             | PlannedOperation::UpdateCollection { collection, .. }
@@ -71,6 +83,25 @@ impl Executor {
             }
             _ => {}
         }
+        Ok(result)
+    }
+
+    /// Decode + normalize a raw backend envelope into an `ExecResponse`.
+    /// Pure (no I/O): extracts server telemetry first (lenient — absent
+    /// telemetry yields `telemetry: None`, never an error), then runs the
+    /// single shared normalization both `dispatch_planned` and
+    /// `explain_analyze` use.
+    pub(crate) fn normalize_planned(
+        op: &PlannedOperation,
+        mut result: serde_json::Value,
+    ) -> Result<ExecResponse, QqlError> {
+        let telemetry = ServerTelemetry::from_envelope_opt(&result);
+        let label = op.operation_label();
+        // Typed hits already in hand below (fallback arm): reused for the
+        // `typed_hits` cache so `hits()` never re-parses what normalization
+        // just built. The pass-through arm keeps zero-copy JSON semantics —
+        // its cache fills lazily on first `hits()` instead.
+        let mut typed_hits: Option<Vec<SearchHit>> = None;
         let (message, data) = match op {
             PlannedOperation::Query { .. }
             | PlannedOperation::Scroll { .. }
@@ -90,9 +121,11 @@ impl Executor {
                     (format!("Found {count} hits"), Some(pts))
                 } else {
                     let hits = extract_search_hits(&result);
+                    let data = Some(serialize_hits(&hits)?);
+                    typed_hits = Some(hits);
                     (
-                        format!("Found {} hits", hits.len()),
-                        Some(serialize_hits(&hits)?),
+                        format!("Found {} hits", typed_hits.as_ref().map_or(0, Vec::len)),
+                        data,
                     )
                 }
             }
@@ -171,12 +204,18 @@ impl Executor {
             }
             _ => (format!("{label} ok"), None),
         };
-        Ok(ExecResponse {
+        let mut response = ExecResponse {
             ok: true,
             operation: label.into(),
             message,
             data,
-        })
+            telemetry,
+            typed_hits: std::sync::OnceLock::new(),
+        };
+        if let Some(hits) = typed_hits {
+            response = response.with_typed_hits(hits);
+        }
+        Ok(response)
     }
 
     /// Run candidate ANN stages, score (query, doc_text) with a cross-encoder, reorder.
@@ -219,7 +258,12 @@ impl Executor {
                 operation: "CROSS_RERANK".into(),
                 message: "Found 0 hits".into(),
                 data: Some(serde_json::json!([])),
-            });
+                // Client-side scoring over candidate envelopes: no single
+                // server timing to attribute.
+                telemetry: None,
+                typed_hits: std::sync::OnceLock::new(),
+            }
+            .with_typed_hits(Vec::new()));
         }
 
         let mut hits: Vec<SearchHit> = by_key.into_values().collect();
@@ -294,11 +338,15 @@ impl Executor {
             .map(|(_, h)| h)
             .collect();
         let n = out.len();
+        let data = Some(serialize_hits(&out)?);
         Ok(ExecResponse {
             ok: true,
             operation: "CROSS_RERANK".into(),
             message: format!("Found {n} hits (cross-encoder)"),
-            data: Some(serialize_hits(&out)?),
-        })
+            data,
+            telemetry: None,
+            typed_hits: std::sync::OnceLock::new(),
+        }
+        .with_typed_hits(out))
     }
 }

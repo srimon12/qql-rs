@@ -98,6 +98,45 @@ where
     }
 }
 
+/// Analyze a single QQL query string or Stmt: static plan plus measured
+/// execution (per-phase client timings, server time, hardware/inference
+/// usage). Batches fail closed (`QQL-VALIDATION-ANALYZE-BATCH`) instead of
+/// silently analyzing one entry — analyze each entry separately.
+pub async fn explain_analyze_dispatch(
+    executor: &qql::executor::Executor,
+    query: serde_json::Value,
+    options: Option<&serde_json::Value>,
+) -> Result<qql::executor::AnalyzeReport, QqlError> {
+    let on_error = on_error_from(options);
+    // JS `null` means "no params" (mirrors Python `params=None`).
+    let params = options
+        .and_then(|o| o.get("params"))
+        .filter(|p| !p.is_null());
+
+    match &query {
+        serde_json::Value::String(s) => {
+            let bound = match params {
+                Some(p) => bind_str_with_params(s, p, false)?,
+                None => s.clone(),
+            };
+            executor.explain_analyze(&bound, on_error).await
+        }
+        serde_json::Value::Array(_) => Err(QqlError::validation(
+            "QQL-VALIDATION-ANALYZE-BATCH",
+            "explainAnalyze accepts a single statement (string or Stmt), not a batch; analyze each entry separately",
+            None,
+        )),
+        _ => {
+            let mut s: ast::Stmt = serde_json::from_value(query).map_err(|e| {
+                QqlError::validation("QQL-BATCH-INVARIANT", format!("invalid Stmt: {e}"), None)
+            })?;
+            if let Some(p) = params {
+                bind_stmt_with_params(&mut s, p)?;
+            }
+            executor.explain_analyze_node(s, on_error).await
+        }
+    }
+}
 /// Execute a QQL query string, a Stmt, or an array of either against
 /// `executor`, binding `options.params` per the shared batch contract.
 ///

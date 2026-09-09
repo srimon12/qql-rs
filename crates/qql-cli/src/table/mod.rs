@@ -305,6 +305,8 @@ mod tests {
             data: Some(serde_json::json!([
                 {"id": 10, "payload": {"tag": "test"}}
             ])),
+            telemetry: None,
+            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&get_points_resp, false).is_ok());
 
@@ -316,6 +318,8 @@ mod tests {
                 {"value": "books", "count": 15},
                 {"value": "electronics", "count": 8}
             ])),
+            telemetry: None,
+            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&facet_resp, false).is_ok());
 
@@ -326,6 +330,8 @@ mod tests {
             data: Some(serde_json::json!({
                 "result": { "shard_keys": ["tenant_1", "tenant_2"] }
             })),
+            telemetry: None,
+            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&shard_resp, false).is_ok());
     }

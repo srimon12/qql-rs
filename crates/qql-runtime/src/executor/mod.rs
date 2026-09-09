@@ -10,6 +10,8 @@ use crate::client::QdrantOps;
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
 
+/// `EXPLAIN ANALYZE`: static plan plus measured execution.
+pub mod analyze;
 pub(crate) mod batch;
 /// DDL preparation and collection schema caching.
 pub mod ddl;
@@ -17,10 +19,17 @@ pub(crate) mod dispatch;
 pub(crate) mod dml;
 pub(crate) mod prepared;
 pub(crate) mod response;
+/// Phase-1 telemetry types: client phase timings plus server `time`/`usage`.
+pub mod telemetry;
 
 pub use prepared::PreparedStatement;
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
-pub use response::{ExecResponse, ExecutionReport, GroupedSearchResult, OnError, SearchHit};
+pub use response::{
+    AnalyzeReport, ExecResponse, ExecutionReport, GroupedSearchResult, OnError, SearchHit,
+};
+pub use telemetry::{
+    HardwareUsage, InferenceUsage, ModelUsage, PhaseTimings, ServerTelemetry, ServerUsage,
+};
 
 /// Collection vector name reserved for multivector (ColBERT) rerank vectors.
 pub const RERANK_VECTOR_NAME: &str = "colbert";
@@ -193,6 +202,8 @@ impl Executor {
                     operation: "PARSE".to_string(),
                     message: error.to_string(),
                     data: None,
+                    telemetry: None,
+                    typed_hits: std::sync::OnceLock::new(),
                 }]));
             }
         };

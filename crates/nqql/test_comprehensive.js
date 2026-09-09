@@ -100,10 +100,12 @@ test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, '
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
 test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, 'function'));
 test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
+test('exports: scrollCursor', () => assert.strictEqual(typeof nqql.scrollCursor, 'function'));
+test('exports: scrollStream', () => assert.strictEqual(typeof nqql.scrollStream, 'function'));
 
 // Unknown exports check
 const knownKeys = ['Client','ExecutionReport','HttpEmbedder','ScoredPoint','Stmt','bind','compileQuery','execute','executeHits','executeStmt',
-  'explain','explainStmt','injectFilter','isValid','parse','parseJson','tokenize', 'version', '__version__'];
+  'explain','explainStmt','injectFilter','isValid','parse','parseJson','scrollCursor','scrollStream','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
   const extras = actualKeys.filter(k => !knownKeys.includes(k));

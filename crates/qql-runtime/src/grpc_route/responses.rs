@@ -419,6 +419,42 @@ pub(crate) fn mutation_response_from(resp: qdrant::PointsOperationResponse) -> s
         "result": result,
         "status": "ok",
         "time": resp.time,
+        "usage": usage_to_json(resp.usage.as_ref()),
+    })
+}
+
+/// Convert a gRPC `Usage` measurement into the REST `usage` JSON shape
+/// (`{"hardware": {…7 counters…} | null, "inference": {"models": {…}} | null}`).
+///
+/// `None` (absent on collection/DDL routes, whose proto responses carry no
+/// `usage` field) becomes JSON null, matching REST's nullable envelope
+/// field — the executor reads both shapes as "no usage".
+pub(crate) fn usage_to_json(usage: Option<&qdrant::Usage>) -> serde_json::Value {
+    let Some(report) = usage else {
+        return serde_json::Value::Null;
+    };
+    let hardware = report.hardware.as_ref().map(|h| {
+        serde_json::json!({
+            "cpu": h.cpu,
+            "payload_io_read": h.payload_io_read,
+            "payload_io_write": h.payload_io_write,
+            "payload_index_io_read": h.payload_index_io_read,
+            "payload_index_io_write": h.payload_index_io_write,
+            "vector_io_read": h.vector_io_read,
+            "vector_io_write": h.vector_io_write,
+        })
+    });
+    let inference = report.inference.as_ref().map(|inf| {
+        let models: serde_json::Map<String, serde_json::Value> = inf
+            .models
+            .iter()
+            .map(|(name, m)| (name.clone(), serde_json::json!({ "tokens": m.tokens })))
+            .collect();
+        serde_json::json!({ "models": models })
+    });
+    serde_json::json!({
+        "hardware": hardware,
+        "inference": inference,
     })
 }
 
