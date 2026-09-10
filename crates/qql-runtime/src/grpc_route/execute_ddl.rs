@@ -146,7 +146,7 @@ pub(crate) async fn execute_create_collection(
     Ok(collection_mutation_to_typed(time))
 }
 
-/// Patch collection params / HNSW / quantization.
+/// Patch collection params / HNSW / quantization / per-vector diffs.
 pub(crate) async fn execute_update_collection(
     client: &GrpcQdrant,
     collection: &str,
@@ -168,6 +168,14 @@ pub(crate) async fn execute_update_collection(
             .quantization_config
             .as_ref()
             .and_then(quantization_config_diff),
+        vectors_config: request
+            .vectors
+            .as_ref()
+            .map(super::ddl::vectors_config_diff),
+        sparse_vectors_config: request
+            .sparse_vectors
+            .as_ref()
+            .map(super::ddl::sparse_vectors_config_diff),
         ..Default::default()
     };
     let resp = client

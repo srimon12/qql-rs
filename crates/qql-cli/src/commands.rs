@@ -360,7 +360,7 @@ fn doctor_host_summary(
         hints.push("CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model");
     }
     if use_edge {
-        hints.push("edge has no SHARD routing or shard-key DDL; ALTER COLLECTION covers HNSW/optimizers only");
+        hints.push("edge has no SHARD routing or shard-key DDL; ALTER COLLECTION covers global HNSW/optimizers and per-vector HNSW only");
     }
 
     serde_json::json!({

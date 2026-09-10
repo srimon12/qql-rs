@@ -798,7 +798,10 @@ mod tests {
         validate_ref(&openapi, "CreateCollection", &body2);
 
         let alter = Parser::parse(
-            "ALTER COLLECTION docs WITH HNSW (ef_construct = 200) WITH PARAMS (replication_factor = 3) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits');",
+            "ALTER COLLECTION docs WITH HNSW (ef_construct = 200) WITH PARAMS (replication_factor = 3) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits') \
+             WITH VECTOR dense (HNSW (m = 32, memory = 'cold'), QUANTIZATION (type = 'scalar', quantile = 0.99), VECTOR (memory = 'cached', on_disk = true)) \
+             WITH VECTOR colbert (QUANTIZATION (disabled = true)) \
+             WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000, memory = 'pinned', datatype = 'float16'));",
         )
         .unwrap();
         let alter_body = to_rest_route(&plan(&alter).unwrap())
@@ -810,7 +813,31 @@ mod tests {
             alter_body["quantization_config"]["binary"]["encoding"],
             "two_bits"
         );
+        assert_eq!(alter_body["vectors"]["dense"]["hnsw_config"]["m"], 32);
+        assert_eq!(alter_body["vectors"]["dense"]["memory"], "cached");
+        assert_eq!(
+            alter_body["vectors"]["dense"]["quantization_config"]["scalar"]["quantile"],
+            0.99
+        );
+        assert_eq!(
+            alter_body["vectors"]["colbert"]["quantization_config"],
+            "Disabled"
+        );
+        assert_eq!(alter_body["sparse_vectors"]["bm25"]["modifier"], "idf");
+        assert_eq!(
+            alter_body["sparse_vectors"]["bm25"]["index"]["full_scan_threshold"],
+            5000
+        );
         validate_ref(&openapi, "UpdateCollection", &alter_body);
+
+        // Unnamed/default-vector form: the empty key on the PATCH `vectors` map.
+        let unnamed = Parser::parse("ALTER COLLECTION docs WITH VECTOR (on_disk = true);").unwrap();
+        let unnamed_body = to_rest_route(&plan(&unnamed).unwrap())
+            .expect("rest")
+            .body_json()
+            .unwrap();
+        assert_eq!(unnamed_body["vectors"][""]["on_disk"], true);
+        validate_ref(&openapi, "UpdateCollection", &unnamed_body);
 
         let disable =
             Parser::parse("ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);").unwrap();

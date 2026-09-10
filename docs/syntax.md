@@ -663,6 +663,8 @@ Legacy `on_disk` / `on_disk_payload` / `always_ram` still parse and dual-write
 with `memory` through Qdrant 1.19; prefer `memory` / `payload_memory` for new
 scripts (upstream plans removal around 1.21).
 
+On `ALTER COLLECTION`, a named `WITH VECTOR <name> (…)` / `WITH SPARSE <name> (…)` clause targets one vector: nested `HNSW (…)`, `QUANTIZATION (…)`, and `VECTOR (…)` blocks are comma-separated and field-wise (unset keys keep their values), and `datatype` is CREATE-only (`QQL-PARSE-VECTOR-DIFF`). The unnamed `WITH VECTOR (…)` targets the default unnamed vector. The edge backend applies per-vector `HNSW` only (`QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` / `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` otherwise).
+
 `USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING HYBRID` creates the default dense+sparse topology. `HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2` assigns arbitrary names to those roles; `HYBRID RERANK` materializes conventional dense + sparse + `colbert` multivector (MaxSim) topology. All forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
 
 When an UPSERT contains text but no embedding clause, the executor inspects the existing collection schema and emits the compatible vector types. `USING DENSE`, `USING SPARSE`, and `USING HYBRID` can also omit target names and rely on schema inference. A role is inferred only when exactly one matching target exists; ambiguous schemas require `VECTOR <name>` or an explicit `EMBED` directive. The executor never infers a role merely from a vector being named `dense` or `sparse`.
@@ -716,6 +718,12 @@ CREATE COLLECTION docs (
   WITH PARAMS (payload_memory = 'cached');
 
 ALTER COLLECTION docs WITH VECTOR (memory = 'pinned');
+ALTER COLLECTION docs WITH VECTOR dense (
+  HNSW (m = 32),
+  QUANTIZATION (disabled = true),
+  VECTOR (memory = 'cached')
+);
+ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000));
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
 CREATE INDEX ON COLLECTION docs FOR tenant TYPE keyword
   WITH (prefix = true, memory = 'cached', is_tenant = true);

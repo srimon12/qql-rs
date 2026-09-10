@@ -287,6 +287,38 @@ pub struct SparseVectorParams {
     pub modifier: SparseModifier,
 }
 
+/// OpenAPI `VectorParamsDiff` (per-vector dense patch on `UpdateCollection`).
+///
+/// Field-wise: every unset key leaves the collection's current setting as-is.
+/// The wire shape has no `datatype` field — a datatype change fails planning.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VectorParamsDiff {
+    /// Replacement HNSW settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hnsw_config: Option<HnswConfig>,
+    /// Replacement quantization settings (`"Disabled"` clears them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantization_config: Option<QuantizationConfigDiff>,
+    /// Legacy on-disk flag (prefer `memory`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_disk: Option<bool>,
+    /// Memory placement of the original vector storage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
+}
+
+/// OpenAPI `SparseVectorParams` as a patch: `modifier` and every index key are
+/// optional, so unset fields keep their current value.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SparseVectorParamsDiff {
+    /// Replacement sparse index settings (field-wise).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<SparseIndexParams>,
+    /// Replacement value modifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modifier: Option<SparseModifier>,
+}
+
 /// OpenAPI `PayloadStorageParams`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PayloadStorageParams {
@@ -378,6 +410,13 @@ pub struct UpdateCollectionRequest {
     /// Quantization replacement (`Disabled` or a config).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<QuantizationConfigDiff>,
+    /// Per-vector dense diffs: REST `VectorsConfigDiff` is this name-keyed map
+    /// (`""` addresses the default unnamed vector).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vectors: Option<BTreeMap<String, VectorParamsDiff>>,
+    /// Per-sparse-vector diffs (`sparse_vectors` on the PATCH body).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sparse_vectors: Option<BTreeMap<String, SparseVectorParamsDiff>>,
 }
 
 /// Plan IR for creating a custom shard key on a collection.

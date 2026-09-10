@@ -91,6 +91,39 @@ pub struct QuantizationUpdate {
     pub config: Option<Box<QuantizationConfig>>,
 }
 
+/// Per-vector dense diff emitted by `ALTER COLLECTION … WITH VECTOR <name> (…)`.
+///
+/// Mirrors the OpenAPI/gRPC `VectorParamsDiff`: only `hnsw_config`,
+/// `quantization_config`, `on_disk`, and `memory` can be changed after create.
+/// `datatype` has no diff field on the wire and fails planning.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VectorDiff {
+    /// Vector name; the empty string addresses the default unnamed vector.
+    pub name: String,
+    /// Replacement HNSW diff (field-wise).
+    pub hnsw: Option<Box<HnswRuntimeConfig>>,
+    /// Replacement quantization settings or `disabled = true`.
+    pub quantization: Option<Box<QuantizationUpdate>>,
+    /// Storage diff (`on_disk` / `memory`); `datatype` is rejected at planning.
+    pub vectors: Option<Box<VectorsConfig>>,
+}
+
+/// Per-vector sparse diff emitted by `ALTER COLLECTION … WITH SPARSE <name> (…)`.
+///
+/// Mirrors OpenAPI `SparseVectorParams` as a diff: `modifier` and the sparse
+/// `index` settings are each optional.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SparseVectorDiff {
+    /// Sparse vector name.
+    pub name: String,
+    /// Replacement sparse index settings (field-wise).
+    pub index: Option<Box<SparseIndexConfig>>,
+    /// Replacement index modifier (`none` / `idf`).
+    pub modifier: Option<String>,
+}
+
 /// `WITH HNSW (…)` graph settings (collection- or vector-scoped).
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -199,6 +232,10 @@ pub struct CollectionConfig {
     pub quantization: Option<Box<QuantizationConfig>>,
     /// Quantization replacement emitted by `ALTER COLLECTION`.
     pub quantization_update: Option<Box<QuantizationUpdate>>,
+    /// Per-vector dense diffs emitted by `ALTER COLLECTION … WITH VECTOR <name>`.
+    pub vector_diffs: Vec<VectorDiff>,
+    /// Per-sparse-vector diffs emitted by `ALTER COLLECTION … WITH SPARSE <name>`.
+    pub sparse_vector_diffs: Vec<SparseVectorDiff>,
 }
 
 /// `CREATE COLLECTION` topology mode.

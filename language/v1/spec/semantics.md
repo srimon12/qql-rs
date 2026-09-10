@@ -327,6 +327,22 @@ type is `scalar`, `binary`, `product`, or `turbo`; `disabled = true` is an
 ALTER form. `sharding_method` accepts the string `'auto'` or `'custom'`;
 `shard_keys` is a list of string or non-negative integer keys (integers route to numeric partitions, never coerced to keywords).
 
+`ALTER COLLECTION` additionally accepts per-vector diffs. The named dense form
+`WITH VECTOR <name> (HNSW (…), QUANTIZATION (…), VECTOR (…))` targets one
+vector; the unnamed `WITH VECTOR (…)` form targets the default unnamed vector
+(`""` on the PATCH `vectors` map). Sparse vectors use
+`WITH SPARSE <name> (SPARSE (…) | INDEX (…))` (Qdrant has no unnamed sparse
+vector). Nested blocks are comma-separated, each at most once, and must set at
+least one key; a vector name may appear in at most one clause. Diffs are
+field-wise: unset keys keep their current value. `datatype` is not part of
+`VectorParamsDiff` and is rejected (`QQL-PARSE-VECTOR-DIFF` at parse time for
+the named form, `QQL-PLAN-VECTOR-DIFF` for a programmatically built AST). Diff
+names are validated against the collection schema when available
+(`QQL-UNKNOWN-VECTOR`); the backend remains the final authority. The edge
+backend applies per-vector `HNSW` only and rejects other per-vector fields and
+all sparse diffs (`QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` /
+`QQL-EDGE-UNSUPPORTED-SPARSE-DIFF`).
+
 ### 6.1 Memory placement
 
 `memory` controls how a component is held in RAM while data remains on disk
@@ -502,6 +518,7 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-TRAILING` | Unexpected trailing token |
 | `QQL-PARSE-UPDATE` | Expected `VECTOR` or `PAYLOAD` after `SET` |
 | `QQL-PARSE-VALUE` | Unexpected value token |
+| `QQL-PARSE-VECTOR-DIFF` | Malformed or unrepresentable `ALTER COLLECTION` per-vector diff (empty or duplicate nested blocks, unknown block names, `datatype`) |
 | `QQL-VALIDATION-FROM` | A top-level query lacks `FROM` |
 | `QQL-VALIDATION-PREFETCH-CTE` | A `PREFETCH` name does not resolve to a CTE |
 | `QQL-VALIDATION-FUSION-PREFETCH` | `QUERY FUSION` has no `PREFETCH` |
@@ -547,6 +564,7 @@ invalid fixtures are normative for those cases.
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
+| `QQL-PLAN-VECTOR-DIFF` | An `ALTER COLLECTION` per-vector diff the wire cannot express (`datatype`), or a duplicate vector diff name |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-BACKEND` | Generic backend or transport failure |
 | `QQL-BACKEND-AUTH` | Rejected credentials |
@@ -565,6 +583,8 @@ invalid fixtures are normative for those cases.
 | `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` has no offline lookup collection |
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` has no offline setter |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` has no offline setter |
+| `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR <name>` fields other than `hnsw_config` have no offline setter |
+| `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE <name>` has no offline setter |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` are not available offline |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the offline engine excludes |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |

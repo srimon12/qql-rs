@@ -3,6 +3,15 @@
 -- Alter vector config
 ALTER COLLECTION docs WITH VECTOR (on_disk = true);
 
+-- Alter a named dense vector diff
+ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32), QUANTIZATION (type = 'scalar', always_ram = true), VECTOR (memory = 'cold'));
+
+-- Disable per-vector quantization
+ALTER COLLECTION docs WITH VECTOR colbert (QUANTIZATION (disabled = true));
+
+-- Alter a named sparse vector diff
+ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000, datatype = 'float16'));
+
 -- Alter HNSW
 ALTER COLLECTION docs WITH HNSW (m = 32);
 

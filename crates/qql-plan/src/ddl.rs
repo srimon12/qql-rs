@@ -52,16 +52,12 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         sparse.insert(
             sv.name.clone(),
             SparseVectorParams {
-                index: sv.index.as_deref().map(|idx| SparseIndexParams {
-                    full_scan_threshold: idx.full_scan_threshold,
-                    on_disk: idx.on_disk,
-                    memory: idx.memory,
-                    datatype: idx.datatype,
-                }),
-                modifier: match sv.modifier.as_deref() {
-                    Some(modifier) if modifier.eq_ignore_ascii_case("none") => SparseModifier::None,
-                    _ => SparseModifier::Idf,
-                },
+                index: sv.index.as_deref().map(lower_sparse_index_params),
+                modifier: sv
+                    .modifier
+                    .as_deref()
+                    .map(lower_sparse_modifier)
+                    .unwrap_or(SparseModifier::Idf),
             },
         );
     }
@@ -86,17 +82,21 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
 }
 
 /// Lower `ALTER COLLECTION` to the transport-neutral update request.
-pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> UpdateCollectionRequest {
+pub fn lower_alter_collection(
+    stmt: &AlterCollectionStmt,
+) -> Result<UpdateCollectionRequest, QqlError> {
     let mut req = UpdateCollectionRequest {
         hnsw_config: None,
         optimizers_config: None,
         params: None,
         quantization_config: None,
+        vectors: None,
+        sparse_vectors: None,
     };
     if let Some(ref config) = stmt.config {
-        fill_update_collection_config(&mut req, config);
+        fill_update_collection_config(&mut req, config)?;
     }
-    req
+    Ok(req)
 }
 
 /// Lower `CREATE INDEX` to the transport-neutral index request.
@@ -228,7 +228,10 @@ fn fill_collection_config(req: &mut CreateCollectionRequest, config: &Collection
     }
 }
 
-fn fill_update_collection_config(req: &mut UpdateCollectionRequest, config: &CollectionConfig) {
+fn fill_update_collection_config(
+    req: &mut UpdateCollectionRequest,
+    config: &CollectionConfig,
+) -> Result<(), QqlError> {
     if let Some(ref h) = config.hnsw {
         req.hnsw_config = Some(lower_hnsw_config(h));
     }
@@ -239,6 +242,122 @@ fn fill_update_collection_config(req: &mut UpdateCollectionRequest, config: &Col
         req.params = Some(lower_collection_params(p));
     }
     req.quantization_config = lower_quantization_diff(config);
+
+    // `ALTER COLLECTION … WITH VECTOR (…)` addresses the default unnamed vector
+    // (REST documents the empty-string map key for exactly that case).
+    if let Some(ref storage) = config.vectors {
+        let diff = lower_storage_diff(storage)?;
+        insert_vector_diff(&mut req.vectors, String::new(), diff)?;
+    }
+    for diff in &config.vector_diffs {
+        let mut params = match diff.vectors.as_deref() {
+            Some(storage) => lower_storage_diff(storage)?,
+            None => VectorParamsDiff::default(),
+        };
+        params.hnsw_config = diff.hnsw.as_deref().map(lower_hnsw_config);
+        params.quantization_config = lower_quantization_update_diff(diff.quantization.as_deref());
+        insert_vector_diff(&mut req.vectors, diff.name.clone(), params)?;
+    }
+    for diff in &config.sparse_vector_diffs {
+        let params = SparseVectorParamsDiff {
+            index: diff.index.as_deref().map(lower_sparse_index_params),
+            modifier: diff.modifier.as_deref().map(lower_sparse_modifier),
+        };
+        insert_sparse_vector_diff(&mut req.sparse_vectors, diff.name.clone(), params)?;
+    }
+    Ok(())
+}
+
+/// Lower `VECTOR (on_disk = …, memory = …)` storage settings into the dense
+/// diff. `datatype` has no `VectorParamsDiff` wire field, so it fails closed.
+fn lower_storage_diff(storage: &VectorsConfig) -> Result<VectorParamsDiff, QqlError> {
+    if storage.datatype.is_some() {
+        return Err(vector_diff_error(
+            "datatype cannot be changed per vector: the Qdrant VectorParamsDiff wire shape has no datatype field. Recreate the collection or set the datatype at CREATE COLLECTION",
+        ));
+    }
+    Ok(VectorParamsDiff {
+        on_disk: storage.on_disk,
+        memory: storage.memory,
+        ..Default::default()
+    })
+}
+
+/// Lower a per-vector `QUANTIZATION (…)` replacement: `disabled = true` clears
+/// the vector's quantization, otherwise the config replaces it.
+fn lower_quantization_update_diff(
+    update: Option<&qql_core::ast::QuantizationUpdate>,
+) -> Option<QuantizationConfigDiff> {
+    let update = update?;
+    if update.disabled {
+        return Some(QuantizationConfigDiff::Disabled);
+    }
+    update
+        .config
+        .as_deref()
+        .map(|config| QuantizationConfigDiff::Config(lower_quantization_config(config)))
+}
+
+/// Insert one dense diff, rejecting a duplicate name (the AST can be built by
+/// hand, bypassing the parser's duplicate check).
+fn insert_vector_diff(
+    map: &mut Option<BTreeMap<String, VectorParamsDiff>>,
+    name: String,
+    diff: VectorParamsDiff,
+) -> Result<(), QqlError> {
+    let map = map.get_or_insert_with(BTreeMap::new);
+    if map.contains_key(&name) {
+        return Err(vector_diff_error(format!(
+            "duplicate vector diff for '{}'",
+            display_vector_name(&name)
+        )));
+    }
+    map.insert(name, diff);
+    Ok(())
+}
+
+/// Insert one sparse diff, rejecting a duplicate name.
+fn insert_sparse_vector_diff(
+    map: &mut Option<BTreeMap<String, SparseVectorParamsDiff>>,
+    name: String,
+    diff: SparseVectorParamsDiff,
+) -> Result<(), QqlError> {
+    let map = map.get_or_insert_with(BTreeMap::new);
+    if map.contains_key(&name) {
+        return Err(vector_diff_error(format!(
+            "duplicate sparse vector diff for '{}'",
+            display_vector_name(&name)
+        )));
+    }
+    map.insert(name, diff);
+    Ok(())
+}
+
+fn display_vector_name(name: &str) -> &str {
+    if name.is_empty() { "<default>" } else { name }
+}
+
+/// `none` is the only non-modifying sparse modifier; every other accepted
+/// spelling is `idf`.
+fn lower_sparse_modifier(raw: &str) -> SparseModifier {
+    if raw.eq_ignore_ascii_case("none") {
+        SparseModifier::None
+    } else {
+        SparseModifier::Idf
+    }
+}
+
+fn vector_diff_error(message: impl Into<alloc::borrow::Cow<'static, str>>) -> QqlError {
+    QqlError::validation("QQL-PLAN-VECTOR-DIFF", message, None)
+}
+
+fn lower_sparse_index_params(index: &qql_core::ast::SparseIndexConfig) -> SparseIndexParams {
+    SparseIndexParams {
+        full_scan_threshold: index.full_scan_threshold,
+        on_disk: index.on_disk,
+        memory: index.memory,
+        datatype: index.datatype,
+    }
 }
 
 /// `ALTER COLLECTION` quantization replacement: `disabled` wins, otherwise the
@@ -877,7 +996,7 @@ mod tests {
         let Stmt::AlterCollection(ref ac) = stmt else {
             panic!()
         };
-        let req = lower_alter_collection(ac);
+        let req = lower_alter_collection(ac).unwrap();
         let rest = serde_json::to_value(&req).unwrap();
         assert!(rest["hnsw_config"].is_object());
         assert_eq!(rest["hnsw_config"]["m"], 32);
@@ -891,7 +1010,7 @@ mod tests {
         let Stmt::AlterCollection(ref ac) = stmt else {
             panic!()
         };
-        let req = lower_alter_collection(ac);
+        let req = lower_alter_collection(ac).unwrap();
         assert!(matches!(
             req.quantization_config,
             Some(QuantizationConfigDiff::Disabled)
@@ -905,7 +1024,7 @@ mod tests {
         let Stmt::AlterCollection(ref ac) = stmt else {
             panic!()
         };
-        let req = lower_alter_collection(ac);
+        let req = lower_alter_collection(ac).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["quantization_config"]["product"]["compression"], "x4");
         assert_eq!(json["quantization_config"]["product"]["always_ram"], true);
@@ -919,10 +1038,118 @@ mod tests {
         let Stmt::AlterCollection(ref ac) = stmt else {
             panic!()
         };
-        let req = lower_alter_collection(ac);
+        let req = lower_alter_collection(ac).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["params"]["replication_factor"], 3);
         assert_eq!(json["params"]["payload"]["memory"], "cached");
+    }
+
+    #[test]
+    fn update_rest_body_lowers_named_vector_diffs() {
+        let stmt = parse_stmt(
+            "ALTER COLLECTION docs \
+             WITH VECTOR dense (HNSW (m = 32, memory = 'cold'), QUANTIZATION (type = 'binary', encoding = 'two_bits'), VECTOR (on_disk = true, memory = 'cached')) \
+             WITH VECTOR colbert (QUANTIZATION (disabled = true)) \
+             WITH SPARSE bm25 (SPARSE (modifier = 'none', full_scan_threshold = 5000, memory = 'pinned', datatype = 'float16'));",
+        );
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac).unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+
+        let dense = &json["vectors"]["dense"];
+        assert_eq!(dense["hnsw_config"]["m"], 32);
+        assert_eq!(dense["hnsw_config"]["memory"], "cold");
+        assert_eq!(
+            dense["quantization_config"]["binary"]["encoding"],
+            "two_bits"
+        );
+        assert_eq!(dense["on_disk"], true);
+        assert_eq!(dense["memory"], "cached");
+        // Unset keys stay absent (field-wise diff), never serialized as null.
+        assert!(dense.get("datatype").is_none());
+
+        // `disabled = true` clears the per-vector quantization config.
+        assert_eq!(
+            json["vectors"]["colbert"]["quantization_config"],
+            "Disabled"
+        );
+
+        let sparse = &json["sparse_vectors"]["bm25"];
+        assert_eq!(sparse["modifier"], "none");
+        assert_eq!(sparse["index"]["full_scan_threshold"], 5000);
+        assert_eq!(sparse["index"]["memory"], "pinned");
+        assert_eq!(sparse["index"]["datatype"], "float16");
+    }
+
+    #[test]
+    fn update_rest_body_unnamed_vector_diff_uses_empty_key() {
+        let stmt =
+            parse_stmt("ALTER COLLECTION docs WITH VECTOR (on_disk = true, memory = 'cold');");
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac).unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["vectors"][""]["on_disk"], true);
+        assert_eq!(json["vectors"][""]["memory"], "cold");
+        assert!(json.get("sparse_vectors").is_none());
+    }
+
+    #[test]
+    fn update_rest_body_per_vector_hnsw_only() {
+        let stmt =
+            parse_stmt("ALTER COLLECTION docs WITH VECTOR dense (HNSW (ef_construct = 200));");
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac).unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+        let dense = &json["vectors"]["dense"];
+        assert_eq!(dense["hnsw_config"]["ef_construct"], 200);
+        assert_eq!(dense.as_object().unwrap().len(), 1, "only the HNSW key");
+    }
+
+    #[test]
+    fn update_plan_rejects_datatype_and_duplicate_names() {
+        // The parser rejects `datatype` inside a diff; a hand-built AST must
+        // fail closed in the planner instead of silently dropping it.
+        let stmt = parse_stmt("ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16));");
+        let Stmt::AlterCollection(mut ac) = stmt else {
+            panic!()
+        };
+        ac.config.as_mut().unwrap().vector_diffs[0].vectors = Some(Box::new(VectorsConfig {
+            on_disk: None,
+            memory: None,
+            datatype: Some(qql_core::ast::VectorDatatype::Float16),
+        }));
+        let err = lower_alter_collection(&ac).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-VECTOR-DIFF");
+        assert!(err.message.contains("datatype"), "{err}");
+
+        // The unnamed/default form shares the create-shaped VECTOR block
+        // parser, so the datatype rejection also lands at planning.
+        let stmt = parse_stmt("ALTER COLLECTION docs WITH VECTOR (datatype = 'float16');");
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let err = lower_alter_collection(ac).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-VECTOR-DIFF");
+        assert!(err.message.contains("datatype"), "{err}");
+
+        // Duplicate diff names (possible only via a hand-built AST) fail closed
+        // instead of letting the BTreeMap keep the last entry.
+        let stmt = parse_stmt("ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16));");
+        let Stmt::AlterCollection(mut ac) = stmt else {
+            panic!()
+        };
+        let mut duplicate = ac.config.as_ref().unwrap().vector_diffs[0].clone();
+        duplicate.hnsw = None;
+        ac.config.as_mut().unwrap().vector_diffs.push(duplicate);
+        let err = lower_alter_collection(&ac).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-VECTOR-DIFF");
+        assert!(err.message.contains("duplicate vector diff"), "{err}");
     }
 
     #[test]

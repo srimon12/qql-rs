@@ -20,9 +20,9 @@ missing** features that already ship.
 | Edge snapshot **creation** | **No** — qdrant-edge 0.8 exposes unpack/apply only; publish edge → remote with `qql --edge migrate … --target-url`, never by copying shard files |
 | Edge → edge migration | **No** — rejected before executors start; seed devices from a server snapshot instead |
 | WAL segment capacity | **Rust/CLI only** — `--wal-segment-mb` / `QQL_EDGE_WAL_SEGMENT_MB` / `LocalExecutorOptions::wal_segment_capacity`; Python/Node cannot set it in qdrant-edge 0.8 |
-| `ALTER COLLECTION … WITH VECTOR (…)` | **Silently dropped on every backend** — the plan has no vector-diff field and the PATCH `vectors` map is name-keyed; do not rely on it (documented gap) |
+| `ALTER COLLECTION … WITH VECTOR <name> (…)` | **Yes (REST/gRPC)** — per-vector `HNSW` / `QUANTIZATION` / storage diffs; unnamed `WITH VECTOR (…)` targets the default vector. Edge: per-vector `HNSW` only; other fields → `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF`, sparse → `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` |
 | `SHARD`, shard-key DDL | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
-| `ALTER COLLECTION` | **Partial** — `WITH HNSW` / `WITH OPTIMIZERS` persist; `WITH PARAMS` / `QUANTIZATION` reject per field |
+| `ALTER COLLECTION` | **Partial** — remote: global + per-vector HNSW/quantization/storage; edge: global `HNSW` / `OPTIMIZERS` and per-vector `HNSW` persist, `WITH PARAMS` / `QUANTIZATION` / other per-vector fields reject per field |
 | Create-time `WITH PARAMS` | **Partial** — `on_disk_payload` only; other keys → `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
 | `SHOW QUOTAS` / `SET QUOTA` | **No** — `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST `/quotas` only) |
 | `PARAMS (idf = …)` | **Yes** on qdrant-edge **0.8+** (per-query sparse IDF corpus) |
@@ -54,7 +54,6 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Edge `GROUP BY` | Supported offline (`QQL-EDGE-*` free) except `LOOKUP FROM`. | Same QQL works on remote Qdrant; offline `SIZE`/`LIMIT`/`OFFSET` are honored. |
 | Host SDK route affinity | Exposed: `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `client.setRouteAffinity(…)`. | Route affinity is **N/A on edge** (single node). Do not add it to `localExecutor`/`httpExecutor`. |
 | Edge quotas | Always unsupported. | Use remote Qdrant REST for quota admin. |
-| `ALTER COLLECTION … WITH VECTOR (…)` | Parsed but dropped by the planner on all backends (no `UpdateCollectionRequest.vectors`; the PATCH `vectors` map is name-keyed, so a collection-scoped block has no faithful projection). | Do not claim it applies anything; recreate or use per-vector settings at `CREATE COLLECTION`. |
 | Edge → edge migrate | Refused with a precise error (local dir is not a server). | Publish edge → remote (`--target-url`) or seed devices with `qql edge bootstrap`; no continuous sync is provided (dual-write + partial snapshots is the documented pattern). |
 | Edge snapshots | qdrant-edge 0.8 can only unpack/apply snapshots, never create them. | Never tar/copy shard directories by hand; back up via a server snapshot seed flow or `qql dump`. |
 
@@ -74,6 +73,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | ACORN params | `PARAMS (acorn = true, max_selectivity = 0.4)` — remote Qdrant and edge 0.8+ |
 | Cluster quotas (REST) | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` — full replace; not gRPC/edge |
 | Memory placement | `memory = 'cold'\|'cached'\|'pinned'` on VECTOR / HNSW / SPARSE / QUANTIZATION / indexes; `payload_memory` in `PARAMS` (no `pinned`) |
+| Per-vector ALTER diffs | `ALTER COLLECTION c WITH VECTOR <name> (HNSW (…), QUANTIZATION (…), VECTOR (…))` / `WITH SPARSE <name> (SPARSE (…))` → typed PATCH `vectors` / `sparse_vectors` maps (gRPC `VectorsConfigDiff`) |
 | TurboQuant dense | `WITH VECTOR (…, datatype = 'turbo4')` |
 | Keyword prefix | Index `WITH (prefix = true)`; filter `field MATCH PREFIX '…'` |
 | Slice sampling | `WHERE SLICE (total, index)` |

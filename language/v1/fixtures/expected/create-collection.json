@@ -111,6 +111,8 @@
           "params": null,
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {
@@ -162,6 +164,8 @@
             },
             "disabled": false
           },
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {
@@ -213,6 +217,8 @@
             },
             "disabled": false
           },
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {
@@ -264,6 +270,8 @@
             },
             "disabled": false
           },
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {
@@ -315,6 +323,8 @@
             },
             "disabled": false
           },
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {
@@ -458,6 +468,8 @@
           },
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {
@@ -504,6 +516,8 @@
           "params": null,
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {

@@ -368,6 +368,28 @@ pub fn merge_collection_config(
         }
         current.quantization_update = new.quantization_update;
     }
+    for diff in new.vector_diffs {
+        if current.vector_diffs.iter().any(|d| d.name == diff.name) {
+            return Err(validation_err(
+                alloc::format!("VECTOR diff '{}' may only appear once", diff.name),
+                span,
+            ));
+        }
+        current.vector_diffs.push(diff);
+    }
+    for diff in new.sparse_vector_diffs {
+        if current
+            .sparse_vector_diffs
+            .iter()
+            .any(|d| d.name == diff.name)
+        {
+            return Err(validation_err(
+                alloc::format!("SPARSE vector diff '{}' may only appear once", diff.name),
+                span,
+            ));
+        }
+        current.sparse_vector_diffs.push(diff);
+    }
     Ok(())
 }
 

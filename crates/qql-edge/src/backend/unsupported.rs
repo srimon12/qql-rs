@@ -25,6 +25,10 @@ pub enum EdgeUnsupported {
     AlterCollectionParams,
     /// `ALTER COLLECTION … QUANTIZATION` (no edge quantization setter).
     AlterCollectionQuantization,
+    /// `ALTER COLLECTION … WITH VECTOR <name>` fields beyond per-vector HNSW.
+    AlterVectorDiff,
+    /// `ALTER COLLECTION … WITH SPARSE <name>` (no edge sparse config setter).
+    AlterSparseVectorDiff,
     /// Collection `WITH PARAMS` (replication, etc.) at create time.
     CollectionParams,
     /// Optimizer keys qdrant-edge deliberately excludes.
@@ -53,6 +57,8 @@ impl EdgeUnsupported {
             Self::ShardKeyDdl => "QQL-EDGE-UNSUPPORTED-SHARD-KEY",
             Self::AlterCollectionParams => "QQL-EDGE-UNSUPPORTED-ALTER-PARAMS",
             Self::AlterCollectionQuantization => "QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION",
+            Self::AlterVectorDiff => "QQL-EDGE-UNSUPPORTED-VECTOR-DIFF",
+            Self::AlterSparseVectorDiff => "QQL-EDGE-UNSUPPORTED-SPARSE-DIFF",
             Self::CollectionParams => "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS",
             Self::OptimizerKey => "QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY",
             Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
@@ -75,6 +81,10 @@ impl EdgeUnsupported {
             Self::ShardKeyDdl => "CREATE/DROP SHARD KEY",
             Self::AlterCollectionParams => "ALTER COLLECTION … WITH PARAMS",
             Self::AlterCollectionQuantization => "ALTER COLLECTION … QUANTIZATION",
+            Self::AlterVectorDiff => {
+                "ALTER COLLECTION … WITH VECTOR (<name>) fields other than hnsw_config"
+            }
+            Self::AlterSparseVectorDiff => "ALTER COLLECTION … WITH SPARSE (<name>)",
             Self::CollectionParams => "collection WITH PARAMS (replication, etc.)",
             Self::OptimizerKey => {
                 "OPTIMIZERS (memmap_threshold / flush_interval_sec / max_optimization_threads)"
@@ -110,6 +120,12 @@ impl EdgeUnsupported {
             }
             Self::AlterCollectionQuantization => {
                 "qdrant-edge exposes no quantization setter after create"
+            }
+            Self::AlterVectorDiff => {
+                "qdrant-edge exposes set_vector_hnsw_config only; it has no per-vector quantization, memory, or on_disk setter"
+            }
+            Self::AlterSparseVectorDiff => {
+                "qdrant-edge has no sparse vector config setter after create"
             }
             Self::CollectionParams => {
                 "qdrant-edge persists only on_disk_payload; replication, write-consistency, fan-out, and payload-memory params have no offline equivalent"
@@ -208,6 +224,54 @@ pub fn reject_collection_params(
     }
 }
 
+/// Validate the `ALTER COLLECTION` per-vector diffs for the edge backend.
+///
+/// Returns the dense HNSW patches to apply (name → diff). Any other dense
+/// field (`quantization_config`, `on_disk`, `memory`) and every sparse diff
+/// field is rejected **only when present**, with the vector name and the
+/// offending key attached. A request is rejected as a whole before anything is
+/// applied, so a mixed diff never half-applies.
+pub fn vector_hnsw_diffs(
+    request: &qql_plan::UpdateCollectionRequest,
+) -> Result<Vec<(String, qql_plan::HnswConfig)>, QqlError> {
+    let mut patches = Vec::new();
+    if let Some(vectors) = &request.vectors {
+        for (name, diff) in vectors {
+            for (key, present) in [
+                ("quantization_config", diff.quantization_config.is_some()),
+                ("on_disk", diff.on_disk.is_some()),
+                ("memory", diff.memory.is_some()),
+            ] {
+                if present {
+                    return Err(EdgeUnsupported::AlterVectorDiff
+                        .error()
+                        .with_vector_name(name.clone())
+                        .with_field("config_key", key));
+                }
+            }
+            if let Some(hnsw) = &diff.hnsw_config {
+                patches.push((name.clone(), hnsw.clone()));
+            }
+        }
+    }
+    if let Some(sparse) = &request.sparse_vectors {
+        for (name, diff) in sparse {
+            for (key, present) in [
+                ("index", diff.index.is_some()),
+                ("modifier", diff.modifier.is_some()),
+            ] {
+                if present {
+                    return Err(EdgeUnsupported::AlterSparseVectorDiff
+                        .error()
+                        .with_vector_name(name.clone())
+                        .with_field("config_key", key));
+                }
+            }
+        }
+    }
+    Ok(patches)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +285,8 @@ mod tests {
             EdgeUnsupported::ShardKeyDdl,
             EdgeUnsupported::AlterCollectionParams,
             EdgeUnsupported::AlterCollectionQuantization,
+            EdgeUnsupported::AlterVectorDiff,
+            EdgeUnsupported::AlterSparseVectorDiff,
             EdgeUnsupported::CollectionParams,
             EdgeUnsupported::OptimizerKey,
             EdgeUnsupported::RecommendAverageVector,
@@ -273,6 +339,77 @@ mod tests {
         let quantization = EdgeUnsupported::AlterCollectionQuantization.error();
         assert_eq!(quantization.code, "QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION");
         assert!(quantization.message.contains("no quantization setter"));
+
+        let vector = EdgeUnsupported::AlterVectorDiff.error();
+        assert_eq!(vector.code, "QQL-EDGE-UNSUPPORTED-VECTOR-DIFF");
+        assert!(vector.message.contains("set_vector_hnsw_config"));
+
+        let sparse = EdgeUnsupported::AlterSparseVectorDiff.error();
+        assert_eq!(sparse.code, "QQL-EDGE-UNSUPPORTED-SPARSE-DIFF");
+        assert!(sparse.message.contains("sparse vector config setter"));
+    }
+
+    /// `vector_hnsw_diffs` passes HNSW patches through and rejects every other
+    /// present field, naming the vector and the key; sparse diffs always reject.
+    #[test]
+    fn vector_hnsw_diffs_pass_hnsw_and_reject_other_fields() {
+        use qql_plan::{SparseModifier, SparseVectorParamsDiff, VectorParamsDiff};
+
+        let hnsw = qql_plan::HnswConfig {
+            m: Some(32),
+            ef_construct: None,
+            full_scan_threshold: None,
+            max_indexing_threads: None,
+            on_disk: None,
+            payload_m: None,
+            inline_storage: None,
+            memory: None,
+        };
+        let mut request = qql_plan::UpdateCollectionRequest {
+            vectors: Some(std::collections::BTreeMap::from([(
+                "dense".to_string(),
+                VectorParamsDiff {
+                    hnsw_config: Some(hnsw),
+                    ..Default::default()
+                },
+            )])),
+            ..Default::default()
+        };
+        let patches = vector_hnsw_diffs(&request).expect("hnsw-only diff");
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].0, "dense");
+        assert_eq!(patches[0].1.m, Some(32));
+
+        request
+            .vectors
+            .as_mut()
+            .unwrap()
+            .get_mut("dense")
+            .unwrap()
+            .memory = Some(qql_plan::MemoryPlacement::Cold);
+        let error = vector_hnsw_diffs(&request).expect_err("memory has no edge setter");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-VECTOR-DIFF");
+        assert_eq!(error.field("vector_name"), Some("dense"));
+        assert_eq!(error.field("config_key"), Some("memory"));
+
+        request
+            .vectors
+            .as_mut()
+            .unwrap()
+            .get_mut("dense")
+            .unwrap()
+            .memory = None;
+        request.sparse_vectors = Some(std::collections::BTreeMap::from([(
+            "bm25".to_string(),
+            SparseVectorParamsDiff {
+                index: None,
+                modifier: Some(SparseModifier::Idf),
+            },
+        )]));
+        let error = vector_hnsw_diffs(&request).expect_err("sparse has no edge setter");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-SPARSE-DIFF");
+        assert_eq!(error.field("vector_name"), Some("bm25"));
+        assert_eq!(error.field("config_key"), Some("modifier"));
     }
 
     #[test]

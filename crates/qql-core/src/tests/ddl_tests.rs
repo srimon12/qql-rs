@@ -189,6 +189,89 @@ fn alter_collection() {
 }
 
 #[test]
+fn alter_collection_named_vector_diffs_parse_and_round_trip() {
+    let sources = [
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32, ef_construct = 100));",
+        "ALTER COLLECTION docs WITH VECTOR dense (QUANTIZATION (type = 'binary', encoding = 'two_bits'));",
+        "ALTER COLLECTION docs WITH VECTOR dense (QUANTIZATION (disabled = true));",
+        "ALTER COLLECTION docs WITH VECTOR dense (VECTOR (on_disk = false, memory = 'cold'));",
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32), QUANTIZATION (type = 'scalar', always_ram = true), VECTOR (memory = 'cached'));",
+        "ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000, memory = 'pinned', datatype = 'float16'));",
+        "ALTER COLLECTION docs WITH SPARSE bm25 (INDEX (modifier = 'none', on_disk = true));",
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16)) WITH SPARSE bm25 (SPARSE (modifier = 'idf')) WITH HNSW (ef_construct = 200);",
+    ];
+    for source in sources {
+        let stmt = Parser::parse(source).unwrap_or_else(|e| panic!("{source}: {e}"));
+        let Stmt::AlterCollection(alter) = &stmt else {
+            panic!("{source}: expected ALTER COLLECTION");
+        };
+        assert!(alter.config.is_some(), "{source}");
+        // Canonical formatting must reparse to the same AST.
+        let formatted = crate::fmt::format_stmt(&stmt);
+        let reparsed = Parser::parse(&formatted)
+            .unwrap_or_else(|e| panic!("formatted '{formatted}' must parse: {e}"));
+        assert_eq!(stmt, reparsed, "round-trip mismatch for: {formatted}");
+    }
+}
+
+#[test]
+fn alter_collection_named_vector_diff_preserves_fields() {
+    let stmt = Parser::parse(
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32), QUANTIZATION (disabled = true), VECTOR (memory = 'cold'));",
+    )
+    .unwrap();
+    let Stmt::AlterCollection(alter) = stmt else {
+        panic!("expected ALTER COLLECTION");
+    };
+    let config = alter.config.expect("config");
+    assert_eq!(config.vector_diffs.len(), 1);
+    let diff = &config.vector_diffs[0];
+    assert_eq!(diff.name, "dense");
+    assert_eq!(diff.hnsw.as_ref().and_then(|h| h.m), Some(32));
+    let update = diff.quantization.as_deref().expect("quantization update");
+    assert!(update.disabled);
+    assert!(update.config.is_none());
+    assert_eq!(
+        diff.vectors.as_deref().and_then(|v| v.memory),
+        Some(crate::ast::MemoryPlacement::Cold)
+    );
+}
+
+#[test]
+fn alter_collection_named_vector_diff_rejections() {
+    let cases = [
+        // Empty diff body.
+        "ALTER COLLECTION docs WITH VECTOR dense ();",
+        // Empty nested blocks.
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW ());",
+        "ALTER COLLECTION docs WITH VECTOR dense (VECTOR ());",
+        "ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE ());",
+        // Duplicate nested blocks.
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16), HNSW (m = 32));",
+        "ALTER COLLECTION docs WITH VECTOR dense (VECTOR (on_disk = true), VECTOR (memory = 'cold'));",
+        // Duplicate vector names across clauses.
+        "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16)) WITH VECTOR dense (HNSW (m = 32));",
+        "ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf')) WITH SPARSE bm25 (SPARSE (modifier = 'none'));",
+        // Unknown nested block.
+        "ALTER COLLECTION docs WITH VECTOR dense (MULTIVECTOR (comparator = 'max_sim'));",
+        // datatype has no diff field on the wire.
+        "ALTER COLLECTION docs WITH VECTOR dense (VECTOR (datatype = 'float16'));",
+        // Sparse body requires SPARSE / INDEX.
+        "ALTER COLLECTION docs WITH SPARSE bm25 (modifier = 'idf');",
+        // Named diffs are ALTER-only; unknown keys in create stay rejected.
+        "CREATE COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf'));",
+    ];
+    for source in cases {
+        assert!(Parser::parse(source).is_err(), "must reject: {source}");
+    }
+    let err =
+        Parser::parse("ALTER COLLECTION docs WITH VECTOR dense (VECTOR (datatype = 'float16'));")
+            .unwrap_err();
+    assert_eq!(err.code, "QQL-PARSE-VECTOR-DIFF");
+    assert!(err.message.contains("datatype"), "{err}");
+}
+
+#[test]
 fn drop_collection() {
     let s = Parser::parse("DROP COLLECTION docs;").unwrap();
     assert!(matches!(s, Stmt::DropCollection(_)));

@@ -50,6 +50,7 @@ use query_converter::{
 };
 use unsupported::{
     EdgeUnsupported, reject_collection_params, reject_collection_sharding, reject_shard_key,
+    vector_hnsw_diffs,
 };
 use vector_parser::ToEdgeVector;
 
@@ -915,10 +916,12 @@ impl QdrantOps for EdgeQdrant {
 
     /// Apply the `ALTER COLLECTION` fields qdrant-edge can persist.
     ///
-    /// qdrant-edge exposes `set_hnsw_config` and `set_optimizers_config` (both
-    /// persist to `edge_config.json`); collection params and a quantization
-    /// diff have no setter, so they are rejected per field — only when the
-    /// request actually carries them.
+    /// qdrant-edge exposes `set_hnsw_config`, `set_vector_hnsw_config`, and
+    /// `set_optimizers_config` (all persist to `edge_config.json`); per-vector
+    /// fields beyond HNSW, sparse diffs, collection params, and a collection
+    /// quantization diff have no setter, so they are rejected per field — only
+    /// when the request actually carries them. Validation runs before any
+    /// setter, so a mixed request never half-applies.
     async fn update_collection(
         &self,
         collection_name: &str,
@@ -930,6 +933,7 @@ impl QdrantOps for EdgeQdrant {
         if req.quantization_config.is_some() {
             return Err(EdgeUnsupported::AlterCollectionQuantization.error());
         }
+        let vector_hnsw = vector_hnsw_diffs(req)?;
         let shard = self.open_shard(collection_name).await?;
         if let Some(hnsw) = req.hnsw_config.as_ref() {
             let hnsw = edge_hnsw_config_over(hnsw, &shard.config().hnsw_config())?;
@@ -941,6 +945,26 @@ impl QdrantOps for EdgeQdrant {
             let optimizers = overlay_optimizers(optimizers, &shard.config().optimizers())?;
             shard
                 .set_optimizers_config(optimizers)
+                .map_err(|e| edge_err(EdgeOp::AlterCollection, Some(collection_name), e))?;
+        }
+        for (name, diff) in &vector_hnsw {
+            // `set_vector_hnsw_config` replaces the whole per-vector block, so
+            // merge the diff over the vector's effective config (its own, else
+            // the collection-wide default), mirroring the server's field-wise
+            // diff semantics. The engine stores a full per-vector config or
+            // none, so the merged block pins every field: a later collection-
+            // wide HNSW change no longer reaches this vector.
+            let base = {
+                let config = shard.config();
+                config
+                    .vectors
+                    .get(name.as_str())
+                    .and_then(|params| params.hnsw_config)
+                    .unwrap_or_else(|| config.hnsw_config())
+            };
+            let merged = edge_hnsw_config_over(diff, &base)?;
+            shard
+                .set_vector_hnsw_config(name, merged)
                 .map_err(|e| edge_err(EdgeOp::AlterCollection, Some(collection_name), e))?;
         }
         Ok(())
@@ -2193,6 +2217,139 @@ mod tests {
                 .await
                 .expect_err("excluded optimizer key");
             assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY");
+
+            reopened.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// Per-vector `ALTER COLLECTION`: HNSW patches field-merge over the
+    /// vector's effective config and persist across reopen; every other
+    /// per-vector field and all sparse diffs reject per field, only when
+    /// present, and a mixed request never half-applies.
+    #[test]
+    fn alter_collection_applies_per_vector_hnsw_diff() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("alter-vector-diff");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE), other VECTOR(3, COSINE)) \
+                     WITH HNSW (m = 8, ef_construct = 64)",
+                ))
+                .await
+                .expect("create collection");
+
+            backend
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32))",
+                ))
+                .await
+                .expect("per-vector HNSW must apply");
+            {
+                let shard = backend.open_shard("docs").await.expect("open shard");
+                let config = shard.config();
+                let dense = config.vectors.get("dense").expect("dense vector");
+                let hnsw = dense.hnsw_config.expect("per-vector HNSW");
+                assert_eq!(hnsw.m, 32);
+                // Unset diff fields inherit the collection-wide value.
+                assert_eq!(hnsw.ef_construct, 64);
+                assert!(
+                    config
+                        .vectors
+                        .get("other")
+                        .expect("other vector")
+                        .hnsw_config
+                        .is_none(),
+                    "untouched vectors keep no per-vector override"
+                );
+            }
+
+            // A partial diff merges over the vector's own config.
+            backend
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH VECTOR dense (HNSW (ef_construct = 200))",
+                ))
+                .await
+                .expect("partial per-vector HNSW must merge");
+            {
+                let shard = backend.open_shard("docs").await.expect("open shard");
+                let hnsw = shard
+                    .config()
+                    .vectors
+                    .get("dense")
+                    .and_then(|params| params.hnsw_config)
+                    .expect("per-vector HNSW");
+                assert_eq!(hnsw.m, 32, "partial diff keeps m");
+                assert_eq!(hnsw.ef_construct, 200);
+            }
+
+            backend.close().await.expect("close edge backend");
+            let reopened = EdgeQdrant::new(&dir, false);
+            {
+                let shard = reopened.open_shard("docs").await.expect("reopen shard");
+                let hnsw = shard
+                    .config()
+                    .vectors
+                    .get("dense")
+                    .and_then(|params| params.hnsw_config)
+                    .expect("persisted per-vector HNSW");
+                assert_eq!(hnsw.m, 32);
+                assert_eq!(hnsw.ef_construct, 200);
+            }
+
+            for (query, key) in [
+                (
+                    "ALTER COLLECTION docs WITH VECTOR dense (VECTOR (memory = 'cold'))",
+                    "memory",
+                ),
+                (
+                    "ALTER COLLECTION docs WITH VECTOR dense (QUANTIZATION (type = 'scalar'))",
+                    "quantization_config",
+                ),
+            ] {
+                let error = reopened
+                    .execute_planned(&plan_one(query))
+                    .await
+                    .expect_err("per-vector field has no edge setter");
+                assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-VECTOR-DIFF");
+                assert_eq!(error.field("vector_name"), Some("dense"));
+                assert_eq!(error.field("config_key"), Some(key));
+            }
+
+            let error = reopened
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf'))",
+                ))
+                .await
+                .expect_err("sparse diff has no edge setter");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-SPARSE-DIFF");
+            assert_eq!(error.field("vector_name"), Some("bm25"));
+            assert_eq!(error.field("config_key"), Some("modifier"));
+
+            // A mixed request is validated before any setter runs.
+            let error = reopened
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 48), VECTOR (on_disk = true))",
+                ))
+                .await
+                .expect_err("mixed request must reject");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-VECTOR-DIFF");
+            {
+                let shard = reopened.open_shard("docs").await.expect("open shard");
+                let hnsw = shard
+                    .config()
+                    .vectors
+                    .get("dense")
+                    .and_then(|params| params.hnsw_config)
+                    .expect("per-vector HNSW");
+                assert_eq!(hnsw.m, 32, "rejected request must not half-apply HNSW");
+            }
 
             reopened.close().await.expect("close edge backend");
             let _ = std::fs::remove_dir_all(dir);

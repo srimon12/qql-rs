@@ -101,7 +101,7 @@ CREATE COLLECTION docs_tiered (
 ) WITH PARAMS (payload_memory = 'cold')
   WITH QUANTIZATION (type = 'scalar', memory = 'cached');
 
-ALTER COLLECTION docs WITH VECTOR (on_disk = true);
+ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32), VECTOR (memory = 'cached'));
 ALTER COLLECTION docs WITH PARAMS (replication_factor = 3);
 ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar', always_ram = true);
 
@@ -291,7 +291,7 @@ routing inside the filter object.
 |---------|--------|
 | REST | Full matrix including `SHOW QUOTAS` / `SET QUOTA` |
 | gRPC | Typed plan → proto; **no** public quota service (`QQL-GRPC-QUOTA`) |
-| Edge | No quotas; no custom shard-key admin; no `GROUP BY … LOOKUP FROM`; **GROUP BY**, **ACORN** + **IDF** on search params (edge 0.8+); HNSW/optimizer `ALTER COLLECTION`; optional multi/image/rerank hosts |
+| Edge | No quotas; no custom shard-key admin; no `GROUP BY … LOOKUP FROM`; **GROUP BY**, **ACORN** + **IDF** on search params (edge 0.8+); global HNSW/optimizer and per-vector HNSW `ALTER COLLECTION`; optional multi/image/rerank hosts |
 | Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
 
 ## Parameter Binding & Prepared Queries

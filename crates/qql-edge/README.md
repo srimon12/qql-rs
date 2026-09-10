@@ -155,7 +155,7 @@ Intel Mac users should disable default features and use `http-embedding` or
 | `PARAMS (idf = 'global' \| WHERE <filter>)` | **Supported** (qdrant-edge 0.8) |
 | `PARAMS (acorn = …, max_selectivity = …)` | **Supported** (qdrant-edge 0.8 wires ACORN into HNSW search) |
 | `QUERY … GROUP BY field [SIZE n] [LIMIT/OFFSET]` | **Supported** (qdrant-edge grouping driver; hits hydrated per output selector) |
-| `ALTER COLLECTION … WITH HNSW / WITH OPTIMIZERS` | **Supported** (persisted via `set_hnsw_config` / `set_optimizers_config`) |
+| `ALTER COLLECTION … WITH HNSW / WITH OPTIMIZERS` / `WITH VECTOR <name> (HNSW (…))` | **Supported** (persisted via `set_hnsw_config` / `set_optimizers_config` / `set_vector_hnsw_config`; the per-vector diff merges over the vector's effective config and pins the merged block) |
 | `CREATE COLLECTION … WITH PARAMS (on_disk_payload = …)` | **Supported** (persisted on the shard config) |
 | Per-vector `WITH VECTOR` / `WITH HNSW` / `WITH QUANTIZATION` / `WITH SPARSE` | **Supported** — lowered onto `EdgeVectorParams` / `EdgeSparseVectorParams`; sparse storage is always mmap, its `on_disk` selects the index placement |
 | `memory = 'pinned'\|'cached'\|'cold'` on vectors/sparse | **Mapped** to the engine's RAM/mmap switch (`pinned` → RAM, `cached`/`cold` → mmap; qdrant-edge 0.8 has no memory tiers) |
@@ -180,6 +180,9 @@ QUERY TEXT 'search' FROM docs USING dense
 ALTER COLLECTION docs WITH HNSW (m = 32)
   WITH OPTIMIZERS (indexing_threshold = 500);
 
+-- Per-vector HNSW diff (other per-vector fields fail closed)
+ALTER COLLECTION docs WITH VECTOR dense (HNSW (ef_construct = 200));
+
 -- Quotas always fail-loud offline
 SHOW QUOTAS;  -- QQL-EDGE-UNSUPPORTED-QUOTA
 ```
@@ -200,6 +203,8 @@ Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE`/`DROP SHARD KEY` |
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` |
+| `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | per-vector `ALTER COLLECTION … WITH VECTOR <name>` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`) |
+| `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | per-sparse-vector `ALTER COLLECTION … WITH SPARSE <name>` |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | create-time `WITH PARAMS` other than `on_disk_payload` |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the engine excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = …)` |

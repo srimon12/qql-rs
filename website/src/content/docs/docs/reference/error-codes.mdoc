@@ -96,6 +96,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-TRAILING-COMMA` | Trailing commas are not allowed (objects, lists, `PARAMS` / config blocks) |
 | `QQL-PARSE-UPDATE` | Expected `VECTOR` or `PAYLOAD` after `SET` |
 | `QQL-PARSE-VALUE` | Unexpected value token |
+| `QQL-PARSE-VECTOR-DIFF` | Malformed or unrepresentable `ALTER COLLECTION` per-vector diff (empty or duplicate nested blocks, unknown block names, `datatype`) |
 | `QQL-PARSE-BOOL` | Expected `true` or `false` |
 | `QQL-PARSE-DUPLICATE-CLAUSE` | Duplicate clause (for example a repeated `WAIT`) |
 | `QQL-PARSE-PARAM` | Expected a parameter identifier after `:` |
@@ -142,6 +143,7 @@ The same structured fields are projected differently by each host binding.
 
 | Code | Meaning |
 |---|---|
+| `QQL-PLAN-VECTOR-DIFF` | `ALTER COLLECTION` per-vector diff the wire cannot express (`datatype` has no `VectorParamsDiff` field) or a duplicate vector diff name |
 | `QQL-PLAN-VECTOR-KIND` | Structural vector input and the declared `AS` role disagree |
 | `QQL-MISSING-USING` | Schema inference is ambiguous; add `USING <vector>` |
 | `QQL-UNKNOWN-VECTOR` | The explicit vector name does not exist in the collection |
@@ -293,6 +295,8 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM`; qdrant-edge has no lookup collection |
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS`; qdrant-edge has no params setter |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION`; qdrant-edge has no quantization setter |
+| `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR (<name>)` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`); qdrant-edge exposes `set_vector_hnsw_config` only |
+| `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE (<name>)`; qdrant-edge has no sparse vector config setter |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` (replication, fan-out, payload memory) |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys qdrant-edge excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
@@ -426,7 +430,9 @@ QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY
 QQL-EDGE-UNSUPPORTED-ROUTE
 QQL-EDGE-UNSUPPORTED-SHARD
 QQL-EDGE-UNSUPPORTED-SHARD-KEY
+QQL-EDGE-UNSUPPORTED-SPARSE-DIFF
 QQL-EDGE-UNSUPPORTED-TIMEOUT
+QQL-EDGE-UNSUPPORTED-VECTOR-DIFF
 QQL-EDGE-VECTOR
 QQL-EDGE-VECTOR-NAME
 QQL-EMBEDDING
@@ -503,6 +509,7 @@ QQL-PARSE-TRAILING
 QQL-PARSE-TRAILING-COMMA
 QQL-PARSE-UPDATE
 QQL-PARSE-VALUE
+QQL-PARSE-VECTOR-DIFF
 QQL-PARSE-VECTOR-KIND
 QQL-PARSE-VECTOR-SIZE
 QQL-PLAN-COLLECTION
@@ -526,6 +533,7 @@ QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
 QQL-PLAN-SERIALIZE
 QQL-PLAN-UNSUPPORTED-PREFETCH
+QQL-PLAN-VECTOR-DIFF
 QQL-PLAN-VECTOR-KIND
 QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
