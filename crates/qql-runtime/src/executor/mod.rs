@@ -25,7 +25,8 @@ pub mod telemetry;
 pub use prepared::PreparedStatement;
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub use response::{
-    AnalyzeReport, ExecResponse, ExecutionReport, GroupedSearchResult, OnError, SearchHit,
+    AnalyzeReport, BackendResponse, ExecData, ExecResponse, ExecutionReport, FacetHit,
+    GroupedSearchResult, OnError, SearchHit,
 };
 pub use telemetry::{
     HardwareUsage, InferenceUsage, ModelUsage, PhaseTimings, ServerTelemetry, ServerUsage,
@@ -203,7 +204,6 @@ impl Executor {
                     message: error.to_string(),
                     data: None,
                     telemetry: None,
-                    typed_hits: std::sync::OnceLock::new(),
                 }]));
             }
         };

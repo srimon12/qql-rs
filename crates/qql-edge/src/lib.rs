@@ -470,6 +470,7 @@ mod tests {
             let cols = report.results[0]
                 .data
                 .as_ref()
+                .and_then(|d| d.as_raw())
                 .and_then(|d| d["result"]["collections"].as_array())
                 .expect("collections array");
             assert!(
@@ -515,6 +516,7 @@ mod tests {
             let cols = report.results[0]
                 .data
                 .as_ref()
+                .and_then(|d| d.as_raw())
                 .and_then(|d| d["result"]["collections"].as_array())
                 .map(|c| c.len())
                 .unwrap_or(0);
@@ -538,8 +540,7 @@ mod tests {
                 "POINTS lookup should report 2 hits, got {:?}",
                 report.results[0].message
             );
-            let data = report.results[0].data.as_ref().expect("data");
-            let hits = data.as_array().expect("hits array");
+            let hits = report.results[0].hits_ref().expect("data");
             assert_eq!(hits.len(), 2, "POINTS lookup should return 2 hits");
 
             executor.close().await.expect("close edge executor");

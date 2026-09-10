@@ -326,8 +326,9 @@ async fn cross_rerank_preserves_same_id_different_collections() {
     assert!(report.ok, "report should be ok: {report:?}");
     assert_eq!(report.results.len(), 1);
     assert_eq!(report.results[0].operation, "CROSS_RERANK");
-    let data = report.results[0].data.as_ref().expect("should have data");
-    let hits = data.as_array().expect("data should be an array of hits");
+    let hits = report.results[0]
+        .hits_ref()
+        .expect("cross rerank should yield typed hits");
 
     assert_eq!(
         hits.len(),
@@ -338,7 +339,7 @@ async fn cross_rerank_preserves_same_id_different_collections() {
 
     let collections: Vec<&str> = hits
         .iter()
-        .map(|h| h["collection"].as_str().unwrap_or(""))
+        .map(|h| h.collection.as_deref().unwrap_or(""))
         .collect();
     assert!(
         collections.contains(&"coll_a"),
@@ -349,21 +350,19 @@ async fn cross_rerank_preserves_same_id_different_collections() {
         "missing coll_b in results: {collections:?}"
     );
 
-    let ids: Vec<&str> = hits
-        .iter()
-        .map(|h| h["id"].as_str().unwrap_or(""))
-        .collect();
+    let ids: Vec<String> = hits.iter().map(|h| h.id.to_string()).collect();
     assert_eq!(
-        ids.iter().filter(|id| **id == "1").count(),
+        ids.iter().filter(|id| id.as_str() == "1").count(),
         2,
         "both hits should have id '1'"
     );
 
     for hit in hits {
-        let score = hit["score"]
-            .as_f64()
-            .expect("hit should have a numeric score");
-        assert!(score > 0.0, "score should be positive, got {score}");
+        assert!(
+            hit.score > 0.0,
+            "score should be positive, got {}",
+            hit.score
+        );
     }
 }
 
@@ -397,10 +396,7 @@ async fn cross_rerank_empty_candidates_returns_zero_hits() {
     assert_eq!(report.results.len(), 1);
     assert_eq!(report.results[0].operation, "CROSS_RERANK");
     assert_eq!(report.results[0].message, "Found 0 hits");
-    assert_eq!(
-        report.results[0].data.as_ref().expect("data present"),
-        &serde_json::json!([])
-    );
+    assert_eq!(report.results[0].hits(), Some(Vec::new()));
 }
 
 #[tokio::test]
@@ -520,11 +516,11 @@ async fn numeric_and_string_ids_preserve_json_types() {
         .expect("query should succeed");
 
     assert!(report.ok);
-    let hits = report.results[0].data.as_ref().unwrap().as_array().unwrap();
-    assert_eq!(hits[0]["id"].as_u64(), Some(42));
+    let hits = report.results[0].hits_ref().expect("hits present");
+    assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(42));
     assert_eq!(
-        hits[1]["id"].as_str(),
-        Some("b3e0c0ea-52aa-4ebc-bd89-e137b0196ce2")
+        hits[1].id,
+        qql_plan::PlanPointId::String("b3e0c0ea-52aa-4ebc-bd89-e137b0196ce2".to_string())
     );
 }
 
@@ -554,16 +550,11 @@ async fn facet_response_normalizes_hits_in_data() {
         .expect("facet should succeed");
 
     assert!(report.ok);
-    let data = report.results[0]
-        .data
-        .as_ref()
-        .expect("data should be present");
-    let hits = data
-        .as_array()
-        .expect("facet data must be a normalized array of hits");
-    assert_eq!(hits.len(), 2);
-    assert_eq!(hits[0]["value"], "electronics");
-    assert_eq!(hits[0]["count"], 12);
+    let facet = report.results[0]
+        .facet()
+        .expect("facet data should be present");
+    assert_eq!(facet.len(), 2);
+    assert_eq!(facet[0], (serde_json::json!("electronics"), 12));
 }
 
 #[tokio::test]
@@ -589,8 +580,8 @@ async fn get_points_bare_array_result_yields_hits() {
         .await
         .expect("point lookup should succeed");
     assert!(report.ok, "{report:?}");
-    let hits = report.results[0].data.as_ref().expect("data present");
-    assert_eq!(hits.as_array().unwrap().len(), 2);
-    assert_eq!(hits[0]["id"], 1483);
-    assert_eq!(hits[1]["id"], 1787);
+    let hits = report.results[0].hits_ref().expect("hits present");
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(1483));
+    assert_eq!(hits[1].id, qql_plan::PlanPointId::Number(1787));
 }

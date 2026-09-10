@@ -61,7 +61,7 @@ async fn telemetry_none_where_backend_sends_none() {
         .expect("execute ok");
     assert!(report.results[0].telemetry.is_none());
     assert!(report.telemetry.is_none());
-    assert_eq!(report.results[0].hits_json().unwrap().len(), 1);
+    assert_eq!(report.results[0].hits_ref().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -124,7 +124,6 @@ fn telemetry_serialization_stays_back_compatible() {
         message: "ok".into(),
         data: None,
         telemetry: Some(tel),
-        typed_hits: std::sync::OnceLock::new(),
     };
     let back: ExecResponse = serde_json::from_value(serde_json::to_value(&resp).unwrap()).unwrap();
     assert_eq!(back.telemetry.unwrap().time_s, Some(0.1));
@@ -155,7 +154,6 @@ fn report_telemetry_aggregates_totals() {
                 }),
             },
         }),
-        typed_hits: std::sync::OnceLock::new(),
     };
     let report = ExecutionReport::from_results(vec![
         mk(Some(0.1), Some(5), Some(10)),
@@ -270,7 +268,11 @@ fn normalize_planned_keeps_telemetry_out_of_the_error_path() {
     };
     let resp = Executor::normalize_planned(
         &op,
-        serde_json::json!({"result": {"count": 3}, "status": "ok", "time": "soon", "usage": 42}),
+        crate::envelope::parse_backend_response(
+            &op,
+            serde_json::json!({"result": {"count": 3}, "status": "ok", "time": "soon", "usage": 42}),
+        )
+        .expect("garbage telemetry still parses"),
     )
     .expect("garbage telemetry never fails");
     assert!(resp.telemetry.is_none());
@@ -279,8 +281,12 @@ fn normalize_planned_keeps_telemetry_out_of_the_error_path() {
     // Well-formed telemetry attaches without disturbing the payload.
     let resp = Executor::normalize_planned(
         &op,
-        serde_json::json!({"result": {"count": 3}, "status": "ok", "time": 0.01,
-            "usage": {"inference": {"models": {"e5": {"tokens": 9}}}}}),
+        crate::envelope::parse_backend_response(
+            &op,
+            serde_json::json!({"result": {"count": 3}, "status": "ok", "time": 0.01,
+                "usage": {"inference": {"models": {"e5": {"tokens": 9}}}}}),
+        )
+        .unwrap(),
     )
     .unwrap();
     let tel = resp.telemetry.as_ref().unwrap();

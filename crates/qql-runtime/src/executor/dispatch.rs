@@ -4,10 +4,22 @@ use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 use qql_plan::{PlannedOperation, plan};
 
-use crate::executor::dml::query::extract_search_hits;
-use crate::executor::response::serialize_hits;
-use crate::executor::telemetry::ServerTelemetry;
-use crate::executor::{ExecResponse, Executor, SearchHit};
+use crate::executor::response::{BackendResponse, ExecData};
+use crate::executor::{ExecResponse, Executor, GroupedSearchResult, SearchHit};
+
+/// Trim a grouped result set by the client-side `group_offset` (which has no
+/// wire representation) exactly once.
+fn trim_group_offset(groups: &mut Vec<GroupedSearchResult>, offset: Option<u64>) {
+    let Some(offset) = offset else {
+        return;
+    };
+    let offset = offset as usize;
+    if offset < groups.len() {
+        groups.drain(0..offset);
+    } else {
+        groups.clear();
+    }
+}
 
 impl Executor {
     /// Execute one parsed statement under the configured timeout, returning a
@@ -65,14 +77,14 @@ impl Executor {
     }
 
     /// Raw backend round-trip for one planned operation plus post-write
-    /// schema-cache invalidation. Returns the untouched backend envelope
-    /// (`{result, status, time, usage?}`) so callers can time the RTT
-    /// separately from decode/normalize.
+    /// schema-cache invalidation. The backend answers typed
+    /// ([`QdrantOps::execute_planned`](crate::client::QdrantOps::execute_planned));
+    /// normalization is the executor's separate, pure step.
     pub(crate) async fn dispatch_raw(
         &self,
         op: &PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError> {
-        let result = self.client.execute_planned(op).await?;
+    ) -> Result<BackendResponse, QqlError> {
+        let response = self.client.execute_planned(op).await?;
         match op {
             PlannedOperation::CreateCollection { collection, .. }
             | PlannedOperation::UpdateCollection { collection, .. }
@@ -83,117 +95,85 @@ impl Executor {
             }
             _ => {}
         }
-        Ok(result)
+        Ok(response)
     }
 
-    /// Decode + normalize a raw backend envelope into an `ExecResponse`.
-    /// Pure (no I/O): extracts server telemetry first (lenient — absent
-    /// telemetry yields `telemetry: None`, never an error), then runs the
-    /// single shared normalization both `dispatch_planned` and
-    /// `explain_analyze` use.
+    /// Decode + normalize a typed backend response into an `ExecResponse`.
+    /// Pure (no I/O): server telemetry travels on the [`BackendResponse`],
+    /// never on the error path; both `dispatch_planned` and `explain_analyze`
+    /// share this single normalization.
     pub(crate) fn normalize_planned(
         op: &PlannedOperation,
-        mut result: serde_json::Value,
+        mut response: BackendResponse,
     ) -> Result<ExecResponse, QqlError> {
-        let telemetry = ServerTelemetry::from_envelope_opt(&result);
+        let telemetry = response.telemetry.take();
         let label = op.operation_label();
-        // Typed hits already in hand below (fallback arm): reused for the
-        // `typed_hits` cache so `hits()` never re-parses what normalization
-        // just built. The pass-through arm keeps zero-copy JSON semantics —
-        // its cache fills lazily on first `hits()` instead.
-        let mut typed_hits: Option<Vec<SearchHit>> = None;
         let (message, data) = match op {
             PlannedOperation::Query { .. }
             | PlannedOperation::Scroll { .. }
             | PlannedOperation::GetPoints { .. } => {
-                let pts_opt = if let Some(serde_json::Value::Object(obj)) = result.get_mut("result")
-                {
-                    obj.remove("points")
-                } else if let Some(serde_json::Value::Array(_)) = result.get("result") {
-                    result.as_object_mut().and_then(|o| o.remove("result"))
-                } else if let Some(obj) = result.as_object_mut() {
-                    obj.remove("points")
-                } else {
-                    None
-                };
-                if let Some(pts) = pts_opt {
-                    let count = pts.as_array().map(|a| a.len()).unwrap_or(0);
-                    (format!("Found {count} hits"), Some(pts))
-                } else {
-                    let hits = extract_search_hits(&result);
-                    let data = Some(serialize_hits(&hits)?);
-                    typed_hits = Some(hits);
-                    (
-                        format!("Found {} hits", typed_hits.as_ref().map_or(0, Vec::len)),
-                        data,
-                    )
-                }
+                let count = response.data.hits().map_or(0, |hits| hits.len());
+                (format!("Found {count} hits"), Some(response.data))
             }
             PlannedOperation::QueryGroups { request, .. } => {
-                if let Some(offset) = request.group_offset {
-                    let offset = offset as usize;
-                    let groups_opt = if result.get("result").is_some() {
-                        result.get_mut("result").and_then(|r| r.get_mut("groups"))
-                    } else {
-                        result.get_mut("groups")
-                    };
-                    if let Some(groups) = groups_opt.and_then(|g| g.as_array_mut()) {
-                        if offset < groups.len() {
-                            groups.drain(0..offset);
-                        } else {
-                            groups.clear();
-                        }
-                    }
+                // `group_offset` has no wire representation (it is serde-skipped
+                // and absent from the gRPC proto), so the backend never applies
+                // it: trim the returned groups client-side, exactly once.
+                if let ExecData::Groups(groups) = &mut response.data {
+                    trim_group_offset(groups, request.group_offset);
                 }
-                let groups_count = result
-                    .get("result")
-                    .and_then(|r| r.get("groups"))
-                    .or_else(|| result.get("groups"))
-                    .and_then(|g| g.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                (format!("Found {groups_count} group(s)"), Some(result))
+                let count = response.data.groups().map_or(0, |groups| groups.len());
+                (format!("Found {count} group(s)"), Some(response.data))
             }
             PlannedOperation::Count { .. } => {
-                let count = result
-                    .get("result")
-                    .and_then(|r| r.get("count"))
-                    .and_then(|c| c.as_u64())
-                    .or_else(|| result.get("count").and_then(|c| c.as_u64()))
-                    .unwrap_or(0);
-                (format!("Count: {count}"), Some(result))
+                let count = response.data.count().unwrap_or(0);
+                (format!("Count: {count}"), Some(ExecData::Count(count)))
             }
             PlannedOperation::Facet { .. } => {
-                let facet_hits = result
-                    .get("result")
-                    .and_then(|r| r.get("hits"))
-                    .cloned()
-                    .or_else(|| result.get("hits").cloned())
-                    .unwrap_or_else(|| serde_json::json!([]));
-                let count = facet_hits.as_array().map(|a| a.len()).unwrap_or(0);
-                (format!("Found {count} facet hit(s)"), Some(facet_hits))
+                let count = response.data.facet().map_or(0, |hits| hits.len());
+                (format!("Found {count} facet hit(s)"), Some(response.data))
             }
             PlannedOperation::ListCollections => {
-                let count = result
-                    .get("result")
-                    .and_then(|value| value.get("collections"))
-                    .or_else(|| result.get("collections"))
-                    .and_then(serde_json::Value::as_array)
+                let count = response
+                    .data
+                    .as_raw()
+                    .and_then(|envelope| {
+                        envelope
+                            .get("result")
+                            .and_then(|value| value.get("collections"))
+                            .or_else(|| envelope.get("collections"))
+                            .and_then(serde_json::Value::as_array)
+                    })
                     .map_or(0, Vec::len);
-                (format!("Found {count} collection(s)"), Some(result))
+                (format!("Found {count} collection(s)"), Some(response.data))
             }
-            PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(result)),
+            PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(response.data)),
             PlannedOperation::Upsert { request, .. } => {
                 let n = request.points.len();
                 (
                     format!("Upserted {n} point(s)"),
-                    Some(serde_json::json!({"count": n})),
+                    Some(ExecData::Mutation {
+                        affected: Some(n as u64),
+                    }),
                 )
             }
-            PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
-            PlannedOperation::GetQuotas => ("Quota configuration shown".into(), Some(result)),
+            PlannedOperation::Delete { .. }
+            | PlannedOperation::UpdatePayload { .. }
+            | PlannedOperation::ClearPayload { .. }
+            | PlannedOperation::DeletePayload { .. }
+            | PlannedOperation::UpdateVectors { .. }
+            | PlannedOperation::DeleteVectors { .. } => (
+                format!("{label} ok"),
+                Some(ExecData::Mutation { affected: None }),
+            ),
+            PlannedOperation::ListShardKeys { .. } => {
+                ("Shard keys listed".into(), Some(response.data))
+            }
+            PlannedOperation::GetQuotas => {
+                ("Quota configuration shown".into(), Some(response.data))
+            }
             PlannedOperation::SetQuotas { .. } => {
-                ("Quota configuration updated".into(), Some(result))
+                ("Quota configuration updated".into(), Some(response.data))
             }
             PlannedOperation::CrossRerank { .. } => {
                 return Err(QqlError::execution(
@@ -204,18 +184,13 @@ impl Executor {
             }
             _ => (format!("{label} ok"), None),
         };
-        let mut response = ExecResponse {
+        Ok(ExecResponse {
             ok: true,
             operation: label.into(),
             message,
             data,
             telemetry,
-            typed_hits: std::sync::OnceLock::new(),
-        };
-        if let Some(hits) = typed_hits {
-            response = response.with_typed_hits(hits);
-        }
-        Ok(response)
+        })
     }
 
     /// Run candidate ANN stages, score (query, doc_text) with a cross-encoder, reorder.
@@ -243,8 +218,16 @@ impl Executor {
                 collection: collection.clone(),
                 request: request.clone(),
             };
-            let raw = self.client.execute_planned(&op).await?;
-            for mut hit in extract_search_hits(&raw) {
+            let response = self.dispatch_raw(&op).await?;
+            let hits = match response.data {
+                ExecData::Hits(hits) => hits,
+                ExecData::Groups(_)
+                | ExecData::Count(_)
+                | ExecData::Facet(_)
+                | ExecData::Mutation { .. }
+                | ExecData::Raw(_) => Vec::new(),
+            };
+            for mut hit in hits {
                 hit.collection = Some(collection.clone());
                 by_key
                     .entry((collection.clone(), hit.id.clone()))
@@ -257,13 +240,11 @@ impl Executor {
                 ok: true,
                 operation: "CROSS_RERANK".into(),
                 message: "Found 0 hits".into(),
-                data: Some(serde_json::json!([])),
+                data: Some(ExecData::Hits(Vec::new())),
                 // Client-side scoring over candidate envelopes: no single
                 // server timing to attribute.
                 telemetry: None,
-                typed_hits: std::sync::OnceLock::new(),
-            }
-            .with_typed_hits(Vec::new()));
+            });
         }
 
         let mut hits: Vec<SearchHit> = by_key.into_values().collect();
@@ -338,15 +319,12 @@ impl Executor {
             .map(|(_, h)| h)
             .collect();
         let n = out.len();
-        let data = Some(serialize_hits(&out)?);
         Ok(ExecResponse {
             ok: true,
             operation: "CROSS_RERANK".into(),
             message: format!("Found {n} hits (cross-encoder)"),
-            data,
+            data: Some(ExecData::Hits(out)),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
-        }
-        .with_typed_hits(out))
+        })
     }
 }

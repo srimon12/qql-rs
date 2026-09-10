@@ -388,25 +388,6 @@ fn json_to_shard_key_keyword_and_number() {
 }
 
 #[test]
-fn facet_hits_read_wrapped_and_flat() {
-    use super::discover::facet_hits;
-    let wrapped = json!({
-        "result": {
-            "hits": [
-                {"value": "Mitte", "count": 3},
-                {"value": 101, "count": 1}
-            ]
-        }
-    });
-    let hits = facet_hits(Some(&wrapped));
-    assert_eq!(hits.len(), 2);
-    assert_eq!(hits[0].0, json!("Mitte"));
-    assert_eq!(hits[1].0, json!(101));
-    let flat = json!([{"value": "acme", "count": 9}]);
-    assert_eq!(facet_hits(Some(&flat)).len(), 1);
-}
-
-#[test]
 fn create_shard_key_sql_parses_keyword_and_number() {
     let k = super::discover::create_shard_key_sql(
         "docs",

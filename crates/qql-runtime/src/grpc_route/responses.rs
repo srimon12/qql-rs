@@ -1,31 +1,19 @@
-//! Proto responses → REST-shaped JSON envelopes.
+//! Proto → JSON for schemaless metadata, plus test-only parity oracles.
 //!
-//! Keeps the executor's hit extraction working unchanged regardless of
-//! transport (`result.points` for queries, mutation envelopes with timing).
+//! Collection info and collection lists are intentionally unmodelled
+//! metadata: the gRPC adapter returns them as [`ExecData::Raw`] envelopes
+//! built here straight from the protobuf response. The vector-output
+//! converter backs the typed hit path ([`super::typed`]); `usage_to_json` and
+//! `facet_hit_to_json` survive only as parity oracles for the typed
+//! conversions (consumed by `contract_test` / `executor_test`) — production
+//! paths never build response envelopes.
+//!
+//! [`ExecData::Raw`]: crate::executor::response::ExecData::Raw
 
 #![allow(deprecated)]
 
 use crate::grpc::memory::memory_to_str;
 use crate::qdrant_grpc::qdrant;
-
-use super::values::qdrant_value_to_json;
-
-pub(crate) fn point_id_to_json(id: &qdrant::PointId) -> serde_json::Value {
-    match &id.point_id_options {
-        Some(qdrant::point_id::PointIdOptions::Num(n)) => serde_json::json!(*n),
-        Some(qdrant::point_id::PointIdOptions::Uuid(s)) => serde_json::json!(s),
-        None => serde_json::Value::Null,
-    }
-}
-
-pub(crate) fn group_id_to_json(id: &qdrant::GroupId) -> serde_json::Value {
-    match &id.kind {
-        Some(qdrant::group_id::Kind::UnsignedValue(n)) => serde_json::json!(*n),
-        Some(qdrant::group_id::Kind::IntegerValue(i)) => serde_json::json!(*i),
-        Some(qdrant::group_id::Kind::StringValue(s)) => serde_json::json!(s),
-        None => serde_json::Value::Null,
-    }
-}
 
 pub(crate) fn vector_output_to_json(vo: &qdrant::VectorOutput) -> serde_json::Value {
     use qdrant::vector_output;
@@ -62,83 +50,6 @@ pub(crate) fn vectors_output_to_json(v: &qdrant::VectorsOutput) -> serde_json::V
         }
         None => serde_json::Value::Null,
     }
-}
-
-pub(crate) fn scored_point_to_json(p: qdrant::ScoredPoint) -> serde_json::Value {
-    let id =
-        p.id.as_ref()
-            .map_or(serde_json::Value::Null, point_id_to_json);
-    let payload = if p.payload.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::Value::Object(
-            p.payload
-                .into_iter()
-                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-                .collect(),
-        )
-    };
-    let mut obj = serde_json::Map::new();
-    obj.insert("id".into(), id);
-    obj.insert("score".into(), serde_json::json!(p.score));
-    obj.insert("payload".into(), payload);
-    if p.version != 0 {
-        obj.insert("version".into(), serde_json::json!(p.version));
-    }
-    if let Some(vectors) = &p.vectors {
-        obj.insert("vector".into(), vectors_output_to_json(vectors));
-    }
-    serde_json::Value::Object(obj)
-}
-
-pub(crate) fn retrieved_point_to_json(p: qdrant::RetrievedPoint) -> serde_json::Value {
-    let id =
-        p.id.as_ref()
-            .map_or(serde_json::Value::Null, point_id_to_json);
-    let payload = if p.payload.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::Value::Object(
-            p.payload
-                .into_iter()
-                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-                .collect(),
-        )
-    };
-    let mut obj = serde_json::Map::new();
-    obj.insert("id".into(), id);
-    obj.insert("payload".into(), payload);
-    if let Some(vectors) = &p.vectors {
-        obj.insert("vector".into(), vectors_output_to_json(vectors));
-    }
-    serde_json::Value::Object(obj)
-}
-
-pub(crate) fn groups_result_to_json(r: qdrant::GroupsResult) -> serde_json::Value {
-    serde_json::json!({
-        "groups": r.groups.into_iter().map(point_group_to_json).collect::<Vec<_>>(),
-    })
-}
-
-pub(crate) fn batch_result_to_json(r: qdrant::BatchResult) -> serde_json::Value {
-    let points = serde_json::Value::Array(r.result.into_iter().map(scored_point_to_json).collect());
-    serde_json::json!({
-        "points": points,
-    })
-}
-
-pub(crate) fn point_group_to_json(g: qdrant::PointGroup) -> serde_json::Value {
-    let hits: Vec<_> = g.hits.into_iter().map(scored_point_to_json).collect();
-    let id =
-        g.id.as_ref()
-            .map_or(serde_json::Value::Null, group_id_to_json);
-    let mut obj = serde_json::Map::new();
-    obj.insert("id".into(), id);
-    obj.insert("hits".into(), serde_json::json!(hits));
-    if let Some(lookup) = g.lookup {
-        obj.insert("lookup".into(), retrieved_point_to_json(lookup));
-    }
-    serde_json::Value::Object(obj)
 }
 
 pub(crate) fn list_collections_response_to_json(
@@ -409,26 +320,14 @@ pub(crate) fn multivec_comp_to_str(c: i32) -> &'static str {
     }
 }
 
-/// Build a REST-shaped mutation envelope from a gRPC `PointsOperationResponse`.
-pub(crate) fn mutation_response_from(resp: qdrant::PointsOperationResponse) -> serde_json::Value {
-    let result = resp
-        .result
-        .map(update_result_to_json)
-        .unwrap_or_else(|| serde_json::json!({ "status": "completed" }));
-    serde_json::json!({
-        "result": result,
-        "status": "ok",
-        "time": resp.time,
-        "usage": usage_to_json(resp.usage.as_ref()),
-    })
-}
-
 /// Convert a gRPC `Usage` measurement into the REST `usage` JSON shape
-/// (`{"hardware": {…7 counters…} | null, "inference": {"models": {…}} | null}`).
+/// (`{"hardware": {…7 counters…} | null, "inference": {"models": {…}} | null`).
 ///
-/// `None` (absent on collection/DDL routes, whose proto responses carry no
-/// `usage` field) becomes JSON null, matching REST's nullable envelope
-/// field — the executor reads both shapes as "no usage".
+/// Parity oracle for [`super::typed::usage_to_telemetry`]: `contract_test`
+/// and `executor_test` assert the typed conversion matches
+/// `ServerUsage::from_json` over this shape. Production code never builds
+/// response JSON.
+#[cfg(test)]
 pub(crate) fn usage_to_json(usage: Option<&qdrant::Usage>) -> serde_json::Value {
     let Some(report) = usage else {
         return serde_json::Value::Null;
@@ -455,51 +354,6 @@ pub(crate) fn usage_to_json(usage: Option<&qdrant::Usage>) -> serde_json::Value 
     serde_json::json!({
         "hardware": hardware,
         "inference": inference,
-    })
-}
-
-/// REST-shaped envelope for collection-level mutations (create/update/drop).
-pub(crate) fn collection_mutation_response(
-    resp: qdrant::CollectionOperationResponse,
-) -> serde_json::Value {
-    serde_json::json!({
-        "result": resp.result,
-        "status": "ok",
-        "time": resp.time,
-    })
-}
-
-/// Fallback when the gRPC response type carries no timing (shard-key ops).
-pub(crate) fn mutation_response_ok() -> serde_json::Value {
-    serde_json::json!({
-        "result": { "status": "completed" },
-        "status": "ok",
-        "time": 0.0_f64,
-    })
-}
-
-pub(crate) fn update_result_to_json(r: qdrant::UpdateResult) -> serde_json::Value {
-    let status = match r.status() {
-        qdrant::UpdateStatus::Acknowledged => "acknowledged",
-        qdrant::UpdateStatus::Completed => "completed",
-        qdrant::UpdateStatus::ClockRejected => "clock_rejected",
-        qdrant::UpdateStatus::WaitTimeout => "wait_timeout",
-        qdrant::UpdateStatus::UnknownUpdateStatus => "unknown",
-    };
-    serde_json::json!({
-        "operation_id": r.operation_id,
-        "status": status,
-    })
-}
-
-/// REST-compatible envelope for `GetPoints`: hit extraction reads
-/// `result.points`, so a bare `result` array would silently drop every hit
-/// (B-3 regression).
-pub(crate) fn get_points_envelope(points: Vec<serde_json::Value>, time: f64) -> serde_json::Value {
-    serde_json::json!({
-        "result": { "points": points },
-        "status": "ok",
-        "time": time,
     })
 }
 
@@ -540,6 +394,10 @@ pub(crate) fn quantization_response_to_json(qc: &qdrant::QuantizationConfig) -> 
     serde_json::Value::Object(obj)
 }
 
+/// Parity oracle for [`super::typed::facet_hit_to_typed`]: tests assert both
+/// conversions agree for every value variant. Production code never builds
+/// response JSON.
+#[cfg(test)]
 pub(crate) fn facet_hit_to_json(hit: qdrant::FacetHit) -> serde_json::Value {
     use qdrant::facet_value::Variant;
     let val = match hit.value.and_then(|v| v.variant) {

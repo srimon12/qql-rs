@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::backend::CollectionInfo;
-use crate::executor::Executor;
 use crate::executor::response::OnError;
+use crate::executor::{ExecData, Executor};
 
 use super::mock::{MockEmbedder, MockQdrantClient, collection_with_vectors, test_config};
 
@@ -222,16 +222,23 @@ async fn test_grouped_offset_applied_exactly_once() {
     assert!(r.ok, "grouped query should succeed: {:?}", r);
     assert_eq!(r.operation, "QUERY_GROUPS");
     assert_eq!(r.message, "Found 2 group(s)");
-    let data = r.data.as_ref().expect("data should be present");
-    let groups = data["result"]["groups"].as_array().expect("groups array");
+    let groups = r
+        .data
+        .as_ref()
+        .and_then(ExecData::groups)
+        .expect("grouped data is typed");
     assert_eq!(
         groups.len(),
         2,
         "must return exactly user_limit groups, got {}",
         groups.len()
     );
-    assert_eq!(groups[0]["id"], "b", "groups must start at the offset");
-    assert_eq!(groups[1]["id"], "c");
+    assert_eq!(
+        groups[0].group_id,
+        serde_json::json!("b"),
+        "groups must start at the offset"
+    );
+    assert_eq!(groups[1].group_id, serde_json::json!("c"));
 }
 
 #[tokio::test]
@@ -543,8 +550,8 @@ async fn same_collection_query_batch_yields_per_statement_hits() {
     let item_b = serde_json::json!({
         "points": [{"id": 1787, "score": 0.7, "payload": {"text": "c"}}]
     });
-    let hits_a = crate::executor::dml::query::extract_search_hits(&item_a);
-    let hits_b = crate::executor::dml::query::extract_search_hits(&item_b);
+    let hits_a = crate::envelope::extract_search_hits(&item_a);
+    let hits_b = crate::envelope::extract_search_hits(&item_b);
     assert_eq!(hits_a.len(), 2, "batch item A must yield its 2 hits");
     assert_eq!(hits_a[0].id, qql_plan::PlanPointId::Number(1483));
     assert_eq!(hits_b.len(), 1, "batch item B must yield its 1 hit");

@@ -9,6 +9,7 @@ use crate::backend::{SparseVectorSpec, VectorSpec};
 use crate::client::{CollectionInfo, QdrantOps};
 use crate::config::QqlConfig;
 use crate::executor::Executor;
+use crate::executor::response::{BackendResponse, ExecData};
 
 pub struct MockQdrantClient {
     pub exists: bool,
@@ -33,6 +34,9 @@ pub struct MockQdrantClient {
     pub fail_query_batch: Arc<Mutex<bool>>,
     /// When non-zero, `execute_planned` fails on that call number (1-based).
     pub fail_execute_planned_call: Arc<Mutex<usize>>,
+    /// When set, `execute_planned` returns it directly instead of parsing the
+    /// mock's envelope (typed backend-response injection).
+    pub typed_response: Arc<Mutex<Option<BackendResponse>>>,
 }
 
 impl Default for MockQdrantClient {
@@ -54,6 +58,7 @@ impl Default for MockQdrantClient {
             point_map: Arc::new(Mutex::new(HashMap::new())),
             fail_query_batch: Arc::new(Mutex::new(false)),
             fail_execute_planned_call: Arc::new(Mutex::new(0)),
+            typed_response: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -120,7 +125,7 @@ impl QdrantOps for MockQdrantClient {
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError> {
+    ) -> Result<BackendResponse, QqlError> {
         *self.execute_planned_call_count.lock().unwrap() += 1;
         *self.last_planned.lock().unwrap() = Some(op.clone());
         let call = *self.execute_planned_call_count.lock().unwrap();
@@ -131,12 +136,18 @@ impl QdrantOps for MockQdrantClient {
                 None,
             ));
         }
+        if let Some(response) = self.typed_response.lock().unwrap().clone() {
+            return Ok(response);
+        }
         if let qql_plan::PlannedOperation::CreateCollection { collection, .. } = op {
             self.created_collections
                 .lock()
                 .unwrap()
                 .insert(collection.clone());
-            return Ok(serde_json::json!({"result": true, "status": "ok", "time": 0.0}));
+            return crate::envelope::parse_backend_response(
+                op,
+                serde_json::json!({"result": true, "status": "ok", "time": 0.0}),
+            );
         }
         let route = qql_plan::plan::to_rest_route(op).expect("rest route");
         if route.path.contains("nonexistent") {
@@ -147,15 +158,18 @@ impl QdrantOps for MockQdrantClient {
             ));
         }
         if matches!(op, qql_plan::PlannedOperation::ListCollections) {
-            return Ok(serde_json::json!({
-                "result": {
-                    "collections": self
-                        .collections
-                        .iter()
-                        .map(|name| serde_json::json!({"name": name}))
-                        .collect::<Vec<_>>(),
-                }
-            }));
+            return crate::envelope::parse_backend_response(
+                op,
+                serde_json::json!({
+                    "result": {
+                        "collections": self
+                            .collections
+                            .iter()
+                            .map(|name| serde_json::json!({"name": name}))
+                            .collect::<Vec<_>>(),
+                    }
+                }),
+            );
         }
         // Return per-collection mock points when configured.
         if let qql_plan::PlannedOperation::Query { collection, .. }
@@ -164,35 +178,38 @@ impl QdrantOps for MockQdrantClient {
         | qql_plan::PlannedOperation::GetPoints { collection, .. } = op
             && let Some(points) = self.point_map.lock().unwrap().get(collection)
         {
-            return Ok(points.clone());
+            return crate::envelope::parse_backend_response(op, points.clone());
         }
         // Default envelope carries server telemetry so telemetry extraction
         // is exercised end-to-end; the `point_map` path above stays bare on
         // purpose (None-where-absent coverage).
-        Ok(serde_json::json!({
-            "result": {"points": []},
-            "status": "ok",
-            "time": 0.0025,
-            "usage": {
-                "hardware": {
-                    "cpu": 10,
-                    "payload_io_read": 1,
-                    "payload_io_write": 2,
-                    "payload_index_io_read": 3,
-                    "payload_index_io_write": 4,
-                    "vector_io_read": 5,
-                    "vector_io_write": 6
-                },
-                "inference": {"models": {"mock-model": {"tokens": 7}}}
-            }
-        }))
+        crate::envelope::parse_backend_response(
+            op,
+            serde_json::json!({
+                "result": {"points": []},
+                "status": "ok",
+                "time": 0.0025,
+                "usage": {
+                    "hardware": {
+                        "cpu": 10,
+                        "payload_io_read": 1,
+                        "payload_io_write": 2,
+                        "payload_index_io_read": 3,
+                        "payload_index_io_write": 4,
+                        "vector_io_read": 5,
+                        "vector_io_write": 6
+                    },
+                    "inference": {"models": {"mock-model": {"tokens": 7}}}
+                }
+            }),
+        )
     }
 
     async fn execute_query_batch(
         &self,
         _collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         *self.batch_call_count.lock().unwrap() += 1;
         *self.last_batch_searches_count.lock().unwrap() = batch.searches.len();
         if *self.fail_query_batch.lock().unwrap() {
@@ -202,12 +219,15 @@ impl QdrantOps for MockQdrantClient {
                 None,
             ));
         }
-        // Real upstream shape (OpenAPI QueryResponse): each batch item
-        // carries the points at its top level — no `result` wrapper.
+        // Empty typed batch results: the shared parser is REST-only, and the
+        // mock has no transport envelope to parse.
         Ok(batch
             .searches
             .iter()
-            .map(|_| serde_json::json!({"points": []}))
+            .map(|_| BackendResponse {
+                data: ExecData::Hits(Vec::new()),
+                telemetry: None,
+            })
             .collect())
     }
 
@@ -215,17 +235,15 @@ impl QdrantOps for MockQdrantClient {
         &self,
         _collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         *self.update_batch_call_count.lock().unwrap() += 1;
         *self.last_update_batch_ops_count.lock().unwrap() = batch.operations.len();
         Ok(batch
             .operations
             .iter()
-            .map(|op| {
-                serde_json::json!({
-                    "status": "completed",
-                    "operation": op.operation_name(),
-                })
+            .map(|_| BackendResponse {
+                data: ExecData::Mutation { affected: None },
+                telemetry: None,
             })
             .collect())
     }

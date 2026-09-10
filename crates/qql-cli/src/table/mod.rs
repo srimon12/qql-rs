@@ -1,7 +1,7 @@
 //! `psql`-style table printer for QQL CLI output.
 //!
 //! Produces unbordered, aligned tables with a row-count footer.
-//! Detects columns automatically from `ExecResponse.data` payloads, supporting
+//! Detects columns automatically from `ExecResponse` data payloads, supporting
 //! both standard tabular views and expanded vertical record displays (`\x`).
 
 mod cell;
@@ -57,6 +57,14 @@ pub fn render_report(
     Ok(())
 }
 
+/// JSON view of typed response data for the table renderers. `ExecData`
+/// serializes to the legacy report shapes (hits array, `{"count": n}`, facet
+/// array, raw envelope), so the renderers keep operating on the same JSON.
+fn data_json(data: &Option<qql::executor::ExecData>) -> Option<serde_json::Value> {
+    data.as_ref()
+        .and_then(|data| serde_json::to_value(data).ok())
+}
+
 /// Render a single `ExecResponse` to stdout.
 pub fn render_response(
     response: &qql::executor::ExecResponse,
@@ -68,39 +76,38 @@ pub fn render_response(
         return Ok(());
     }
 
+    let data = data_json(&response.data);
     match response.operation.as_str() {
         "QUERY" | "SCROLL" | "CROSS_RERANK" | "GET_POINTS" => {
-            print_query_table(&response.data)?;
+            print_query_table(&data)?;
         }
         "FACET" => {
-            print_facet_table(&response.data)?;
+            print_facet_table(&data)?;
         }
         "QUERY_GROUPS" => {
-            print_groups_table(&response.data)?;
+            print_groups_table(&data)?;
         }
         "COUNT" => {
-            print_count(&response.data);
+            print_count(&data);
         }
         "SHOW_COLLECTIONS" => {
-            print_collections_list(&response.data)?;
+            print_collections_list(&data)?;
         }
         "SHOW_COLLECTION" | "show_collection" => {
-            print_collection_info(&response.data)?;
+            print_collection_info(&data)?;
         }
         "SHOW_SHARD_KEYS" => {
-            print_shard_keys_table(&response.data)?;
+            print_shard_keys_table(&data)?;
         }
         "SHOW_QUOTAS" => {
-            print_quotas_table(&response.data)?;
+            print_quotas_table(&data)?;
         }
         _ => {
             // DDL/DML: just print the message
             println!("{}", response.message);
-            if let Some(ref data) = response.data {
+            if let Some(count) = response.count() {
                 // For operations like UPSERT that have data (count), show it
-                if let Some(count) = data.get("count").and_then(|c| c.as_u64()) {
-                    println!("  count: {}", count);
-                }
+                println!("  count: {}", count);
             }
         }
     }
@@ -298,15 +305,18 @@ mod tests {
 
     #[test]
     fn render_response_dispatches_facet_and_get_points() {
+        fn typed_data(value: serde_json::Value) -> Option<qql::executor::ExecData> {
+            Some(serde_json::from_value(value).expect("test data must parse"))
+        }
+
         let get_points_resp = qql::executor::ExecResponse {
             ok: true,
             operation: "GET_POINTS".into(),
             message: "Found 1 hits".into(),
-            data: Some(serde_json::json!([
+            data: typed_data(serde_json::json!([
                 {"id": 10, "payload": {"tag": "test"}}
             ])),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&get_points_resp, false).is_ok());
 
@@ -314,12 +324,11 @@ mod tests {
             ok: true,
             operation: "FACET".into(),
             message: "Found 2 facet hit(s)".into(),
-            data: Some(serde_json::json!([
+            data: typed_data(serde_json::json!([
                 {"value": "books", "count": 15},
                 {"value": "electronics", "count": 8}
             ])),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&facet_resp, false).is_ok());
 
@@ -327,11 +336,10 @@ mod tests {
             ok: true,
             operation: "SHOW_SHARD_KEYS".into(),
             message: "Shard keys listed".into(),
-            data: Some(serde_json::json!({
+            data: typed_data(serde_json::json!({
                 "result": { "shard_keys": ["tenant_1", "tenant_2"] }
             })),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&shard_resp, false).is_ok());
     }

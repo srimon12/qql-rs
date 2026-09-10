@@ -219,7 +219,8 @@ pub(crate) async fn list_shard_keys(
         collection: collection.to_string(),
     };
     let response = ops.execute_planned(&op).await?;
-    Ok(parse_shard_key_list(&response))
+    let envelope = response.data.as_raw().cloned().unwrap_or_default();
+    Ok(parse_shard_key_list(&envelope))
 }
 
 /// Sorted, deduplicated shard keys from a `ListShardKeys` response body.

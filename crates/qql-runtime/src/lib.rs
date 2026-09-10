@@ -52,6 +52,11 @@ pub mod config;
 /// Remote embedding-server adapter ([`HttpEmbedder`](embedder::HttpEmbedder))
 /// implementing the `qql-embed` [`Embedder`](embedder::Embedder) trait.
 pub mod embedder;
+/// REST-shaped envelope → typed response IR parsing. REST is the only
+/// production transport that speaks JSON envelopes; the executor's unit-test
+/// doubles reuse the parser under `cfg(test)`.
+#[cfg(any(feature = "rest", test))]
+mod envelope;
 /// The executor: parse → prepare → plan → batch → dispatch.
 pub mod executor;
 /// Tonic channel client and typed protobuf conversions for the gRPC transport.
@@ -89,7 +94,9 @@ pub use qql_plan::{
 
 // Sparse unit tests live in `qql-embed` (shared implementation).
 
-#[cfg(test)]
+// Contract tests exercise the typed gRPC route converters alongside the
+// OpenAPI REST schemas; gRPC is required for the parity half.
+#[cfg(all(test, feature = "grpc"))]
 mod contract_test;
 #[cfg(test)]
 mod executor_test;

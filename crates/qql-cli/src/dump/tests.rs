@@ -1,6 +1,7 @@
 use qql::backend::{
     CollectionInfo, CollectionParamsSpec, CollectionSchema, PayloadIndexSpec, VectorSpec,
 };
+use qql::executor::{BackendResponse, ExecData};
 use qql_plan::semantic::PlanPointId;
 use serde_json::json;
 
@@ -281,36 +282,35 @@ fn parse_shard_key_list_accepts_rest_and_grpc_shapes() {
 }
 
 #[test]
-fn extract_scroll_page_with_next_offset() {
-    let response = json!({
-        "result": {
-            "points": [
-                { "id": 1, "vector": [0.1], "payload": {} },
-                { "id": 2, "vector": [0.2], "payload": { "x": 1 } }
-            ],
-            "next_page_offset": 2
-        }
-    });
+fn extract_scroll_page_returns_typed_hits_and_falls_back_cursor() {
+    let data: ExecData = serde_json::from_value(json!([
+        { "id": 1, "vector": [0.1], "payload": {} },
+        { "id": "a", "vector": [0.2], "payload": { "x": 1 } }
+    ]))
+    .expect("hits shape");
+    let response = BackendResponse {
+        data,
+        telemetry: None,
+    };
     let (points, next) = extract_scroll_page(&response);
     assert_eq!(points.len(), 2);
-    assert_eq!(next, Some(PlanPointId::Number(2)));
-}
-
-#[test]
-fn extract_scroll_page_string_offset() {
-    let response = json!({
-        "result": {
-            "points": [{ "id": "a" }],
-            "next_page_offset": "a"
-        }
-    });
-    let (_, next) = extract_scroll_page(&response);
-    assert_eq!(next, Some(PlanPointId::String("a".into())));
+    assert_eq!(points[0]["id"], 1);
+    assert_eq!(points[1]["id"], "a");
+    // `ExecData::Hits` carries no `next_page_offset`; the cursor falls back to
+    // the last point id, and the inclusive repeat is dropped on the next page.
+    assert!(next.is_none());
+    assert_eq!(
+        next_scroll_cursor(next, &points),
+        Some(PlanPointId::String("a".into()))
+    );
 }
 
 #[test]
 fn extract_empty_page() {
-    let response = json!({ "result": { "points": [] } });
+    let response = BackendResponse {
+        data: ExecData::Hits(Vec::new()),
+        telemetry: None,
+    };
     let (points, next) = extract_scroll_page(&response);
     assert!(points.is_empty());
     assert!(next.is_none());

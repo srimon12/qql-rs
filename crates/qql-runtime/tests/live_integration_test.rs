@@ -1,6 +1,8 @@
 //! Live end-to-end integration test for the REST and gRPC transports with an
 //! Ollama embedding endpoint. Requires a Qdrant on localhost:6333/6334 and
 //! Ollama on localhost:11434.
+#![cfg(all(feature = "rest", feature = "grpc"))]
+
 use std::sync::Arc;
 
 use qql::embedder::HttpEmbedder;
@@ -89,17 +91,9 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
         .await
         .unwrap();
     assert!(rest_search.ok, "REST search failed: {:?}", rest_search);
-    assert!(
-        rest_search.results[0].data.is_some(),
-        "Search data should be present"
-    );
-
     let hits = rest_search.results[0]
-        .data
-        .as_ref()
-        .unwrap()
-        .as_array()
-        .unwrap();
+        .hits_ref()
+        .expect("Search data should be present");
     assert!(!hits.is_empty(), "Should return search hits");
     println!("REST Search returned {} hits: {:?}", hits.len(), hits);
 
@@ -112,17 +106,9 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
         .await
         .unwrap();
     assert!(grpc_search.ok, "gRPC search failed: {:?}", grpc_search);
-    assert!(
-        grpc_search.results[0].data.is_some(),
-        "gRPC Search data should be present"
-    );
-
     let grpc_hits = grpc_search.results[0]
-        .data
-        .as_ref()
-        .unwrap()
-        .as_array()
-        .unwrap();
+        .hits_ref()
+        .expect("gRPC Search data should be present");
     assert!(!grpc_hits.is_empty(), "gRPC should return search hits");
     println!(
         "gRPC Search returned {} hits: {:?}",
@@ -142,10 +128,8 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
     // B-3 regression: GetPoints must report the retrieved hits, not 0.
     assert_eq!(points_res.results[0].message, "Found 2 hits");
     let points_hits = points_res.results[0]
-        .data
-        .as_ref()
-        .and_then(|d| d.as_array())
-        .expect("POINTS data should be an array");
+        .hits_ref()
+        .expect("POINTS data should carry hits");
     assert_eq!(points_hits.len(), 2, "POINTS lookup should return 2 hits");
 
     // Scroll

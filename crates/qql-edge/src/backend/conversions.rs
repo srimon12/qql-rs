@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use qdrant_edge::{PointId, Record};
 use serde_json::Value;
 
+use qql::executor::{FacetHit, SearchHit};
 use qql_core::error::QqlError;
 use qql_plan::PlanPointId;
 
@@ -33,7 +36,7 @@ where
     ids.into_iter().map(to_edge_id).collect()
 }
 
-/// Accept typed plan IDs and legacy JSON values during the migration.
+/// Accept typed plan point IDs (owned or borrowed).
 pub(crate) trait IntoPlanPointId {
     fn into_plan_point_id(self) -> PlanPointId;
 }
@@ -50,61 +53,51 @@ impl IntoPlanPointId for &PlanPointId {
     }
 }
 
-impl IntoPlanPointId for serde_json::Value {
-    fn into_plan_point_id(self) -> PlanPointId {
-        match self {
-            Value::Number(n) => n
-                .as_u64()
-                .map(PlanPointId::Number)
-                .unwrap_or_else(|| PlanPointId::String(n.to_string())),
-            Value::String(s) => PlanPointId::String(s),
-            // Do NOT map unknown JSON shapes to id 0 — that silently rewrites
-            // deletes/retrieves. Use an unparseable string so to_edge_id errors.
-            other => PlanPointId::String(format!("__invalid_point_id__:{other}")),
-        }
-    }
-}
-
-pub(crate) fn from_edge_id(id: &PointId) -> Value {
+/// Typed plan ID from a `qdrant-edge` point ID (no JSON hop).
+pub(crate) fn from_edge_plan_id(id: &PointId) -> PlanPointId {
     match id {
-        PointId::NumId(n) => serde_json::json!(*n),
-        PointId::Uuid(u) => serde_json::json!(u.to_string()),
+        PointId::NumId(n) => PlanPointId::Number(*n),
+        PointId::Uuid(u) => PlanPointId::String(u.to_string()),
     }
 }
 
-pub(crate) fn from_edge_record(rec: Record) -> Value {
-    let id = from_edge_id(&rec.id);
-    let payload: Value = rec
-        .payload
-        .map(|p| {
-            let map: serde_json::Map<String, Value> = p.0.into_iter().collect();
-            Value::Object(map)
-        })
-        .unwrap_or(Value::Null);
-    let mut obj = serde_json::Map::new();
-    obj.insert("id".into(), id);
-    obj.insert("payload".into(), payload);
-    if let Some(vector) = rec.vector {
-        obj.insert("vector".into(), edge_vector_to_json(vector));
-    }
-    Value::Object(obj)
+fn from_edge_payload(payload: qdrant_edge::Payload) -> HashMap<String, Value> {
+    payload.0.into_iter().collect()
 }
 
-pub(crate) fn from_edge_scored_point(point: qdrant_edge::ScoredPoint) -> Value {
-    let mut object = serde_json::Map::new();
-    object.insert("id".into(), from_edge_id(&point.id));
-    object.insert("score".into(), serde_json::json!(point.score));
-    object.insert("version".into(), serde_json::json!(point.version));
-    if let Some(payload) = point.payload {
-        object.insert(
-            "payload".into(),
-            serde_json::to_value(payload).unwrap_or(Value::Null),
-        );
+/// Typed search hit from a scored query point.
+///
+/// `text` stays `None` (the payload still carries any text field).
+pub(crate) fn from_edge_scored_point_to_hit(point: qdrant_edge::ScoredPoint) -> SearchHit {
+    SearchHit {
+        id: from_edge_plan_id(&point.id),
+        score: point.score,
+        text: None,
+        payload: point.payload.map(from_edge_payload),
+        collection: None,
+        vector: point.vector.map(edge_vector_to_json),
     }
-    if let Some(vector) = point.vector {
-        object.insert("vector".into(), edge_vector_to_json(vector));
+}
+
+/// Typed search hit from a scroll/retrieve record. Records carry no similarity
+/// score, so `score` is `0.0`.
+pub(crate) fn from_edge_record_to_hit(record: Record) -> SearchHit {
+    SearchHit {
+        id: from_edge_plan_id(&record.id),
+        score: 0.0,
+        text: None,
+        payload: record.payload.map(from_edge_payload),
+        collection: None,
+        vector: record.vector.map(edge_vector_to_json),
     }
-    Value::Object(object)
+}
+
+/// Typed facet entry from a `qdrant-edge` facet hit.
+pub(crate) fn from_edge_facet_hit(hit: qdrant_edge::FacetValueHit) -> FacetHit {
+    FacetHit {
+        value: qdrant_edge::ValueVariants::from(hit.value).to_value(),
+        count: hit.count as u64,
+    }
 }
 
 fn edge_vector_to_json(vector: qdrant_edge::VectorStructInternal) -> Value {

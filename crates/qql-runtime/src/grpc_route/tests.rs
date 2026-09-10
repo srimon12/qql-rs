@@ -6,7 +6,14 @@ use super::query::{
     plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
     to_vector_input, to_vectors,
 };
-use super::responses::{facet_hit_to_json, get_points_envelope};
+use super::responses::{facet_hit_to_json, usage_to_json};
+use super::typed::{
+    collection_mutation_to_typed, facet_hit_to_typed, mutation_response_to_typed,
+    point_group_to_typed, retrieved_point_to_hit, scored_point_to_hit, telemetry_from_proto,
+    usage_to_telemetry,
+};
+use crate::executor::response::BackendResponse;
+use crate::executor::{ExecData, ServerUsage};
 use crate::qdrant_grpc::qdrant;
 use qql_core::parser::Parser;
 use qql_plan::types::{FilterExpression, MatchValue};
@@ -583,28 +590,37 @@ fn grpc_float_equality_filter_is_range() {
     }
 }
 
-/// GetPoints must wrap hits in `result.points` so hit extraction sees
-/// them (B-3 regression); a bare `result` array would report 0 hits.
+/// GetPoints must keep every hit (B-3 regression): the retired JSON path
+/// silently dropped them when the envelope shape was wrong, and the typed path
+/// maps every `RetrievedPoint` straight into a hit.
 #[test]
-fn grpc_get_points_envelope_keeps_hits_extractable() {
-    use crate::executor::dml::query::extract_search_hits;
+fn typed_get_points_keeps_every_hit() {
+    let point = |id: u64, title: &str| qdrant::RetrievedPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(id)),
+        }),
+        payload: [(
+            "title".to_string(),
+            proto_value(qdrant::value::Kind::StringValue(title.to_string())),
+        )]
+        .into_iter()
+        .collect(),
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    };
 
-    let envelope = get_points_envelope(
-        vec![
-            serde_json::json!({"id": 1, "payload": {"title": "a"}}),
-            serde_json::json!({"id": 2, "payload": {"title": "b"}}),
-        ],
-        0.0,
-    );
-    assert_eq!(envelope["result"]["points"].as_array().unwrap().len(), 2);
-    let hits = extract_search_hits(&envelope);
-    assert_eq!(hits.len(), 2, "GetPoints hits must survive hit extraction");
+    let hits: Vec<_> = vec![point(1, "a"), point(2, "b")]
+        .into_iter()
+        .map(retrieved_point_to_hit)
+        .collect();
+    assert_eq!(hits.len(), 2, "GetPoints hits must survive conversion");
     assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(1));
     assert_eq!(hits[1].id, qql_plan::PlanPointId::Number(2));
-
-    // The empty case still yields zero hits, not an error.
-    let envelope = get_points_envelope(Vec::new(), 0.0);
-    assert_eq!(extract_search_hits(&envelope).len(), 0);
+    assert_eq!(
+        hits[1].payload.as_ref().expect("payload")["title"],
+        serde_json::json!("b")
+    );
 }
 
 /// IN/NOT IN lists must be homogeneous and int64-representable: valid
@@ -1095,4 +1111,374 @@ fn grpc_to_vectors_rejects_unbound_params() {
 
     let err = to_vectors(&PlanPointVectors::PositionalParam(1)).unwrap_err();
     assert_eq!(err.code, "QQL-BIND-MISSING-POSITIONAL");
+}
+
+// ── Typed read path: proto → BackendResponse parity with the JSON fallback ──
+
+fn planned(sql: &str) -> qql_plan::PlannedOperation {
+    qql_plan::plan(&Parser::parse(sql).expect("parse")).expect("plan")
+}
+
+fn proto_value(kind: qdrant::value::Kind) -> qdrant::Value {
+    qdrant::Value { kind: Some(kind) }
+}
+
+fn sample_hardware_usage() -> qdrant::HardwareUsage {
+    qdrant::HardwareUsage {
+        cpu: 11,
+        payload_io_read: 22,
+        payload_io_write: 33,
+        payload_index_io_read: 44,
+        payload_index_io_write: 55,
+        vector_io_read: 66,
+        vector_io_write: 77,
+    }
+}
+
+fn sample_usage() -> qdrant::Usage {
+    qdrant::Usage {
+        hardware: Some(sample_hardware_usage()),
+        inference: Some(qdrant::InferenceUsage {
+            models: [("bm25".to_string(), qdrant::ModelUsage { tokens: 512 })]
+                .into_iter()
+                .collect(),
+        }),
+    }
+}
+
+/// `scored_point_to_hit` + `telemetry_from_proto` must produce exactly what
+/// the REST envelope parser derives from an equivalent envelope. The JSON
+/// response builders are gone, so the envelope is written by hand: this pins
+/// the typed mapping against the parser contract, not against a builder.
+#[test]
+fn typed_query_hit_and_telemetry_match_json_envelope() {
+    let usage = sample_usage();
+    let point = qdrant::ScoredPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(7)),
+        }),
+        payload: [
+            (
+                "title".to_string(),
+                proto_value(qdrant::value::Kind::StringValue("a".to_string())),
+            ),
+            (
+                "stars".to_string(),
+                proto_value(qdrant::value::Kind::IntegerValue(5)),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        score: 0.75,
+        version: 3,
+        vectors: Some(qdrant::VectorsOutput {
+            vectors_options: Some(qdrant::vectors_output::VectorsOptions::Vector(
+                qdrant::VectorOutput {
+                    vector: Some(qdrant::vector_output::Vector::Dense(qdrant::DenseVector {
+                        data: vec![0.5, 0.25],
+                    })),
+                    ..Default::default()
+                },
+            )),
+        }),
+        shard_key: None,
+        order_value: None,
+    };
+
+    // Envelope parser contract for the same point (hand-written REST shape).
+    let envelope = serde_json::json!({
+        "result": { "points": [{
+            "id": 7,
+            "score": 0.75,
+            "version": 3,
+            "payload": { "title": "a", "stars": 5 },
+            "vector": [0.5, 0.25],
+        }]},
+        "status": "ok",
+        "time": 0.125,
+        "usage": usage_to_json(Some(&usage)),
+    });
+    let json =
+        crate::envelope::parse_backend_response(&planned("QUERY POINTS (7) FROM docs;"), envelope)
+            .expect("envelope parses");
+
+    // Typed fast path: proto → `BackendResponse`.
+    let typed = BackendResponse {
+        data: ExecData::Hits(vec![scored_point_to_hit(point)]),
+        telemetry: telemetry_from_proto(0.125, Some(&usage)),
+    };
+
+    assert_eq!(json.data, typed.data, "typed hits must match envelope hits");
+    assert_eq!(
+        json.telemetry, typed.telemetry,
+        "typed telemetry must match envelope telemetry"
+    );
+
+    // Pin the mapping explicitly (not just mutual agreement).
+    let hits = typed.data.hits().expect("hits");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(7));
+    assert_eq!(hits[0].score, 0.75);
+    assert_eq!(hits[0].text, None);
+    assert_eq!(
+        hits[0].payload.as_ref().expect("payload")["title"],
+        serde_json::json!("a")
+    );
+    assert_eq!(
+        hits[0].vector,
+        Some(serde_json::json!([0.5, 0.25])),
+        "vectors_output converts like the JSON builder"
+    );
+}
+
+/// `retrieved_point_to_hit` (get / scroll) must match envelope extraction,
+/// including UUID ids and the unscored `0.0` default.
+#[test]
+fn typed_retrieved_hit_matches_json_envelope() {
+    let point = qdrant::RetrievedPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(
+                "11111111-2222-3333-4444-555555555555".to_string(),
+            )),
+        }),
+        payload: Default::default(),
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    };
+
+    let envelope = serde_json::json!({
+        "result": { "points": [{
+            "id": "11111111-2222-3333-4444-555555555555",
+            "payload": null,
+        }]},
+        "status": "ok",
+        "time": 0.0,
+    });
+    let json =
+        crate::envelope::parse_backend_response(&planned("SCROLL FROM docs LIMIT 1;"), envelope)
+            .expect("envelope parses");
+
+    let typed = BackendResponse {
+        data: ExecData::Hits(vec![retrieved_point_to_hit(point)]),
+        telemetry: telemetry_from_proto(0.0, None),
+    };
+
+    assert_eq!(json.data, typed.data);
+    assert_eq!(json.telemetry, typed.telemetry);
+    let hits = typed.data.hits().expect("hits");
+    assert_eq!(
+        hits[0].id,
+        qql_plan::PlanPointId::String("11111111-2222-3333-4444-555555555555".to_string())
+    );
+    assert_eq!(hits[0].score, 0.0);
+    assert_eq!(hits[0].payload, None);
+}
+
+/// `point_group_to_typed` must match the REST envelope parser for every
+/// `GroupId` variant, ordered hits, and dropped `lookup` points.
+#[test]
+fn typed_groups_match_json_envelope_parser() {
+    use qdrant::group_id::Kind;
+
+    let point = |id: u64, score: f32| qdrant::ScoredPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(id)),
+        }),
+        payload: Default::default(),
+        score,
+        version: 0,
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    };
+
+    let proto_groups = vec![
+        qdrant::PointGroup {
+            id: Some(qdrant::GroupId {
+                kind: Some(Kind::UnsignedValue(7)),
+            }),
+            hits: vec![point(1, 0.75)],
+            lookup: Some(qdrant::RetrievedPoint {
+                id: Some(qdrant::PointId {
+                    point_id_options: Some(qdrant::point_id::PointIdOptions::Num(99)),
+                }),
+                ..Default::default()
+            }),
+        },
+        qdrant::PointGroup {
+            id: Some(qdrant::GroupId {
+                kind: Some(Kind::IntegerValue(-3)),
+            }),
+            hits: vec![point(2, 0.5)],
+            lookup: None,
+        },
+        qdrant::PointGroup {
+            id: Some(qdrant::GroupId {
+                kind: Some(Kind::StringValue("a".to_string())),
+            }),
+            hits: Vec::new(),
+            lookup: None,
+        },
+    ];
+    let typed = BackendResponse {
+        data: ExecData::Groups(proto_groups.into_iter().map(point_group_to_typed).collect()),
+        telemetry: telemetry_from_proto(0.5, None),
+    };
+
+    let envelope = serde_json::json!({
+        "result": { "groups": [
+            {"id": 7, "hits": [{"id": 1, "score": 0.75}], "lookup": {"id": 99}},
+            {"id": -3, "hits": [{"id": 2, "score": 0.5}]},
+            {"id": "a", "hits": []},
+        ]},
+        "status": "ok",
+        "time": 0.5,
+    });
+    let parsed = crate::envelope::parse_backend_response(
+        &planned("QUERY TEXT 'x' MODEL 'm' FROM docs USING dense GROUP BY category LIMIT 3;"),
+        envelope,
+    )
+    .expect("envelope parses");
+
+    assert_eq!(
+        parsed.data, typed.data,
+        "typed groups must match envelope groups"
+    );
+    assert_eq!(parsed.telemetry, typed.telemetry);
+    let groups = typed.data.groups().expect("groups");
+    assert_eq!(groups[0].group_id, serde_json::json!(7));
+    assert_eq!(groups[1].group_id, serde_json::json!(-3));
+    assert_eq!(groups[2].group_id, serde_json::json!("a"));
+    assert_eq!(groups[0].hits.len(), 1, "lookup points expand into no hits");
+}
+
+/// Write responses (upsert/delete/payload/vector ops) are status-only typed
+/// mutations with telemetry straight from the proto: the proto `UpdateResult`
+/// has no affected count (the executor derives upserts from the request).
+#[test]
+fn typed_mutation_response_is_status_only_with_telemetry() {
+    let usage = sample_usage();
+    let resp = qdrant::PointsOperationResponse {
+        result: Some(qdrant::UpdateResult {
+            operation_id: Some(42),
+            status: qdrant::UpdateStatus::Completed as i32,
+        }),
+        time: 0.25,
+        usage: Some(usage.clone()),
+    };
+
+    let typed = mutation_response_to_typed(resp);
+    assert_eq!(typed.data, ExecData::Mutation { affected: None });
+    assert_eq!(typed.telemetry, telemetry_from_proto(0.25, Some(&usage)));
+    assert_eq!(
+        serde_json::to_value(&typed.data).expect("serializes"),
+        serde_json::Value::Null,
+        "status-only mutations serialize as the report's null data"
+    );
+}
+
+/// Collection / shard-key mutations (proto bool status + time) are status-only
+/// typed mutations — no Raw envelope remains for status responses.
+#[test]
+fn typed_collection_mutation_is_status_only() {
+    let typed = collection_mutation_to_typed(0.125);
+    assert_eq!(typed.data, ExecData::Mutation { affected: None });
+    assert_eq!(typed.telemetry, telemetry_from_proto(0.125, None));
+}
+
+/// `facet_hit_to_typed` must serialize to exactly `facet_hit_to_json` for
+/// every value variant.
+#[test]
+fn typed_facet_hits_match_json() {
+    use qdrant::facet_value::Variant;
+    use qdrant::{FacetHit as ProtoFacetHit, FacetValue};
+
+    for proto in [
+        ProtoFacetHit {
+            value: Some(FacetValue {
+                variant: Some(Variant::StringValue("hotel".to_string())),
+            }),
+            count: 42,
+        },
+        ProtoFacetHit {
+            value: Some(FacetValue {
+                variant: Some(Variant::IntegerValue(101)),
+            }),
+            count: 7,
+        },
+        ProtoFacetHit {
+            value: Some(FacetValue {
+                variant: Some(Variant::BoolValue(true)),
+            }),
+            count: 99,
+        },
+        ProtoFacetHit {
+            value: None,
+            count: 0,
+        },
+    ] {
+        let json = facet_hit_to_json(proto.clone());
+        let typed = serde_json::to_value(facet_hit_to_typed(proto)).expect("facet serializes");
+        assert_eq!(json, typed);
+    }
+}
+
+/// `usage_to_telemetry` must mirror `usage_to_json` + `ServerUsage::from_json`
+/// for every section combination (absent, empty, hardware-only,
+/// inference-only, both).
+#[test]
+fn usage_to_telemetry_matches_json_pipeline() {
+    let usage = sample_usage();
+    assert_eq!(
+        usage_to_telemetry(Some(&usage)),
+        ServerUsage::from_json(&usage_to_json(Some(&usage))),
+        "hardware + inference"
+    );
+
+    let hardware_only = qdrant::Usage {
+        hardware: usage.hardware,
+        inference: None,
+    };
+    assert_eq!(
+        usage_to_telemetry(Some(&hardware_only)),
+        ServerUsage::from_json(&usage_to_json(Some(&hardware_only))),
+        "hardware only"
+    );
+
+    let inference_only = qdrant::Usage {
+        hardware: None,
+        inference: usage.inference.clone(),
+    };
+    assert_eq!(
+        usage_to_telemetry(Some(&inference_only)),
+        ServerUsage::from_json(&usage_to_json(Some(&inference_only))),
+        "inference only"
+    );
+
+    let empty = qdrant::Usage {
+        hardware: None,
+        inference: None,
+    };
+    assert_eq!(usage_to_telemetry(Some(&empty)), None);
+    assert_eq!(ServerUsage::from_json(&usage_to_json(Some(&empty))), None);
+    assert_eq!(usage_to_telemetry(None), None);
+
+    let parsed = usage_to_telemetry(Some(&usage)).expect("usage present");
+    assert_eq!(
+        parsed.hardware,
+        Some(crate::executor::HardwareUsage {
+            cpu: 11,
+            payload_io_read: 22,
+            payload_io_write: 33,
+            payload_index_io_read: 44,
+            payload_index_io_write: 55,
+            vector_io_read: 66,
+            vector_io_write: 77,
+        })
+    );
+    assert_eq!(
+        parsed.inference.expect("inference present").models["bm25"].tokens,
+        512
+    );
 }

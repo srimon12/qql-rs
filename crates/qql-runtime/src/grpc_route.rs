@@ -13,7 +13,9 @@
 //! - [`filter`] — filter expression converters
 //! - [`formula`] — formula expression converters
 //! - [`values`] — payload value conversions (JSON ↔ proto)
-//! - [`responses`] — proto responses → REST-shaped JSON envelopes
+//! - [`responses`] — schemaless metadata JSON (collection info/lists) + parity
+//!   oracles; typed responses live in [`typed`]
+//! - [`typed`] — proto responses → typed executor IR (no JSON envelope)
 //! - [`execute`] — fast-path dispatch ([`execute_planned_grpc`])
 //! - [`execute_read`] / [`execute_write`] / [`execute_ddl`] — dispatch helpers
 #![allow(deprecated)]
@@ -30,6 +32,7 @@ mod query;
 mod responses;
 #[cfg(test)]
 mod tests;
+mod typed;
 mod values;
 
 pub use execute::execute_planned_grpc;

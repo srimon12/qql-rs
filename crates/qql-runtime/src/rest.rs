@@ -12,6 +12,7 @@ use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 pub use crate::client::REQUEST_ID_HEADER;
 pub(crate) use crate::client::next_request_id;
 use crate::client::{CollectionInfo, QdrantOps};
+use crate::executor::response::{BackendResponse, ExecData};
 
 /// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
 pub const ROUTE_AFFINITY_HEADER: &str = "X-Qdrant-Route-Affinity";
@@ -354,18 +355,24 @@ impl QdrantOps for RestQdrant {
         self.execute_planned(&op).await.map(|_| ())
     }
 
-    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
+    async fn execute_planned(
+        &self,
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<BackendResponse, QqlError> {
         if let qql_plan::PlannedOperation::CreateCollection {
             collection,
             request,
         } = op
         {
             self.create_collection_planned(collection, request).await?;
-            return Ok(serde_json::json!({
-                "result": true,
-                "status": "ok",
-                "time": 0.0,
-            }));
+            return crate::envelope::parse_backend_response(
+                op,
+                serde_json::json!({
+                    "result": true,
+                    "status": "ok",
+                    "time": 0.0,
+                }),
+            );
         }
         let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
             qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
@@ -379,27 +386,45 @@ impl QdrantOps for RestQdrant {
                 None,
             ),
         })?;
-        self.execute_http(route).await
+        let envelope = self.execute_http(route).await?;
+        crate::envelope::parse_backend_response(op, envelope)
     }
 
     async fn execute_query_batch(
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         let path = format!("/collections/{collection}/points/query/batch");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        result_array(&value, &path)
+        let items = result_array(&value, &path)?;
+        let mut responses = Vec::with_capacity(items.len());
+        for item in items {
+            ensure_batch_item_ok(&item)?;
+            responses.push(crate::envelope::parse_query_batch_item(&item));
+        }
+        Ok(responses)
     }
 
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         let path = format!("/collections/{collection}/points/batch?wait=true");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        result_array(&value, &path)
+        let items = result_array(&value, &path)?;
+        let mut responses = Vec::with_capacity(items.len());
+        for item in items {
+            ensure_batch_item_ok(&item)?;
+            // The mutation payload is request-derived in the executor's
+            // normalization; the per-item update result carries only status.
+            responses.push(BackendResponse {
+                data: ExecData::Mutation { affected: None },
+                telemetry: None,
+            });
+        }
+        Ok(responses)
     }
 
     async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
@@ -592,6 +617,16 @@ fn result_array(value: &Value, operation: &str) -> Result<Vec<Value>, QqlError> 
                 None,
             )
         })
+}
+
+/// Qdrant batch endpoints answer per item; a 200 response can still carry
+/// per-item failures (`status: "error"`). Surface the first one as a batch
+/// error so the executor's continue path retries the group individually.
+fn ensure_batch_item_ok(item: &Value) -> Result<(), QqlError> {
+    match qql_plan::batch_item_error(item) {
+        Some(message) => Err(QqlError::backend("QQL-BACKEND-BATCH", message, None)),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]

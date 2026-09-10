@@ -15,8 +15,13 @@ async fn show_collections_preserves_backend_data() {
         .unwrap();
 
     assert_eq!(report.results[0].operation, "SHOW_COLLECTIONS");
+    let data = report.results[0]
+        .data
+        .as_ref()
+        .and_then(crate::executor::ExecData::as_raw)
+        .expect("SHOW COLLECTIONS keeps its raw envelope");
     assert_eq!(
-        report.results[0].data.as_ref().unwrap()["result"]["collections"],
+        data["result"]["collections"],
         serde_json::json!([{"name": "alpha"}, {"name": "beta"}])
     );
 }

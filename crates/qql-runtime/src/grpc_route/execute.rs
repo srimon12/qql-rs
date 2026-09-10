@@ -1,34 +1,36 @@
-//! Fast-path gRPC dispatch: [`PlannedOperation`] → execution helpers.
+//! Fast-path gRPC dispatch:
+//! [`qql_plan::PlannedOperation`] → typed [`BackendResponse`].
 //!
-//! Dispatch a [`PlannedOperation`] directly to gRPC — **no Route, no JSON**
-//! for query vectors and point IDs, which convert from typed plan structs
-//! straight to protobuf. Two sanctioned exceptions keep JSON on this path by
-//! design: (a) the formula fallback (`formula::ast_formula_to_grpc` falls back
-//! to `lower_formula_expr → to_formula_expression` for future AST variants),
-//! and (b) DDL sub-configs (`hnsw_config`, `optimizers_config`,
+//! Dispatch a [`qql_plan::PlannedOperation`] directly to gRPC — **no Route, no
+//! JSON envelope, no envelope parser**. Each variant delegates to a focused
+//! helper in [`super::execute_read`], [`super::execute_write`] or
+//! [`super::execute_ddl`] that builds the tonic request from the already-typed
+//! fields and converts the protobuf response straight into the executor's
+//! typed IR.
+//!
+//! Two request-side JSON exceptions remain by design: (a) the formula fallback
+//! (`formula::ast_formula_to_grpc` falls back to
+//! `lower_formula_expr → to_formula_expression` for future AST variants), and
+//! (b) DDL sub-configs (`hnsw_config`, `optimizers_config`,
 //! `quantization_config`, vector params), whose plan IR fields are
 //! intentionally schemaless `serde_json::Value` maps.
-//!
-//! This is the fast path for gRPC backends: each variant delegates to a
-//! focused helper in [`super::execute_read`], [`super::execute_write`] or
-//! [`super::execute_ddl`] that builds the tonic request from the
-//! already-typed fields. There is no intermediate REST `Route` projection
-//! and no JSON serialisation/deserialisation.
 
 use qql_core::error::QqlError;
 
+use crate::executor::response::BackendResponse;
 use crate::grpc::GrpcQdrant;
 
-/// Dispatch a [`PlannedOperation`] directly to gRPC — **no Route, no JSON**.
+/// Dispatch a [`qql_plan::PlannedOperation`] directly to gRPC, building typed
+/// data straight from the protobuf response.
 ///
-/// This is the fast path for gRPC backends.  It matches each
-/// `PlannedOperation` variant and builds the corresponding tonic
-/// request from the already-typed fields.  There is no intermediate
-/// REST `Route` projection and no JSON serialisation/deserialisation.
+/// This is the single fast path for gRPC backends: there is no intermediate
+/// REST `Route` projection, no JSON serialisation/deserialisation, and no
+/// response envelope parsing. `Raw` responses remain only for schemaless
+/// metadata (collection info/lists, shard-key lists).
 pub async fn execute_planned_grpc(
     client: &GrpcQdrant,
     op: &qql_plan::PlannedOperation,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     use qql_plan::PlannedOperation;
     match op {
         PlannedOperation::Query {
@@ -51,6 +53,10 @@ pub async fn execute_planned_grpc(
             collection,
             request,
         } => super::execute_read::execute_count(client, collection, request).await,
+        PlannedOperation::Facet {
+            collection,
+            request,
+        } => super::execute_read::execute_facet(client, collection, request).await,
         PlannedOperation::Upsert {
             collection,
             request,
@@ -136,9 +142,5 @@ pub async fn execute_planned_grpc(
                 None,
             ))
         }
-        PlannedOperation::Facet {
-            collection,
-            request,
-        } => super::execute_read::execute_facet(client, collection, request).await,
     }
 }
