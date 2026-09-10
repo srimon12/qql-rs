@@ -23,12 +23,19 @@ Version sites owned by this script:
 - ``crates/{pyqql,pyqql-edge}/pyproject.toml`` ``[project].version``
 - ``crates/{nqql,nqql-edge}/package.json`` ``version`` plus every
   ``optionalDependencies`` platform package
+- ``RELEASING.md``: every release-version mention (it documents the current
+  release, not release history; external pins such as the Qdrant ``--ref``
+  are left alone)
+
+Check mode additionally validates the human-owned release notes: a
+``CHANGELOG.md`` section must exist for the expected version and
+``RELEASING.md`` must state that version as current.
 
 Deliberately NOT rewritten: generated wasm bundles (``editors/vscode/wasm``,
 ``crates/qql-wasm/pkg`` — rebuilt with wasm-pack), ``Cargo.lock`` (refreshed
 via ``cargo update -w``), the VS Code extension ``package.json`` (packaging
-slot with an independent version), and prose files (``CHANGELOG.md``,
-``editors/vscode/README.md``, ``bench/README.md`` — printed as reminders).
+slot with an independent version), and ``CHANGELOG.md`` (human-written release
+notes; the script only checks that the release section exists).
 """
 
 from __future__ import annotations
@@ -43,6 +50,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "VERSION"
+CHANGELOG_FILE = ROOT / "CHANGELOG.md"
+RELEASING_FILE = ROOT / "RELEASING.md"
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$")
 
 PUBLIC_CRATES = (
@@ -277,6 +286,50 @@ def validate_editor(expected: str) -> None:
             )
 
 
+def validate_changelog(expected: str) -> None:
+    """``CHANGELOG.md`` is written by hand; the script only proves that a
+    section for the expected release exists, so an [Unreleased] draft cannot
+    be tagged."""
+    if not CHANGELOG_FILE.is_file():
+        fail("CHANGELOG.md is missing")
+    text = CHANGELOG_FILE.read_text()
+    heading = re.search(rf"^## \[{re.escape(expected)}\](.*)$", text, re.MULTILINE)
+    if heading is None:
+        fail(
+            f"CHANGELOG.md has no `## [{expected}]` section; move the "
+            "[Unreleased] notes into a dated release section"
+        )
+    if not re.match(r"\s+-\s+\d{4}-\d{2}-\d{2}\s*$", heading.group(1)):
+        warn(f"CHANGELOG.md [{expected}] section has no ISO release date")
+
+
+def validate_releasing(expected: str) -> None:
+    """``RELEASING.md`` documents the *current* release, not release history:
+    every release-version mention must track VERSION. Lines carrying external
+    pins (the Qdrant ``--ref``, the npm CLI floor) are skipped."""
+    if not RELEASING_FILE.is_file():
+        fail("RELEASING.md is missing")
+    text = RELEASING_FILE.read_text()
+    current = re.search(r"The current release is `([^`]+)`", text)
+    if current is None:
+        fail("RELEASING.md must state `The current release is `<version>``")
+    if normalize_version(current.group(1)) != expected:
+        fail(
+            f"RELEASING.md current release is {current.group(1)}, "
+            f"expected {expected}"
+        )
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if "--ref" in line or "npm CLI" in line:
+            continue
+        for match in re.finditer(r"\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?", line):
+            found = match.group(0).rstrip(".-")
+            if found != expected:
+                fail(
+                    f"RELEASING.md:{line_number} mentions {found}, "
+                    f"expected {expected}: {line.strip()}"
+                )
+
+
 def validate_crate_discovery() -> None:
     """Every crates/* directory must be known to this script: an unknown crate
     would silently escape version validation, and a stale ALL_CRATES entry
@@ -293,7 +346,10 @@ def validate_crate_discovery() -> None:
             fail(f"crates/{crate} is listed in check_release.py but has no manifest")
 
 
-def run_checks(expected: str) -> None:
+def run_checks(expected: str, *, changelog: bool = True) -> None:
+    """Validate the release metadata. Update mode passes ``changelog=False``
+    because the human dates the release notes after the version rewrite; the
+    final check-mode run always enforces them."""
     validate_crate_discovery()
     if not (ROOT / "LICENSE").is_file():
         fail("root MIT LICENSE is missing")
@@ -314,6 +370,9 @@ def run_checks(expected: str) -> None:
     validate_python(expected)
     validate_node(expected)
     validate_editor(expected)
+    validate_releasing(expected)
+    if changelog:
+        validate_changelog(expected)
 
 
 # --------------------------------------------------------------------------
@@ -385,6 +444,15 @@ def update_node_package(path: Path, old: str, new: str) -> tuple[str, list[str]]
     return json.dumps(data, indent=2) + "\n", changes
 
 
+def replace_releasing_versions(text: str, old: str, new: str) -> tuple[str, int]:
+    """Rewrite every release-version mention in ``RELEASING.md`` while leaving
+    surrounding text (``v`` prefixes, package specifiers) intact. The
+    lookarounds keep a longer numeric token or a different pre-release from
+    being clipped."""
+    pattern = re.compile(rf"(?<![\d.]){re.escape(old)}(?![\d.-])")
+    return pattern.subn(new, text)
+
+
 def collect_update_plan(old: str, new: str) -> list[tuple[Path, str, str]]:
     """Return [(path, description, new_content)] for every version site."""
     plan: list[tuple[Path, str, str]] = []
@@ -433,6 +501,12 @@ def collect_update_plan(old: str, new: str) -> list[tuple[Path, str, str]]:
             fail(f"{package} package.json has no version/optionalDependencies at {old}")
         plan.append((path, ", ".join(changes), text))
 
+    if not RELEASING_FILE.is_file():
+        fail("RELEASING.md is missing")
+    text, hits = replace_releasing_versions(RELEASING_FILE.read_text(), old, new)
+    if hits:
+        plan.append((RELEASING_FILE, f"{hits} release-version mention(s)", text))
+
     return plan
 
 
@@ -468,7 +542,7 @@ def print_reminders(old: str, new: str) -> None:
     )
     print(
         f"  2. CHANGELOG.md: move the [Unreleased] notes into a [{new}] section "
-        "dated today."
+        "dated today (check mode fails until the section exists)."
     )
     print(
         "  3. Prose version mentions to review: editors/vscode/README.md, "
@@ -495,7 +569,9 @@ def apply_version(old: str, new: str, dry_run: bool) -> None:
 
     refresh_lockfile()
 
-    run_checks(new)
+    # The changelog section is added by hand after the rewrite; check mode
+    # enforces it on the next run.
+    run_checks(new, changelog=False)
     print()
     print(f"release metadata synchronized to {new} and re-validated")
     print_reminders(old, new)

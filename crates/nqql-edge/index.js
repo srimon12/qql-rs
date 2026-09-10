@@ -10,11 +10,11 @@ function isMusl() {
 
 function nativeTarget() {
   const { platform, arch } = process;
-  if (platform === 'linux' && arch === 'x64') {
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
     if (isMusl()) {
       throw new Error(`nqql-edge ${pkg.version} does not provide a Linux musl binary`);
     }
-    return 'linux-x64-gnu';
+    return arch === 'arm64' ? 'linux-arm64-gnu' : 'linux-x64-gnu';
   }
   if (platform === 'darwin' && arch === 'arm64') {
     return 'darwin-arm64';

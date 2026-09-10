@@ -1,6 +1,6 @@
 ---
-title: "Upgrading from QQL 0.3 to 0.4"
-description: "SDK version upgrade notes for moving from QQL 0.3.x to 0.4.0."
+title: "Upgrading from QQL 0.3.1 to 0.4.0"
+description: "Migration notes for QQL 0.3.1 to 0.4.0: typed shard keys, strict scripts, canonical statement strings, and host SDK behavior changes."
 sidebar:
   order: 9
 ---
@@ -11,23 +11,108 @@ Cluster or collection data migration lives in Operations > Cluster migration
 This page covers the SDK version upgrade only.
 {% /aside %}
 
-QQL 0.4.0 hardens the compiler, query planner, and host SDKs for production stability,
-unifies batch parameter semantics across all language bindings, and introduces typed
-result objects.
+QQL 0.4.0 hardens the compiler, query planner, and host SDKs, moves the
+language surface to QQL 1.7 (parameter placeholders, the `WAIT` durability
+clause, and typed shard keys), upgrades the Rust workspace to Edition 2024, and
+unifies batch parameter semantics across Python, Node.js, and WebAssembly.
 
-Review the breaking changes and behavioral updates below when upgrading from 0.3.x.
+Most statements and calls keep working unchanged. The sections below list what
+now fails closed, what behaves differently, and the replacement for each call
+shape. Every code named here is defined in the [error code
+reference](/docs/reference/error-codes/). To triage an unfamiliar statement
+before running it, use `qql check "<statement>"`.
 
 ---
 
-## 1. Statement-Scoped Batch Parameters (`QQL-BIND-BATCH-LENGTH`)
+## Breaking changes
 
-In 0.3.x, passing lists of parameters to multi-statement batches had ambiguous broadcasting
-rules. In 0.4.0, batch parameter binding follows a single strict contract across Python,
-Node.js, and WebAssembly:
+These changes reject input or change output that 0.3.1 accepted. Update the
+call site shown with each item.
 
-- **Statement-scoped**: A list whose items are all parameter containers (all dicts/objects or all lists/arrays) binds 1:1 to statements by index. The parameter list length **must exactly match** the statement count, or the runtime raises `QQL-BIND-BATCH-LENGTH`.
-- **Broadcast**: A single dictionary/object or single primitive list binds to all statements in the batch identically.
-- **Single-container rule**: Passing `params=[[1, 2]]` to a single statement binds `[1, 2]` positionally to statement 0 (unrolled as a 1-element container list), never as a positional matrix.
+### 1. Typed shard keys end to end
+
+Keyword and number shard keys hash differently in Qdrant. 0.4.0 carries the key
+type from parse through REST and gRPC: `SHARD 101` routes to the numeric
+partition, and `SHARD '101'` routes to the keyword partition named `101`.
+
+Before 0.4.0, only `UPSERT` preserved numbers. The other update statements
+coerced a numeric key through a stringifying shim, query statements rejected
+numbers at parse time, the gRPC adapter wrapped every key as a keyword, and
+`DROP SHARD KEY 101` did not parse at all. All of those cases are fixed.
+
+What changed:
+
+- All routing statements accept `SHARD <int>`, and `CREATE SHARD KEY 101`,
+  `DROP SHARD KEY 101`, and integer `shard_keys` entries in `WITH PARAMS` keep
+  numeric form. `DROP SHARD KEY` accepts quoted and numeric keys.
+- `SHARD :tenant` binds by value type: strings become keyword keys and
+  non-negative integers become numeric keys.
+- AST JSON renders keys as `{"Keyword": "acme"}` or `{"Number": 101}`. A
+  numeric key is no longer rendered as a bare string.
+- Host accessors are typed: Python `stmt.shard_key` is `str | int`, Node
+  `stmt.shardKey` is `string | number | bigint`, and the WASM getter returns
+  `string | bigint` while its setter accepts a string, number, bigint, or
+  `null`. Setters fail closed on booleans, floats, negative values, and
+  out-of-range magnitudes. Rust `Stmt::shard_key()` and
+  `PlannedOperation::shard_key()` return typed keys.
+- The non-contract `?shard_key=` REST query parameter is no longer emitted.
+  Routing travels in the request body, which is where Qdrant defines it.
+
+Fix: pass the key in its real type. In source, quote keyword keys and leave
+numeric keys bare. In host code, assign a string or an integer.
+
+```text
+-- Numeric partition.
+QUERY [0.1, 0.2] FROM docs SHARD 101 LIMIT 5;
+
+-- Keyword partition named "101" (a different partition).
+QUERY [0.1, 0.2] FROM docs SHARD '101' LIMIT 5;
+```
+
+```python
+stmt.shard_key = 101      # numeric partition
+stmt.shard_key = "acme"   # keyword partition
+```
+
+```javascript
+stmt.shardKey = 101;      // number
+stmt.shardKey = 101n;     // bigint, the same numeric partition
+stmt.shardKey = "acme";   // keyword partition
+```
+
+If any code compared a shard key against a string, handle numbers as well.
+
+### 2. Empty scripts fail closed (`QQL-VALIDATION-EMPTY-SCRIPT`)
+
+`execute("")`, whitespace-only and comments-only strings, and an empty
+statement array now raise `QQL-VALIDATION-EMPTY-SCRIPT` instead of returning an
+empty `{ ok: true }` report. `analyze` and `explain_analyze` raise the same
+code for an empty input. `";;"` was already a parse error.
+
+Why: an empty success report made "nothing ran" look like a completed script.
+
+```python
+if not queries:
+    return
+client.execute(queries)
+```
+
+### 3. Statement-scoped batch parameters (`QQL-BIND-BATCH-LENGTH`)
+
+In 0.3.x, passing lists of parameters to multi-statement batches had ambiguous
+broadcasting rules. In 0.4.0, batch parameter binding follows a single strict
+contract across Python, Node.js, and WebAssembly:
+
+- **Statement-scoped**: A list whose items are all parameter containers (all
+  dicts/objects or all lists/arrays) binds 1:1 to statements by index. The
+  parameter list length **must exactly match** the statement count, or the
+  runtime raises `QQL-BIND-BATCH-LENGTH`.
+- **Broadcast**: A single dictionary/object, or an array that is not all
+  containers (including a scalar list such as `[1, 2]`), applies to every
+  statement identically.
+- **Single-container rule**: Passing `params=[[1, 2]]` to a single statement
+  binds `[1, 2]` positionally to statement 0 (unrolled as a 1-element container
+  list), never as a positional matrix.
 
 ```python
 # Statement-scoped: 2 statements, exactly 2 parameter dictionaries
@@ -43,12 +128,11 @@ client.execute(
 )
 ```
 
----
+### 4. Duplicate parameter collisions (`QQL-BIND-DUPLICATE-PARAM`)
 
-## 2. Duplicate Parameter Collisions (`QQL-BIND-DUPLICATE-PARAM`)
-
-When flattening nested dictionaries into dotted parameter keys (such as `loc.lat`), QQL
-now rejects conflicting definitions instead of silently overwriting earlier values.
+When flattening nested dictionaries into dotted parameter keys (such as
+`loc.lat`), QQL now rejects conflicting definitions instead of silently
+overwriting earlier values.
 
 ```python
 # FAILS with QQL-BIND-DUPLICATE-PARAM:
@@ -58,40 +142,33 @@ client.execute(
 )
 ```
 
----
+### 5. Canonical statement strings and previews
 
-## 3. String Representation: Canonical vs Preview
+Node and WASM `Stmt.toString()` now return canonical, re-parseable QQL instead
+of a truncated debug preview. Positional markers are normalized to a bare `?`,
+and `SCROLL LIMIT`, `FACET LIMIT`, and formula targets render their placeholders
+correctly, so canonical output re-parses. Python keeps `str(stmt)` canonical
+and `repr(stmt)` as the truncated form.
 
-`Stmt` string serialization is now strictly separated into canonical and preview forms:
-
-- **Canonical QQL (`Stmt.toString()` / `str(stmt)`)**: Returns full, valid QQL that can be re-parsed without data loss. Vector literals are never truncated.
-- **Preview (`Stmt.toReadableString()` / `repr(stmt)`)**: Produces a compact summary with vector dimensions truncated (e.g., `[0.1, 0.2, ... (128 dims)]`) intended for logging and debug output.
+Use `Stmt.toReadableString()` for the compact preview intended for logs.
 
 ```javascript
 // Canonical: re-parseable
 const qql = stmt.toString();
 
-// Preview: safe for logs
+// Preview: safe for logs, vector literals truncated
 console.log(stmt.toReadableString());
 ```
 
----
+### 6. Strict zero-limit rejection
 
-## 4. Removal of `truncateVectors` from Execution Options
+Literal `LIMIT 0` is rejected at parse time with `QQL-PARSE-POSITIVE-INTEGER`
+across `QUERY`, `SCROLL`, and `FACET`. `FACET ... WITH (limit = 0)` carries the
+same code, and a parameter that binds to 0 is rejected with
+`QQL-BIND-TYPE-MISMATCH`. `OFFSET 0` remains valid.
 
-The `truncateVectors` flag has been removed from client `execute()` and `executeAsync()`
-options. Vector truncation is strictly a display/inspection concern:
-
-- Use `bind(query, params, truncate_vectors=True)` or `stmt.toReadableString()` for debugging.
-- Query execution always transmits full vector payloads.
-
----
-
-## 5. Strict Zero-Limit Rejection
-
-Queries and paginated statements now strictly reject `LIMIT 0` at validation time across
-`QUERY`, `SCROLL`, and `FACET` statements. If pagination yields zero items, omit the request
-or set `LIMIT` to at least `1`.
+Why: Qdrant's query API requires `limit >= 1`, so the runtime no longer sends a
+request the backend is guaranteed to reject.
 
 ```text
 -- REJECTED at parse/validation:
@@ -99,13 +176,154 @@ QUERY [0.1, 0.2] FROM docs LIMIT 0;
 FACET category FROM docs WITH (limit = 0);
 ```
 
+### 7. Strict grammar surface
+
+The parser now rejects inputs it used to tolerate:
+
+| Input | Result |
+|---|---|
+| Trailing commas in objects, lists, `PARAMS`, or config blocks | `QQL-PARSE-TRAILING-COMMA` |
+| Empty `PARAMS ()` | `QQL-PARSE-SEARCH-PARAMS` |
+| `ALTER COLLECTION` without a `WITH` clause | `QQL-PARSE-ALTER-CONFIG` |
+| Unknown or duplicate `FACET WITH` keys | `QQL-PARSE-FACET-CONFIG` |
+| Numeric field names, non-scalar `BETWEEN` / `IN` bounds, float values for integer options such as `m = 2.0`, operator object keys | Parse failures with `QQL-PARSE-*` codes |
+| Unknown `VECTOR`, `OPTIMIZERS`, `QUANTIZATION`, or index options | `QQL-VALIDATION-CONFIG` (`Validation`) |
+
+`PARAMS` and config failures carry token spans.
+
+Why: keys that were silently ignored hid misspelled configuration. Remove the
+trailing comma, delete the empty block, add the missing `WITH`, or write the
+value in the expected shape.
+
+### 8. Fail-closed filter injection on UPSERT (`QQL-VALIDATION-FILTER-INJECT`)
+
+`inject_filter` on an `UPSERT` now reports `QQL-VALIDATION-FILTER-INJECT` when
+the operator is not `=` or the field is `id`. Before, the call was a silent
+no-op. On other statement types the previous fail-closed behavior is unchanged,
+and host string operators are parsed ASCII case-insensitively.
+
+Why: a policy predicate that does not apply must not look successful. UPSERT
+can only stamp an equality payload key; it cannot express a point ID predicate.
+
+```python
+stmt.inject_filter("tenant_id", "=", "acme")   # OK
+
+# QQL-VALIDATION-FILTER-INJECT:
+# stmt.inject_filter("rating", ">", 4)
+# stmt.inject_filter("id", "=", 42)
+```
+
+Injecting into an unbound whole-point parameter (`VALUES :rows`) fails the same
+way; bind the points first, then inject. For point-targeted changes, put the
+selector in the statement itself.
+
+### 9. Imperative executor helpers removed
+
+`Executor::scroll_ids`, `Executor::upsert_records`, and
+`Executor::upsert_columns` are gone from the Rust executor, and the SDK clients
+no longer expose ad-hoc imperative helpers. Use declarative QQL instead:
+
+| Removed | Replacement |
+|---|---|
+| `scroll_ids` | `SCROLL FROM docs WHERE ... AFTER :offset LIMIT 100`, or `scroll_cursor` / `scrollCursor` / `scrollStream` |
+| `upsert_records` / `upsert_columns` | `UPSERT INTO docs VALUES :rows` through `upsert_many` / `upsertMany` |
+
+Why: one execution path keeps batching, validation, and error codes in the
+planner.
+
+```python
+client.upsert_many("docs", rows, batch_size=100)
+for point in client.scroll_cursor("docs", batch_size=100):
+    ...
+```
+
+```javascript
+await client.upsertMany("docs", rows, { batchSize: 100 });
+for await (const point of client.scrollCursor("docs", { batchSize: 100 })) {
+  ...
+}
+```
+
+### 10. Removal of `truncateVectors` from execution options
+
+The `truncateVectors` flag has been removed from client `execute()` and
+`executeAsync()` options. Vector truncation is strictly a display/inspection
+concern:
+
+- Use `bind(query, params, { truncateVectors: true })` (Node, WASM),
+  `bind(query, params, truncate_vectors=True)` (Python), or
+  `Stmt.toReadableString()` for debugging.
+- Query execution always transmits full vector payloads.
+
+### 11. Backdoor response fields removed
+
+The execution result JSON no longer includes the internal
+`__pre_serialized_hits` and `hits_len` keys from the gRPC read path. Reports
+now extract points from the canonical Qdrant response structures directly.
+
+Fix: read results through the report accessors (`hits()`, `points()`, `ids()`,
+`facet()`, `count()`, `groups()`) instead of parsing raw result JSON.
+
+Why: two representations of the same hits could disagree, and the internal keys
+were never part of the contract.
+
+### 12. Named backend error codes
+
+REST and gRPC failures now map to specific codes:
+
+| Code | When |
+|---|---|
+| `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
+| `QQL-BACKEND-COLLECTION-NOT-FOUND` | Missing collection (HTTP 404, gRPC `NotFound`) |
+| `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
+| `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building, retry the query |
+| `QQL-BACKEND-STRICT-MODE` | Strict-mode or quota rejection |
+| `QQL-BACKEND-HTTP` | Other rejected REST requests, for example HTTP 400 on a batch |
+
+`QQL-BACKEND` and `QQL-GRPC` remain for unclassified failures.
+
+Fix: match the specific code. Authentication and missing-collection failures
+are permanent, while `QQL-BACKEND-INDEX-NOT-READY` is transient and safe to
+retry.
+
+### 13. Parameter error code consolidation and exact spans
+
+The 0.3.x per-type codes for invalid integer, invalid point ID, invalid float,
+and formula parameter values no longer exist. Every parameter type failure now
+reports the single code `QQL-BIND-TYPE-MISMATCH`, including a bound `LIMIT`
+value of 0.
+
+The other bind outcomes keep dedicated codes: `QQL-BIND-MISSING-PARAM`,
+`QQL-BIND-UNBOUND-PARAM`, `QQL-BIND-MISSING-POSITIONAL`,
+`QQL-BIND-UNUSED-PARAMS`, `QQL-BIND-NULL-PARAM`, `QQL-BIND-INVALID-PARAMS`,
+`QQL-BIND-UNSUPPORTED-STATEMENT`, and `QQL-BIND-ALREADY-BOUND` (new params on
+an already-bound `Stmt`).
+
+Placeholder-level bind failures carry an exact `Span` byte range for the
+offending `:name` or `?` occurrence. Structural failures such as a batch length
+mismatch carry no span.
+
+Fix: match on `QQL-BIND-TYPE-MISMATCH` in type-error handling.
+
+### 14. Rust Edition 2024
+
+The workspace is Edition 2024 with `rust-version = "1.98"`. Building against
+the QQL crates requires a toolchain at or above that version. Your own crates
+keep their current edition.
+
 ---
 
-## 6. Point ID Type Preservation
+## Behavioral changes
 
-`QUERY` and retrieval responses now preserve non-standard point IDs as strings rather than
-silently dropping them or coercing them to empty strings. Scored hits accurately reflect
-either integer or string identifiers:
+These items keep the same call shapes, but results, error codes, or wire
+requests may differ.
+
+### Point IDs and typed results
+
+Non-standard string point IDs are preserved as strings instead of being coerced
+to empty strings, and numeric IDs keep integer types. `ScoredPoint` exposes
+`id`, `score`, `version`, `payload`, `vector`, and `shard_key`; a missing score
+reads as `0.0`. Python points also support dictionary indexing.
 
 ```python
 hits = report.hits(0)
@@ -113,19 +331,121 @@ hits = report.hits(0)
 print(hits[0].id, type(hits[0].id))
 ```
 
+### Float equality filters
+
+`WHERE rating = 4.5` now lowers to `range(gte: 4.5, lte: 4.5)` on REST and gRPC
+because Qdrant's `match` filter rejects float values at runtime. Integer and
+string equality still use `match`.
+
+If a float match value still reaches the gRPC converter, it fails with
+`QQL-GRPC-FLOAT-MATCH` and points at a `RANGE` filter or an exact integer value
+instead of silently matching nothing.
+
+### Unscored retrieval accessors
+
+`.hits()` and `.points()` no longer drop points without a score, so `SCROLL`
+and `QUERY POINTS` return rows instead of `[]`. Facet buckets stay out of
+`hits()` / `points()`: use `.facet()`, which returns `{ value, count }` entries.
+
+Why: browsing operations are not scored, and the old accessors made a
+successful retrieval look empty.
+
+### `WAIT` durability propagation
+
+QQL 1.7 adds a trailing `WAIT true|false` clause to `UPSERT`, `DELETE`,
+`DELETE VECTOR`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `UPDATE ... VECTOR`,
+`UPDATE ... PAYLOAD`, and `CREATE INDEX` (after `SHARD`; a repeated `WAIT` is
+rejected with `QQL-PARSE-DUPLICATE-CLAUSE`). `SET QUOTA` already accepted it.
+
+The gRPC path now honors `WAIT false` for upserts, deletes, updates, clear
+payload, and create index. Before 0.4.0 it always waited on those operations,
+so `WAIT false` did not reduce latency as requested.
+
+```text
+UPSERT INTO docs VALUES {id: 1, text: 'a'} WAIT false;
+DELETE FROM docs WHERE status = 'stale' WAIT true;
+```
+
+When the clause is omitted, Qdrant's default applies (wait until applied).
+
+### Batch behavior
+
+- Same-collection `/points/query/batch` responses no longer drop points from
+  the response envelope.
+- `DELETE PAYLOAD` batches on REST, gRPC, and edge like the other update
+  operations. REST projection failures now surface as `QQL-PLAN-SERIALIZE`
+  instead of panicking.
+- With `on_error = "continue"`, an unbound parameter is recorded as a step
+  failure with `operation: "BIND"` and earlier results are kept, instead of
+  aborting the script and discarding them. WASM detects per-item
+  `status: "error"` entries in HTTP 200 batch responses and retries a failed
+  batch individually when continuation is requested.
+
+### Hybrid sparse model leg
+
+Hybrid queries embed the sparse leg with the request's `MODEL` instead of
+silently falling back to `"default"`. On WASM, a non-default dense `MODEL` that
+is not configured fails with `QQL-EMBEDDING`, and empty dense responses or
+empty embedding vectors are rejected on the query path.
+
+Fix: configure the dense model in the embedder, or omit the `MODEL` clause to
+use the configured default.
+
+### Edge unbound placeholders fail closed
+
+A vector or query placeholder that reaches edge execution unbound now fails
+with `QQL-EDGE-VECTOR` or `QQL-EDGE-QUERY` naming the placeholder, instead of
+executing with no value.
+
+Fix: bind parameters before executing. The edge backend does not embed text or
+resolve placeholders itself.
+
+### Internal file layout and re-exports
+
+`qql-core`, `qql-plan`, `qql-runtime`, and `qql-cli` were split into focused
+modules under 400 lines (`fmt/`, `params/`, `ast/statement/`, `parser/query/`,
+executor `ddl/` / `batch` / `dispatch` / `prepared` / `response`, CLI `table/`
+and `dump/`). Public paths are re-exported, so documented imports keep working.
+Only code reaching into paths that are not part of the public API needs an
+update; import from the crate root or the documented module instead.
+
 ---
 
-## 7. WebAssembly DX Layer (`dx.js`)
+## New in 0.4.0
 
-`@veristamp/qql-wasm` now includes the typed `dx.js` wrapper module matching `@veristamp/nqql`:
-`ExecutionReport`, `ScoredPoint`, `buildError`, `wrapReport`, and `executeHits` are available for browser and Edge
-runtimes with full TypeScript typings.
+No migration needed. These additions replace common workarounds.
 
----
-
-## 8. Parameter Error Code Consolidation & Exact Spans
-
-Parameter type failures (`QQL-BIND-INVALID-INTEGER`, `QQL-BIND-INVALID-POINT-ID`,
-`QQL-BIND-INVALID-FLOAT`, `QQL-BIND-FORMULA-TYPE`) are consolidated into the single
-semantic code `QQL-BIND-TYPE-MISMATCH`. In addition, parameter binding errors now carry
-exact `Span` byte ranges pinpointing the offending placeholder in the template.
+- **Prepared statements and parameter placeholders** (`:name` and `?`) across
+  query inputs, point IDs, scalars, and clauses, with nested key expansion
+  (`:loc.lat`), typed-array vector params (`Float32Array` / `Float64Array` in
+  Node, 1-D float buffers in Python), and whole-point upsert params
+  (`VALUES :rows`). See [Parameter
+  binding](/docs/language/queries/#parameter-binding--prepared-queries).
+- **Bulk ingest** with `upsert_many` / `upsertMany`, which prepares one `:rows`
+  template and splices each chunk. `batch_size` below 1 fails with
+  `QQL-VALIDATION-UPSERT-BATCH`.
+- **Typed report accessors** (`.hits()`, `.points()`, `.facet()`, `.count()`,
+  `.groups()`), `ScoredPoint`, execution telemetry on every report, and typed
+  `QqlError` subclasses in Python.
+- **Lazy scroll cursors**: Node `client.scrollCursor` / `client.scrollStream`
+  and Python `client.scroll_cursor` / `scroll_cursor_async`, buffering at most
+  one page.
+- **Execution profiling** with `Executor::explain_analyze` /
+  `Client.explain_analyze` / `Client.explainAnalyze`, returning the static plan
+  plus measured client phases and server telemetry.
+- **WASM `dx.js`**: `@veristamp/qql-wasm` now includes the typed wrapper module
+  matching `@veristamp/nqql`: `ExecutionReport`, `ScoredPoint`, `buildError`,
+  `wrapReport`, `executeHits`, and `scrollCursor` are available for browser and
+  Edge runtimes with full TypeScript typings.
+- **Python DB-API subset**: `pyqql.connect("http://...")` returns a PEP 249
+  connection with `execute`, `executemany`, `fetchone`, `fetchmany`,
+  `fetchall`, `nextset`, iteration, `description`, and `rowcount`. `commit()`
+  is a documented no-op; `rollback()` raises `NotSupportedError`.
+- **CLI**: `--param key=value` / `--params-file <path>` on `qql exec` and
+  `qql explain`, a `\param` REPL command, `qql check` staged triage, `qql
+  migrate` for cluster-to-cluster moves, and sharded `qql dump` output that
+  round-trips `CREATE SHARD KEY` plus per-shard `SHARD`-routed upserts.
+- **Embedder parity**: Python `HttpEmbedder` gains the multi, image, and rerank
+  endpoint groups; WASM gains `setHttpMultiEmbedder`, `setHttpImageEmbedder`,
+  and `setHttpReranker` with core fallback semantics. Sparse stays local BM25
+  on every host.
