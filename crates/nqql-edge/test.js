@@ -405,13 +405,24 @@ console.log("  ✓ Client.compile");
   assert.strictEqual(r.ok, false, "edge must reject clustered SHARD routing");
   console.log("  ✓ SHARD clause is rejected explicitly in edge mode");
 
-  // 5g. GROUP BY not supported in edge
-  r = await exec.execute(
-    `QUERY 'x' FROM nqql_test USING dense GROUP BY meta.cat LIMIT 5`,
-    { onError: "continue" },
+  // 5g. GROUP BY executes in edge (query_groups)
+  await exec.execute("CREATE COLLECTION nqql_group_test (dense VECTOR(3, DOT))");
+  await exec.execute(
+    "CREATE INDEX ON COLLECTION nqql_group_test FOR district TYPE keyword",
   );
-  assert.strictEqual(r.ok, false, "query_groups should fail in edge");
-  console.log("  ✓ GROUP BY rejected in edge mode");
+  await exec.execute(
+    "UPSERT INTO nqql_group_test VALUES " +
+      "{id: 1, vector: {dense: [3.0, 0.0, 0.0]}, district: 'NYC'}, " +
+      "{id: 2, vector: {dense: [2.0, 0.0, 0.0]}, district: 'SF'}",
+  );
+  r = await exec.execute(
+    "QUERY [3.0, 0.0, 0.0] FROM nqql_group_test USING dense GROUP BY district LIMIT 5",
+  );
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const edgeGroups = r.groups(0);
+  assert.deepStrictEqual(edgeGroups.map((g) => g.id), ["NYC", "SF"]);
+  await exec.execute("DROP COLLECTION nqql_group_test");
+  console.log("  ✓ GROUP BY executes in edge mode");
 
   // The original qdrant-edge API accepts vectors for recommendations, while
   // QQL's public RECOMMEND syntax supplies point references. Do not add a
