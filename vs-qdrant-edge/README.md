@@ -73,15 +73,21 @@ pub enum ExecData {
     Count(u64),
     Facet(Vec<FacetHit>),
     Mutation { affected: Option<u64> },        // writes; upsert count from the request
-    Raw(serde_json::Value),                    // schemaless metadata ONLY
+    Collections(Vec<String>),                  // SHOW COLLECTIONS
+    Collection(CollectionInfo),                // SHOW COLLECTION
+    ShardKeys(Vec<PlanShardKey>),              // SHOW SHARD KEYS
+    Quotas(QuotaConfig),                       // SHOW / SET QUOTA
 }
 ```
 
 What was deleted (no compatibility layer retained):
 
 - `QdrantOps::execute_planned_typed` and the JSON `execute_planned -> Value`
-  — one typed method remains; `BackendResponse::from_envelope` is gone from
-  shared code (REST parses via crate-private `crate::envelope::parse_backend_response`).
+  — one typed method remains; `BackendResponse::from_envelope`, the shared
+  `envelope.rs` parser and the shape-detecting `ExecData` deserializer are
+  deleted. REST parses each response against its OpenAPI shape in the
+  crate-private `rest_response` module and fails closed with
+  `QQL-BACKEND-ENVELOPE`.
 - Batch methods return `Vec<BackendResponse>`; no per-item JSON.
 - gRPC: 10 JSON response builders deleted (`scored_point_to_json`,
   `retrieved_point_to_json`, `groups_result_to_json`, mutation/DDL envelopes…),
@@ -93,14 +99,22 @@ What was deleted (no compatibility layer retained):
 - Python: `_dx_report.py` **deleted from both packages**; `__init__` imports
   the native `ExecutionReport`/`ScoredPoint` directly; `wrap_execution_report`
   collapsed to `PyExecutionReport::wrap`; `.pyi` rewritten to the native surface.
+- Metadata: `SHOW COLLECTIONS` / `SHOW COLLECTION` / `SHOW SHARD KEYS` build
+  `Collections` / `Collection(CollectionInfo)` / `ShardKeys` directly on gRPC
+  and edge — the proto→JSON builders and fabricated `{result,status,time}`
+  envelopes are gone.
+- Request side: formula trees (`PlanFormula`) and every DDL config (vectors,
+  sparse vectors, collection params, index/quantization/optimizer options) are
+  plan-owned types that convert straight to protobuf; the
+  `lower_formula_expr → to_formula_expression` round-trip and the DDL `Value`
+  maps are gone.
 - Scores serialize as shortest f32 (`0.95`, not `0.949999988079071`), matching
   Qdrant's JSON text and the native getter — JSON view and typed view agree.
 
-**`Raw` remnants (schemaless by design):** `SHOW COLLECTIONS`, `SHOW COLLECTION`
-(edge + gRPC; free-form collection config), `SHOW SHARD KEYS` (gRPC; union-typed
-list), REST quotas. Typing them means re-modelling Qdrant's entire
-collection-config schema in the plan IR — the same reason DDL sub-configs stay
-schemaless maps.
+**Remaining JSON is at real boundaries only:** REST wire bodies, point payload
+values (schemaless by Qdrant's model), the `--json` report export, and the
+JS/WASM object layer. No request config or response envelope is JSON-as-IR
+anymore.
 
 New capabilities from the same refactor: **`FACET` works on edge** (was a hard
 error) and **`optimize()` is exposed** (`Client.optimize(collection)`, edge
@@ -135,8 +149,8 @@ Measured effect of the whole refactor (before/after, qql/official):
 2. gRPC/edge writes and DDL — done, all typed.
 3. Sync edge path — done, no `spawn_blocking` on data operations.
 4. `optimize()` — done.
-5. Schemaless metadata variants (`Collections`, `Collection`, `ShardKeys`) —
-   the only remaining `Raw` producers; deferred deliberately.
+5. Schemaless metadata variants (`Collections`, `Collection`, `ShardKeys`,
+   `Quotas`) — **done**: `ExecData::Raw` was deleted in the close-out pass.
 
 ---
 
@@ -283,3 +297,6 @@ make quick          # --no-ingest --reps 1 --iters 5 --skip-colbert
    graphs; QQL = SQL + numpy buffers + prepared/batched statements.
 5. Embedding models are warm-cached; first-use download excluded.
 6. Only within-folder ratios are meaningful (`vs-qdrant` is remote REST/gRPC).
+7. Timings were captured as the typed pipeline landed, before the final
+   close-out that removed `Raw`, typed the SHOW responses and the
+   formula/DDL request paths; those are shape changes on the same hot paths.
