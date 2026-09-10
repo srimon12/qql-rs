@@ -799,24 +799,15 @@ impl QdrantOps for EdgeQdrant {
     ) -> Result<(), QqlError> {
         let shard = self.open_shard(collection_name).await?;
 
-        let schema_type = match req.field_schema.to_lowercase().as_str() {
-            "keyword" => PayloadSchemaType::Keyword,
-            "uuid" => PayloadSchemaType::Uuid,
-            "integer" | "int" => PayloadSchemaType::Integer,
-            "float" => PayloadSchemaType::Float,
-            "bool" | "boolean" => PayloadSchemaType::Bool,
-            "geo" => PayloadSchemaType::Geo,
-            "text" => PayloadSchemaType::Text,
-            "datetime" => PayloadSchemaType::Datetime,
-            other => {
-                return Err(QqlError::execution(
-                    "QQL-EDGE-UNSUPPORTED-FIELD-TYPE",
-                    format!("unsupported field index type: '{other}'"),
-                    None,
-                )
-                .with_collection(collection_name.to_string())
-                .with_field_name(req.field_name.clone()));
-            }
+        let schema_type = match req.field_schema {
+            qql_plan::IndexFieldType::Keyword => PayloadSchemaType::Keyword,
+            qql_plan::IndexFieldType::Uuid => PayloadSchemaType::Uuid,
+            qql_plan::IndexFieldType::Integer => PayloadSchemaType::Integer,
+            qql_plan::IndexFieldType::Float => PayloadSchemaType::Float,
+            qql_plan::IndexFieldType::Bool => PayloadSchemaType::Bool,
+            qql_plan::IndexFieldType::Geo => PayloadSchemaType::Geo,
+            qql_plan::IndexFieldType::Text => PayloadSchemaType::Text,
+            qql_plan::IndexFieldType::Datetime => PayloadSchemaType::Datetime,
         };
 
         let field_schema = Some(PayloadFieldSchema::FieldType(schema_type));
@@ -965,7 +956,7 @@ impl QdrantOps for EdgeQdrant {
             } => {
                 reject_collection_sharding(
                     request.shard_number,
-                    request.sharding_method.as_deref(),
+                    request.sharding_method,
                     request.shard_keys.as_deref(),
                 )?;
                 if request.params.is_some() {

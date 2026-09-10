@@ -37,5 +37,6 @@ impl Method {
 
 pub use crate::ddl_types::*;
 pub use crate::filter_types::*;
+pub use crate::index_types::*;
 pub use crate::mutation_types::*;
 pub use crate::query_types::*;

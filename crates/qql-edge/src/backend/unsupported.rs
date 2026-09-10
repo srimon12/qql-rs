@@ -155,7 +155,7 @@ pub fn reject_shard_key<T>(shard_key: Option<T>) -> Result<(), QqlError> {
 /// Convenience: reject collection sharding options on create.
 pub fn reject_collection_sharding(
     shard_number: Option<u64>,
-    sharding_method: Option<&str>,
+    sharding_method: Option<qql_plan::ShardingMethod>,
     shard_keys: Option<&[qql_plan::semantic::PlanShardKey]>,
 ) -> Result<(), QqlError> {
     if shard_number.is_some() || sharding_method.is_some() || shard_keys.is_some() {

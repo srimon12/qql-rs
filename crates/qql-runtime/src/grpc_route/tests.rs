@@ -13,33 +13,36 @@ use super::typed::{
 };
 use crate::executor::{ExecData, ServerUsage};
 use crate::qdrant_grpc::qdrant;
+use qql_core::ast::{VectorDatatype, VectorDistance};
 use qql_core::parser::Parser;
 use qql_plan::types::{FilterExpression, MatchValue};
 use qql_plan::{
-    PlanFacetValue, PlanGroupId, PlanPointVectors, PlanQueryInput, PlanVectorStruct,
-    PlanVectorValue,
+    DenseVectorParams, PlanFacetValue, PlanGroupId, PlanPointVectors, PlanQueryInput,
+    PlanVectorStruct, PlanVectorValue,
 };
+
+fn dense_params(datatype: Option<VectorDatatype>) -> DenseVectorParams {
+    DenseVectorParams {
+        size: 128,
+        distance: VectorDistance::Cosine,
+        hnsw_config: None,
+        quantization_config: None,
+        on_disk: None,
+        memory: None,
+        datatype,
+        multivector_config: None,
+    }
+}
 
 #[test]
 fn dense_vector_params_propagates_datatype() {
-    let params = vector_params(&serde_json::json!({
-        "size": 128,
-        "distance": "Cosine",
-        "datatype": "uint8",
-    }));
+    let params = vector_params(&dense_params(Some(VectorDatatype::Uint8)));
     assert_eq!(params.datatype, Some(qdrant::Datatype::Uint8 as i32));
 
-    let f16 = vector_params(&serde_json::json!({
-        "size": 64,
-        "distance": "Dot",
-        "datatype": "float16",
-    }));
+    let f16 = vector_params(&dense_params(Some(VectorDatatype::Float16)));
     assert_eq!(f16.datatype, Some(qdrant::Datatype::Float16 as i32));
 
-    let none = vector_params(&serde_json::json!({
-        "size": 32,
-        "distance": "Cosine",
-    }));
+    let none = vector_params(&dense_params(None));
     assert_eq!(none.datatype, None);
 }
 
@@ -353,9 +356,12 @@ fn create_collection_vectors_and_hnsw() {
 
     // vectors should contain dense → size 384, distance Cosine
     let vectors = req.vectors.as_ref().expect("vectors should be set");
-    let dense = vectors.get("dense").expect("dense vector config missing");
-    assert_eq!(dense["size"], 384);
-    assert_eq!(dense["distance"], "Cosine");
+    let qql_plan::DenseVectorsConfig::Named(map) = vectors else {
+        panic!("expected named vectors, got {vectors:?}");
+    };
+    let dense = map.get("dense").expect("dense vector config missing");
+    assert_eq!(dense.size, 384);
+    assert_eq!(dense.distance, VectorDistance::Cosine);
 
     // HNSW → gRPC conversion with m + ef_construct
     let hnsw_json = req.hnsw_config.as_ref().expect("hnsw_config should be set");

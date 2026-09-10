@@ -6,13 +6,8 @@
 //! helper in [`super::execute_read`], [`super::execute_write`] or
 //! [`super::execute_ddl`] that builds the tonic request from the already-typed
 //! fields and converts the protobuf response straight into the executor's
-//! typed IR.
-//!
-//! One request-side JSON exception remains by design: DDL sub-configs
-//! (`hnsw_config`, `optimizers_config`, `quantization_config`, vector
-//! params), whose plan IR fields are intentionally schemaless
-//! `serde_json::Value` maps. Formula expressions convert straight from the
-//! typed [`qql_plan::PlanFormula`] tree into proto expressions.
+//! typed IR. Formula expressions convert straight from the typed
+//! [`qql_plan::PlanFormula`] tree into proto expressions.
 
 use qql_core::error::QqlError;
 

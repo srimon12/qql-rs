@@ -18,13 +18,14 @@ mod ddl_types;
 pub mod filter;
 mod filter_types;
 mod formula_types;
+/// Payload index request types (`CREATE INDEX`).
+mod index_types;
 /// Mutation lowering: upsert, delete, and payload/vector updates into wire bodies.
 pub mod mutation;
 mod mutation_types;
 mod params;
 pub mod plan;
 mod prefetch;
-mod quantization;
 /// Query lowering: `QUERY` statements into `/points/query` request bodies.
 pub mod query;
 mod query_types;

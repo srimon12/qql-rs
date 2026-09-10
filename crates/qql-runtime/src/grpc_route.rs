@@ -6,7 +6,7 @@
 //!
 //! Layout:
 //!
-//! - [`common`] — JSON / shard-key / enum helpers
+//! - [`common`] — shard-key / enum helpers
 //! - [`ddl`] — collection & index converters (HNSW, optimizers, quantization,
 //!   vector params, payload index params)
 //! - [`query`] — query / point converters (`QueryPoints`, selectors, vectors)

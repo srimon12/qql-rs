@@ -9,14 +9,15 @@ use qql_core::error::QqlError;
 
 use crate::executor::response::{BackendResponse, ExecData};
 use crate::grpc::GrpcQdrant;
-use crate::grpc::memory::memory_from_str;
+use crate::grpc::memory::memory_to_proto;
 use crate::grpc::schema::collection_info_from_grpc;
 use crate::qdrant_grpc::qdrant;
 
+use super::common::field_type_to_proto;
 use super::ddl::{
     collection_params_diff, hnsw_config_from_plan, optimizers_config_from_plan,
     payload_index_params, quantization_config_diff, quantization_config_from_plan,
-    sparse_vector_params, vector_params,
+    sparse_vector_params, u32_param, vector_params,
 };
 use super::typed::{
     collection_mutation_to_typed, mutation_response_to_typed, shard_key_to_plan,
@@ -33,29 +34,43 @@ pub(crate) async fn execute_create_collection(
         .params
         .as_ref()
         .map(collection_params_diff)
+        .transpose()?
         .filter(|params| {
             params.read_fan_out_factor.is_some() || params.read_fan_out_delay_ms.is_some()
         });
+    let params = request.params.as_ref();
+    let vectors_config = request
+        .vectors
+        .as_ref()
+        .map(|vectors| qdrant::VectorsConfig {
+            config: Some(match vectors {
+                qql_plan::DenseVectorsConfig::Single(params) => {
+                    qdrant::vectors_config::Config::Params(vector_params(params))
+                }
+                qql_plan::DenseVectorsConfig::Named(map) => {
+                    qdrant::vectors_config::Config::ParamsMap(qdrant::VectorParamsMap {
+                        map: map
+                            .iter()
+                            .map(|(name, params)| (name.clone(), vector_params(params)))
+                            .collect(),
+                    })
+                }
+            }),
+        });
+    let sparse_vectors_config =
+        request
+            .sparse_vectors
+            .as_ref()
+            .map(|map| qdrant::SparseVectorConfig {
+                map: map
+                    .iter()
+                    .map(|(name, params)| (name.clone(), sparse_vector_params(params)))
+                    .collect(),
+            });
     let grpc_req = qdrant::CreateCollection {
         collection_name: collection.to_owned(),
-        vectors_config: request.vectors.as_ref().map(|v| {
-            let map = v
-                .iter()
-                .map(|(name, cfg)| (name.clone(), vector_params(cfg)))
-                .collect();
-            qdrant::VectorsConfig {
-                config: Some(qdrant::vectors_config::Config::ParamsMap(
-                    qdrant::VectorParamsMap { map },
-                )),
-            }
-        }),
-        sparse_vectors_config: request.sparse_vectors.as_ref().map(|sv| {
-            let map = sv
-                .iter()
-                .map(|(name, cfg)| (name.clone(), sparse_vector_params(cfg)))
-                .collect();
-            qdrant::SparseVectorConfig { map }
-        }),
+        vectors_config,
+        sparse_vectors_config,
         hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
         optimizers_config: request
             .optimizers_config
@@ -63,48 +78,30 @@ pub(crate) async fn execute_create_collection(
             .map(optimizers_config_from_plan),
         shard_number: request
             .shard_number
-            .or_else(|| {
-                request
-                    .params
-                    .as_ref()
-                    .and_then(|p| p.get("shard_number"))
-                    .and_then(|v| v.as_u64())
-            })
-            .map(|n| n as u32),
-        replication_factor: request
-            .params
-            .as_ref()
-            .and_then(|p| p.get("replication_factor"))
-            .and_then(|v| v.as_u64())
-            .map(|n| n as u32),
-        on_disk_payload: request
-            .params
-            .as_ref()
-            .and_then(|p| p.get("on_disk_payload"))
-            .and_then(|v| v.as_bool()),
-        payload: request.payload.as_ref().and_then(|p| {
-            p.get("memory")
-                .and_then(serde_json::Value::as_str)
-                .and_then(memory_from_str)
-                .map(|memory| qdrant::PayloadStorageParams {
-                    memory: Some(memory),
-                })
-        }),
-        write_consistency_factor: request
-            .params
-            .as_ref()
-            .and_then(|p| p.get("write_consistency_factor"))
-            .and_then(serde_json::Value::as_u64)
-            .map(|n| n as u32),
+            .map(|n| u32_param(n, "shard_number"))
+            .transpose()?,
+        replication_factor: params
+            .and_then(|p| p.replication_factor)
+            .map(|n| u32_param(n, "replication_factor"))
+            .transpose()?,
+        on_disk_payload: params.and_then(|p| p.on_disk_payload),
+        payload: params
+            .and_then(|p| p.payload.as_ref())
+            .and_then(|payload| payload.memory)
+            .map(|memory| qdrant::PayloadStorageParams {
+                memory: Some(memory_to_proto(memory)),
+            }),
+        write_consistency_factor: params
+            .and_then(|p| p.write_consistency_factor)
+            .map(|n| u32_param(n, "write_consistency_factor"))
+            .transpose()?,
         quantization_config: request
             .quantization_config
             .as_ref()
             .and_then(quantization_config_from_plan),
-        sharding_method: request.sharding_method.as_ref().map(|method| {
-            match method.to_ascii_lowercase().as_str() {
-                "custom" => qdrant::ShardingMethod::Custom as i32,
-                _ => qdrant::ShardingMethod::Auto as i32,
-            }
+        sharding_method: request.sharding_method.map(|method| match method {
+            qql_plan::ShardingMethod::Custom => qdrant::ShardingMethod::Custom as i32,
+            qql_plan::ShardingMethod::Auto => qdrant::ShardingMethod::Auto as i32,
         }),
         ..Default::default()
     };
@@ -161,7 +158,11 @@ pub(crate) async fn execute_update_collection(
             .optimizers_config
             .as_ref()
             .map(optimizers_config_from_plan),
-        params: request.params.as_ref().map(collection_params_diff),
+        params: request
+            .params
+            .as_ref()
+            .map(collection_params_diff)
+            .transpose()?,
         hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
         quantization_config: request
             .quantization_config
@@ -199,23 +200,12 @@ pub(crate) async fn execute_create_index(
     request: &qql_plan::types::CreateIndexRequest,
     wait: bool,
 ) -> Result<BackendResponse, QqlError> {
-    let field_type = match request.field_schema.as_str() {
-        "keyword" => qdrant::FieldType::Keyword as i32,
-        "integer" => qdrant::FieldType::Integer as i32,
-        "float" => qdrant::FieldType::Float as i32,
-        "geo" => qdrant::FieldType::Geo as i32,
-        "text" => qdrant::FieldType::Text as i32,
-        "bool" => qdrant::FieldType::Bool as i32,
-        "datetime" => qdrant::FieldType::Datetime as i32,
-        "uuid" => qdrant::FieldType::Uuid as i32,
-        _ => qdrant::FieldType::Keyword as i32,
-    };
     let grpc_req = qdrant::CreateFieldIndexCollection {
         collection_name: collection.to_owned(),
         wait: Some(wait),
         field_name: request.field_name.clone(),
-        field_type: Some(field_type),
-        field_index_params: Some(payload_index_params(&request.field_schema, &request.extra)?),
+        field_type: Some(field_type_to_proto(request.field_schema)),
+        field_index_params: Some(payload_index_params(request)),
         ..Default::default()
     };
     let resp = client
@@ -253,8 +243,14 @@ pub(crate) async fn execute_create_shard_key(
         collection_name: collection.to_owned(),
         request: Some(qdrant::CreateShardKey {
             shard_key: Some(super::common::shard_key_proto(&request.shard_key)),
-            shards_number: request.shards_number.map(|n| n as u32),
-            replication_factor: request.replication_factor.map(|n| n as u32),
+            shards_number: request
+                .shards_number
+                .map(|n| u32_param(n, "shards_number"))
+                .transpose()?,
+            replication_factor: request
+                .replication_factor
+                .map(|n| u32_param(n, "replication_factor"))
+                .transpose()?,
             ..Default::default()
         }),
         ..Default::default()

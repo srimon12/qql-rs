@@ -859,23 +859,22 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(&cc);
-        let rest = create_collection_rest_body(&req).unwrap();
+        let rest = serde_json::to_value(create_collection_rest_body(&req)).unwrap();
         assert_eq!(rest["replication_factor"], 2);
         assert_eq!(
             rest["vectors"]["v"]["quantization_config"]["scalar"]["quantile"],
             0.95
         );
 
-        // gRPC converters consume flat IR
-        let vp = crate::grpc_route::test_api_ddl::vector_params(
-            req.vectors.as_ref().unwrap().get("v").unwrap(),
-        );
+        // gRPC converters consume the same typed IR
+        let qql_plan::DenseVectorsConfig::Named(map) = req.vectors.as_ref().unwrap() else {
+            panic!("expected named vectors");
+        };
+        let vp = crate::grpc_route::test_api_ddl::vector_params(map.get("v").unwrap());
         assert_eq!(vp.size, 128);
         assert!(vp.hnsw_config.is_some());
         assert!(vp.quantization_config.is_some());
         assert!(vp.multivector_config.is_some());
-        let hnsw = req.hnsw_config.as_ref().map(|_| ());
-        let _ = hnsw;
         assert!(req.optimizers_config.is_some());
     }
 

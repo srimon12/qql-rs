@@ -407,18 +407,15 @@ impl RestQdrant {
         collection: &str,
         req: &qql_plan::types::CreateCollectionRequest,
     ) -> Result<(), QqlError> {
-        let body = qql_plan::ddl::create_collection_rest_body(req).map_err(|e| match e {
-            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
-                "QQL-REST-CLIENT-SIDE",
-                format!("{stmt_type} cannot be executed as a single REST route"),
-                None,
-            ),
-            qql_plan::RestProjectionError::SerializeFailed { message } => QqlError::execution(
-                "QQL-PLAN-SERIALIZE",
-                format!("plan IR REST request body serialization failed: {message}"),
-                None,
-            ),
-        })?;
+        let body = serde_json::to_value(qql_plan::ddl::create_collection_rest_body(req)).map_err(
+            |error| {
+                QqlError::execution(
+                    "QQL-PLAN-SERIALIZE",
+                    format!("plan IR REST request body serialization failed: {error}"),
+                    None,
+                )
+            },
+        )?;
         self.call::<Value>(
             Method::PUT,
             &format!("/collections/{collection}"),
@@ -427,6 +424,13 @@ impl RestQdrant {
         .await?;
 
         if let Some(params_patch) = qql_plan::ddl::create_collection_deferred_params_rest(req) {
+            let params_patch = serde_json::to_value(&params_patch).map_err(|error| {
+                QqlError::execution(
+                    "QQL-PLAN-SERIALIZE",
+                    format!("plan IR REST request body serialization failed: {error}"),
+                    None,
+                )
+            })?;
             self.call::<Value>(
                 Method::PATCH,
                 &format!("/collections/{collection}"),

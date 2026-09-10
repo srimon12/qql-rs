@@ -566,7 +566,7 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
         }),
         Stmt::CreateIndex(index) => Ok(PlannedOperation::CreateIndex {
             collection: index.collection.clone(),
-            request: lower_create_index(index),
+            request: lower_create_index(index)?,
             wait: index.wait.unwrap_or(true),
         }),
         Stmt::DropIndex(index) => Ok(PlannedOperation::DropIndex {

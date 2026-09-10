@@ -157,6 +157,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
 | `QQL-PLAN-GROUP` | A groups query was lowered without a `GROUP BY` (internal misuse) |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
+| `QQL-PLAN-INDEX-OPTION` | Invalid or unsupported `CREATE INDEX` option value |
+| `QQL-PLAN-INDEX-TYPE` | Unknown payload index field type |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
@@ -169,9 +171,9 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-GRPC` | Generic gRPC transport failure |
+| `QQL-GRPC-DDL-RANGE` | A DDL value exceeds the bundled Qdrant proto `uint32` range |
 | `QQL-GRPC-FLOAT-MATCH` | A float equality value has no `double` field in the bundled Qdrant proto `Match`; use a `RANGE` filter or an exact integer value |
 | `QQL-GRPC-FUSION` | Unsupported fusion method on the gRPC path |
-| `QQL-GRPC-INDEX` | Unsupported field index type on the gRPC path |
 | `QQL-GRPC-LIST-INT` | An integer value is out of the gRPC `int64` range |
 | `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
 | `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
@@ -279,7 +281,6 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
-| `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
 | `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formula functions; the pinned qdrant-edge predates those `Expression` variants |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
@@ -290,8 +291,7 @@ problems: collection lifecycle (`QQL-EDGE-COLLECTION-EXISTS`,
 `QQL-EDGE-DELETE-COLLECTION-CLOSE`, `QQL-EDGE-CLOSE`), storage I/O
 (`QQL-EDGE-CREATE-DIR`, `QQL-EDGE-READ-DIR`, `QQL-EDGE-DIR-ENTRY`, `QQL-EDGE-LIB`,
 `QQL-EDGE-SPAWN`, `QQL-EDGE-CONFIG`), vector handling (`QQL-EDGE-VECTOR`,
-`QQL-EDGE-VECTOR-NAME-MISSING`, `QQL-EDGE-MISSING-VECTOR`, `QQL-EDGE-MULTI-VECTOR-NAMES`,
-`QQL-EDGE-FIELD-NAME`), filters (`QQL-EDGE-FILTER-CONVERT`), query conversion
+`QQL-EDGE-MISSING-VECTOR`, `QQL-EDGE-FIELD-NAME`), filters (`QQL-EDGE-FILTER-CONVERT`), query conversion
 (`QQL-EDGE-QUERY`), embedding (`QQL-EDGE-EMBED`), and mutations that require a
 target (`QQL-EDGE-DELETE-REQUIRES-TARGET`, `QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET`,
 `QQL-EDGE-DELETE-PAYLOAD-REQUIRES-TARGET`, `QQL-EDGE-DELETE-VECTORS-REQUIRES-TARGET`,
@@ -365,7 +365,6 @@ QQL-EDGE-FILTER-CONVERT
 QQL-EDGE-INVALID-POINT-ID
 QQL-EDGE-LIB
 QQL-EDGE-MISSING-VECTOR
-QQL-EDGE-MULTI-VECTOR-NAMES
 QQL-EDGE-QUERY
 QQL-EDGE-READ-DIR
 QQL-EDGE-SET-PAYLOAD-REQUIRES-TARGET
@@ -374,7 +373,6 @@ QQL-EDGE-UNSUPPORTED-ACORN
 QQL-EDGE-UNSUPPORTED-ALTER
 QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS
 QQL-EDGE-UNSUPPORTED-CONSISTENCY
-QQL-EDGE-UNSUPPORTED-FIELD-TYPE
 QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION
 QQL-EDGE-UNSUPPORTED-GROUP-BY
 QQL-EDGE-UNSUPPORTED-POINT-REF
@@ -385,7 +383,6 @@ QQL-EDGE-UNSUPPORTED-SHARD
 QQL-EDGE-UNSUPPORTED-SHARD-KEY
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-VECTOR
-QQL-EDGE-VECTOR-NAME-MISSING
 QQL-EMBEDDING
 QQL-EMBEDDING-DIM
 QQL-EMBEDDING-IMAGE
@@ -395,9 +392,9 @@ QQL-EMBEDDING-SPARSE
 QQL-EMBEDDING-TARGET
 QQL-EMBEDDING-TOPOLOGY
 QQL-GRPC
+QQL-GRPC-DDL-RANGE
 QQL-GRPC-FLOAT-MATCH
 QQL-GRPC-FUSION
-QQL-GRPC-INDEX
 QQL-GRPC-LIST-INT
 QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
@@ -471,6 +468,8 @@ QQL-PLAN-CROSS-RERANK-QUERY
 QQL-PLAN-FUSION-PREFETCH
 QQL-PLAN-GROUP
 QQL-PLAN-IDF
+QQL-PLAN-INDEX-OPTION
+QQL-PLAN-INDEX-TYPE
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-QUOTA

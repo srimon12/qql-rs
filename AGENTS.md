@@ -214,7 +214,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 - `qdrant-client` dropped entirely — replaced with `tonic` 0.14 + `tonic-prost` + `tonic-prost-build`
 - Proto files in `proto/`, compiled at build time via `tonic-prost-build`
 - `GrpcQdrant` wraps `tonic::Channel` with `connect_lazy`
-- `grpc_route.rs` converts typed qql-plan structs → generated protobuf types directly for query vectors, point IDs, vector values, and formula expressions (`PlanFormula` → `qdrant::Expression`, no JSON hop). DDL sub-configs still read from `serde_json::Value` fields (hnsw_config, optimizers_config, quantization_config).
+- `grpc_route.rs` converts typed qql-plan structs → generated protobuf types directly for query vectors, point IDs, vector values, formula expressions (`PlanFormula` → `qdrant::Expression`), and every DDL request config. DDL requests are plan-owned typed structs (`DenseVectorParams`, `SparseVectorParams`, `CollectionParams`, `MaxOptimizationThreads`, `IndexOptions`, …) — no `serde_json::Value` request IR remains.
 - `grpc.rs` is the thin Tonic client wrapper; heavy conversion lives in `grpc_route.rs`
 - Tonic features: `channel`, `codegen`, `tls-ring`, `tls-webpki-roots` (no server, no axum, no router)
 - API key support via `ApiKeyInterceptor` (RUN-009 fixed)
@@ -245,7 +245,7 @@ All generated route payloads are validated directly against Qdrant's official
 
 1. **Size Constraints**: Target <400 lines per file where possible. Split large files into modules.
 2. **Error Propagation**: Dispatch directly; bubble up downstream errors. No pre-emptive checks.
-3. **No JSON-as-IR**: `RequestBody` and `BackendResponse`/`ExecData` are typed, and `ExecData` is closed — no `Raw(Value)` passthrough. JSON only at the REST boundary (request and response), except for DDL sub-configs and formula expressions which still use JSON within gRPC conversion. gRPC and edge never build a response JSON envelope: every response maps proto / `qdrant-edge` values directly into a typed `ExecData` variant.
+3. **No JSON-as-IR**: `RequestBody` and `BackendResponse`/`ExecData` are typed, and `ExecData` is closed — no `Raw(Value)` passthrough. JSON only at the REST boundary (request and response). The gRPC path converts typed plan structs (query inputs, point IDs, DDL request configs, `PlanFormula` trees) directly to protobuf. gRPC and edge never build a response JSON envelope: every response maps proto / `qdrant-edge` values directly into a typed `ExecData` variant.
 4. **No duplicate planners**: `qql_plan::plan::plan()` is the single fallible planner. `routing::try_route()` is the fallible REST projection; the deprecated `route()` wrapper is removed. DDL goes through the same planner.
 5. **No glue code**: Each layer has one responsibility. No wrappers around wrappers.
 

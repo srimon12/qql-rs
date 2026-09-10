@@ -1,83 +1,68 @@
 //! OpenAPI REST body projection for collection / index DDL.
+//!
+//! Each function returns a typed view over the plan IR; the caller serializes
+//! it (`routing::serialize_body` / the runtime REST adapter). No JSON maps are
+//! built here.
 
-use crate::quantization::{nest_quantization_for_rest, nest_vector_params_for_rest};
-use crate::routing::{RestProjectionError, serialize_body};
 use crate::types::*;
+use alloc::collections::BTreeMap;
+use serde::Serialize;
 
 // ── REST OpenAPI wire projection (distinct from internal plan IR) ─────────
 //
 // CreateCollection OpenAPI fields are top-level (replication_factor, …), not a
-// nested `params` object. QuantizationConfig is nested (`{ "scalar": {…} }`).
-// Plan IR may carry `shard_keys`; the REST projection creates them via the
-// /shards endpoint after collection create (not as a CreateCollection field).
-// Internal plan IR keeps flat `type: "scalar"|…` for gRPC converters.
+// nested `params` object. QuantizationConfig is already the nested OpenAPI
+// shape in the typed IR. Plan IR may carry `shard_keys`; the REST projection
+// creates them via the /shards endpoint after collection create (not as a
+// CreateCollection field).
 
-/// OpenAPI PUT `/collections/{c}` body from plan IR.
-pub fn create_collection_rest_body(
-    req: &CreateCollectionRequest,
-) -> Result<serde_json::Value, RestProjectionError> {
-    let mut body = serde_json::Map::new();
+/// OpenAPI PUT `/collections/{c}` body.
+#[derive(Debug, Serialize)]
+pub struct CreateCollectionRestBody<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vectors: Option<&'a DenseVectorsConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sparse_vectors: Option<&'a BTreeMap<String, SparseVectorParams>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hnsw_config: Option<&'a HnswConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    optimizers_config: Option<&'a OptimizersConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quantization_config: Option<&'a QuantizationConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shard_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sharding_method: Option<ShardingMethod>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    replication_factor: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    write_consistency_factor: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_disk_payload: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<&'a PayloadStorageParams>,
+}
 
-    if let Some(vectors) = &req.vectors {
-        let mut out = serde_json::Map::new();
-        for (name, cfg) in vectors {
-            out.insert(name.clone(), nest_vector_params_for_rest(cfg));
-        }
-        body.insert("vectors".into(), serde_json::Value::Object(out));
-    }
-    if let Some(sparse) = &req.sparse_vectors {
-        body.insert(
-            "sparse_vectors".into(),
-            serde_json::Value::Object(sparse.clone()),
-        );
-    }
-    if let Some(hnsw) = &req.hnsw_config {
-        let v = serialize_body(hnsw).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("hnsw_config".into(), v);
-    }
-    if let Some(opt) = &req.optimizers_config {
-        let v = serialize_body(opt).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("optimizers_config".into(), v);
-    }
-    if let Some(q) = &req.quantization_config {
-        let v = serialize_body(q).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("quantization_config".into(), v);
-    }
-    if let Some(n) = req.shard_number {
-        body.insert("shard_number".into(), serde_json::Value::from(n));
-    }
-    if let Some(method) = &req.sharding_method {
-        body.insert(
-            "sharding_method".into(),
-            serde_json::Value::String(method.clone()),
-        );
-    }
-    // OpenAPI CreateCollection: replication_factor / write_consistency_factor /
-    // on_disk_payload are top-level, not nested under `params`.
-    if let Some(params) = &req.params {
-        if let Some(rf) = params.get("replication_factor") {
-            body.insert("replication_factor".into(), rf.clone());
-        }
-        if let Some(wc) = params.get("write_consistency_factor") {
-            body.insert("write_consistency_factor".into(), wc.clone());
-        }
-        if let Some(od) = params.get("on_disk_payload") {
-            body.insert("on_disk_payload".into(), od.clone());
-        }
+/// Build the OpenAPI PUT `/collections/{c}` body view from plan IR.
+pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> CreateCollectionRestBody<'_> {
+    let params = req.params.as_ref();
+    CreateCollectionRestBody {
+        vectors: req.vectors.as_ref(),
+        sparse_vectors: req.sparse_vectors.as_ref(),
+        hnsw_config: req.hnsw_config.as_ref(),
+        optimizers_config: req.optimizers_config.as_ref(),
+        quantization_config: req.quantization_config.as_ref(),
+        shard_number: req.shard_number,
+        sharding_method: req.sharding_method,
+        // OpenAPI CreateCollection: replication_factor / write_consistency_factor /
+        // on_disk_payload / payload are top-level, not nested under `params`.
+        replication_factor: params.and_then(|p| p.replication_factor),
+        write_consistency_factor: params.and_then(|p| p.write_consistency_factor),
+        on_disk_payload: params.and_then(|p| p.on_disk_payload),
+        payload: params.and_then(|p| p.payload.as_ref()),
         // read_fan_out_* only exist on UpdateCollection params (CollectionParamsDiff);
         // callers apply them with a follow-up PATCH (REST) or update (gRPC).
     }
-    if let Some(payload) = &req.payload {
-        body.insert("payload".into(), payload.clone());
-    }
-    // Do not emit: params, vectors_config, shard_keys
-    Ok(serde_json::Value::Object(body))
 }
 
 /// OpenAPI PUT `/collections/{c}/index` body.
@@ -85,86 +70,69 @@ pub fn create_collection_rest_body(
 /// When index options are present, `field_schema` becomes a typed object
 /// (`{ "type": "text", "tokenizer": … }`) per OpenAPI `PayloadSchemaParams`.
 /// Without options it remains a plain type string.
-pub fn create_index_rest_body(req: &CreateIndexRequest) -> serde_json::Value {
-    let mut body = serde_json::Map::new();
-    body.insert(
-        "field_name".into(),
-        serde_json::Value::String(req.field_name.clone()),
-    );
-    if req.extra.is_empty() {
-        body.insert(
-            "field_schema".into(),
-            serde_json::Value::String(req.field_schema.clone()),
-        );
-    } else {
-        let mut schema = serde_json::Map::new();
-        schema.insert(
-            "type".into(),
-            serde_json::Value::String(req.field_schema.clone()),
-        );
-        for (k, v) in &req.extra {
-            // Map QQL aliases to OpenAPI enum strings where needed.
-            if k == "encoding" {
-                continue;
-            }
-            let v = if k == "tokenizer" {
-                if let Some(s) = v.as_str() {
-                    serde_json::Value::String(s.to_ascii_lowercase())
-                } else {
-                    v.clone()
-                }
-            } else {
-                v.clone()
-            };
-            schema.insert(k.clone(), v);
-        }
-        body.insert("field_schema".into(), serde_json::Value::Object(schema));
-    }
-    serde_json::Value::Object(body)
+#[derive(Debug, Serialize)]
+pub struct CreateIndexRestBody<'a> {
+    field_name: &'a str,
+    field_schema: FieldSchema<'a>,
 }
 
-/// OpenAPI PATCH `/collections/{c}` body from plan IR.
-pub fn update_collection_rest_body(
-    req: &UpdateCollectionRequest,
-) -> Result<serde_json::Value, RestProjectionError> {
-    let mut body = serde_json::Map::new();
-    if let Some(hnsw) = &req.hnsw_config {
-        let v = serialize_body(hnsw).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("hnsw_config".into(), v);
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum FieldSchema<'a> {
+    /// `"field_schema": "text"`
+    Type(IndexFieldType),
+    /// `"field_schema": { "type": "text", …options }`
+    Params {
+        #[serde(rename = "type")]
+        field_type: IndexFieldType,
+        #[serde(flatten)]
+        options: &'a IndexOptions,
+    },
+}
+
+/// Build the OpenAPI PUT `/collections/{c}/index` body view from plan IR.
+pub fn create_index_rest_body(req: &CreateIndexRequest) -> CreateIndexRestBody<'_> {
+    let field_schema = if req.options.is_empty() {
+        FieldSchema::Type(req.field_schema)
+    } else {
+        FieldSchema::Params {
+            field_type: req.field_schema,
+            options: &req.options,
+        }
+    };
+    CreateIndexRestBody {
+        field_name: &req.field_name,
+        field_schema,
     }
-    if let Some(opt) = &req.optimizers_config {
-        let v = serialize_body(opt).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("optimizers_config".into(), v);
-    }
-    if let Some(params) = &req.params {
-        body.insert("params".into(), params.clone());
-    }
-    if let Some(q) = &req.quantization_config {
-        body.insert("quantization_config".into(), nest_quantization_for_rest(q));
-    }
-    Ok(serde_json::Value::Object(body))
 }
 
 /// Follow-up PATCH body for create-time params that only exist on update
 /// (`read_fan_out_factor`, `read_fan_out_delay_ms`).
+#[derive(Debug, Serialize)]
+pub struct CreateCollectionDeferredParams {
+    params: DeferredCollectionParams,
+}
+
+#[derive(Debug, Serialize)]
+struct DeferredCollectionParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_fan_out_factor: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_fan_out_delay_ms: Option<u64>,
+}
+
+/// Build the deferred PATCH body view, or `None` when no deferred param is set.
 pub fn create_collection_deferred_params_rest(
     req: &CreateCollectionRequest,
-) -> Option<serde_json::Value> {
+) -> Option<CreateCollectionDeferredParams> {
     let params = req.params.as_ref()?;
-    let mut out = serde_json::Map::new();
-    if let Some(v) = params.get("read_fan_out_factor") {
-        out.insert("read_fan_out_factor".into(), v.clone());
+    if params.read_fan_out_factor.is_none() && params.read_fan_out_delay_ms.is_none() {
+        return None;
     }
-    if let Some(v) = params.get("read_fan_out_delay_ms") {
-        out.insert("read_fan_out_delay_ms".into(), v.clone());
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(serde_json::json!({ "params": out }))
-    }
+    Some(CreateCollectionDeferredParams {
+        params: DeferredCollectionParams {
+            read_fan_out_factor: params.read_fan_out_factor,
+            read_fan_out_delay_ms: params.read_fan_out_delay_ms,
+        },
+    })
 }
