@@ -23,13 +23,13 @@
   },
   "rust": {
     "official": {
-      "code_lines": 421,
-      "total_lines": 464
+      "code_lines": 387,
+      "total_lines": 428
     },
     "qql": {
-      "code_lines": 253,
-      "total_lines": 303
+      "code_lines": 274,
+      "total_lines": 334
     },
-    "ratio": 0.6
+    "ratio": 0.71
   }
 }

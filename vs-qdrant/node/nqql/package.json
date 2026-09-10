@@ -15,7 +15,7 @@
   "scripts": {
     "build": "napi build --platform --no-js --release --dts native.d.ts",
     "build:debug": "napi build --platform --no-js --dts native.d.ts",
-    "test": "node --test test_options.js && npm run build:debug && node test_dx.js nqql && node test.js && node test_comprehensive.js",
+    "test": "node --test test_options.js && npm run build:debug && node test_dx.js nqql && node --test test_scroll.js && node test.js && node test_comprehensive.js",
     "test:options": "node --test test_options.js",
     "prepublishOnly": "napi prepublish -t npm"
   },
@@ -51,6 +51,7 @@
     "binaryName": "index",
     "targets": [
       "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
       "x86_64-apple-darwin",
       "aarch64-apple-darwin",
       "x86_64-pc-windows-msvc"
@@ -58,6 +59,7 @@
   },
   "optionalDependencies": {
     "@veristamp/nqql-linux-x64-gnu": "0.4.0",
+    "@veristamp/nqql-linux-arm64-gnu": "0.4.0",
     "@veristamp/nqql-darwin-x64": "0.4.0",
     "@veristamp/nqql-darwin-arm64": "0.4.0",
     "@veristamp/nqql-win32-x64-msvc": "0.4.0"

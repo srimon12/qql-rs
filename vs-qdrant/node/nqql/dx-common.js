@@ -123,7 +123,9 @@ class ScoredPoint {
     this.id = data.id;
     this.score = data.score ?? 0;
     this.payload = data.payload ?? null;
-    this.text = data.text ?? null;
+    // `text` is derived from the payload's `text` field: the typed hit has
+    // no separate text field.
+    this.text = data.payload?.text ?? null;
     this.collection = data.collection ?? null;
     this.vector = data.vector ?? null;
     this.shard_key = data.shard_key ?? null;
@@ -137,6 +139,8 @@ class ScoredPoint {
     return defaultValue;
   }
 }
+
+const POINT_OPS = new Set(['QUERY', 'GET_POINTS', 'SCROLL', 'CROSS_RERANK']);
 
 class ExecutionReport {
   constructor(data) {
@@ -157,12 +161,8 @@ class ExecutionReport {
 
   hits(stmt = 0) {
     const res = this.#resultAt(stmt);
-    if (!res || !Array.isArray(res.data)) return [];
-    return res.data
-      // Only map entries shaped like points; facet entries
-      // ({ value, count }) are not points.
-      .filter((d) => d && typeof d === 'object' && 'id' in d)
-      .map((d) => new ScoredPoint(d));
+    if (!res || !POINT_OPS.has(res.operation) || !Array.isArray(res.data)) return [];
+    return res.data.map((hit) => new ScoredPoint(hit));
   }
 
   points(stmt = 0) {
@@ -170,59 +170,28 @@ class ExecutionReport {
   }
 
   ids(stmt = 0) {
-    const res = this.#resultAt(stmt);
-    if (!res) return [];
-    let items = [];
-    if (Array.isArray(res.data)) {
-      items = res.data;
-    } else if (typeof res.data === 'object' && res.data !== null) {
-      const raw = res.data.result;
-      if (raw && typeof raw === 'object') {
-        items = Array.isArray(raw) ? raw : (raw.points || raw.hits || []);
-      } else {
-        items = res.data.points || res.data.hits || [];
-      }
-    }
-    const out = [];
-    for (const item of items) {
-      if (item && typeof item === 'object' && 'id' in item) {
-        out.push(item.id);
-      }
-    }
-    return out;
+    return this.hits(stmt).map((hit) => hit.id);
   }
 
   facet(stmt = 0) {
     const res = this.#resultAt(stmt);
-    if (!res) return [];
-    if (Array.isArray(res.data)) return res.data;
-    if (typeof res.data === 'object' && res.data !== null) {
-      return res.data.result?.hits || res.data.hits || [];
-    }
-    return [];
+    if (!res || res.operation !== 'FACET' || !Array.isArray(res.data)) return [];
+    return res.data;
   }
 
   count(stmt = 0) {
     const res = this.#resultAt(stmt);
-    if (!res) return 0;
-    if (typeof res.data === 'number') return res.data;
-    if (typeof res.data === 'object' && res.data !== null) {
-      const c = res.data.result?.count ?? res.data.count;
-      if (typeof c === 'number') return c;
-    }
-    if (typeof res.message === 'string' && res.message.startsWith('Count: ')) {
-      const parsed = parseInt(res.message.slice(7), 10);
-      if (!Number.isNaN(parsed)) return parsed;
-    }
-    return 0;
+    const data = res?.data;
+    // Count / mutation payloads are `{count: n}`; status-only mutations
+    // serialize `null`.
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+    return typeof data.count === 'number' ? data.count : 0;
   }
 
   groups(stmt = 0) {
     const res = this.#resultAt(stmt);
-    if (!res || typeof res.data !== 'object' || res.data === null) return [];
-    const raw = res.data.result;
-    const nested = raw && typeof raw === 'object' ? raw.groups : undefined;
-    const groups = nested !== undefined && nested !== null ? nested : res.data.groups;
+    if (!res || res.operation !== 'QUERY_GROUPS') return [];
+    const groups = res.data?.groups;
     return Array.isArray(groups) ? groups : [];
   }
 }
@@ -422,6 +391,68 @@ function scrollStream(client, collection, options) {
   });
 }
 
+/**
+ * Normalize `upsertMany` rows so typed arrays behave the same on every SDK.
+ * `Float32Array` / `Float64Array` become plain arrays (one copy, same vector
+ * semantics as the packed `F32Array` bind path); `Int32Array` / `Uint32Array`
+ * become integer lists for sparse `indices`. Raw binary (`Buffer`,
+ * `ArrayBuffer`, `DataView`) fails closed with wrap-first guidance, matching
+ * the `bind` surface. Plain values pass through untouched. Non-array top-level
+ * input passes through so the native layer fails with
+ * `QQL-BIND-TYPE-MISMATCH`.
+ */
+function normalizeUpsertValue(value) {
+  if (typeof Float32Array !== 'undefined' && value instanceof Float32Array) {
+    return Array.from(value);
+  }
+  if (typeof Float64Array !== 'undefined' && value instanceof Float64Array) {
+    return Array.from(value);
+  }
+  if (typeof Int32Array !== 'undefined' && value instanceof Int32Array) {
+    return Array.from(value);
+  }
+  if (typeof Uint32Array !== 'undefined' && value instanceof Uint32Array) {
+    return Array.from(value);
+  }
+  if (
+    typeof Buffer !== 'undefined' &&
+    typeof Buffer.isBuffer === 'function' &&
+    Buffer.isBuffer(value)
+  ) {
+    throw new TypeError(
+      'binary Buffer must be wrapped in a Float32Array or Float64Array view first (e.g. new Float64Array(buf.buffer, buf.byteOffset, buf.length / 8))',
+    );
+  }
+  if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+    throw new TypeError(
+      'binary ArrayBuffer must be wrapped in a Float32Array or Float64Array view first',
+    );
+  }
+  if (typeof DataView !== 'undefined' && value instanceof DataView) {
+    throw new TypeError(
+      'binary ArrayBuffer must be wrapped in a Float32Array or Float64Array view first',
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeUpsertValue);
+  }
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value)) {
+      out[key] = normalizeUpsertValue(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function normalizeUpsertRows(rows) {
+  if (!Array.isArray(rows)) {
+    return rows;
+  }
+  return rows.map(normalizeUpsertValue);
+}
+
 module.exports = {
   installStmtToJSON,
   buildError,
@@ -435,4 +466,6 @@ module.exports = {
   buildScrollStatement,
   scrollCursor,
   scrollStream,
+  normalizeUpsertValue,
+  normalizeUpsertRows,
 };

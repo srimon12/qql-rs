@@ -2451,6 +2451,7 @@ dependencies = [
  "qdrant-client",
  "qql",
  "qql-core",
+ "qql-plan",
  "serde_json",
  "tokio",
  "ureq",

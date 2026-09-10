@@ -11,33 +11,34 @@ corpus generator, a GPU embedding pipeline with checksummed artifacts, and one
 harness per language that runs both contenders and asserts result parity
 before it reports a single timing number.
 
-This is **run 6** — ingest on all three legs goes through the bulk
-`upsert_many` / `upsertMany` helpers (one `:rows` template prepared once,
-no hand-rolled batch loops), and the durability barrier waits for
-`points_count` **plus green collection status** (optimizer idle — run-5
-reads raced background segment merges, see §"What moved"). Run 1
-(pre-fix API shape) is preserved in `results/run1/`; §"What moved"
-quantifies every leg of the journey.
+This is **run 7** — all three legs are rebuilt from the 0.4.0 typed pipeline
+(native Python result classes, typed `nqql` wrappers, typed Rust accessors),
+and the Rust harness now compares each SDK's **native typed results** — no
+JSON serialization runs inside the timed path on either side. The durability
+barrier still waits for `points_count` **plus green collection status**
+(optimizer idle). Run 1 (pre-fix API shape) is preserved in `results/run1/`;
+§"What moved" quantifies every leg of the journey.
 
 ---
 
-## TL;DR (Qdrant 1.19.1, GTX 1060 host, 2026-09-09, run 6 — green-barrier stabilization)
+## TL;DR (Qdrant 1.19.1, GTX 1060 host, 2026-09-10, run 7 — typed pipeline on all three legs)
 
 | | Python (REST) | Node (REST) | Rust (gRPC) |
 |---|---|---|---|
-| Read scenarios won by qql | **10 / 10** | **10 / 10** | 2 / 10 (count_legal 1.01x, query_colbert 1.02x) |
-| Best qql advantage | **3.8x** (count), 3.0x (sparse), 2.8x (facet) | **6.3x** (count), 5.4x (sparse), 4.4x (facet) | 1.02x (colbert) |
-| Ingest (10k pts, wait=false) | 0.68x — 1.5x slower than official | **1.22x — faster than official** | 0.80x — 1.25x slower (was 4.5x pre-fix) |
-| Cold import/require | **35x faster** (30.9 vs 1096.8 ms) | 2.9x faster (37 vs 108 ms) | n/a (compiled) |
-| Application LOC | 0.79x | 0.83x | **0.6x** |
+| Read scenarios won by qql | **10 / 10** | **10 / 10** | 2 / 10 at ≥1.00x (count_legal 1.01x, colbert 1.00x); 0.87–0.99x otherwise |
+| Best qql advantage | **4.1x** (count_legal), 3.2x (sparse), 2.8x (facet) | **5.9x** (count_legal), 4.9x (sparse), 4.3x (facet) | near-parity: 1.01x (count_legal), 0.99x (facet) |
+| Ingest (10k pts, wait=false) | **1.54x — faster than official** (4.3 vs 6.7 s) | **1.12x — faster than official** (8.0 vs 9.0 s) | 0.82x — 1.22x slower (was 4.5x pre-fix) |
+| Cold import/require | **67x faster** (17.1 vs 1149.0 ms) | 3.0x faster (33.9 vs 102.4 ms) | n/a (compiled) |
+| Application LOC | 0.79x | 0.83x | **0.71x** |
 | Result parity | exact / ANN-equivalent | exact / ANN-equivalent | exact / ANN-equivalent |
 
 The headline pattern: **QQL wins the read path on the dynamic-language
-transports** (the parse→plan→route pipeline plus payload extraction beat the
-official SDKs' pydantic/typed-object response layer), while the **official
-Rust gRPC client is faster on raw reads** (protobuf-in / protobuf-out with no
-intermediate AST). After the 0.4.0 write-path fixes, the Rust ingest gap
-narrowed from 4.5x to ~1.25x and scroll parity returned to exact 1.0.
+transports** (parse→plan→route plus native result classes beat the official
+SDKs' pydantic/typed-object response layer), while the **official Rust gRPC
+client is at near-parity on raw reads** (0.87–1.01x; it returns protobuf-
+decoded results with no intermediate AST). Python ingest is now **1.54x
+faster** than the official client and Node 1.12x faster; the Rust ingest gap
+is 1.22x, down from 4.5x pre-fix. Scroll parity is exact on all legs.
 
 Every qql advantage above was measured **after parity checks passed** — the
 two contenders return the same points, same scores (≤ 2e-5 difference from
@@ -129,51 +130,51 @@ No timing is reported until results are compared:
 
 | scenario | official ops/s | qql ops/s | qql/official | p50 official | p50 qql | parity |
 |---|---:|---:|---:|---:|---:|---|
-| query_dense | 346 | 724 | 2.09x | 2.891 ms | 1.381 ms | overlap 1.0, top1 ok |
-| query_dense_filtered | 224 | 287 | 1.28x | 4.455 ms | 3.479 ms | overlap 1.0, top1 ok |
-| query_sparse | 725 | 2,147 | 2.96x | 1.38 ms | 0.466 ms | overlap 1.0, top1 ok |
-| query_hybrid | 260 | 485 | 1.87x | 3.843 ms | 2.061 ms | overlap 0.818, top1 differs |
-| scroll_pages | 86 | 128 | 1.49x | 11.562 ms | 7.841 ms | overlap 1.0, top1 ok |
-| count_berlin | 613 | 1,577 | 2.57x | 1.631 ms | 0.634 ms | exact |
-| facet_district | 755 | 2,081 | 2.76x | 1.325 ms | 0.48 ms | exact |
-| query_colbert | 126 | 132 | 1.05x | 7.932 ms | 7.578 ms | overlap 1.0, top1 ok |
-| count_legal | 808 | 3,045 | 3.77x | 1.237 ms | 0.328 ms | exact |
-| prepared_rerun | 100 | 192 | 1.92x | 10.04 ms | 5.213 ms | overlap 1.0, top1 ok |
-| ingest (10k pts, wait=false) | 6.757 s | 9.892 s | 0.68x | — | — | counts + sample point byte-identical |
-| cold import / require | 1096.8 ms | 30.9 ms | 35.5x | — | — | median of 5 fresh processes |
+| query_dense | 417 | 805 | 1.93x | 2.397 ms | 1.242 ms | overlap 1.0, top1 ok |
+| query_dense_filtered | 227 | 305 | 1.34x | 4.413 ms | 3.284 ms | overlap 1.0, top1 ok |
+| query_sparse | 728 | 2,345 | 3.22x | 1.373 ms | 0.426 ms | overlap 1.0, top1 ok |
+| query_hybrid | 266 | 526 | 1.98x | 3.763 ms | 1.902 ms | overlap 0.818, top1 ok |
+| scroll_pages | 88 | 145 | 1.65x | 11.366 ms | 6.915 ms | overlap 1.0, top1 ok |
+| count_berlin | 616 | 1,546 | 2.51x | 1.623 ms | 0.647 ms | exact |
+| facet_district | 736 | 2,028 | 2.76x | 1.358 ms | 0.493 ms | exact |
+| query_colbert | 121 | 135 | 1.12x | 8.295 ms | 7.401 ms | overlap 1.0, top1 ok |
+| count_legal | 794 | 3,257 | 4.10x | 1.259 ms | 0.307 ms | exact |
+| prepared_rerun | 102 | 210 | 2.06x | 9.846 ms | 4.754 ms | overlap 1.0, top1 ok |
+| ingest (10k pts, wait=false) | 6.663 s | 4.315 s | 1.54x | — | — | counts + sample point byte-identical |
+| cold import / require | 1149.0 ms | 17.1 ms | 67.2x | — | — | median of 5 fresh processes |
 
 #### Node — `@qdrant/js-client-rest 1.19.0` vs `nqql 0.4.0` (both REST)
 
 | scenario | official ops/s | qql ops/s | qql/official | p50 official | p50 qql | parity |
 |---|---:|---:|---:|---:|---:|---|
-| query_dense | 292 | 707 | 2.42x | 3.429 ms | 1.414 ms | overlap 1, top1 ok |
-| query_dense_filtered | 184 | 276 | 1.50x | 5.43 ms | 3.619 ms | overlap 1, top1 ok |
-| query_sparse | 401 | 2,159 | 5.38x | 2.493 ms | 0.463 ms | overlap 1, top1 ok |
-| query_hybrid | 252 | 439 | 1.74x | 3.962 ms | 2.275 ms | overlap 1, tie-break ok |
-| scroll_pages | 56 | 130 | 2.32x | 17.745 ms | 7.705 ms | overlap 1, top1 ok |
-| count_berlin | 371 | 1,201 | 3.24x | 2.695 ms | 0.833 ms | exact |
-| facet_district | 404 | 1,776 | 4.40x | 2.477 ms | 0.563 ms | exact |
-| query_colbert | 105 | 128 | 1.22x | 9.508 ms | 7.813 ms | overlap 1, top1 ok |
-| count_legal | 419 | 2,639 | 6.30x | 2.385 ms | 0.379 ms | exact |
-| prepared_rerun | 75 | 185 | 2.47x | 13.311 ms | 5.411 ms | overlap 1, top1 ok |
-| ingest (10k pts, wait=false) | 8.803 s | 7.193 s | 1.22x | — | — | counts + sample point byte-identical |
-| cold import / require | 108.1 ms | 37 ms | 2.9x | — | — | median of 5 fresh processes |
+| query_dense | 290 | 741 | 2.56x | 3.448 ms | 1.349 ms | overlap 1, top1 ok |
+| query_dense_filtered | 190 | 280 | 1.47x | 5.258 ms | 3.572 ms | overlap 1, top1 ok |
+| query_sparse | 425 | 2,060 | 4.85x | 2.353 ms | 0.485 ms | overlap 1, top1 ok |
+| query_hybrid | 245 | 501 | 2.04x | 4.085 ms | 1.995 ms | overlap 1, top1 ok |
+| scroll_pages | 59 | 103 | 1.75x | 17.009 ms | 9.75 ms | overlap 1, top1 ok |
+| count_berlin | 420 | 1,483 | 3.53x | 2.383 ms | 0.674 ms | exact |
+| facet_district | 454 | 1,967 | 4.33x | 2.205 ms | 0.508 ms | exact |
+| query_colbert | 118 | 137 | 1.16x | 8.446 ms | 7.274 ms | overlap 1, top1 ok |
+| count_legal | 506 | 2,968 | 5.87x | 1.976 ms | 0.337 ms | exact |
+| prepared_rerun | 80 | 189 | 2.36x | 12.44 ms | 5.277 ms | overlap 1, top1 ok |
+| ingest (10k pts, wait=false) | 8.982 s | 7.986 s | 1.12x | — | — | counts + sample point byte-identical |
+| cold import / require | 102.4 ms | 33.9 ms | 3.0x | — | — | median of 5 fresh processes |
 
 #### Rust — `qdrant-client 1.19.0` vs `qql 0.4.0` (both gRPC)
 
 | scenario | official ops/s | qql ops/s | qql/official | p50 official | p50 qql | parity |
 |---|---:|---:|---:|---:|---:|---|
-| count_berlin | 1,668 | 1,633 | 0.98x | 0.599 ms | 0.612 ms | exact |
-| count_legal | 3,205 | 3,252 | 1.01x | 0.312 ms | 0.307 ms | exact |
-| facet_district | 2,412 | 2,286 | 0.95x | 0.414 ms | 0.437 ms | exact |
-| prepared_rerun | 229 | 210 | 0.92x | 4.349 ms | 4.742 ms | overlap 1.0, top1 ok |
-| query_colbert | 42 | 43 | 1.02x | 23.745 ms | 22.994 ms | overlap 1.0, top1 ok |
-| query_dense | 971 | 923 | 0.95x | 1.029 ms | 1.083 ms | overlap 1.0, top1 ok |
-| query_dense_filtered | 327 | 311 | 0.95x | 3.05 ms | 3.21 ms | overlap 1.0, top1 ok |
-| query_hybrid | 660 | 619 | 0.94x | 1.513 ms | 1.615 ms | overlap 0.818, top1 ok |
-| query_sparse | 2,700 | 2,410 | 0.89x | 0.37 ms | 0.415 ms | overlap 1.0, top1 ok |
-| scroll_pages | 152 | 132 | 0.87x | 6.559 ms | 7.573 ms | overlap 1.0, top1 ok |
-| ingest (10k pts, wait=false) | 0.802 s | 1.001 s | 0.80x | — | — | counts + sample point byte-identical |
+| count_berlin | 1,649 | 1,562 | 0.95x | 0.606 ms | 0.64 ms | exact |
+| count_legal | 3,547 | 3,576 | 1.01x | 0.282 ms | 0.28 ms | exact |
+| facet_district | 2,414 | 2,382 | 0.99x | 0.414 ms | 0.42 ms | exact |
+| prepared_rerun | 288 | 275 | 0.95x | 3.462 ms | 3.632 ms | overlap 1.0, top1 ok |
+| query_colbert | 43 | 43 | 1.00x | 22.989 ms | 23.06 ms | overlap 1.0, top1 ok |
+| query_dense | 1,229 | 1,154 | 0.94x | 0.814 ms | 0.866 ms | overlap 1.0, top1 ok |
+| query_dense_filtered | 338 | 322 | 0.95x | 2.957 ms | 3.101 ms | overlap 1.0, top1 ok |
+| query_hybrid | 693 | 675 | 0.97x | 1.443 ms | 1.48 ms | overlap 0.818, top1 differs |
+| query_sparse | 2,820 | 2,686 | 0.95x | 0.354 ms | 0.372 ms | overlap 1.0, top1 ok |
+| scroll_pages | 154 | 134 | 0.87x | 6.475 ms | 7.413 ms | overlap 1.0, top1 ok |
+| ingest (10k pts, wait=false) | 0.784 s | 0.957 s | 0.82x | — | — | counts + sample point byte-identical |
 
 ### Application LOC (identical scenario set)
 
@@ -181,18 +182,19 @@ No timing is reported until results are compared:
 |---|---:|---:|---:|
 | python | 170 | 134 | 0.79x |
 | node | 152 | 126 | 0.83x |
-| rust | 421 | 253 | 0.6x |
+| rust | 387 | 274 | 0.71x |
 
 
-Rust gRPC context: the official client remains the fastest bulk-ingest and
-raw-read path (protobuf-in / protobuf-out, no intermediate AST). Ingest is one
-`upsert_many` call (payload and vectors as data, template prepared once,
-chunks moved — never cloned — through the point-splice path) — 0.802 s vs
-1.001 s (1.25x). The residue is peak memory (the full row `Vec` stays alive
-during ingest, where the old code built per-batch) plus per-point value
-conversion and gRPC dispatch — not statement text. Vector reads stay at
-0.87–1.02x — the parse→plan→normalize pipeline cost; `count_legal` /
-`query_colbert` win at 1.01–1.02x with dense/count_berlin at 0.95–0.98x.
+Rust gRPC context: the official client remains slightly ahead on raw reads
+(protobuf-in / protobuf-out, no intermediate AST) but the gap is now
+near-parity: **0.87–1.01x**, with `count_legal` 1.01x, `query_colbert` 1.00x
+and `facet_district` 0.99x at the top, `query_dense` 0.94x / `scroll_pages`
+0.87x at the bottom. Both sides now time their **native typed results** — the
+harness no longer JSON-serializes either SDK inside the timed path. Ingest is
+one `upsert_many` call (payload and vectors as data, template prepared once,
+chunks moved — never cloned) at 0.957 s vs 0.784 s (1.22x); the residue is
+peak memory (the full row `Vec` stays alive during ingest) plus per-point
+value conversion and gRPC dispatch — not statement text.
 
 ### Native BM25 wire-parity proof (Rust leg)
 
@@ -229,10 +231,13 @@ re-measured:
 | **whole-point `:rows` params + prepared ingest (run 4)** | payload and vectors become **data, not statement text**; template prepared once, schema resolved once. **python ingest 8.34 s → 3.69 s (0.45x — 2.2x faster than the official client)**; node 8.26 → 8.82 s (0.96x — the async napi statement boundary dominates, see findings); rust 1.50 → 1.62 s with official drifting 0.79 → 0.85 s (ratio ~1.9x, unchanged). Adoption also caught and fixed a runtime bug (blind `vectors.take()` dropped named vectors on the fast path — see findings #14) |
 | **bulk `upsert_many` helpers, no hand-rolled batch loops (run 5)** | one call per collection — prepare-once, move-not-clone chunking. **python holds 0.44x (3.48 s)**; **node 8.82 s → 7.11 s (0.81x — faster than official, best ever)** after disproving the serde fear (the 141 saved per-batch RPC round-trips dwarf conversion cost, measured release-vs-release); rust 1.97 s → 1.67 s (2.04x) after fixing a chunk-clone tax the adoption exposed (`chunks().to_vec()` deep-cloned every point). Harness scenario code falls on every leg (py 133→126, node 138→123, rust 326→293 lines) |
 | **green optimizer barrier, no code change (run 6)** | the barrier now waits for `points_count` **plus green collection status** (optimizer idle) instead of count alone. Run-5 reads raced background segment merges/HNSW indexing: the same dense query measured 30% apart between scenario #1 and #10 on one leg (1.715 ms → 1.203 ms per-query on the official side) — pure variance, both directions across runs. Green narrows that intra-leg drift to ~2% (0.979 → 1.001 ms) and lifts both sides ~75% onto settled segments (rust dense 583/609 → 1021/1013). Read wins settle at python 10/10, node 10/10, rust 2/10 (count_legal, colbert); ingest at py 1.5x slower / node faster / rust 1.25x slower |
+| **typed pipeline on all three legs + typed Rust comparison (run 7)** | every client is rebuilt from the 0.4.0 typed pipeline (native PyO3 result classes, typed `nqql` wrappers, typed Rust report accessors), and the Rust harness now compares each SDK's **native typed results** — no JSON serialization in the timed path on either side. **Python ingest 9.9 s → 4.3 s (1.54x faster than official)**, node 1.12x faster; cold import pyqql 30.9 → 17.1 ms (67x), nqql 37 → 33.9 ms (3.0x). Reads: python 10/10 (up to 4.1x), node 10/10 (up to 5.9x), rust 0.87–1.01x with count_legal/colbert/facet at 1.01x/1.00x/0.99x |
 
-Remaining qql ingest gap (1.5x py slower / node faster / 1.25x rust) is now
-dominated by ColBERT param conversion (nested per-token lists) and payload
-encoding — not by vector text parsing, which is gone.
+Run-7 ingest: python and node are now **faster** than their official clients
+(1.54x / 1.12x); the Rust leg is 1.22x slower, dominated by peak live-set
+memory (the full row `Vec` stays alive during `upsert_many`, vs per-batch
+construction in the official loop) plus per-point value conversion and gRPC
+dispatch — not by vector text parsing, which is gone.
 
 ---
 
@@ -250,10 +255,11 @@ up as lines:
 3. **Typed, located errors.** Every QQL failure carries an error code and the
    source span that caused it (`QQL-BIND-MISSING-PARAM` at 21:9); official SDK
    errors surface as server 400s or pydantic validation traces.
-4. **Response normalization.** qql/`nqql` hits are plain dicts with `id`,
-   `score`, `payload`; the official Python client returns `ScoredPoint`
-   objects whose payloads must be unpacked (`p.payload[...]`, protobuf `Value`
-   unwrapping in Rust before anything is JSON-serializable).
+4. **Typed results on every host.** `pyqql` returns native `ScoredPoint` /
+   `ExecutionReport` classes, `nqql`/WASM return typed `ScoredPoint` wrappers,
+   and the Rust runtime exposes typed `hits()/facet()/count()` accessors —
+   the same information the official clients only reach through pydantic
+   models, protobuf `Value` unwrapping, or raw JSON.
 
 ---
 
@@ -292,8 +298,8 @@ the way it does.
    client** (positions 5/6 swap between two identical calls). Benchmarks of
    hybrid fusion need the self-consistency baseline this harness records;
    single-shot fusion comparisons will flake.
-9. **Python client cold import is ~1.1 s** (pydantic model graph) vs 29.5 ms
-   for pyqql — matters for serverless/CLI usage.
+9. **Python client cold import is ~1.1 s** (pydantic model graph) vs 17.1 ms
+   for pyqql (67x) — matters for serverless/CLI usage.
 
 **Fixed after run 2 (typed-array / flat-multivector bind fast paths, run 3):**
 
@@ -319,20 +325,22 @@ the way it does.
 
 **Open qql backlog:**
 
-12. Rust ingest residue (1.25x) — peak live-set memory (the full row `Vec`
-    stays alive during `upsert_many`, vs per-batch construction before) plus
-    per-point value conversion + gRPC dispatch. For million-row ingests,
-    chunk the *calls*; `upsert_many` chunks transport, not memory.
-13. Rust vector reads (0.87–1.02x) — the parse→plan→normalize pipeline; the
-    typed-result fast path (see #15) is the next lever.
+12. Rust ingest residue (1.22x) — peak live-set memory (the full row `Vec`
+    stays alive during `upsert_many`) plus per-point value conversion + gRPC
+    dispatch. For million-row ingests, chunk the *calls*; `upsert_many`
+    chunks transport, not memory.
+13. Rust vector reads (0.87–1.01x) — the parse→plan→normalize pipeline is the
+    remaining cost; the typed result accessors (below) removed the response
+    serialization hop in run 7.
 14. ~~Prepared `:rows` dropped named vectors~~ → **fixed during run-4
     adoption**: blind `vectors.take()` in the unnamed→named mapping removed
     Named vectors when the pattern didn't match; the fast path then sent
     vector-less points ("Expected some vectors"). Regression-tested
     (named dense+sparse preserved).
-15. Typed Rust result accessors — `report.hits()/facet()/count()` like
-    node/python already expose; removes the SearchHit→JSON→user double hop
-    on the gRPC leg (queued; small).
+15. ~~Typed Rust result accessors~~ → **done in run 7**: `report.hits()/facet()/
+    count()` (plus consuming access to the typed report) replaced the
+    SearchHit→JSON→user double hop on the gRPC leg; the harness now compares
+    native typed results.
 
 ---
 
@@ -403,7 +411,7 @@ vs-qdrant/
 ├── data/              corpora, precomputed vectors, queries.json, manifest.json (SHA256)
 ├── python/            bench.py + {official,qql}_scenarios.py
 ├── node/              bench.js + {official,qql}_scenarios.js + vendored nqql/
-├── rust/              src/{main,official,qql_side}.rs (cargo project)
+├── rust/              src/{main,official,qql_side,parity}.rs (cargo project)
 ├── results/           python.json, node.json, rust.json, loc.json, tables.md
 │                      + run1/ (pre-fix API baseline)
 └── vendor/wheels/     pyqql 0.4.0 abi3 wheel

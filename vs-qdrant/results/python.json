@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-09-09T05:52:20",
+    "timestamp": "2026-09-10T23:48:24",
     "python": "3.14.4",
     "pyqql": "0.4.0",
     "qdrant_client": "1.19.0",
@@ -10,16 +10,16 @@
   "scenarios": {
     "query_dense": {
       "official": {
-        "ops_per_sec": 346,
-        "p50_ms": 2.891,
-        "p95_ms": 2.947,
+        "ops_per_sec": 417,
+        "p50_ms": 2.397,
+        "p95_ms": 2.461,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 724,
-        "p50_ms": 1.381,
-        "p95_ms": 1.7,
+        "ops_per_sec": 805,
+        "p50_ms": 1.242,
+        "p95_ms": 1.83,
         "reps": 5,
         "iters": 25
       },
@@ -31,16 +31,16 @@
     },
     "query_dense_filtered": {
       "official": {
-        "ops_per_sec": 224,
-        "p50_ms": 4.455,
-        "p95_ms": 4.5,
+        "ops_per_sec": 227,
+        "p50_ms": 4.413,
+        "p95_ms": 4.466,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 287,
-        "p50_ms": 3.479,
-        "p95_ms": 3.529,
+        "ops_per_sec": 305,
+        "p50_ms": 3.284,
+        "p95_ms": 3.318,
         "reps": 5,
         "iters": 25
       },
@@ -52,48 +52,48 @@
     },
     "query_sparse": {
       "official": {
-        "ops_per_sec": 725,
-        "p50_ms": 1.38,
-        "p95_ms": 1.518,
+        "ops_per_sec": 728,
+        "p50_ms": 1.373,
+        "p95_ms": 1.401,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 2147,
-        "p50_ms": 0.466,
-        "p95_ms": 0.502,
+        "ops_per_sec": 2345,
+        "p50_ms": 0.426,
+        "p95_ms": 0.436,
         "reps": 5,
         "iters": 25
       },
       "parity": {
         "top1_match": true,
         "jaccard_overlap": 1.0,
-        "max_score_diff": 0.0
+        "max_score_diff": 9.999999999621423e-06
       }
     },
     "query_hybrid": {
       "official": {
-        "ops_per_sec": 260,
-        "p50_ms": 3.843,
-        "p95_ms": 5.188,
+        "ops_per_sec": 266,
+        "p50_ms": 3.763,
+        "p95_ms": 3.784,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 485,
-        "p50_ms": 2.061,
-        "p95_ms": 2.157,
+        "ops_per_sec": 526,
+        "p50_ms": 1.902,
+        "p95_ms": 2.0,
         "reps": 5,
         "iters": 25
       },
       "parity": {
         "qql_vs_official": {
-          "top1_match": false,
+          "top1_match": true,
           "jaccard_overlap": 0.818,
           "max_score_diff": 0.04999999999999999
         },
         "official_vs_official": {
-          "top1_match": true,
+          "top1_match": false,
           "jaccard_overlap": 0.818,
           "max_score_diff": 0.0
         }
@@ -101,16 +101,16 @@
     },
     "scroll_pages": {
       "official": {
-        "ops_per_sec": 86,
-        "p50_ms": 11.562,
-        "p95_ms": 15.587,
+        "ops_per_sec": 88,
+        "p50_ms": 11.366,
+        "p95_ms": 15.255,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 128,
-        "p50_ms": 7.841,
-        "p95_ms": 9.174,
+        "ops_per_sec": 145,
+        "p50_ms": 6.915,
+        "p95_ms": 8.502,
         "reps": 5,
         "iters": 25
       },
@@ -122,16 +122,16 @@
     },
     "count_berlin": {
       "official": {
-        "ops_per_sec": 613,
-        "p50_ms": 1.631,
-        "p95_ms": 1.896,
+        "ops_per_sec": 616,
+        "p50_ms": 1.623,
+        "p95_ms": 1.699,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 1577,
-        "p50_ms": 0.634,
-        "p95_ms": 0.677,
+        "ops_per_sec": 1546,
+        "p50_ms": 0.647,
+        "p95_ms": 0.661,
         "reps": 5,
         "iters": 25
       },
@@ -142,16 +142,16 @@
     },
     "facet_district": {
       "official": {
-        "ops_per_sec": 755,
-        "p50_ms": 1.325,
-        "p95_ms": 1.344,
+        "ops_per_sec": 736,
+        "p50_ms": 1.358,
+        "p95_ms": 1.444,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 2081,
-        "p50_ms": 0.48,
-        "p95_ms": 0.496,
+        "ops_per_sec": 2028,
+        "p50_ms": 0.493,
+        "p95_ms": 0.506,
         "reps": 5,
         "iters": 25
       },
@@ -162,16 +162,16 @@
     },
     "query_colbert": {
       "official": {
-        "ops_per_sec": 126,
-        "p50_ms": 7.932,
-        "p95_ms": 8.821,
+        "ops_per_sec": 121,
+        "p50_ms": 8.295,
+        "p95_ms": 8.42,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 132,
-        "p50_ms": 7.578,
-        "p95_ms": 7.685,
+        "ops_per_sec": 135,
+        "p50_ms": 7.401,
+        "p95_ms": 7.763,
         "reps": 5,
         "iters": 25
       },
@@ -183,16 +183,16 @@
     },
     "count_legal": {
       "official": {
-        "ops_per_sec": 808,
-        "p50_ms": 1.237,
-        "p95_ms": 1.246,
+        "ops_per_sec": 794,
+        "p50_ms": 1.259,
+        "p95_ms": 1.279,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 3045,
-        "p50_ms": 0.328,
-        "p95_ms": 0.348,
+        "ops_per_sec": 3257,
+        "p50_ms": 0.307,
+        "p95_ms": 0.311,
         "reps": 5,
         "iters": 25
       },
@@ -203,16 +203,16 @@
     },
     "prepared_rerun": {
       "official": {
-        "ops_per_sec": 100,
-        "p50_ms": 10.04,
-        "p95_ms": 10.335,
+        "ops_per_sec": 102,
+        "p50_ms": 9.846,
+        "p95_ms": 10.111,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 192,
-        "p50_ms": 5.213,
-        "p95_ms": 6.64,
+        "ops_per_sec": 210,
+        "p50_ms": 4.754,
+        "p95_ms": 4.826,
         "reps": 5,
         "iters": 25
       },
@@ -224,8 +224,8 @@
     }
   },
   "ingest": {
-    "official_sec": 6.757,
-    "qql_sec": 9.892,
+    "official_sec": 6.663,
+    "qql_sec": 4.315,
     "points": {
       "berlin": 8000,
       "legal": 2000,
@@ -246,7 +246,7 @@
     "delete_by_filter": true
   },
   "cold_import": {
-    "qdrant_client": 1096.8,
-    "pyqql": 30.9
+    "qdrant_client": 1149.0,
+    "pyqql": 17.1
   }
 }

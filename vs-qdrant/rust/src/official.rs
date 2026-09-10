@@ -10,7 +10,7 @@ use qdrant_client::qdrant::{
     CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
     FacetCountsBuilder, FieldType, Filter, Fusion, HnswConfigDiffBuilder,
     MultiVectorComparator, MultiVectorConfigBuilder, NamedVectors, PointId, PointStruct,
-    PrefetchQueryBuilder, QueryPointsBuilder, Range, ScrollPointsBuilder, SearchParamsBuilder,
+    PrefetchQueryBuilder, QueryPointsBuilder, Range, ScoredPoint, ScrollPointsBuilder, SearchParamsBuilder,
     SetPayloadPointsBuilder, SparseVector, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
     UpsertPointsBuilder, Value as PbValue, Vector, VectorParamsBuilder, Vectors,
     VectorsConfigBuilder,
@@ -52,23 +52,6 @@ fn pb_value(v: &serde_json::Value) -> PbValue {
     }
 }
 
-fn pb_to_json(v: &PbValue) -> serde_json::Value {
-    use qdrant_client::qdrant::value::Kind;
-    match &v.kind {
-        Some(Kind::NullValue(_)) => serde_json::Value::Null,
-        Some(Kind::BoolValue(b)) => serde_json::json!(b),
-        Some(Kind::IntegerValue(i)) => serde_json::json!(i),
-        Some(Kind::DoubleValue(d)) => serde_json::json!(d),
-        Some(Kind::StringValue(s)) => serde_json::json!(s),
-        Some(Kind::ListValue(l)) => {
-            serde_json::Value::Array(l.values.iter().map(pb_to_json).collect())
-        }
-        Some(Kind::StructValue(s)) => serde_json::Value::Object(
-            s.fields.iter().map(|(k, v)| (k.clone(), pb_to_json(v))).collect()),
-        None => serde_json::Value::Null,
-    }
-}
-
 fn json_payload(doc: &serde_json::Value) -> HashMap<String, PbValue> {
     doc.as_object().unwrap()
         .iter()
@@ -77,7 +60,7 @@ fn json_payload(doc: &serde_json::Value) -> HashMap<String, PbValue> {
         .collect()
 }
 
-fn point_id_num(pid: &Option<PointId>) -> u64 {
+pub(crate) fn point_id_num(pid: &Option<PointId>) -> u64 {
     match pid.as_ref().and_then(|p| p.point_id_options.as_ref()) {
         Some(PointIdOptions::Num(n)) => *n,
         _ => 0,
@@ -100,25 +83,6 @@ fn sparse_of_idx(sv: &serde_json::Value) -> Vec<u32> {
 fn f32s_val(sv: &serde_json::Value) -> Vec<f32> {
     sv["values"].as_array().unwrap()
         .iter().map(|v| v.as_f64().unwrap() as f32).collect()
-}
-
-fn scored_to_json(points: Vec<qdrant_client::qdrant::ScoredPoint>) -> Vec<serde_json::Value> {
-    points
-        .into_iter()
-        .map(|p| {
-            let payload: serde_json::Value = if p.payload.is_empty() {
-                serde_json::Value::Null
-            } else {
-                serde_json::Value::Object(
-                    p.payload.into_iter().map(|(k, v)| (k, pb_to_json(&v))).collect())
-            };
-            serde_json::json!({
-                "id": point_id_num(&p.id),
-                "score": p.score,
-                "payload": payload,
-            })
-        })
-        .collect()
 }
 
 impl OfficialScenarios {
@@ -261,7 +225,7 @@ impl OfficialScenarios {
     }
 
     // ------------------------------------------------------------- reads ----
-    pub async fn query_dense(&self, name: &str, qvec: &[f32]) -> Result<Vec<serde_json::Value>> {
+    pub async fn query_dense(&self, name: &str, qvec: &[f32]) -> Result<Vec<ScoredPoint>> {
         let res = self
             .client
             .query(
@@ -272,12 +236,12 @@ impl OfficialScenarios {
                     .with_payload(true),
             )
             .await?;
-        Ok(scored_to_json(res.result))
+        Ok(res.result)
     }
 
     pub async fn query_dense_filtered(
         &self, name: &str, qvec: &[f32],
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<ScoredPoint>> {
         let filter = Filter::must([
             Condition::range("price", Range { lt: Some(150.0), ..Default::default() }),
             Condition::range("guests", Range { gte: Some(2.0), ..Default::default() }),
@@ -293,12 +257,12 @@ impl OfficialScenarios {
                     .with_payload(true),
             )
             .await?;
-        Ok(scored_to_json(res.result))
+        Ok(res.result)
     }
 
     pub async fn query_sparse(
         &self, name: &str, sv: &SparseVector,
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<ScoredPoint>> {
         let res = self
             .client
             .query(
@@ -310,12 +274,12 @@ impl OfficialScenarios {
                     .with_payload(true),
             )
             .await?;
-        Ok(scored_to_json(res.result))
+        Ok(res.result)
     }
 
     pub async fn query_hybrid(
         &self, name: &str, qvec: &[f32], sv: &SparseVector,
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<ScoredPoint>> {
         // hnsw_ef=128 on the dense leg: fused rankings must be deterministic
         // across the two independently built collections.
         let dense_q = PrefetchQueryBuilder::default()
@@ -337,12 +301,12 @@ impl OfficialScenarios {
                     .with_payload(true),
             )
             .await?;
-        Ok(scored_to_json(res.result))
+        Ok(res.result)
     }
 
     pub async fn query_colbert(
         &self, name: &str, mvec: Vec<Vec<f32>>,
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<ScoredPoint>> {
         let res = self
             .client
             .query(
@@ -353,7 +317,7 @@ impl OfficialScenarios {
                     .with_payload(true),
             )
             .await?;
-        Ok(scored_to_json(res.result))
+        Ok(res.result)
     }
 
     pub async fn scroll_pages(&self, name: &str, pages: usize, batch: u32) -> Result<Vec<u64>> {
@@ -400,7 +364,7 @@ impl OfficialScenarios {
             .result.unwrap().count)
     }
 
-    pub async fn facet_district(&self, name: &str) -> Result<Vec<(serde_json::Value, u64)>> {
+    pub async fn facet_district(&self, name: &str) -> Result<Vec<(String, u64)>> {
         let res = self
             .client
             .facet(FacetCountsBuilder::new(name.to_string(), "district".to_string())
@@ -412,10 +376,10 @@ impl OfficialScenarios {
             .into_iter()
             .map(|h| {
                 let value = h.value.and_then(|v| v.variant).map(|variant| match variant {
-                    qdrant_client::qdrant::facet_value::Variant::StringValue(s) => serde_json::json!(s),
-                    qdrant_client::qdrant::facet_value::Variant::IntegerValue(i) => serde_json::json!(i),
-                    qdrant_client::qdrant::facet_value::Variant::BoolValue(b) => serde_json::json!(b),
-                }).unwrap_or(serde_json::Value::Null);
+                    qdrant_client::qdrant::facet_value::Variant::StringValue(s) => s,
+                    qdrant_client::qdrant::facet_value::Variant::IntegerValue(i) => i.to_string(),
+                    qdrant_client::qdrant::facet_value::Variant::BoolValue(b) => b.to_string(),
+                }).unwrap_or_default();
                 (value, h.count)
             })
             .collect())
@@ -452,7 +416,7 @@ impl OfficialScenarios {
 
     pub async fn prepared_rerun(
         &self, name: &str, qvecs: &[Vec<f32>],
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<ScoredPoint>> {
         // No prepared statements in the official SDK: repeat the call.
         let mut hits = Vec::new();
         for v in qvecs {
