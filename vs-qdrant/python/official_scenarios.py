@@ -22,8 +22,9 @@ from config import BATCH_BERLIN, BATCH_LEGAL
 class OfficialScenarios:
     """qdrant-client 1.19 — the reference Qdrant Python SDK."""
 
-    def __init__(self, url: str):
-        self.client = QdrantClient(url=url, timeout=120, check_compatibility=False)
+    def __init__(self, url: str, *, prefer_grpc: bool = False):
+        self.client = QdrantClient(url=url, timeout=120, check_compatibility=False,
+                                   prefer_grpc=prefer_grpc)
 
     def close(self) -> None:
         self.client.close()

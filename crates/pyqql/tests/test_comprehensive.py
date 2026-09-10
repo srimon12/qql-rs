@@ -243,7 +243,7 @@ class TestErrorHandling(unittest.TestCase):
     def test_c5_client_execute_on_error_continue_bad_syntax(self):
         client = pyqql.Client()
         result = client.execute("BROKEN !!! SYNTAX @@@@", on_error="continue")
-        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result, pyqql.ExecutionReport)
         self.assertFalse(result["ok"])
         self.assertEqual(result["failed"], 1)
         self.assertEqual(result["succeeded"], 0)
@@ -388,7 +388,7 @@ class TestClient(unittest.TestCase):
 
     def test_e2_client_execute_show_collections(self):
         result = self.client.execute("SHOW COLLECTIONS")
-        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result, pyqql.ExecutionReport)
         self.assertTrue(result["ok"])
         self.assertEqual(result["failed"], 0)
         self.assertGreater(len(result["results"]), 0)
@@ -401,7 +401,7 @@ class TestClient(unittest.TestCase):
             "INVALID !!! @@@@",
             on_error="continue",
         )
-        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result, pyqql.ExecutionReport)
         self.assertFalse(result["ok"])
         self.assertEqual(result["failed"], 1)
         self.assertEqual(result["results"][0]["operation"], "PARSE")
@@ -409,7 +409,7 @@ class TestClient(unittest.TestCase):
     def test_e4_client_execute_async_basic(self):
         async def _run():
             result = await self.client.execute_async(f"COUNT FROM {E2E_COLLECTION}")
-            self.assertIsInstance(result, dict)
+            self.assertIsInstance(result, pyqql.ExecutionReport)
             self.assertTrue(result["ok"])
             return result
 
@@ -422,7 +422,7 @@ class TestClient(unittest.TestCase):
         r0 = result["results"][0]
         self.assertEqual(r0["operation"], "COUNT")
         self.assertIn("data", r0)
-        self.assertIn("count", r0["data"]["result"])
+        self.assertIn("count", r0["data"])
 
     def test_e6_client_execute_count_with_filter(self):
         """COUNT with WHERE filter works against live Qdrant."""
@@ -433,18 +433,18 @@ class TestClient(unittest.TestCase):
         r0 = result["results"][0]
         self.assertEqual(r0["operation"], "COUNT")
         self.assertIn("data", r0)
-        count = r0["data"]["result"]["count"]
+        count = r0["data"]["count"]
         self.assertIsInstance(count, int)
 
     def test_e7_module_level_execute(self):
         result = pyqql.execute(f"COUNT FROM {E2E_COLLECTION}")
-        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result, pyqql.ExecutionReport)
         self.assertTrue(result["ok"])
 
     def test_e8_module_level_execute_async(self):
         async def _run():
             result = await pyqql.execute_async(f"COUNT FROM {E2E_COLLECTION}")
-            self.assertIsInstance(result, dict)
+            self.assertIsInstance(result, pyqql.ExecutionReport)
             self.assertTrue(result["ok"])
 
         asyncio.run(_run())
@@ -580,15 +580,14 @@ class TestE2EPipeline(unittest.TestCase):
         result = self.client.execute("SHOW COLLECTIONS")
         self.assertTrue(result["ok"])
         r0 = result["results"][0]
-        collections = r0["data"]["result"]["collections"]
-        names = [c["name"] for c in collections]
+        names = r0["data"]["collections"]
         self.assertIsInstance(names, list)
 
     def test_g2_count_collection(self):
         """COUNT on collection returns positive or zero count."""
         result = self.client.execute(f"COUNT FROM {E2E_COLLECTION}")
         self.assertTrue(result["ok"])
-        count = result["results"][0]["data"]["result"]["count"]
+        count = result["results"][0]["data"]["count"]
         self.assertIsInstance(count, int)
         self.assertGreaterEqual(count, 0)
 
@@ -598,7 +597,7 @@ class TestE2EPipeline(unittest.TestCase):
             f'COUNT FROM {E2E_COLLECTION} WHERE symbol = "AAPL"'
         )
         self.assertTrue(result["ok"])
-        count = result["results"][0]["data"]["result"]["count"]
+        count = result["results"][0]["data"]["count"]
         self.assertIsInstance(count, int)
 
     def test_g4_count_with_comparison_filter(self):
@@ -607,7 +606,7 @@ class TestE2EPipeline(unittest.TestCase):
             f"COUNT FROM {E2E_COLLECTION} WHERE volume > 10000000"
         )
         self.assertTrue(result["ok"])
-        count = result["results"][0]["data"]["result"]["count"]
+        count = result["results"][0]["data"]["count"]
         self.assertIsInstance(count, int)
 
     def test_g5_create_and_drop_collection(self):
@@ -623,10 +622,7 @@ class TestE2EPipeline(unittest.TestCase):
 
         # Verify it appears
         r2 = self.client.execute("SHOW COLLECTIONS")
-        names = [
-            c["name"]
-            for c in r2["results"][0]["data"]["result"]["collections"]
-        ]
+        names = r2["results"][0]["data"]["collections"]
         self.assertIn(tmp_coll, names)
 
         # Drop
@@ -635,10 +631,7 @@ class TestE2EPipeline(unittest.TestCase):
 
         # Verify gone
         r4 = self.client.execute("SHOW COLLECTIONS")
-        names2 = [
-            c["name"]
-            for c in r4["results"][0]["data"]["result"]["collections"]
-        ]
+        names2 = r4["results"][0]["data"]["collections"]
         self.assertNotIn(tmp_coll, names2)
 
     def test_g6_upsert_compiles_correct_route(self):

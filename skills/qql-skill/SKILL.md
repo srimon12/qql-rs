@@ -195,7 +195,7 @@ FROM <collection>
 
 - `OFFSET` **is** now supported with `GROUP BY` (maps to Qdrant's `group_offset`).
 - `MMR` now supports sparse vectors (`USING … AS SPARSE` with MMR is supported).
-- `max_selectivity` requires `acorn = true` (remote Qdrant; not edge).
+- `max_selectivity` requires `acorn = true`; ACORN is supported on remote Qdrant and on edge (qdrant-edge 0.8+).
 - `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
 - `idf` is a search param for sparse IDF corpus scoping (remote + edge 0.8+).
 - Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
@@ -291,7 +291,7 @@ routing inside the filter object.
 |---------|--------|
 | REST | Full matrix including `SHOW QUOTAS` / `SET QUOTA` |
 | gRPC | Typed plan → proto; **no** public quota service (`QQL-GRPC-QUOTA`) |
-| Edge | No quotas; no custom shard-key admin; no `GROUP BY` / ACORN; **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
+| Edge | No quotas; no custom shard-key admin; no `GROUP BY`; **ACORN** + **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
 | Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
 
 ## Parameter Binding & Prepared Queries

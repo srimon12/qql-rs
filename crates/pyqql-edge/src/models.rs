@@ -1,4 +1,3 @@
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use std::sync::atomic::AtomicBool;
@@ -144,13 +143,12 @@ pub fn execute_async<'py>(
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let result = pyqql_common::run_async(&inner, input, on_error).await;
         let close_result = inner.close().await;
-        let value = result.map_err(pyqql_common::qql_py_error)?;
+        let report = result.map_err(pyqql_common::qql_py_error)?;
         close_result.map_err(pyqql_common::qql_py_error)?;
         Python::attach(|py| {
-            let dict = pythonize::pythonize(py, &value)
-                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-            let report = pyqql_common::wrap_execution_report(py, dict, "pyqql_edge")?;
-            Ok(report.unbind())
+            Ok(pyqql_common::PyExecutionReport::wrap(py, report)?
+                .into_any()
+                .unbind())
         })
     })
 }

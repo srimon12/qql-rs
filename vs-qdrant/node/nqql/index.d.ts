@@ -89,12 +89,14 @@ export class ExecutionReport {
   results: ExecResponse[];
   succeeded: number;
   failed: number;
+  /** Aggregated server telemetry when the backend reported it; absent otherwise. */
+  telemetry?: ServerTelemetry | null;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
   ids(stmt?: number): Array<string | number>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
-  groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;
+  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
 }
 
 export interface ExecuteOptions {
@@ -183,9 +185,9 @@ export class Client {
   /**
    * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
    * chunks (default 100). One `:rows` template is prepared once — no
-   * re-parse, no per-batch schema fetch. Vectors take plain arrays or the
-   * flat `{data, dim}` multivector form; `Float32Array`/`Float64Array`
-   * need the sync `Stmt.bind` surface instead, then `execute`.
+   * re-parse, no per-batch schema fetch. Vectors take plain arrays, packed
+   * `Float32Array` / `Float64Array`, integer typed arrays for sparse
+   * `indices`, or the flat `{data, dim}` multivector form.
    */
   upsertMany(
     collection: string,
@@ -195,6 +197,16 @@ export class Client {
   explain(query: string): string;
   explainStmt(stmt: Stmt): string;
   compile(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
+  /** Lazily page through a collection with SCROLL, yielding one ScoredPoint per point. */
+  scrollCursor(
+    collection: string,
+    options?: ScrollCursorOptions,
+  ): AsyncGenerator<ScoredPoint>;
+  /** WHATWG stream over `scrollCursor` (pull-driven; honors backpressure). */
+  scrollStream(
+    collection: string,
+    options?: ScrollCursorOptions,
+  ): ReadableStream<ScoredPoint>;
   /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
   readonly routeAffinity: string | null;
   close(): Promise<void>;
@@ -244,6 +256,8 @@ export interface ScrollCursorOptions {
   batchSize?: number;
   /** Raw QQL filter fragment appended as `WHERE …` (default none). */
   where?: string;
+  /** Optional parameters to bind into the `where` filter fragment. */
+  params?: Record<string, unknown>;
   /** Payloads are included by default; `false` strips `payload`
    * client-side before yielding (SCROLL has no server-side payload
    * exclusion in the grammar). */
@@ -251,6 +265,8 @@ export interface ScrollCursorOptions {
   /** Append `WITH VECTOR` so yielded points carry vectors (default false;
    * SCROLL omits vectors unless asked). */
   withVector?: boolean;
+  /** Optional custom shard key partition routing (keyword or number). */
+  shardKey?: string | number | bigint;
 }
 /** Lazily page through a collection with SCROLL, yielding one ScoredPoint
  * per point. At most one page is ever buffered. Works with any client

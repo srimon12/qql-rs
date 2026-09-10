@@ -1,14 +1,18 @@
-use crate::filter::value_to_json;
-pub(crate) use crate::quantization::turbo_bits_label;
 use crate::types::*;
-use qql_core::ast::{AlterCollectionStmt, CreateCollectionStmt, CreateIndexStmt, VectorDistance};
+use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use qql_core::ast::{
+    AlterCollectionStmt, CollectionConfig, CreateCollectionStmt, CreateIndexStmt,
+    MultivectorComparator, Value, VectorsConfig,
+};
 use qql_core::error::QqlError;
 
 pub use crate::ddl_rest::{
+    CreateCollectionDeferredParams, CreateCollectionRestBody, CreateIndexRestBody,
     create_collection_deferred_params_rest, create_collection_rest_body, create_index_rest_body,
-    update_collection_rest_body,
 };
-pub use crate::quantization::nest_quantization_for_rest;
 
 /// Lower `CREATE COLLECTION` to the transport-neutral create request.
 pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionRequest {
@@ -19,98 +23,50 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         optimizers_config: None,
         params: None,
         quantization_config: None,
-        vectors_config: None,
         shard_number: None,
         sharding_method: None,
         shard_keys: None,
-        payload: None,
     };
 
-    let mut vectors = serde_json::Map::new();
+    let mut vectors = BTreeMap::new();
     for vd in &stmt.vectors {
-        let mut v = serde_json::Map::new();
-        v.insert("size".into(), serde_json::Value::from(vd.size));
-        v.insert(
-            "distance".into(),
-            serde_json::Value::String(distance_str(vd.distance)),
-        );
-        if let Some(ref hnsw) = vd.hnsw {
-            v.insert("hnsw_config".into(), lower_hnsw_config_val(hnsw));
-        }
-        if let Some(ref quant) = vd.quantization {
-            v.insert(
-                "quantization_config".into(),
-                lower_quantization_config_val(quant),
-            );
-        }
-        if let Some(ref mv) = vd.multivector {
-            let comparator = match mv.comparator {
-                qql_core::ast::MultivectorComparator::MaxSim => "max_sim",
-            };
-            v.insert(
-                "multivector_config".into(),
-                serde_json::json!({"comparator": comparator}),
-            );
-        }
-        if let Some(ref vec_cfg) = vd.vectors {
-            if let Some(on_disk) = vec_cfg.on_disk {
-                v.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
-            }
-            if let Some(ref memory) = vec_cfg.memory {
-                v.insert(
-                    "memory".into(),
-                    serde_json::Value::String(memory.as_str().into()),
-                );
-            }
-            if let Some(ref datatype) = vec_cfg.datatype {
-                v.insert(
-                    "datatype".into(),
-                    serde_json::Value::String(datatype.as_str().into()),
-                );
-            }
-        }
-        vectors.insert(vd.name.clone(), serde_json::Value::Object(v));
-    }
-    if !vectors.is_empty() {
-        req.vectors = Some(vectors);
+        let params = DenseVectorParams {
+            size: vd.size,
+            distance: vd.distance,
+            hnsw_config: vd.hnsw.as_deref().map(lower_hnsw_config),
+            quantization_config: vd.quantization.as_deref().map(lower_quantization_config),
+            on_disk: vd.vectors.as_deref().and_then(|cfg| cfg.on_disk),
+            memory: vd.vectors.as_deref().and_then(|cfg| cfg.memory),
+            datatype: vd.vectors.as_deref().and_then(|cfg| cfg.datatype),
+            multivector_config: vd.multivector.as_ref().map(|mv| MultiVectorConfig {
+                comparator: match mv.comparator {
+                    MultivectorComparator::MaxSim => MultiVectorComparator::MaxSim,
+                },
+            }),
+        };
+        vectors.insert(vd.name.clone(), params);
     }
 
-    let mut sparse = serde_json::Map::new();
+    let mut sparse = BTreeMap::new();
     for sv in &stmt.sparse_vectors {
-        let mut opts = serde_json::Map::new();
-        if let Some(ref modifier) = sv.modifier {
-            opts.insert(
-                "modifier".into(),
-                serde_json::Value::String(modifier.clone()),
-            );
-        } else {
-            opts.insert("modifier".into(), serde_json::json!("idf"));
-        }
-        if let Some(ref idx) = sv.index {
-            let mut idx_map = serde_json::Map::new();
-            if let Some(fst) = idx.full_scan_threshold {
-                idx_map.insert("full_scan_threshold".into(), serde_json::Value::from(fst));
-            }
-            if let Some(od) = idx.on_disk {
-                idx_map.insert("on_disk".into(), serde_json::Value::Bool(od));
-            }
-            if let Some(ref dt) = idx.datatype {
-                idx_map.insert(
-                    "datatype".into(),
-                    serde_json::Value::String(dt.as_str().into()),
-                );
-            }
-            if let Some(ref memory) = idx.memory {
-                idx_map.insert(
-                    "memory".into(),
-                    serde_json::Value::String(memory.as_str().into()),
-                );
-            }
-            if !idx_map.is_empty() {
-                opts.insert("index".into(), serde_json::Value::Object(idx_map));
-            }
-        }
-        sparse.insert(sv.name.clone(), serde_json::Value::Object(opts));
+        sparse.insert(
+            sv.name.clone(),
+            SparseVectorParams {
+                index: sv.index.as_deref().map(|idx| SparseIndexParams {
+                    full_scan_threshold: idx.full_scan_threshold,
+                    on_disk: idx.on_disk,
+                    memory: idx.memory,
+                    datatype: idx.datatype,
+                }),
+                modifier: match sv.modifier.as_deref() {
+                    Some(modifier) if modifier.eq_ignore_ascii_case("none") => SparseModifier::None,
+                    _ => SparseModifier::Idf,
+                },
+            },
+        );
+    }
+    if !vectors.is_empty() {
+        req.vectors = Some(DenseVectorsConfig::Named(vectors));
     }
     if !sparse.is_empty() {
         req.sparse_vectors = Some(sparse);
@@ -118,18 +74,11 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
 
     if let Some(ref config) = stmt.config {
         fill_collection_config(&mut req, config);
-    }
-
-    if let Some(on_disk) = req
-        .vectors_config
-        .take()
-        .and_then(|config| config.get("on_disk").and_then(serde_json::Value::as_bool))
-        && let Some(vectors) = &mut req.vectors
-    {
-        for vector in vectors.values_mut() {
-            if let Some(vector) = vector.as_object_mut() {
-                vector.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
-            }
+        // Collection-scoped `WITH VECTOR (…)` settings are defaults: they fill
+        // unset per-vector values and never override an explicit per-vector
+        // setting.
+        if let Some(ref default) = config.vectors {
+            apply_vector_defaults(req.vectors.as_mut(), default);
         }
     }
 
@@ -150,44 +99,114 @@ pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> UpdateCollectionReq
     req
 }
 
-/// Lower `CREATE INDEX` to the transport-neutral index request (options flat).
-pub fn lower_create_index(stmt: &CreateIndexStmt) -> CreateIndexRequest {
-    let mut extra = serde_json::Map::new();
+/// Lower `CREATE INDEX` to the transport-neutral index request.
+pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, QqlError> {
+    let field_schema = IndexFieldType::parse(&stmt.field_type).ok_or_else(|| {
+        QqlError::validation(
+            "QQL-PLAN-INDEX-TYPE",
+            format!("unknown index field type '{}'", stmt.field_type),
+            None,
+        )
+    })?;
+
+    let mut options = IndexOptions::default();
     for (key, value) in &stmt.options {
-        extra.insert(key.clone(), value_to_json(value));
+        let lower = key.to_ascii_lowercase();
+        match lower.as_str() {
+            "is_tenant" => options.is_tenant = Some(index_bool(key, value)?),
+            "on_disk" => options.on_disk = Some(index_bool(key, value)?),
+            "enable_hnsw" => options.enable_hnsw = Some(index_bool(key, value)?),
+            "lowercase" => options.lowercase = Some(index_bool(key, value)?),
+            "ascii_folding" => options.ascii_folding = Some(index_bool(key, value)?),
+            "phrase_matching" => options.phrase_matching = Some(index_bool(key, value)?),
+            "lookup" => options.lookup = Some(index_bool(key, value)?),
+            "range" => options.range = Some(index_bool(key, value)?),
+            "is_principal" => options.is_principal = Some(index_bool(key, value)?),
+            "prefix" => options.prefix = Some(index_bool(key, value)?),
+            "min_token_len" => options.min_token_len = Some(index_u64(key, value)?),
+            "max_token_len" => options.max_token_len = Some(index_u64(key, value)?),
+            "tokenizer" => {
+                let raw = index_str(key, value)?;
+                options.tokenizer = Some(TextTokenizer::parse(raw).ok_or_else(|| {
+                    index_option_error(format!(
+                        "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
+                    ))
+                })?);
+            }
+            "stemmer" => options.stemmer = Some(StemmingAlgorithm::parse(index_str(key, value)?)),
+            "stopwords" => {
+                options.stopwords = Some(StopwordsSet {
+                    custom: index_str_list(key, value)?,
+                });
+            }
+            "memory" => {
+                let raw = index_str(key, value)?;
+                options.memory = Some(MemoryPlacement::parse(raw).ok_or_else(|| {
+                    index_option_error(format!(
+                        "unsupported memory placement '{raw}'. Expected: cold, cached, pinned"
+                    ))
+                })?);
+            }
+            other => {
+                return Err(index_option_error(format!(
+                    "unknown index option '{other}'"
+                )));
+            }
+        }
     }
-    CreateIndexRequest {
+
+    Ok(CreateIndexRequest {
         field_name: stmt.field.clone(),
-        field_schema: stmt.field_type.clone(),
-        extra,
+        field_schema,
+        options,
+    })
+}
+
+fn index_option_error(message: impl Into<alloc::borrow::Cow<'static, str>>) -> QqlError {
+    QqlError::validation("QQL-PLAN-INDEX-OPTION", message, None)
+}
+
+fn index_bool(key: &str, value: &Value) -> Result<bool, QqlError> {
+    match value {
+        Value::Bool(value) => Ok(*value),
+        _ => Err(index_option_error(format!("{key} must be true or false"))),
     }
 }
 
-fn fill_collection_config(
-    req: &mut CreateCollectionRequest,
-    config: &qql_core::ast::CollectionConfig,
-) {
-    if let Some(ref v) = config.vectors {
-        let mut vc = serde_json::Map::new();
-        if let Some(on_disk) = v.on_disk {
-            vc.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
-        }
-        if let Some(ref memory) = v.memory {
-            vc.insert(
-                "memory".into(),
-                serde_json::Value::String(memory.as_str().into()),
-            );
-        }
-        if let Some(ref datatype) = v.datatype {
-            vc.insert(
-                "datatype".into(),
-                serde_json::Value::String(datatype.as_str().into()),
-            );
-        }
-        if !vc.is_empty() {
-            req.vectors_config = Some(serde_json::Value::Object(vc));
-        }
+fn index_u64(key: &str, value: &Value) -> Result<u64, QqlError> {
+    match value {
+        Value::Int(value) if *value >= 0 => Ok(*value as u64),
+        _ => Err(index_option_error(format!(
+            "{key} must be a non-negative integer"
+        ))),
     }
+}
+
+fn index_str<'a>(key: &str, value: &'a Value) -> Result<&'a str, QqlError> {
+    match value {
+        Value::Str(value) => Ok(value),
+        _ => Err(index_option_error(format!("{key} must be a string"))),
+    }
+}
+
+fn index_str_list(key: &str, value: &Value) -> Result<Vec<String>, QqlError> {
+    match value {
+        Value::List(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Str(item) => Ok(item.clone()),
+                _ => Err(index_option_error(format!(
+                    "{key} must be a list of strings"
+                ))),
+            })
+            .collect(),
+        _ => Err(index_option_error(format!(
+            "{key} must be a list of strings"
+        ))),
+    }
+}
+
+fn fill_collection_config(req: &mut CreateCollectionRequest, config: &CollectionConfig) {
     if let Some(ref h) = config.hnsw {
         req.hnsw_config = Some(lower_hnsw_config(h));
     }
@@ -195,40 +214,9 @@ fn fill_collection_config(
         req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
-        let mut pc = serde_json::Map::new();
-        if let Some(rf) = p.replication_factor {
-            pc.insert("replication_factor".into(), serde_json::Value::from(rf));
-        }
-        if let Some(wc) = p.write_consistency_factor {
-            pc.insert(
-                "write_consistency_factor".into(),
-                serde_json::Value::from(wc),
-            );
-        }
-        if let Some(rf) = p.read_fan_out_factor {
-            pc.insert("read_fan_out_factor".into(), serde_json::Value::from(rf));
-        }
-        if let Some(rd) = p.read_fan_out_delay_ms {
-            pc.insert("read_fan_out_delay_ms".into(), serde_json::Value::from(rd));
-        }
-        if let Some(od) = p.on_disk_payload {
-            pc.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
-        }
-        if let Some(ref payload_memory) = p.payload_memory {
-            let mut ps = serde_json::Map::new();
-            ps.insert(
-                "memory".into(),
-                serde_json::Value::String(payload_memory.as_str().into()),
-            );
-            req.payload = Some(serde_json::Value::Object(ps));
-        }
-        if !pc.is_empty() {
-            req.params = Some(serde_json::Value::Object(pc));
-        }
-        if let Some(sn) = p.shard_number {
-            req.shard_number = Some(sn);
-        }
-        req.sharding_method = p.sharding_method.clone();
+        req.params = Some(lower_collection_params(p));
+        req.shard_number = p.shard_number;
+        req.sharding_method = p.sharding_method.as_deref().map(lower_sharding_method);
         req.shard_keys = p.shard_keys.as_ref().map(|keys| {
             keys.iter()
                 .map(crate::semantic::PlanShardKey::from)
@@ -240,10 +228,7 @@ fn fill_collection_config(
     }
 }
 
-fn fill_update_collection_config(
-    req: &mut UpdateCollectionRequest,
-    config: &qql_core::ast::CollectionConfig,
-) {
+fn fill_update_collection_config(req: &mut UpdateCollectionRequest, config: &CollectionConfig) {
     if let Some(ref h) = config.hnsw {
         req.hnsw_config = Some(lower_hnsw_config(h));
     }
@@ -251,51 +236,65 @@ fn fill_update_collection_config(
         req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
-        let mut pc = serde_json::Map::new();
-        if let Some(rf) = p.replication_factor {
-            pc.insert("replication_factor".into(), serde_json::Value::from(rf));
-        }
-        if let Some(wc) = p.write_consistency_factor {
-            pc.insert(
-                "write_consistency_factor".into(),
-                serde_json::Value::from(wc),
-            );
-        }
-        if let Some(rf) = p.read_fan_out_factor {
-            pc.insert("read_fan_out_factor".into(), serde_json::Value::from(rf));
-        }
-        if let Some(rd) = p.read_fan_out_delay_ms {
-            pc.insert("read_fan_out_delay_ms".into(), serde_json::Value::from(rd));
-        }
-        if let Some(od) = p.on_disk_payload {
-            pc.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
-        }
-        if let Some(ref payload_memory) = p.payload_memory {
-            let mut ps = serde_json::Map::new();
-            ps.insert(
-                "memory".into(),
-                serde_json::Value::String(payload_memory.as_str().into()),
-            );
-            pc.insert("payload".into(), serde_json::Value::Object(ps));
-        }
-        if !pc.is_empty() {
-            req.params = Some(serde_json::Value::Object(pc));
-        }
+        req.params = Some(lower_collection_params(p));
     }
-    if let Some(ref q) = config.quantization {
-        req.quantization_config = Some(lower_quantization_config_val(q));
-    }
-    if let Some(ref qu) = config.quantization_update {
-        let mut qup = serde_json::Map::new();
-        qup.insert("disabled".into(), serde_json::Value::Bool(qu.disabled));
-        if let Some(ref qc) = qu.config {
-            qup.insert(
-                "quantization_config".into(),
-                lower_quantization_config_val(qc),
-            );
+    req.quantization_config = lower_quantization_diff(config);
+}
+
+/// `ALTER COLLECTION` quantization replacement: `disabled` wins, otherwise the
+/// replacement config (falling back to a plain `WITH QUANTIZATION` block).
+fn lower_quantization_diff(config: &CollectionConfig) -> Option<QuantizationConfigDiff> {
+    if let Some(ref update) = config.quantization_update {
+        if update.disabled {
+            return Some(QuantizationConfigDiff::Disabled);
         }
-        // quantization_update w/ disabled is a REST PATCH shape.
-        req.quantization_config = Some(serde_json::Value::Object(qup));
+        return update
+            .config
+            .as_deref()
+            .or(config.quantization.as_deref())
+            .map(|q| QuantizationConfigDiff::Config(lower_quantization_config(q)));
+    }
+    config
+        .quantization
+        .as_deref()
+        .map(|q| QuantizationConfigDiff::Config(lower_quantization_config(q)))
+}
+
+fn lower_collection_params(config: &qql_core::ast::CollectionParamsConfig) -> CollectionParams {
+    CollectionParams {
+        replication_factor: config.replication_factor,
+        write_consistency_factor: config.write_consistency_factor,
+        read_fan_out_factor: config.read_fan_out_factor,
+        read_fan_out_delay_ms: config.read_fan_out_delay_ms,
+        on_disk_payload: config.on_disk_payload,
+        payload: config.payload_memory.map(|memory| PayloadStorageParams {
+            memory: Some(memory),
+        }),
+    }
+}
+
+fn lower_sharding_method(method: &str) -> ShardingMethod {
+    if method.eq_ignore_ascii_case("custom") {
+        ShardingMethod::Custom
+    } else {
+        ShardingMethod::Auto
+    }
+}
+
+fn apply_vector_defaults(vectors: Option<&mut DenseVectorsConfig>, default: &VectorsConfig) {
+    fn apply(params: &mut DenseVectorParams, default: &VectorsConfig) {
+        params.on_disk = params.on_disk.or(default.on_disk);
+        params.memory = params.memory.or(default.memory);
+        params.datatype = params.datatype.or(default.datatype);
+    }
+    match vectors {
+        Some(DenseVectorsConfig::Single(params)) => apply(params, default),
+        Some(DenseVectorsConfig::Named(map)) => {
+            for params in map.values_mut() {
+                apply(params, default);
+            }
+        }
+        None => {}
     }
 }
 
@@ -313,50 +312,10 @@ pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfi
     }
 }
 
-/// Lower an AST HNSW config to a flat JSON object (internal IR / gRPC shape).
-pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    if let Some(m) = config.m {
-        obj.insert("m".into(), serde_json::Value::from(m));
-    }
-    if let Some(ef) = config.ef_construct {
-        obj.insert("ef_construct".into(), serde_json::Value::from(ef));
-    }
-    if let Some(fst) = config.full_scan_threshold {
-        obj.insert("full_scan_threshold".into(), serde_json::Value::from(fst));
-    }
-    if let Some(mit) = config.max_indexing_threads {
-        obj.insert("max_indexing_threads".into(), serde_json::Value::from(mit));
-    }
-    if let Some(od) = config.on_disk {
-        obj.insert("on_disk".into(), serde_json::Value::Bool(od));
-    }
-    if let Some(pm) = config.payload_m {
-        obj.insert("payload_m".into(), serde_json::Value::from(pm));
-    }
-    if let Some(inline) = config.inline_storage {
-        obj.insert("inline_storage".into(), serde_json::Value::Bool(inline));
-    }
-    if let Some(ref memory) = config.memory {
-        obj.insert(
-            "memory".into(),
-            serde_json::Value::String(memory.as_str().into()),
-        );
-    }
-    serde_json::Value::Object(obj)
-}
-
 /// Lower an AST optimizer config into the typed plan `OptimizersConfig` IR.
 pub fn lower_optimizers_config(
     config: &qql_core::ast::OptimizersRuntimeConfig,
 ) -> OptimizersConfig {
-    let max_threads = config.max_optimization_threads.as_ref().map(|mot| {
-        if mot.auto_ {
-            serde_json::Value::String("auto".into())
-        } else {
-            serde_json::Value::from(mot.value)
-        }
-    });
     OptimizersConfig {
         deleted_threshold: config.deleted_threshold,
         vacuum_min_vector_number: config.vacuum_min_vector_number,
@@ -365,63 +324,21 @@ pub fn lower_optimizers_config(
         memmap_threshold: config.memmap_threshold,
         indexing_threshold: config.indexing_threshold,
         flush_interval_sec: config.flush_interval_sec,
-        max_optimization_threads: max_threads,
+        max_optimization_threads: config.max_optimization_threads.as_ref().map(|threads| {
+            if threads.auto_ {
+                MaxOptimizationThreads::Auto
+            } else {
+                MaxOptimizationThreads::Threads(threads.value)
+            }
+        }),
         prevent_unoptimized: config.prevent_unoptimized,
     }
 }
 
-/// Lower an AST optimizer config to a flat JSON object (internal IR / gRPC shape).
-pub fn lower_optimizers_config_val(
-    config: &qql_core::ast::OptimizersRuntimeConfig,
-) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    if let Some(dt) = config.deleted_threshold {
-        obj.insert("deleted_threshold".into(), serde_json::Value::from(dt));
-    }
-    if let Some(vmvn) = config.vacuum_min_vector_number {
-        obj.insert(
-            "vacuum_min_vector_number".into(),
-            serde_json::Value::from(vmvn),
-        );
-    }
-    if let Some(dsn) = config.default_segment_number {
-        obj.insert(
-            "default_segment_number".into(),
-            serde_json::Value::from(dsn),
-        );
-    }
-    if let Some(mss) = config.max_segment_size {
-        obj.insert("max_segment_size".into(), serde_json::Value::from(mss));
-    }
-    if let Some(mt) = config.memmap_threshold {
-        obj.insert("memmap_threshold".into(), serde_json::Value::from(mt));
-    }
-    if let Some(it) = config.indexing_threshold {
-        obj.insert("indexing_threshold".into(), serde_json::Value::from(it));
-    }
-    if let Some(fi) = config.flush_interval_sec {
-        obj.insert("flush_interval_sec".into(), serde_json::Value::from(fi));
-    }
-    if let Some(ref mot) = config.max_optimization_threads {
-        if mot.auto_ {
-            obj.insert(
-                "max_optimization_threads".into(),
-                serde_json::Value::String("auto".into()),
-            );
-        } else {
-            obj.insert(
-                "max_optimization_threads".into(),
-                serde_json::Value::from(mot.value),
-            );
-        }
-    }
-    if let Some(pu) = config.prevent_unoptimized {
-        obj.insert("prevent_unoptimized".into(), serde_json::Value::Bool(pu));
-    }
-    serde_json::Value::Object(obj)
-}
-
 /// Lower an AST quantization config into the typed plan `QuantizationConfig`.
+///
+/// `compression` defaults to `x4` (the OpenAPI enum has no empty string) and is
+/// normalized to lowercase, mirroring the REST projection this replaces.
 pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> QuantizationConfig {
     match config.qtype {
         qql_core::ast::QuantizationType::Scalar => QuantizationConfig::Scalar {
@@ -434,7 +351,11 @@ pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> 
         },
         qql_core::ast::QuantizationType::Product => QuantizationConfig::Product {
             product: ProductQuantization {
-                compression: config.compression.clone().unwrap_or_default(),
+                compression: config
+                    .compression
+                    .as_deref()
+                    .map(|c| c.to_ascii_lowercase())
+                    .unwrap_or_else(|| "x4".into()),
                 always_ram: Some(config.always_ram),
                 memory: config.memory,
             },
@@ -457,64 +378,24 @@ pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> 
     }
 }
 
-/// Lower an AST quantization config to a flat JSON object (internal IR / gRPC shape).
-pub fn lower_quantization_config_val(
-    config: &qql_core::ast::QuantizationConfig,
-) -> serde_json::Value {
-    let qtype = match config.qtype {
-        qql_core::ast::QuantizationType::Scalar => "scalar",
-        qql_core::ast::QuantizationType::Binary => "binary",
-        qql_core::ast::QuantizationType::Product => "product",
-        qql_core::ast::QuantizationType::Turbo => "turbo",
+/// Map numeric turbo bits onto the OpenAPI `TurboQuantBitSize` label.
+///
+/// Unknown values still emit a best-effort `bits<value>` label so the backend
+/// can reject them clearly instead of silently mislabeling as `bits1`.
+fn turbo_bits_label(bits: Option<f64>) -> Option<String> {
+    let bits = bits?;
+    let label = if (bits - 1.5).abs() < f64::EPSILON {
+        "bits1_5"
+    } else if (bits - 2.0).abs() < f64::EPSILON {
+        "bits2"
+    } else if (bits - 4.0).abs() < f64::EPSILON {
+        "bits4"
+    } else if (bits - 1.0).abs() < f64::EPSILON {
+        "bits1"
+    } else {
+        return Some(format!("bits{bits}"));
     };
-    let mut obj = serde_json::Map::new();
-    obj.insert("type".into(), serde_json::Value::String(qtype.into()));
-    obj.insert(
-        "always_ram".into(),
-        serde_json::Value::Bool(config.always_ram),
-    );
-    if let Some(quantile) = config.quantile {
-        obj.insert("quantile".into(), serde_json::Value::from(quantile));
-    }
-    if let Some(bits) = config.bits {
-        // Emit both keys: gRPC/plan use turbo_bits; REST/OpenAPI turbo config uses bits.
-        obj.insert("turbo_bits".into(), serde_json::Value::from(bits));
-        obj.insert("bits".into(), serde_json::Value::from(bits));
-    }
-    if let Some(ref compression) = config.compression {
-        obj.insert(
-            "compression".into(),
-            serde_json::Value::String(compression.clone()),
-        );
-    }
-    if let Some(ref encoding) = config.encoding {
-        obj.insert(
-            "encoding".into(),
-            serde_json::Value::String(encoding.clone()),
-        );
-    }
-    if let Some(ref query_encoding) = config.query_encoding {
-        obj.insert(
-            "query_encoding".into(),
-            serde_json::Value::String(query_encoding.clone()),
-        );
-    }
-    if let Some(ref memory) = config.memory {
-        obj.insert(
-            "memory".into(),
-            serde_json::Value::String(memory.as_str().into()),
-        );
-    }
-    serde_json::Value::Object(obj)
-}
-
-fn distance_str(d: VectorDistance) -> String {
-    match d {
-        VectorDistance::Cosine => "Cosine".into(),
-        VectorDistance::Dot => "Dot".into(),
-        VectorDistance::Euclid => "Euclid".into(),
-        VectorDistance::Manhattan => "Manhattan".into(),
-    }
+    Some(label.to_string())
 }
 
 /// Lower a `SET QUOTA (…)` statement to a typed quota request.
@@ -526,20 +407,15 @@ fn distance_str(d: VectorDistance) -> String {
 pub(crate) fn lower_set_quota(
     stmt: &qql_core::ast::SetQuotaStmt,
 ) -> Result<SetQuotaRequest, QqlError> {
-    use qql_core::ast::Value;
-
     let mut request = SetQuotaRequest {
-        enabled: None,
-        max_resident_memory_percent: None,
-        max_disk_usage_percent: None,
-        release_margin_percent: None,
+        config: QuotaConfig::default(),
         wait: stmt.wait,
     };
     for (key, value) in &stmt.config {
         let lower = key.to_ascii_lowercase();
         match lower.as_str() {
             "enabled" => match value {
-                Value::Bool(b) => request.enabled = Some(*b),
+                Value::Bool(b) => request.config.enabled = Some(*b),
                 _ => {
                     return Err(QqlError::validation(
                         "QQL-PLAN-QUOTA",
@@ -571,20 +447,22 @@ pub(crate) fn lower_set_quota(
 fn apply_quota_percent(
     mut request: SetQuotaRequest,
     key: &str,
-    value: &qql_core::ast::Value,
+    value: &Value,
     min: u64,
     max: u64,
 ) -> Result<SetQuotaRequest, QqlError> {
     match value {
         // Explicit null → leave field unset so the replacement config has no
         // cap for this resource (full PUT replace semantics).
-        qql_core::ast::Value::Null => {}
-        qql_core::ast::Value::Int(n) if *n >= min as i64 && (*n as u64) <= max => {
+        Value::Null => {}
+        Value::Int(n) if *n >= min as i64 && (*n as u64) <= max => {
             let n = *n as u64;
             match key {
-                "max_resident_memory_percent" => request.max_resident_memory_percent = Some(n),
-                "max_disk_usage_percent" => request.max_disk_usage_percent = Some(n),
-                _ => request.release_margin_percent = Some(n),
+                "max_resident_memory_percent" => {
+                    request.config.max_resident_memory_percent = Some(n)
+                }
+                "max_disk_usage_percent" => request.config.max_disk_usage_percent = Some(n),
+                _ => request.config.release_margin_percent = Some(n),
             }
         }
         _ => {
@@ -608,6 +486,12 @@ mod tests {
         Parser::parse(s).expect("parse failed")
     }
 
+    macro_rules! rest_json {
+        ($req:expr) => {
+            serde_json::to_value(create_collection_rest_body($req)).unwrap()
+        };
+    }
+
     #[test]
     fn create_collection_dense() {
         let stmt = parse_stmt("CREATE COLLECTION docs (dense VECTOR(384, COSINE));");
@@ -615,9 +499,29 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let json = serde_json::to_value(&req).unwrap();
+        let json = rest_json!(&req);
         assert_eq!(json["vectors"]["dense"]["size"], 384);
         assert_eq!(json["vectors"]["dense"]["distance"], "Cosine");
+    }
+
+    #[test]
+    fn single_vector_config_serializes_as_bare_params() {
+        let req = CreateCollectionRequest {
+            vectors: Some(DenseVectorsConfig::Single(DenseVectorParams {
+                size: 8,
+                distance: qql_core::ast::VectorDistance::Dot,
+                hnsw_config: None,
+                quantization_config: None,
+                on_disk: None,
+                memory: None,
+                datatype: None,
+                multivector_config: None,
+            })),
+            ..Default::default()
+        };
+        let json = rest_json!(&req);
+        assert_eq!(json["vectors"]["size"], 8);
+        assert_eq!(json["vectors"]["distance"], "Dot");
     }
 
     #[test]
@@ -640,18 +544,29 @@ mod tests {
         let Stmt::CreateIndex(ref ci) = stmt else {
             panic!()
         };
-        let req = lower_create_index(ci);
-        // IR flattens options for gRPC payload_index_params
+        let req = lower_create_index(ci).unwrap();
+        // IR keeps typed options separate from the schema.
         let ir = serde_json::to_value(&req).unwrap();
         assert_eq!(ir["field_name"], "title");
         assert_eq!(ir["field_schema"], "text");
-        assert_eq!(ir["lowercase"], true);
+        assert_eq!(ir["options"]["lowercase"], true);
         // REST OpenAPI nests options under field_schema object
-        let rest = create_index_rest_body(&req);
+        let rest = serde_json::to_value(create_index_rest_body(&req)).unwrap();
         assert_eq!(rest["field_name"], "title");
         assert_eq!(rest["field_schema"]["type"], "text");
         assert_eq!(rest["field_schema"]["lowercase"], true);
         assert!(rest.get("lowercase").is_none());
+    }
+
+    #[test]
+    fn create_index_without_options_uses_type_string() {
+        let stmt = parse_stmt("CREATE INDEX ON COLLECTION docs FOR tag TYPE keyword;");
+        let Stmt::CreateIndex(ref ci) = stmt else {
+            panic!()
+        };
+        let req = lower_create_index(ci).unwrap();
+        let rest = serde_json::to_value(create_index_rest_body(&req)).unwrap();
+        assert_eq!(rest["field_schema"], "keyword");
     }
 
     #[test]
@@ -662,16 +577,67 @@ mod tests {
         let Stmt::CreateIndex(ref ci) = stmt else {
             panic!()
         };
-        let req = lower_create_index(ci);
-        let rest = create_index_rest_body(&req);
+        let req = lower_create_index(ci).unwrap();
+        let rest = serde_json::to_value(create_index_rest_body(&req)).unwrap();
         assert_eq!(rest["field_schema"]["type"], "keyword");
         assert_eq!(rest["field_schema"]["prefix"], true);
         assert_eq!(rest["field_schema"]["memory"], "cached");
         assert_eq!(rest["field_schema"]["is_tenant"], true);
-        // The extra options survive for the gRPC payload_index_params path.
-        let ir = serde_json::to_value(&req).unwrap();
-        assert_eq!(ir["prefix"], true);
-        assert_eq!(ir["memory"], "cached");
+        // Typed options survive for the gRPC payload_index_params path.
+        assert_eq!(req.options.prefix, Some(true));
+        assert_eq!(req.options.memory, Some(MemoryPlacement::Cached));
+    }
+
+    #[test]
+    fn create_text_index_typed_options() {
+        let stmt = parse_stmt(
+            "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (tokenizer = 'WORD', lowercase = true, min_token_len = 2, max_token_len = 10, stopwords = ['the', 'a'], stemmer = 'English');",
+        );
+        let Stmt::CreateIndex(ref ci) = stmt else {
+            panic!()
+        };
+        let req = lower_create_index(ci).unwrap();
+        assert_eq!(req.options.tokenizer, Some(TextTokenizer::Word));
+        assert_eq!(req.options.min_token_len, Some(2));
+        assert_eq!(req.options.max_token_len, Some(10));
+        assert_eq!(
+            req.options.stopwords,
+            Some(StopwordsSet {
+                custom: vec!["the".into(), "a".into()]
+            })
+        );
+        assert_eq!(
+            req.options.stemmer,
+            Some(StemmingAlgorithm::Snowball("english".into()))
+        );
+        let rest = serde_json::to_value(create_index_rest_body(&req)).unwrap();
+        assert_eq!(rest["field_schema"]["tokenizer"], "word");
+        assert_eq!(rest["field_schema"]["stemmer"]["type"], "snowball");
+        assert_eq!(rest["field_schema"]["stemmer"]["language"], "english");
+        assert_eq!(rest["field_schema"]["stopwords"]["custom"][0], "the");
+    }
+
+    #[test]
+    fn create_index_fails_closed_on_unknown_values() {
+        let Stmt::CreateIndex(ci) = parse_stmt(
+            "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (tokenizer = 'bogus');",
+        ) else {
+            panic!()
+        };
+        let err = lower_create_index(&ci).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-INDEX-OPTION");
+
+        // The parser rejects unknown field types; a programmatically built AST
+        // still fails closed in the planner.
+        let ci = qql_core::ast::CreateIndexStmt {
+            collection: "docs".into(),
+            field: "body".into(),
+            field_type: "bogus".into(),
+            options: Vec::new(),
+            wait: None,
+        };
+        let err = lower_create_index(&ci).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-INDEX-TYPE");
     }
 
     #[test]
@@ -683,11 +649,26 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let json = serde_json::to_value(&req).unwrap();
+        let json = rest_json!(&req);
         let quant = &json["vectors"]["v"]["quantization_config"];
-        assert_eq!(quant["type"], "product");
-        assert_eq!(quant["compression"], "x16");
-        assert_eq!(quant["always_ram"], true);
+        assert_eq!(quant["product"]["compression"], "x16");
+        assert_eq!(quant["product"]["always_ram"], true);
+    }
+
+    #[test]
+    fn lower_product_quantization_defaults_compression() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'product', always_ram = true));",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = rest_json!(&req);
+        assert_eq!(
+            json["vectors"]["v"]["quantization_config"]["product"]["compression"],
+            "x4"
+        );
     }
 
     #[test]
@@ -699,11 +680,10 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let json = serde_json::to_value(&req).unwrap();
+        let json = rest_json!(&req);
         let quant = &json["vectors"]["v"]["quantization_config"];
-        assert_eq!(quant["type"], "binary");
-        assert_eq!(quant["encoding"], "two_bits");
-        assert_eq!(quant["always_ram"], true);
+        assert_eq!(quant["binary"]["encoding"], "two_bits");
+        assert_eq!(quant["binary"]["always_ram"], true);
     }
 
     #[test]
@@ -715,17 +695,14 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let json = serde_json::to_value(&req).unwrap();
+        let json = rest_json!(&req);
         let quant = &json["vectors"]["v"]["quantization_config"];
-        assert_eq!(quant["type"], "turbo");
-        assert_eq!(quant["bits"], 1.5);
-        assert_eq!(quant["turbo_bits"], 1.5);
+        assert_eq!(quant["turbo"]["bits"], "bits1_5");
+        assert_eq!(quant["turbo"]["always_ram"], true);
     }
 
     #[test]
-    fn turbo_bits_label_and_nesting_agree() {
-        // P15 twin-drift guard: the typed label helper and the REST nester
-        // must map the same numeric bits to the same OpenAPI string.
+    fn turbo_bits_label_maps_known_values() {
         // Unknown values stay backend-rejectable (no silent "bits1").
         for (bits, expected) in [
             (1.0, "bits1"),
@@ -734,12 +711,8 @@ mod tests {
             (4.0, "bits4"),
         ] {
             assert_eq!(turbo_bits_label(Some(bits)).as_deref(), Some(expected));
-            let flat = serde_json::json!({"type": "turbo", "bits": bits});
-            assert_eq!(nest_quantization_for_rest(&flat)["turbo"]["bits"], expected);
         }
-        let unknown = serde_json::json!({"type": "turbo", "bits": 3.0});
-        let nested = nest_quantization_for_rest(&unknown);
-        assert_eq!(nested["turbo"]["bits"], "bits3");
+        assert_eq!(turbo_bits_label(Some(3.0)).as_deref(), Some("bits3"));
     }
 
     #[test]
@@ -751,12 +724,48 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let json = serde_json::to_value(&req).unwrap();
+        let json = rest_json!(&req);
         let v = &json["vectors"]["v"];
         assert_eq!(v["on_disk"], true);
         assert_eq!(v["multivector_config"]["comparator"], "max_sim");
-        assert_eq!(v["quantization_config"]["encoding"], "two_bits");
-        assert_eq!(v["quantization_config"]["query_encoding"], "scalar4bits");
+        assert_eq!(v["quantization_config"]["binary"]["encoding"], "two_bits");
+        assert_eq!(
+            v["quantization_config"]["binary"]["query_encoding"],
+            "scalar4bits"
+        );
+    }
+
+    #[test]
+    fn collection_wide_vector_defaults_apply_to_every_vector() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(8, COSINE), w VECTOR(4, DOT)) WITH VECTOR (on_disk = true, memory = 'cached', datatype = 'float16');",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = rest_json!(&req);
+        for name in ["v", "w"] {
+            assert_eq!(json["vectors"][name]["on_disk"], true);
+            assert_eq!(json["vectors"][name]["memory"], "cached");
+            assert_eq!(json["vectors"][name]["datatype"], "float16");
+        }
+    }
+
+    #[test]
+    fn collection_wide_vector_defaults_do_not_override_per_vector() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(8, COSINE) WITH VECTOR (on_disk = false, memory = 'cold')) WITH VECTOR (on_disk = true, memory = 'cached', datatype = 'float16');",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = rest_json!(&req);
+        assert_eq!(json["vectors"]["v"]["on_disk"], false);
+        assert_eq!(json["vectors"]["v"]["memory"], "cold");
+        // Unset per-vector fields still pick up the collection default.
+        assert_eq!(json["vectors"]["v"]["datatype"], "float16");
     }
 
     #[test]
@@ -787,7 +796,7 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let rest = create_collection_rest_body(&req).unwrap();
+        let rest = rest_json!(&req);
         // OpenAPI top-level params
         assert_eq!(rest["replication_factor"], 2);
         assert_eq!(rest["write_consistency_factor"], 1);
@@ -815,54 +824,25 @@ mod tests {
         // Deferred fan-out only when IR carries those keys (ALTER-only in grammar;
         // still projected for gRPC/REST multi-step if present).
         let mut with_fanout = req.clone();
-        if let Some(serde_json::Value::Object(ref mut p)) = with_fanout.params {
-            p.insert("read_fan_out_factor".into(), serde_json::json!(3));
-        }
-        let deferred = create_collection_deferred_params_rest(&with_fanout).unwrap();
+        with_fanout
+            .params
+            .as_mut()
+            .expect("params")
+            .read_fan_out_factor = Some(3);
+        let deferred = serde_json::to_value(
+            create_collection_deferred_params_rest(&with_fanout).expect("deferred params"),
+        )
+        .unwrap();
         assert_eq!(deferred["params"]["read_fan_out_factor"], 3);
-        // IR still flat for gRPC
+        // IR keeps typed vectors and shard keys
         let ir = serde_json::to_value(&req).unwrap();
-        assert_eq!(ir["vectors"]["v"]["quantization_config"]["type"], "scalar");
-        assert_eq!(ir["params"]["replication_factor"], 2);
-        assert_eq!(ir["shard_keys"], serde_json::json!(["a", "b"]));
-    }
-
-    #[test]
-    fn rest_body_product_binary_turbo_quantization() {
-        let product = nest_quantization_for_rest(&serde_json::json!({
-            "type": "product", "compression": "x16", "always_ram": true
-        }));
-        assert_eq!(product["product"]["compression"], "x16");
-        let binary = nest_quantization_for_rest(&serde_json::json!({
-            "type": "binary", "encoding": "two_bits", "query_encoding": "scalar4bits"
-        }));
-        assert_eq!(binary["binary"]["encoding"], "two_bits");
-        assert_eq!(binary["binary"]["query_encoding"], "scalar4bits");
-        let turbo = nest_quantization_for_rest(&serde_json::json!({
-            "type": "turbo", "bits": 1.5, "always_ram": false
-        }));
-        assert_eq!(turbo["turbo"]["bits"], "bits1_5");
-        let disabled = nest_quantization_for_rest(&serde_json::json!({ "disabled": true }));
-        assert_eq!(disabled, "Disabled");
-    }
-
-    #[test]
-    fn lower_sparse_vector_full_config_and_sharding_method() {
-        let stmt = parse_stmt(
-            "CREATE COLLECTION docs (bm25 SPARSE WITH SPARSE (modifier = 'idf', full_scan_threshold = 10000, on_disk = true, datatype = 'float32')) WITH PARAMS (sharding_method = 'custom', shard_number = 2);",
+        assert_eq!(
+            ir["vectors"]["v"]["quantization_config"]["scalar"]["type"],
+            "int8"
         );
-        let Stmt::CreateCollection(ref cc) = stmt else {
-            panic!()
-        };
-        let req = lower_create_collection(cc);
-        let json = serde_json::to_value(&req).unwrap();
-        let sparse = &json["sparse_vectors"]["bm25"];
-        assert_eq!(sparse["modifier"], "idf");
-        assert_eq!(sparse["index"]["full_scan_threshold"], 10000);
-        assert_eq!(sparse["index"]["on_disk"], true);
-        assert_eq!(sparse["index"]["datatype"], "float32");
-        assert_eq!(json["sharding_method"], "custom");
-        assert_eq!(json["shard_number"], 2);
+        assert_eq!(ir["params"]["replication_factor"], 2);
+        assert_eq!(ir["sharding_method"], "custom");
+        assert_eq!(ir["shard_keys"], serde_json::json!(["a", "b"]));
     }
 
     #[test]
@@ -877,20 +857,20 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let rest = create_collection_rest_body(&req).unwrap();
-        assert_ne!(rest["hnsw_config"], serde_json::Value::Null);
+        let rest = rest_json!(&req);
+        assert!(rest["hnsw_config"].is_object());
         assert_eq!(rest["hnsw_config"]["m"], 16);
-        assert_ne!(rest["optimizers_config"], serde_json::Value::Null);
+        assert!(rest["optimizers_config"].is_object());
         assert_eq!(rest["optimizers_config"]["indexing_threshold"], 1000);
-        assert_ne!(rest["quantization_config"], serde_json::Value::Null);
+        assert!(rest["quantization_config"].is_object());
         assert_eq!(rest["quantization_config"]["scalar"]["type"], "int8");
         assert_eq!(rest["quantization_config"]["scalar"]["quantile"], 0.5);
     }
 
     #[test]
     fn update_rest_body_config_sections_are_objects_not_null() {
-        // Regression for `update_collection_rest_body` (same swallowed-serialization
-        // footgun as create). PATCH body must carry real hnsw/optimizers objects.
+        // Regression for the PATCH body (same swallowed-serialization footgun
+        // as create). PATCH body must carry real hnsw/optimizers objects.
         let stmt = parse_stmt(
             "ALTER COLLECTION docs WITH HNSW (m = 32) WITH OPTIMIZERS (indexing_threshold = 500);",
         );
@@ -898,10 +878,80 @@ mod tests {
             panic!()
         };
         let req = lower_alter_collection(ac);
-        let rest = update_collection_rest_body(&req).unwrap();
-        assert_ne!(rest["hnsw_config"], serde_json::Value::Null);
+        let rest = serde_json::to_value(&req).unwrap();
+        assert!(rest["hnsw_config"].is_object());
         assert_eq!(rest["hnsw_config"]["m"], 32);
-        assert_ne!(rest["optimizers_config"], serde_json::Value::Null);
+        assert!(rest["optimizers_config"].is_object());
         assert_eq!(rest["optimizers_config"]["indexing_threshold"], 500);
+    }
+
+    #[test]
+    fn update_rest_body_disabled_quantization_and_product_default() {
+        let stmt = parse_stmt("ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);");
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac);
+        assert!(matches!(
+            req.quantization_config,
+            Some(QuantizationConfigDiff::Disabled)
+        ));
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["quantization_config"], "Disabled");
+
+        let stmt = parse_stmt(
+            "ALTER COLLECTION docs WITH QUANTIZATION (type = 'product', always_ram = true);",
+        );
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac);
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["quantization_config"]["product"]["compression"], "x4");
+        assert_eq!(json["quantization_config"]["product"]["always_ram"], true);
+    }
+
+    #[test]
+    fn update_rest_body_nests_params_with_payload() {
+        let stmt = parse_stmt(
+            "ALTER COLLECTION docs WITH PARAMS (replication_factor = 3, payload_memory = 'cached');",
+        );
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac);
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["params"]["replication_factor"], 3);
+        assert_eq!(json["params"]["payload"]["memory"], "cached");
+    }
+
+    #[test]
+    fn lower_sparse_vector_full_config_and_sharding_method() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (bm25 SPARSE WITH SPARSE (modifier = 'idf', full_scan_threshold = 10000, on_disk = true, datatype = 'float32')) WITH PARAMS (sharding_method = 'custom', shard_number = 2);",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = rest_json!(&req);
+        let sparse = &json["sparse_vectors"]["bm25"];
+        assert_eq!(sparse["modifier"], "idf");
+        assert_eq!(sparse["index"]["full_scan_threshold"], 10000);
+        assert_eq!(sparse["index"]["on_disk"], true);
+        assert_eq!(sparse["index"]["datatype"], "float32");
+        assert_eq!(json["sharding_method"], "custom");
+        assert_eq!(json["shard_number"], 2);
+    }
+
+    #[test]
+    fn lower_sparse_default_modifier_is_idf() {
+        let stmt = parse_stmt("CREATE COLLECTION docs (bm25 SPARSE);");
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = rest_json!(&req);
+        assert_eq!(json["sparse_vectors"]["bm25"]["modifier"], "idf");
     }
 }

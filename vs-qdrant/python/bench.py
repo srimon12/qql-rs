@@ -31,7 +31,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 
-from config import BATCH_BERLIN, BATCH_LEGAL, COLLS, LIMIT, SCROLL_BATCH, SCROLL_PAGES, URL  # noqa: E402
+from config import BATCH_BERLIN, BATCH_LEGAL, COLLS, LIMIT, SCROLL_BATCH, SCROLL_PAGES, URL, URL_GRPC  # noqa: E402
 
 from official_scenarios import OfficialScenarios  # noqa: E402
 from qql_scenarios import QqlScenarios  # noqa: E402
@@ -145,11 +145,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--iters", type=int, default=25)
+    ap.add_argument("--transport", choices=("rest", "grpc"), default="rest",
+                    help="Qdrant transport for BOTH contenders (default rest)")
+    ap.add_argument("--out", default="python.json",
+                    help="results filename under ../results/ (default python.json)")
     args = ap.parse_args()
 
+    grpc = args.transport == "grpc"
+    url = URL_GRPC if grpc else URL
     docs, dense, sparse, colbert_flat, colbert_lens, queries = load_data()
-    official, qql = OfficialScenarios(URL), QqlScenarios(URL)
+    official = OfficialScenarios(url, prefer_grpc=grpc)
+    qql = QqlScenarios(url, use_grpc=grpc)
     R = {"meta": meta(), "scenarios": {}, "ingest": {}, "parity": {}, "cold_import": {}}
+    R["meta"]["transport"] = "gRPC (both contenders)" if grpc else "REST (both contenders)"
+    R["meta"]["url"] = url
 
     # ---- cold import (fresh interpreter, median of N) ----
     R["cold_import"] = {
@@ -277,7 +286,7 @@ def main() -> None:
         official.count_berlin(B_OFF), qql.count_berlin(B_QQL))["match"]
 
     RESULTS.mkdir(exist_ok=True)
-    out = RESULTS / "python.json"
+    out = RESULTS / args.out
     out.write_text(json.dumps(R, indent=2))
     print(f"\nwritten {out}")
 

@@ -605,7 +605,7 @@ async function runE2E() {
   {
     const r = await e2eClient.execute('SHOW COLLECTIONS');
     assert.strictEqual(r.ok, true);
-    const names = r.results[0].data.result.collections.map(c => c.name);
+    const names = r.results[0].data.collections;
     assert.ok(names.includes(TEST_COLLECTION));
     console.log('  ✓ E2E: SHOW COLLECTIONS via QQL');
     passed++;
@@ -642,7 +642,7 @@ async function runE2E() {
   {
     const r = await e2eClient.execute(`COUNT FROM ${TEST_COLLECTION}`);
     assert.strictEqual(r.ok, true);
-    assert.strictEqual(r.results[0].data.result.count, 2);
+    assert.strictEqual(r.results[0].data.count, 2);
     console.log('  ✓ E2E: COUNT = 2');
     passed++;
   }
@@ -670,7 +670,7 @@ async function runE2E() {
   {
     const r = await e2eClient.execute(`COUNT FROM ${TEST_COLLECTION}`);
     assert.strictEqual(r.ok, true);
-    assert.strictEqual(r.results[0].data.result.count, 1);
+    assert.strictEqual(r.results[0].data.count, 1);
     console.log('  ✓ E2E: COUNT = 1 after delete');
     passed++;
   }

@@ -107,13 +107,11 @@ async fn facet_keys(
     if !resp.ok {
         return Err(resp.message.clone().into());
     }
-    let hits = resp
-        .facet()
-        .unwrap_or_else(|| facet_hits(resp.data.as_ref()));
+    let hits = resp.facet().unwrap_or_default();
     let truncated = hits.len() as u64 >= FACET_LIMIT;
     let mut keys = Vec::new();
     for (value, _) in hits {
-        if let Some(key) = json_to_shard_key(&value) {
+        if let Some(key) = facet_value_to_shard_key(&value) {
             keys.push(key);
         }
     }
@@ -166,28 +164,17 @@ pub(crate) fn json_to_shard_key(value: &Value) -> Option<ShardKey> {
     }
 }
 
-pub(crate) fn facet_hits(data: Option<&Value>) -> Vec<(Value, u64)> {
-    let Some(data) = data else {
-        return Vec::new();
-    };
-    let hits = data
-        .as_array()
-        .or_else(|| {
-            data.get("result")
-                .and_then(|r| r.get("hits"))
-                .and_then(|h| h.as_array())
-        })
-        .or_else(|| data.get("hits").and_then(|h| h.as_array()));
-    let Some(hits) = hits else {
-        return Vec::new();
-    };
-    hits.iter()
-        .filter_map(|hit| {
-            let value = hit.get("value")?.clone();
-            let count = hit.get("count")?.as_u64()?;
-            Some((value, count))
-        })
-        .collect()
+/// Typed FACET value → shard key. Bool facet values are not shard keys.
+fn facet_value_to_shard_key(value: &qql::PlanFacetValue) -> Option<ShardKey> {
+    match value {
+        qql::PlanFacetValue::Keyword(text) if !text.is_empty() => {
+            Some(ShardKey::Keyword(text.clone()))
+        }
+        qql::PlanFacetValue::Integer(number) if *number >= 0 => {
+            Some(ShardKey::Number(*number as u64))
+        }
+        _ => None,
+    }
 }
 
 fn facet_missing_index(msg: &str) -> bool {

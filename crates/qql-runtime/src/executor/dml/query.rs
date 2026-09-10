@@ -1,5 +1,5 @@
 use crate::client::CollectionInfo;
-use crate::executor::{Executor, SearchHit};
+use crate::executor::Executor;
 use qql_core::ast::QueryStmt;
 use qql_core::error::QqlError;
 use qql_embed::{TopologyNames, query_needs_kind_resolution, resolve_query_vector_kinds};
@@ -47,66 +47,5 @@ pub(crate) fn topology_names_from_info(info: &CollectionInfo) -> TopologyNames {
         dense,
         sparse,
         multivector,
-    }
-}
-
-pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {
-    let points = result
-        .get("result")
-        .and_then(|r| r.get("points"))
-        .and_then(serde_json::Value::as_array)
-        // `/points/query/batch` answers one QueryResponse per search, and per
-        // the OpenAPI `QueryResponse` schema each item carries the points at
-        // its TOP LEVEL: `{"points": [...]}` — no `result` wrapper. Without
-        // this branch every same-collection QUERY batch silently reports
-        // 0 hits.
-        .or_else(|| result.get("points").and_then(serde_json::Value::as_array))
-        // `POST /collections/{c}/points` (get points by ID) returns `result`
-        // as a bare array of point records.
-        .or_else(|| result.get("result").and_then(serde_json::Value::as_array));
-
-    match points {
-        Some(pts) => pts
-            .iter()
-            .map(|hit| SearchHit {
-                id: hit
-                    .get("id")
-                    .map(|id| match id {
-                        serde_json::Value::Number(n) => {
-                            if let Some(u) = n.as_u64() {
-                                qql_plan::PlanPointId::Number(u)
-                            } else {
-                                qql_plan::PlanPointId::String(n.to_string())
-                            }
-                        }
-                        serde_json::Value::String(s) => qql_plan::PlanPointId::String(s.clone()),
-                        other => qql_plan::PlanPointId::String(other.to_string()),
-                    })
-                    .unwrap_or_else(|| qql_plan::PlanPointId::String("<missing-id>".to_string())),
-                score: hit
-                    .get("score")
-                    .and_then(|v| match v {
-                        serde_json::Value::Number(n) => n.as_f64(),
-                        serde_json::Value::String(s) => s.parse::<f64>().ok(),
-                        _ => None,
-                    })
-                    .unwrap_or(0.0) as f32,
-                text: hit
-                    .get("payload")
-                    .and_then(|p| p.get("text"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned),
-                payload: hit.get("payload").and_then(|p| {
-                    p.as_object()
-                        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                }),
-                collection: None,
-                vector: hit
-                    .get("vector")
-                    .cloned()
-                    .or_else(|| hit.get("vectors").cloned()),
-            })
-            .collect(),
-        None => Vec::new(),
     }
 }

@@ -1,7 +1,7 @@
 //! `psql`-style table printer for QQL CLI output.
 //!
 //! Produces unbordered, aligned tables with a row-count footer.
-//! Detects columns automatically from `ExecResponse.data` payloads, supporting
+//! Detects columns automatically from `ExecResponse` data payloads, supporting
 //! both standard tabular views and expanded vertical record displays (`\x`).
 
 mod cell;
@@ -58,49 +58,58 @@ pub fn render_report(
 }
 
 /// Render a single `ExecResponse` to stdout.
+///
+/// Dispatches on the typed [`ExecData`](qql::executor::ExecData) payload — no
+/// JSON re-parsing between the executor and the terminal.
 pub fn render_response(
     response: &qql::executor::ExecResponse,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use qql::executor::ExecData;
+
     if json {
         let s = serde_json::to_string_pretty(response)?;
         println!("{}", s);
         return Ok(());
     }
 
+    let data = response.data.as_ref();
     match response.operation.as_str() {
-        "QUERY" | "SCROLL" | "CROSS_RERANK" | "GET_POINTS" => {
-            print_query_table(&response.data)?;
+        // Scored operations: the backend returns similarity scores.
+        "QUERY" | "CROSS_RERANK" => {
+            print_query_table(data.and_then(ExecData::hits), true)?;
+        }
+        // Unscored point retrieval: scores default to 0.0 and are hidden.
+        "SCROLL" | "GET_POINTS" => {
+            print_query_table(data.and_then(ExecData::hits), false)?;
         }
         "FACET" => {
-            print_facet_table(&response.data)?;
+            print_facet_table(data.and_then(ExecData::facet))?;
         }
         "QUERY_GROUPS" => {
-            print_groups_table(&response.data)?;
+            print_groups_table(data.and_then(ExecData::groups))?;
         }
         "COUNT" => {
-            print_count(&response.data);
+            print_count(response.count());
         }
         "SHOW_COLLECTIONS" => {
-            print_collections_list(&response.data)?;
+            print_collections_list(data.and_then(ExecData::collections))?;
         }
         "SHOW_COLLECTION" | "show_collection" => {
-            print_collection_info(&response.data)?;
+            print_collection_info(data.and_then(ExecData::collection))?;
         }
         "SHOW_SHARD_KEYS" => {
-            print_shard_keys_table(&response.data)?;
+            print_shard_keys_table(data.and_then(ExecData::shard_keys))?;
         }
         "SHOW_QUOTAS" => {
-            print_quotas_table(&response.data)?;
+            print_quotas_table(data.and_then(ExecData::quotas))?;
         }
         _ => {
             // DDL/DML: just print the message
             println!("{}", response.message);
-            if let Some(ref data) = response.data {
+            if let Some(count) = response.count() {
                 // For operations like UPSERT that have data (count), show it
-                if let Some(count) = data.get("count").and_then(|c| c.as_u64()) {
-                    println!("  count: {}", count);
-                }
+                println!("  count: {}", count);
             }
         }
     }
@@ -112,9 +121,24 @@ pub fn render_response(
 mod tests {
     use super::cell::{Alignment, Cell, escape_controls, stringify_value};
     use super::columns::{detect_query_columns, query_cell};
-    use super::formatters::{collection_names, count_value};
     use super::renderer::Table;
     use super::*;
+
+    use qql::executor::{ExecData, ExecResponse, FacetHit, GroupedSearchResult, SearchHit};
+    use qql::{PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey};
+
+    fn search_hit(id: PlanPointId, score: f32, payload: serde_json::Value) -> SearchHit {
+        SearchHit {
+            id,
+            score,
+            payload: payload
+                .as_object()
+                .cloned()
+                .map(|map| map.into_iter().collect()),
+            collection: None,
+            vector: None,
+        }
+    }
 
     #[test]
     fn table_renders_psql_layout() {
@@ -196,16 +220,32 @@ mod tests {
     }
 
     #[test]
-    fn qdrant_result_envelopes_render_collection_names_and_counts() {
-        let collections = Some(serde_json::json!({
-            "result": {
-                "collections": [{"name": "berlin_airbnb"}, {"name": "sec10k"}]
-            }
-        }));
-        let count = Some(serde_json::json!({"result": {"count": 2500}}));
+    fn typed_collection_and_count_payloads_render() {
+        let collections = ExecResponse {
+            ok: true,
+            operation: "SHOW_COLLECTIONS".into(),
+            message: "Collections listed".into(),
+            data: Some(ExecData::Collections(vec![
+                "berlin_airbnb".into(),
+                "sec10k".into(),
+            ])),
+            telemetry: None,
+        };
+        assert_eq!(
+            collections.data.as_ref().unwrap().collections().unwrap(),
+            ["berlin_airbnb", "sec10k"]
+        );
+        assert!(render_response(&collections, false).is_ok());
 
-        assert_eq!(collection_names(&collections), ["berlin_airbnb", "sec10k"]);
-        assert_eq!(count_value(&count), 2500);
+        let count = ExecResponse {
+            ok: true,
+            operation: "COUNT".into(),
+            message: "Counted".into(),
+            data: Some(ExecData::Count(2500)),
+            telemetry: None,
+        };
+        assert_eq!(count.count(), Some(2500));
+        assert!(render_response(&count, false).is_ok());
     }
 
     #[test]
@@ -219,17 +259,12 @@ mod tests {
 
     #[test]
     fn detect_columns_from_search_hits() {
-        let hits = vec![{
-            let mut m = serde_json::Map::new();
-            m.insert("id".into(), serde_json::json!("abc"));
-            m.insert("score".into(), serde_json::json!(0.95));
-            m.insert(
-                "payload".into(),
-                serde_json::json!({"title": "hello", "year": 2024, "nested": {"deep": true}}),
-            );
-            m
-        }];
-        let cols = detect_query_columns(&hits);
+        let hits = vec![search_hit(
+            PlanPointId::String("abc".into()),
+            0.95,
+            serde_json::json!({"title": "hello", "year": 2024, "nested": {"deep": true}}),
+        )];
+        let cols = detect_query_columns(&hits, true);
         let labels = cols
             .iter()
             .map(|column| column.label.as_str())
@@ -242,43 +277,55 @@ mod tests {
     }
 
     #[test]
+    fn detect_columns_hides_score_for_unscored_operations() {
+        let hits = vec![search_hit(
+            PlanPointId::Number(7),
+            0.0,
+            serde_json::json!({}),
+        )];
+        let labels = detect_query_columns(&hits, false)
+            .iter()
+            .map(|column| column.label.clone())
+            .collect::<Vec<_>>();
+        assert!(!labels.contains(&"score".to_string()));
+    }
+
+    #[test]
     fn query_cells_read_payload_fields_and_preserve_json() {
-        let hit = serde_json::json!({
-            "id": "abc",
-            "score": 0.95,
-            "payload": {
+        let hit = search_hit(
+            PlanPointId::String("abc".into()),
+            0.95,
+            serde_json::json!({
                 "title": "hello",
                 "year": 2024,
                 "nested": {"deep": true}
-            }
-        });
-        let hit = hit.as_object().unwrap();
-        let columns = detect_query_columns(std::slice::from_ref(hit));
+            }),
+        );
+        let columns = detect_query_columns(std::slice::from_ref(&hit), true);
         let column = |label| columns.iter().find(|column| column.label == label).unwrap();
 
-        assert_eq!(query_cell(hit, column("id")).value, "abc");
-        assert_eq!(query_cell(hit, column("score")).value, "0.95");
-        assert_eq!(query_cell(hit, column("title")).value, "hello");
-        assert_eq!(query_cell(hit, column("year")).value, "2024");
-        assert_eq!(query_cell(hit, column("nested")).value, r#"{"deep":true}"#);
-        assert_eq!(query_cell(hit, column("year")).alignment, Alignment::Right);
+        assert_eq!(query_cell(&hit, column("id")).value, "abc");
+        assert_eq!(query_cell(&hit, column("score")).value, "0.95");
+        assert_eq!(query_cell(&hit, column("title")).value, "hello");
+        assert_eq!(query_cell(&hit, column("year")).value, "2024");
+        assert_eq!(query_cell(&hit, column("nested")).value, r#"{"deep":true}"#);
+        assert_eq!(query_cell(&hit, column("year")).alignment, Alignment::Right);
     }
 
     #[test]
     fn colliding_payload_keys_are_labeled_and_read_unambiguously() {
-        let hit = serde_json::json!({
-            "id": "point-1",
-            "score": 0.95,
-            "payload": {"id": "external-id", "score": 10}
-        });
-        let hit = hit.as_object().unwrap();
-        let columns = detect_query_columns(std::slice::from_ref(hit));
+        let hit = search_hit(
+            PlanPointId::String("point-1".into()),
+            0.95,
+            serde_json::json!({"id": "external-id", "score": 10}),
+        );
+        let columns = detect_query_columns(std::slice::from_ref(&hit), true);
         let column = |label| columns.iter().find(|column| column.label == label).unwrap();
 
         assert!(columns.iter().any(|column| column.label == "payload.id"));
         assert!(columns.iter().any(|column| column.label == "payload.score"));
-        assert_eq!(query_cell(hit, column("payload.id")).value, "external-id");
-        assert_eq!(query_cell(hit, column("payload.score")).value, "10");
+        assert_eq!(query_cell(&hit, column("payload.id")).value, "external-id");
+        assert_eq!(query_cell(&hit, column("payload.score")).value, "10");
     }
 
     #[test]
@@ -297,42 +344,113 @@ mod tests {
     }
 
     #[test]
-    fn render_response_dispatches_facet_and_get_points() {
-        let get_points_resp = qql::executor::ExecResponse {
+    fn render_response_dispatches_typed_payloads() {
+        let get_points_resp = ExecResponse {
             ok: true,
             operation: "GET_POINTS".into(),
             message: "Found 1 hits".into(),
-            data: Some(serde_json::json!([
-                {"id": 10, "payload": {"tag": "test"}}
-            ])),
+            data: Some(ExecData::Hits(vec![search_hit(
+                PlanPointId::Number(10),
+                0.0,
+                serde_json::json!({"tag": "test"}),
+            )])),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&get_points_resp, false).is_ok());
 
-        let facet_resp = qql::executor::ExecResponse {
+        let query_resp = ExecResponse {
+            ok: true,
+            operation: "QUERY".into(),
+            message: "Found 1 hits".into(),
+            data: Some(ExecData::Hits(vec![search_hit(
+                PlanPointId::Number(11),
+                0.5,
+                serde_json::json!({"text": "hello"}),
+            )])),
+            telemetry: None,
+        };
+        assert!(render_response(&query_resp, false).is_ok());
+
+        let facet_resp = ExecResponse {
             ok: true,
             operation: "FACET".into(),
             message: "Found 2 facet hit(s)".into(),
-            data: Some(serde_json::json!([
-                {"value": "books", "count": 15},
-                {"value": "electronics", "count": 8}
+            data: Some(ExecData::Facet(vec![
+                FacetHit {
+                    value: PlanFacetValue::Keyword("books".into()),
+                    count: 15,
+                },
+                FacetHit {
+                    value: PlanFacetValue::Integer(3),
+                    count: 8,
+                },
             ])),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&facet_resp, false).is_ok());
 
-        let shard_resp = qql::executor::ExecResponse {
+        let groups_resp = ExecResponse {
+            ok: true,
+            operation: "QUERY_GROUPS".into(),
+            message: "Found 1 group(s)".into(),
+            data: Some(ExecData::Groups(vec![GroupedSearchResult {
+                group_id: PlanGroupId::Keyword("alpha".into()),
+                hits: vec![search_hit(
+                    PlanPointId::Number(1),
+                    0.9,
+                    serde_json::json!({}),
+                )],
+            }])),
+            telemetry: None,
+        };
+        assert!(render_response(&groups_resp, false).is_ok());
+
+        let shard_resp = ExecResponse {
             ok: true,
             operation: "SHOW_SHARD_KEYS".into(),
             message: "Shard keys listed".into(),
-            data: Some(serde_json::json!({
-                "result": { "shard_keys": ["tenant_1", "tenant_2"] }
-            })),
+            data: Some(ExecData::ShardKeys(vec![
+                PlanShardKey::Keyword("tenant_1".into()),
+                PlanShardKey::Number(2),
+            ])),
             telemetry: None,
-            typed_hits: std::sync::OnceLock::new(),
         };
         assert!(render_response(&shard_resp, false).is_ok());
+
+        let collection_resp = ExecResponse {
+            ok: true,
+            operation: "SHOW_COLLECTION".into(),
+            message: "Collection info".into(),
+            data: Some(ExecData::Collection(qql::backend::CollectionInfo {
+                status: "green".into(),
+                points_count: 12,
+                segments_count: 2,
+                schema: Default::default(),
+            })),
+            telemetry: None,
+        };
+        assert!(render_response(&collection_resp, false).is_ok());
+
+        let quotas_resp = ExecResponse {
+            ok: true,
+            operation: "SHOW_QUOTAS".into(),
+            message: "Quotas listed".into(),
+            data: Some(ExecData::Quotas(qql::QuotaConfig {
+                enabled: Some(true),
+                max_resident_memory_percent: Some(80),
+                ..Default::default()
+            })),
+            telemetry: None,
+        };
+        assert!(render_response(&quotas_resp, false).is_ok());
+
+        let mutation_resp = ExecResponse {
+            ok: true,
+            operation: "UPSERT".into(),
+            message: "Upserted 3 points".into(),
+            data: Some(ExecData::Mutation { affected: Some(3) }),
+            telemetry: None,
+        };
+        assert!(render_response(&mutation_resp, false).is_ok());
     }
 }

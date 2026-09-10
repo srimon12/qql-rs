@@ -183,7 +183,7 @@ class TestEdgeExecutor(unittest.TestCase):
 
             r = edge.exec.execute("COUNT FROM py_test")
             self.assertTrue(r["ok"], r)
-            count = r["results"][0]["data"]["result"]["count"]
+            count = r["results"][0]["data"]["count"]
             self.assertEqual(count, 2)
 
             # numeric ids work
@@ -196,7 +196,7 @@ class TestEdgeExecutor(unittest.TestCase):
             self.assertTrue(r["ok"], r)
 
             r = edge.exec.execute("COUNT FROM py_test")
-            count = r["results"][0]["data"]["result"]["count"]
+            count = r["results"][0]["data"]["count"]
             self.assertEqual(count, 2)  # id1 + numeric 7
 
     def test_native_query_variants(self):

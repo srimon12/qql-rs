@@ -7,6 +7,7 @@
 //! Writes: ../results/rust.json
 
 mod official;
+mod parity;
 mod qql_side;
 
 use std::collections::HashMap;
@@ -14,6 +15,8 @@ use std::collections::HashMap;
 use anyhow::Result;
 use qdrant_client::qdrant::point_id::PointIdOptions;
 use serde_json::{json, Value};
+
+use crate::parity::{official_hits, qql_hits, HitView};
 
 const URL: &str = "http://localhost:6333";
 const URL_GRPC: &str = "http://localhost:6334";
@@ -141,13 +144,9 @@ async fn wait_until_ready(collection: &str, expected: u64) -> Result<()> {
 }
 
 // --------------------------------------------------------------- parity ----
-fn hit_id(h: &Value) -> u64 {
-    h["id"].as_u64().or_else(|| h["id"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
-}
-
-fn compare_hits(official: &[Value], qql: &[Value]) -> Value {
-    let o: Vec<u64> = official.iter().map(hit_id).collect();
-    let q: Vec<u64> = qql.iter().map(hit_id).collect();
+fn compare_hits(official: &[HitView], qql: &[HitView]) -> Value {
+    let o: Vec<u64> = official.iter().map(|h| h.id).collect();
+    let q: Vec<u64> = qql.iter().map(|h| h.id).collect();
     let inter = o.iter().filter(|id| q.contains(id)).count();
     let mut all = o.clone();
     all.extend(q.iter().cloned());
@@ -156,10 +155,8 @@ fn compare_hits(official: &[Value], qql: &[Value]) -> Value {
     let overlap = if all.is_empty() { 1.0 } else { inter as f64 / all.len() as f64 };
     let mut max_diff = 0.0f64;
     for oh in official {
-        if let Some(qh) = qql.iter().find(|h| hit_id(h) == hit_id(oh)) {
-            let a = oh["score"].as_f64().unwrap_or(0.0);
-            let b = qh["score"].as_f64().unwrap_or(0.0);
-            max_diff = max_diff.max((a - b).abs());
+        if let Some(qh) = qql.iter().find(|h| h.id == oh.id) {
+            max_diff = max_diff.max((oh.score - qh.score).abs());
         }
     }
     json!({
@@ -167,6 +164,12 @@ fn compare_hits(official: &[Value], qql: &[Value]) -> Value {
         "jaccard_overlap": (overlap * 1000.0).round() / 1000.0,
         "max_score_diff": (max_diff * 1e6).round() / 1e6,
     })
+}
+
+/// Exact id-sequence comparison (scroll pages): order and membership.
+fn compare_ids(official: &[u64], qql: &[u64]) -> Value {
+    let view = |ids: &[u64]| ids.iter().map(|&id| HitView { id, score: 0.0 }).collect::<Vec<_>>();
+    compare_hits(&view(official), &view(qql))
 }
 
 fn compare_exact(official: &Value, qql: &Value) -> Value {
@@ -179,10 +182,10 @@ fn compare_exact(official: &Value, qql: &Value) -> Value {
     })
 }
 
-fn facet_map(hits: Vec<(Value, u64)>) -> Value {
+fn facet_map(hits: &[(String, u64)]) -> Value {
     let mut m = serde_json::Map::new();
     for (v, c) in hits {
-        m.insert(v.to_string(), Value::from(c));
+        m.insert(v.clone(), Value::from(*c));
     }
     Value::Object(m)
 }
@@ -290,7 +293,9 @@ async fn main() -> Result<()> {
     macro_rules! read_pair {
         ($label:expr, $o_call:expr, $q_call:expr) => {
             read_pair!(INNER, $label, $o_call, $q_call,
-                |o: Vec<Value>, q: Vec<Value>| compare_hits(&o, &q))
+                |o: Vec<qdrant_client::qdrant::ScoredPoint>, q: Vec<qql::executor::SearchHit>| {
+                    compare_hits(&official_hits(&o), &qql_hits(&q))
+                })
         };
         ($label:expr, $o_call:expr, $q_call:expr, $parity:expr) => {
             read_pair!(INNER, $label, $o_call, $q_call, $parity)
@@ -329,8 +334,8 @@ async fn main() -> Result<()> {
         let o2 = official.query_hybrid(&c("berlin", "official"), &bq2d, &sparse_vec(bq2s)).await?;
         let q = qql.query_hybrid(&c("berlin", "qql"), &bq2d, bq2s).await?;
         R["parity"]["hybrid_tie_baseline"] = json!({
-            "official_vs_official": compare_hits(&o1, &o2),
-            "qql_vs_official": compare_hits(&o1, &q),
+            "official_vs_official": compare_hits(&official_hits(&o1), &official_hits(&o2)),
+            "qql_vs_official": compare_hits(&official_hits(&o1), &qql_hits(&q)),
         });
         println!("hybrid_tie_baseline: {}",
             serde_json::to_string(&R["parity"]["hybrid_tie_baseline"]).unwrap());
@@ -338,9 +343,7 @@ async fn main() -> Result<()> {
     read_pair!("scroll_pages",
         official.scroll_pages(&c("berlin", "official"), SCROLL_PAGES, SCROLL_BATCH),
         qql.scroll_pages(&c("berlin", "qql"), SCROLL_PAGES, SCROLL_BATCH as u64),
-        |o: Vec<u64>, q: Vec<u64>| compare_hits(
-            &o.iter().map(|id| json!({"id": id, "score": 0.0})).collect::<Vec<_>>(),
-            &q.iter().map(|id| json!({"id": id, "score": 0.0})).collect::<Vec<_>>()));
+        |o: Vec<u64>, q: Vec<u64>| compare_ids(&o, &q));
     read_pair!("count_berlin",
         official.count_berlin(&c("berlin", "official")),
         qql.count_berlin(&c("berlin", "qql")),
@@ -348,7 +351,7 @@ async fn main() -> Result<()> {
     read_pair!("facet_district",
         official.facet_district(&c("berlin", "official")),
         qql.facet_district(&c("berlin", "qql")),
-        |o, q| compare_exact(&facet_map(o), &facet_map(q)));
+        |o: Vec<(String, u64)>, q: Vec<(String, u64)>| compare_exact(&facet_map(&o), &facet_map(&q)));
     read_pair!("query_colbert",
         official.query_colbert(&c("legal", "official"), legal_multivec.clone()),
         qql.query_colbert(&c("legal", "qql"), &legal_multivec));
@@ -371,7 +374,7 @@ async fn main() -> Result<()> {
     //    per-term weight (1.665…) — a uniform scale, so rankings agree.
     {
         let text = bq[0]["text"].as_str().unwrap();
-        let (qql_hits, native_sv) =
+        let (qql_native, native_sv) =
             qql.query_sparse_native(&c("berlin", "qql"), text).await?;
         let pre = bq0s;
         let pre_indices: Vec<u32> = pre["indices"].as_array().unwrap()
@@ -404,8 +407,8 @@ async fn main() -> Result<()> {
         R["parity"]["native_bm25"] = json!({
             "query_token_ids_match": token_ids_match,
             "document_vectors_byte_identical": doc_identical,
-            "qql_native_vs_official_native": compare_hits(&official_native, &qql_hits),
-            "official_native_vs_official_precomputed": compare_hits(&official_native, &official_pre),
+            "qql_native_vs_official_native": compare_hits(&official_hits(&official_native), &qql_hits(&qql_native)),
+            "official_native_vs_official_precomputed": compare_hits(&official_hits(&official_native), &official_hits(&official_pre)),
         });
         println!("native_bm25: tokens_match={} doc_identical={} parity={}",
             token_ids_match, doc_identical,
@@ -418,8 +421,8 @@ async fn main() -> Result<()> {
     official.update_payload(&c("berlin", "official")).await?;
     qql.update_payload(&c("berlin", "qql")).await?;
     R["parity"]["update_payload"] = compare_exact(
-        &facet_map(official.facet_district(&c("berlin", "official")).await?),
-        &facet_map(qql.facet_district(&c("berlin", "qql")).await?))["match"].clone();
+        &facet_map(&official.facet_district(&c("berlin", "official")).await?),
+        &facet_map(&qql.facet_district(&c("berlin", "qql")).await?))["match"].clone();
 
     official.delete_by_filter(&c("berlin", "official")).await?;
     qql.delete_by_filter(&c("berlin", "qql")).await?;

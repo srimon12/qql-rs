@@ -3,7 +3,7 @@
 //! paths, with no direct `qql-core` / `qql-plan` dependency in this file.
 
 use qql::client::{CollectionInfo, QdrantOps};
-use qql::executor::Executor;
+use qql::executor::{BackendResponse, ExecData, Executor};
 use qql::{
     ComparisonOp, CreateCollectionRequest, CreateIndexRequest, Parser, PlannedOperation,
     PreparedStatement, QqlError, QueryBatchRequest, UpdateBatchRequest, UpdateCollectionRequest,
@@ -67,15 +67,18 @@ impl QdrantOps for StubBackend {
         Ok(())
     }
 
-    async fn execute_planned(&self, _op: &PlannedOperation) -> Result<serde_json::Value, QqlError> {
-        Ok(serde_json::json!({}))
+    async fn execute_planned(&self, _op: &PlannedOperation) -> Result<BackendResponse, QqlError> {
+        Ok(BackendResponse {
+            data: ExecData::Mutation { affected: None },
+            telemetry: None,
+        })
     }
 
     async fn execute_query_batch(
         &self,
         _collection: &str,
         _batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         Ok(Vec::new())
     }
 
@@ -83,7 +86,7 @@ impl QdrantOps for StubBackend {
         &self,
         _collection: &str,
         _batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         Ok(Vec::new())
     }
 }

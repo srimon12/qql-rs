@@ -1,7 +1,9 @@
 //! Query IR types: `/points/query`, groups, prefetch, and output selectors.
 
 use crate::filter_types::*;
+use crate::formula_types::{FormulaDefault, PlanFormula};
 use crate::semantic::*;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use serde::Serialize;
@@ -337,9 +339,11 @@ pub struct RrfQuery {
 pub struct FormulaQuery {
     /// Typed formula expression serialized to the OpenAPI wire form.
     pub formula: PlanFormula,
-    /// Default values for variables referenced by the formula.
+    /// Default values for variables referenced by the formula, keyed by
+    /// variable name. Values are numbers for numeric variables and ISO-8601
+    /// strings for datetime variables (backend-coerced per variable).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub defaults: Option<serde_json::Map<String, serde_json::Value>>,
+    pub defaults: Option<BTreeMap<String, FormulaDefault>>,
 }
 
 /// Relevance-feedback query: target input, scored examples, and strategy.

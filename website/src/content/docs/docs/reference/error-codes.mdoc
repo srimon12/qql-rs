@@ -157,6 +157,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
 | `QQL-PLAN-GROUP` | A groups query was lowered without a `GROUP BY` (internal misuse) |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
+| `QQL-PLAN-INDEX-OPTION` | Invalid or unsupported `CREATE INDEX` option value |
+| `QQL-PLAN-INDEX-TYPE` | Unknown payload index field type |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
@@ -169,9 +171,9 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-GRPC` | Generic gRPC transport failure |
+| `QQL-GRPC-DDL-RANGE` | A DDL value exceeds the bundled Qdrant proto `uint32` range |
 | `QQL-GRPC-FLOAT-MATCH` | A float equality value has no `double` field in the bundled Qdrant proto `Match`; use a `RANGE` filter or an exact integer value |
 | `QQL-GRPC-FUSION` | Unsupported fusion method on the gRPC path |
-| `QQL-GRPC-INDEX` | Unsupported field index type on the gRPC path |
 | `QQL-GRPC-LIST-INT` | An integer value is out of the gRPC `int64` range |
 | `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
 | `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
@@ -182,12 +184,14 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
 | `QQL-BACKEND` | Generic backend or transport failure |
 | `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
+| `QQL-BACKEND-BATCH` | A batched query/update item reported an error in its status field |
 | `QQL-BACKEND-COLLECTION-NOT-FOUND` | The backend reports a missing collection (HTTP 404, gRPC `NotFound`) |
 | `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
 | `QQL-BACKEND-ENVELOPE` | A Qdrant response envelope missed its expected `result` shape |
 | `QQL-BACKEND-HTTP` | The backend rejected a REST request (for example HTTP 400 on batch) |
 | `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
 | `QQL-BACKEND-JSON` | A Qdrant response body failed JSON parsing |
+| `QQL-BACKEND-OPTIMIZE` | The backend has no in-process optimizer to run (only qdrant-edge does) |
 | `QQL-BACKEND-STRICT-MODE` | The request violates the collection's strict-mode / quota limits |
 | `QQL-TIMEOUT` | Batch execution exceeded its deadline |
 | `QQL-TRANSPORT` | HTTP client, request, or body failure (carries the request id) |
@@ -228,7 +232,6 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-CROSS-RERANK` | `CROSS RERANK` must run client-side, not via a Qdrant route |
 | `QQL-RERANK-CROSS` | `CROSS RERANK` has no pair-scorer configured, or it returned a wrong score count |
 | `QQL-RERANK-CROSS-FIELD` | `CROSS RERANK` candidates lack the scored payload field |
-| `QQL-RESPONSE-SERIALIZE` | Search hits failed JSON serialization while building the response |
 
 ## Embedding
 
@@ -270,35 +273,47 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not yet exposed by qql-edge |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
-| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
-| `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
 | `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formula functions; the pinned qdrant-edge predates those `Expression` variants |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
 
-Edge also emits `QQL-EDGE-*` runtime failures for storage and configuration
-problems: collection lifecycle (`QQL-EDGE-COLLECTION-EXISTS`,
-`QQL-EDGE-COLLECTION-NOT-FOUND`, `QQL-EDGE-DELETE-COLLECTION`,
-`QQL-EDGE-DELETE-COLLECTION-CLOSE`, `QQL-EDGE-CLOSE`), storage I/O
-(`QQL-EDGE-CREATE-DIR`, `QQL-EDGE-READ-DIR`, `QQL-EDGE-DIR-ENTRY`, `QQL-EDGE-LIB`,
-`QQL-EDGE-SPAWN`, `QQL-EDGE-CONFIG`), vector handling (`QQL-EDGE-VECTOR`,
-`QQL-EDGE-VECTOR-NAME-MISSING`, `QQL-EDGE-MISSING-VECTOR`, `QQL-EDGE-MULTI-VECTOR-NAMES`,
-`QQL-EDGE-FIELD-NAME`), filters (`QQL-EDGE-FILTER-CONVERT`,
-`QQL-EDGE-FILTER-SERIALIZE`, `QQL-EDGE-FILTER-DESERIALIZE`), query conversion
-(`QQL-EDGE-QUERY`), embedding (`QQL-EDGE-EMBED`), and mutations that require a
-target (`QQL-EDGE-DELETE-REQUIRES-TARGET`, `QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET`,
+Edge also emits `QQL-EDGE-*` runtime failures. Every fallible engine call is
+classified by the `qdrant-edge` failure variant, so the code names the failure
+category while the message keeps the operation and the crate's own cause text:
+
+| Code | Meaning |
+|---|---|
+| `QQL-EDGE-DIMENSION` | Vector dimension does not match the collection schema |
+| `QQL-EDGE-BAD-INPUT` | The engine rejected the request as invalid (validation, malformed vector blob, sparse/multi-vector misuse, non-finite formula result) |
+| `QQL-EDGE-TYPE` | A payload or formula value has the wrong type |
+| `QQL-EDGE-VECTOR-NAME` | The named vector does not exist in the collection |
+| `QQL-EDGE-POINT-NOT-FOUND` | A mutated point id does not exist |
+| `QQL-EDGE-STORAGE` | `qdrant-edge` service/storage failure (I/O, internal invariant, segment capacity); the message carries the crate's cause |
+| `QQL-EDGE-CORRUPT` | The engine detected inconsistent on-disk storage |
+| `QQL-EDGE-FILE-NOT-FOUND` | An essential storage file is missing |
+| `QQL-EDGE-OOM` | The engine ran out of memory |
+| `QQL-EDGE-CANCELLED` | The engine cancelled the operation |
+| `QQL-EDGE-TIMEOUT` | The engine operation timed out |
+| `QQL-EDGE-MISSING-INDEX` | `ORDER BY` / `FACET` needs a payload index that does not exist |
+
+Operational failures keep their dedicated codes: collection lifecycle
+(`QQL-EDGE-COLLECTION-EXISTS`, `QQL-EDGE-COLLECTION-NOT-FOUND`,
+`QQL-EDGE-DELETE-COLLECTION`, `QQL-EDGE-DELETE-COLLECTION-CLOSE`,
+`QQL-EDGE-CLOSE`), storage I/O (`QQL-EDGE-CREATE-DIR`, `QQL-EDGE-READ-DIR`,
+`QQL-EDGE-DIR-ENTRY`, `QQL-EDGE-SPAWN`, `QQL-EDGE-CONFIG`), vector handling
+(`QQL-EDGE-VECTOR`, `QQL-EDGE-MISSING-VECTOR`, `QQL-EDGE-FIELD-NAME`), filters
+(`QQL-EDGE-FILTER-CONVERT`), query conversion (`QQL-EDGE-QUERY`), embedding
+(`QQL-EDGE-EMBED`), and mutations that require a target
+(`QQL-EDGE-DELETE-REQUIRES-TARGET`, `QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET`,
 `QQL-EDGE-DELETE-PAYLOAD-REQUIRES-TARGET`, `QQL-EDGE-DELETE-VECTORS-REQUIRES-TARGET`,
 `QQL-EDGE-SET-PAYLOAD-REQUIRES-TARGET`).
-
-`FACET` has no offline route: the edge backend fails closed with
-`QQL-EDGE-FACET` (run it against remote Qdrant over REST instead).
 
 The [Backend compatibility](/docs/reference/backend-compatibility/) matrix
 covers which features are available on each backend.
@@ -321,12 +336,14 @@ exceptions live in the script allowlist with reasons attached.
 ```text
 QQL-BACKEND
 QQL-BACKEND-AUTH
+QQL-BACKEND-BATCH
 QQL-BACKEND-COLLECTION-NOT-FOUND
 QQL-BACKEND-DIMENSION-MISMATCH
 QQL-BACKEND-ENVELOPE
 QQL-BACKEND-HTTP
 QQL-BACKEND-INDEX-NOT-READY
 QQL-BACKEND-JSON
+QQL-BACKEND-OPTIMIZE
 QQL-BACKEND-STRICT-MODE
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
@@ -344,37 +361,41 @@ QQL-BIND-UNUSED-PARAMS
 QQL-CLIENT-CLOSED
 QQL-CONFIG
 QQL-CROSS-RERANK
+QQL-EDGE-BAD-INPUT
+QQL-EDGE-CANCELLED
 QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET
 QQL-EDGE-CLOSE
 QQL-EDGE-COLLECTION-EXISTS
 QQL-EDGE-COLLECTION-NOT-FOUND
 QQL-EDGE-CONFIG
+QQL-EDGE-CORRUPT
 QQL-EDGE-CREATE-DIR
 QQL-EDGE-DELETE-COLLECTION
 QQL-EDGE-DELETE-COLLECTION-CLOSE
 QQL-EDGE-DELETE-PAYLOAD-REQUIRES-TARGET
 QQL-EDGE-DELETE-REQUIRES-TARGET
 QQL-EDGE-DELETE-VECTORS-REQUIRES-TARGET
+QQL-EDGE-DIMENSION
 QQL-EDGE-DIR-ENTRY
 QQL-EDGE-EMBED
-QQL-EDGE-FACET
 QQL-EDGE-FIELD-NAME
+QQL-EDGE-FILE-NOT-FOUND
 QQL-EDGE-FILTER-CONVERT
-QQL-EDGE-FILTER-DESERIALIZE
-QQL-EDGE-FILTER-SERIALIZE
 QQL-EDGE-INVALID-POINT-ID
-QQL-EDGE-LIB
+QQL-EDGE-MISSING-INDEX
 QQL-EDGE-MISSING-VECTOR
-QQL-EDGE-MULTI-VECTOR-NAMES
+QQL-EDGE-OOM
+QQL-EDGE-POINT-NOT-FOUND
 QQL-EDGE-QUERY
 QQL-EDGE-READ-DIR
 QQL-EDGE-SET-PAYLOAD-REQUIRES-TARGET
 QQL-EDGE-SPAWN
-QQL-EDGE-UNSUPPORTED-ACORN
+QQL-EDGE-STORAGE
+QQL-EDGE-TIMEOUT
+QQL-EDGE-TYPE
 QQL-EDGE-UNSUPPORTED-ALTER
 QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS
 QQL-EDGE-UNSUPPORTED-CONSISTENCY
-QQL-EDGE-UNSUPPORTED-FIELD-TYPE
 QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION
 QQL-EDGE-UNSUPPORTED-GROUP-BY
 QQL-EDGE-UNSUPPORTED-POINT-REF
@@ -385,7 +406,7 @@ QQL-EDGE-UNSUPPORTED-SHARD
 QQL-EDGE-UNSUPPORTED-SHARD-KEY
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-VECTOR
-QQL-EDGE-VECTOR-NAME-MISSING
+QQL-EDGE-VECTOR-NAME
 QQL-EMBEDDING
 QQL-EMBEDDING-DIM
 QQL-EMBEDDING-IMAGE
@@ -395,9 +416,9 @@ QQL-EMBEDDING-SPARSE
 QQL-EMBEDDING-TARGET
 QQL-EMBEDDING-TOPOLOGY
 QQL-GRPC
+QQL-GRPC-DDL-RANGE
 QQL-GRPC-FLOAT-MATCH
 QQL-GRPC-FUSION
-QQL-GRPC-INDEX
 QQL-GRPC-LIST-INT
 QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
@@ -471,6 +492,8 @@ QQL-PLAN-CROSS-RERANK-QUERY
 QQL-PLAN-FUSION-PREFETCH
 QQL-PLAN-GROUP
 QQL-PLAN-IDF
+QQL-PLAN-INDEX-OPTION
+QQL-PLAN-INDEX-TYPE
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-QUOTA
@@ -484,7 +507,6 @@ QQL-PLAN-UNSUPPORTED-PREFETCH
 QQL-PLAN-VECTOR-KIND
 QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
-QQL-RESPONSE-SERIALIZE
 QQL-REST-CLIENT-SIDE
 QQL-TIMEOUT
 QQL-TRANSPORT

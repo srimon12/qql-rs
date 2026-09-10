@@ -206,10 +206,11 @@ class Client {
 
   /**
    * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
-   * chunks (default 100). One `:rows` template is prepared once — no
-   * re-parse, no per-batch schema fetch. Vectors take plain arrays or the
-   * flat `{data, dim}` multivector form; `Float32Array`/`Float64Array`
-   * need the sync `Stmt.bind` surface instead, then `execute`.
+   * chunks (default 100). One `:rows` template is prepared once with no
+   * re-parse and no per-batch schema fetch. Vectors take plain arrays, packed
+   * `Float32Array` / `Float64Array`, integer typed arrays for sparse
+   * `indices`, or the flat `{data, dim}` multivector form (same contract as
+   * Python and WASM; see the API surface bulk ingest contract).
    */
   async upsertMany(collection, rows, options) {
     try {
@@ -219,9 +220,10 @@ class Client {
       ) {
         throw new TypeError("options.batchSize must be an integer >= 1");
       }
+      const normalized = dx.normalizeUpsertRows(rows);
       const raw = await this._inner.upsertMany(
         collection,
-        rows,
+        normalized,
         validateOptions(options) || undefined,
       );
       return new ExecutionReport(JSON.parse(raw));
@@ -258,6 +260,14 @@ class Client {
 
   compile(query, params) {
     return callNative(() => this._inner.compile(query, params));
+  }
+
+  scrollCursor(collection, options) {
+    return scrollCursor(this, collection, options);
+  }
+
+  scrollStream(collection, options) {
+    return scrollStream(this, collection, options);
   }
 
   async close() {

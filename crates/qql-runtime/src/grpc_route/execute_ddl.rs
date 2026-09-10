@@ -1,19 +1,27 @@
 //! DDL execution: collections / indexes / shard keys.
+//!
+//! Every response converts straight into typed `ExecData`: status-only
+//! successes become `Mutation { affected: None }`, collection lists become
+//! `Collections`, collection metadata becomes `Collection`, and shard-key
+//! lists become `ShardKeys`. No JSON envelope is built anywhere.
 
 use qql_core::error::QqlError;
 
+use crate::executor::response::{BackendResponse, ExecData};
 use crate::grpc::GrpcQdrant;
-use crate::grpc::memory::memory_from_str;
+use crate::grpc::memory::memory_to_proto;
+use crate::grpc::schema::collection_info_from_grpc;
 use crate::qdrant_grpc::qdrant;
 
+use super::common::field_type_to_proto;
 use super::ddl::{
     collection_params_diff, hnsw_config_from_plan, optimizers_config_from_plan,
     payload_index_params, quantization_config_diff, quantization_config_from_plan,
-    sparse_vector_params, vector_params,
+    sparse_vector_params, u32_param, vector_params,
 };
-use super::responses::{
-    collection_info_to_json, collection_mutation_response, list_collections_response_to_json,
-    mutation_response_from, mutation_response_ok,
+use super::typed::{
+    collection_mutation_to_typed, mutation_response_to_typed, shard_key_to_plan,
+    telemetry_from_proto,
 };
 
 /// Create a collection, then apply deferred params and shard keys.
@@ -21,34 +29,48 @@ pub(crate) async fn execute_create_collection(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::CreateCollectionRequest,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let deferred_params = request
         .params
         .as_ref()
         .map(collection_params_diff)
+        .transpose()?
         .filter(|params| {
             params.read_fan_out_factor.is_some() || params.read_fan_out_delay_ms.is_some()
         });
+    let params = request.params.as_ref();
+    let vectors_config = request
+        .vectors
+        .as_ref()
+        .map(|vectors| qdrant::VectorsConfig {
+            config: Some(match vectors {
+                qql_plan::DenseVectorsConfig::Single(params) => {
+                    qdrant::vectors_config::Config::Params(vector_params(params))
+                }
+                qql_plan::DenseVectorsConfig::Named(map) => {
+                    qdrant::vectors_config::Config::ParamsMap(qdrant::VectorParamsMap {
+                        map: map
+                            .iter()
+                            .map(|(name, params)| (name.clone(), vector_params(params)))
+                            .collect(),
+                    })
+                }
+            }),
+        });
+    let sparse_vectors_config =
+        request
+            .sparse_vectors
+            .as_ref()
+            .map(|map| qdrant::SparseVectorConfig {
+                map: map
+                    .iter()
+                    .map(|(name, params)| (name.clone(), sparse_vector_params(params)))
+                    .collect(),
+            });
     let grpc_req = qdrant::CreateCollection {
         collection_name: collection.to_owned(),
-        vectors_config: request.vectors.as_ref().map(|v| {
-            let map = v
-                .iter()
-                .map(|(name, cfg)| (name.clone(), vector_params(cfg)))
-                .collect();
-            qdrant::VectorsConfig {
-                config: Some(qdrant::vectors_config::Config::ParamsMap(
-                    qdrant::VectorParamsMap { map },
-                )),
-            }
-        }),
-        sparse_vectors_config: request.sparse_vectors.as_ref().map(|sv| {
-            let map = sv
-                .iter()
-                .map(|(name, cfg)| (name.clone(), sparse_vector_params(cfg)))
-                .collect();
-            qdrant::SparseVectorConfig { map }
-        }),
+        vectors_config,
+        sparse_vectors_config,
         hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
         optimizers_config: request
             .optimizers_config
@@ -56,48 +78,30 @@ pub(crate) async fn execute_create_collection(
             .map(optimizers_config_from_plan),
         shard_number: request
             .shard_number
-            .or_else(|| {
-                request
-                    .params
-                    .as_ref()
-                    .and_then(|p| p.get("shard_number"))
-                    .and_then(|v| v.as_u64())
-            })
-            .map(|n| n as u32),
-        replication_factor: request
-            .params
-            .as_ref()
-            .and_then(|p| p.get("replication_factor"))
-            .and_then(|v| v.as_u64())
-            .map(|n| n as u32),
-        on_disk_payload: request
-            .params
-            .as_ref()
-            .and_then(|p| p.get("on_disk_payload"))
-            .and_then(|v| v.as_bool()),
-        payload: request.payload.as_ref().and_then(|p| {
-            p.get("memory")
-                .and_then(serde_json::Value::as_str)
-                .and_then(memory_from_str)
-                .map(|memory| qdrant::PayloadStorageParams {
-                    memory: Some(memory),
-                })
-        }),
-        write_consistency_factor: request
-            .params
-            .as_ref()
-            .and_then(|p| p.get("write_consistency_factor"))
-            .and_then(serde_json::Value::as_u64)
-            .map(|n| n as u32),
+            .map(|n| u32_param(n, "shard_number"))
+            .transpose()?,
+        replication_factor: params
+            .and_then(|p| p.replication_factor)
+            .map(|n| u32_param(n, "replication_factor"))
+            .transpose()?,
+        on_disk_payload: params.and_then(|p| p.on_disk_payload),
+        payload: params
+            .and_then(|p| p.payload.as_ref())
+            .and_then(|payload| payload.memory)
+            .map(|memory| qdrant::PayloadStorageParams {
+                memory: Some(memory_to_proto(memory)),
+            }),
+        write_consistency_factor: params
+            .and_then(|p| p.write_consistency_factor)
+            .map(|n| u32_param(n, "write_consistency_factor"))
+            .transpose()?,
         quantization_config: request
             .quantization_config
             .as_ref()
             .and_then(quantization_config_from_plan),
-        sharding_method: request.sharding_method.as_ref().map(|method| {
-            match method.to_ascii_lowercase().as_str() {
-                "custom" => qdrant::ShardingMethod::Custom as i32,
-                _ => qdrant::ShardingMethod::Auto as i32,
-            }
+        sharding_method: request.sharding_method.map(|method| match method {
+            qql_plan::ShardingMethod::Custom => qdrant::ShardingMethod::Custom as i32,
+            qql_plan::ShardingMethod::Auto => qdrant::ShardingMethod::Auto as i32,
         }),
         ..Default::default()
     };
@@ -105,6 +109,7 @@ pub(crate) async fn execute_create_collection(
         .create_collection_raw(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None))?;
+    let time = resp.time;
     if let Some(params) = deferred_params {
         client
             .update_collection_raw(qdrant::UpdateCollection {
@@ -138,7 +143,7 @@ pub(crate) async fn execute_create_collection(
                 })?;
         }
     }
-    Ok(collection_mutation_response(resp))
+    Ok(collection_mutation_to_typed(time))
 }
 
 /// Patch collection params / HNSW / quantization.
@@ -146,14 +151,18 @@ pub(crate) async fn execute_update_collection(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::UpdateCollectionRequest,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::UpdateCollection {
         collection_name: collection.to_owned(),
         optimizers_config: request
             .optimizers_config
             .as_ref()
             .map(optimizers_config_from_plan),
-        params: request.params.as_ref().map(collection_params_diff),
+        params: request
+            .params
+            .as_ref()
+            .map(collection_params_diff)
+            .transpose()?,
         hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
         quantization_config: request
             .quantization_config
@@ -165,14 +174,14 @@ pub(crate) async fn execute_update_collection(
         .update_collection_raw(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None))?;
-    Ok(collection_mutation_response(resp))
+    Ok(collection_mutation_to_typed(resp.time))
 }
 
 /// Drop a collection.
 pub(crate) async fn execute_drop_collection(
     client: &GrpcQdrant,
     collection: &str,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::DeleteCollection {
         collection_name: collection.to_owned(),
         ..Default::default()
@@ -181,7 +190,7 @@ pub(crate) async fn execute_drop_collection(
         .delete_collection_raw(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None))?;
-    Ok(collection_mutation_response(resp))
+    Ok(collection_mutation_to_typed(resp.time))
 }
 
 /// Create a payload field index.
@@ -190,31 +199,20 @@ pub(crate) async fn execute_create_index(
     collection: &str,
     request: &qql_plan::types::CreateIndexRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
-    let field_type = match request.field_schema.as_str() {
-        "keyword" => qdrant::FieldType::Keyword as i32,
-        "integer" => qdrant::FieldType::Integer as i32,
-        "float" => qdrant::FieldType::Float as i32,
-        "geo" => qdrant::FieldType::Geo as i32,
-        "text" => qdrant::FieldType::Text as i32,
-        "bool" => qdrant::FieldType::Bool as i32,
-        "datetime" => qdrant::FieldType::Datetime as i32,
-        "uuid" => qdrant::FieldType::Uuid as i32,
-        _ => qdrant::FieldType::Keyword as i32,
-    };
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::CreateFieldIndexCollection {
         collection_name: collection.to_owned(),
         wait: Some(wait),
         field_name: request.field_name.clone(),
-        field_type: Some(field_type),
-        field_index_params: Some(payload_index_params(&request.field_schema, &request.extra)?),
+        field_type: Some(field_type_to_proto(request.field_schema)),
+        field_index_params: Some(payload_index_params(request)),
         ..Default::default()
     };
     let resp = client
         .create_field_index(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Drop a payload field index.
@@ -222,7 +220,7 @@ pub(crate) async fn execute_drop_index(
     client: &GrpcQdrant,
     collection: &str,
     field: &str,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::DeleteFieldIndexCollection {
         collection_name: collection.to_owned(),
         field_name: field.to_owned(),
@@ -232,7 +230,7 @@ pub(crate) async fn execute_drop_index(
         .delete_field_index(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Create a shard key.
@@ -240,22 +238,28 @@ pub(crate) async fn execute_create_shard_key(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::CreateShardKeyRequest,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::CreateShardKeyRequest {
         collection_name: collection.to_owned(),
         request: Some(qdrant::CreateShardKey {
             shard_key: Some(super::common::shard_key_proto(&request.shard_key)),
-            shards_number: request.shards_number.map(|n| n as u32),
-            replication_factor: request.replication_factor.map(|n| n as u32),
+            shards_number: request
+                .shards_number
+                .map(|n| u32_param(n, "shards_number"))
+                .transpose()?,
+            replication_factor: request
+                .replication_factor
+                .map(|n| u32_param(n, "replication_factor"))
+                .transpose()?,
             ..Default::default()
         }),
         ..Default::default()
     };
-    client
+    let resp = client
         .create_shard_key(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None))?;
-    Ok(mutation_response_ok())
+    Ok(collection_mutation_to_typed(resp.time))
 }
 
 /// Drop a shard key.
@@ -263,7 +267,7 @@ pub(crate) async fn execute_drop_shard_key(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::DropShardKeyRequest,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::DeleteShardKeyRequest {
         collection_name: collection.to_owned(),
         request: Some(qdrant::DeleteShardKey {
@@ -271,41 +275,57 @@ pub(crate) async fn execute_drop_shard_key(
         }),
         ..Default::default()
     };
-    client
+    let resp = client
         .delete_shard_key(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None))?;
-    Ok(mutation_response_ok())
+    Ok(collection_mutation_to_typed(resp.time))
 }
 
 /// List collection names.
 pub(crate) async fn execute_list_collections(
     client: &GrpcQdrant,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let resp = client
         .list_collections_raw()
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("list: {e}"), None))?;
-    Ok(list_collections_response_to_json(resp))
+    let telemetry = telemetry_from_proto(resp.time, None);
+    Ok(BackendResponse {
+        data: ExecData::Collections(resp.collections.into_iter().map(|c| c.name).collect()),
+        telemetry,
+    })
 }
 
 /// Fetch collection info.
 pub(crate) async fn execute_get_collection(
     client: &GrpcQdrant,
     collection: &str,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let resp = client
         .collection_info_raw(collection.to_owned())
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None))?;
-    Ok(collection_info_to_json(resp))
+    let info = resp.result.ok_or_else(|| {
+        QqlError::backend(
+            "QQL-GRPC-NO-RESULT",
+            "collection_info response missing result field",
+            None,
+        )
+        .with_collection(collection.to_string())
+    })?;
+    let telemetry = telemetry_from_proto(resp.time, None);
+    Ok(BackendResponse {
+        data: ExecData::Collection(collection_info_from_grpc(&info)),
+        telemetry,
+    })
 }
 
 /// List shard keys.
 pub(crate) async fn execute_list_shard_keys(
     client: &GrpcQdrant,
     collection: &str,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let grpc_req = qdrant::ListShardKeysRequest {
         collection_name: collection.to_owned(),
     };
@@ -313,19 +333,27 @@ pub(crate) async fn execute_list_shard_keys(
         .list_shard_keys(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("list_shard_keys: {e}"), None))?;
-    let keys: Vec<serde_json::Value> = resp
+    let telemetry = telemetry_from_proto(resp.time, None);
+    let keys = resp
         .shard_keys
         .into_iter()
-        .filter_map(|d| d.key)
-        .map(|sk| match sk.key {
-            Some(qdrant::shard_key::Key::Keyword(s)) => serde_json::Value::String(s),
-            Some(qdrant::shard_key::Key::Number(n)) => serde_json::Value::Number((n).into()),
-            None => serde_json::Value::Null,
+        .map(|description| {
+            description
+                .key
+                .as_ref()
+                .ok_or_else(|| {
+                    QqlError::backend(
+                        "QQL-BACKEND-ENVELOPE",
+                        "shard key description is missing its key",
+                        None,
+                    )
+                    .with_collection(collection.to_string())
+                })
+                .and_then(shard_key_to_plan)
         })
-        .collect();
-    Ok(serde_json::json!({
-        "result": { "shard_keys": keys },
-        "status": "ok",
-        "time": 0.0_f64,
-    }))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(BackendResponse {
+        data: ExecData::ShardKeys(keys),
+        telemetry,
+    })
 }

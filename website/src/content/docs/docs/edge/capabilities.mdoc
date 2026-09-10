@@ -35,7 +35,7 @@ Qdrant" hint.
 | CTEs / prefetch | yes | `WITH … PREFETCH` |
 | Cross rerank | yes | client-side, host cross-encoder model |
 | Score threshold, offset/limit | yes | |
-| `PARAMS (hnsw_ef, exact, quantization, indexed_only, idf)` | yes | including per-query sparse IDF corpora |
+| `PARAMS (hnsw_ef, exact, acorn, quantization, indexed_only, idf)` | yes | including per-query sparse IDF corpora and ACORN filtered search |
 | Payload filters | yes | comparisons, `IN`, `BETWEEN`, `MATCH` / `MATCH PREFIX`, `SLICE`, geo, `NESTED`, … |
 | `UPSERT` with auto-embedding | yes | dense, sparse, multi, image |
 | `DELETE` / payload / vector operations | yes | by id or filter |
@@ -49,7 +49,6 @@ Qdrant" hint.
 | `ALTER COLLECTION` | no | `QQL-EDGE-UNSUPPORTED-ALTER` |
 | Collection `WITH PARAMS` | no | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
 | `SHOW QUOTAS` / `SET QUOTA` | no | `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST only) |
-| `PARAMS (acorn = …)` | no | `QQL-EDGE-UNSUPPORTED-ACORN` |
 | `RECOMMEND STRATEGY average_vector` | no | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` |
 | Point-id query inputs | no | `QQL-EDGE-UNSUPPORTED-POINT-REF` |
 | String point IDs (non-UUID) | no | `QQL-EDGE-INVALID-POINT-ID` |
@@ -191,7 +190,6 @@ the feature, the reason, and a remediation hint.
 | `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, shard count, …) |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
-| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id-only inputs (need materialized vectors) |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | any other unmapped projection |
@@ -200,8 +198,9 @@ the feature, the reason, and a remediation hint.
 Example rejection:
 
 ```text
-GROUP BY / query groups is not supported offline: qdrant-edge has no /points/query/groups
-endpoint. Use remote Qdrant (REST or gRPC) for this feature.
+GROUP BY / query groups is not supported offline: qql-edge does not yet expose
+grouped queries (qdrant-edge's query_groups is not wired into the executor).
+Use remote Qdrant (REST or gRPC) for this feature.
 ```
 
 {% aside type="caution" title="Point IDs: integers or UUIDs only" %}
@@ -213,10 +212,11 @@ exactly what edge refuses to do.
 
 {% aside type="note" title="Group by, shards, quotas, and clusters need remote Qdrant" %}
 `GROUP BY`, custom `SHARD` routing, shard-key administration, `ALTER
-COLLECTION`, ACORN, collection `WITH PARAMS`, and `SHOW QUOTAS` /
+COLLECTION`, collection `WITH PARAMS`, and `SHOW QUOTAS` /
 `SET QUOTA` are cluster or REST-only features. Edge keeps the whole language
 surface and rejects at execution — switch to REST (or gRPC where supported)
-for those workloads. Per-query sparse `idf` params **are** supported offline.
+for those workloads. Per-query sparse `idf` and ACORN params **are** supported
+offline.
 {% /aside %}
 
 ## Code catalog
@@ -235,8 +235,8 @@ embedded by the configured model work; point-id-only inputs fail with
 
 `timeout` and `consistency` are request-level fields for remote REST/gRPC
 transports and are rejected offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and
-`QQL-EDGE-UNSUPPORTED-CONSISTENCY`. `hnsw_ef`, `exact`, `quantization`, and
-`indexed_only` are honored.
+`QQL-EDGE-UNSUPPORTED-CONSISTENCY`. `hnsw_ef`, `exact`, `acorn` (with
+`max_selectivity`), `quantization`, and `indexed_only` are honored.
 
 ## Transport
 

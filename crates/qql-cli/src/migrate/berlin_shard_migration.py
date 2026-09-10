@@ -127,10 +127,9 @@ class Qql:
         if shard:
             sql += f" SHARD '{shard}'"
         data = self.exec(sql + ";")["results"][0]["data"]
-        count = data.get("count", data.get("result", {}).get("count"))
-        if count is None:
+        if not isinstance(data, dict) or "count" not in data:
             raise Fail(f"could not read count from {data}")
-        return int(count)
+        return int(data["count"])
 
 
 def check_prereqs(qql: Qql) -> None:
@@ -273,12 +272,12 @@ def verify_target(qql: Qql, tmp: Path) -> None:
     if facet_map(qql, SRC) != facet_map(qql, DST):
         raise Fail("FACET parity src != dst")
     ok("FACET parity src == dst")
-    keys = qql.exec(f"SHOW SHARD KEYS ON COLLECTION {DST};")["results"][0]["data"]["result"][
+    keys = qql.exec(f"SHOW SHARD KEYS ON COLLECTION {DST};")["results"][0]["data"][
         "shard_keys"
     ]
     if len(keys) != 12:
         raise Fail(f"want 12 shard keys, got {len(keys)}")
-    ok("12 shard keys: " + ", ".join(sorted(k["key"] for k in keys)))
+    ok("12 shard keys: " + ", ".join(sorted(str(k) for k in keys)))
     if qql.count(DST, shard="Mitte") != 621:
         raise Fail("SHARD Mitte count drifted (want 621)")
     ok("COUNT SHARD 'Mitte' = 621")

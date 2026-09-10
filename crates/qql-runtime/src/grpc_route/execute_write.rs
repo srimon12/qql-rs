@@ -2,12 +2,13 @@
 
 use qql_core::error::QqlError;
 
+use crate::executor::response::{BackendResponse, ExecData};
 use crate::grpc::GrpcQdrant;
 use crate::qdrant_grpc::qdrant;
 
 use super::common::{shard_key_selector, to_point_id};
 use super::query::{points_and_filter_selector, to_vectors};
-use super::responses::{mutation_response_from, update_result_to_json};
+use super::typed::mutation_response_to_typed;
 use super::values::to_qdrant_value;
 
 /// Upsert points via `Points.Upsert`.
@@ -16,7 +17,7 @@ pub(crate) async fn execute_upsert(
     collection: &str,
     request: &qql_plan::types::UpsertRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let points: Vec<qdrant::PointStruct> = request
         .points
         .iter()
@@ -50,7 +51,7 @@ pub(crate) async fn execute_upsert(
         .upsert_points(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Delete points by IDs or filter via `Points.Delete`.
@@ -59,7 +60,7 @@ pub(crate) async fn execute_delete(
     collection: &str,
     request: &qql_plan::types::DeleteRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::DeletePoints {
         collection_name: collection.to_owned(),
@@ -72,7 +73,7 @@ pub(crate) async fn execute_delete(
         .delete_points(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Clear full payload via `Points.ClearPayload`.
@@ -81,7 +82,7 @@ pub(crate) async fn execute_clear_payload(
     collection: &str,
     request: &qql_plan::types::ClearPayloadRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::ClearPayloadPoints {
         collection_name: collection.to_owned(),
@@ -94,7 +95,7 @@ pub(crate) async fn execute_clear_payload(
         .clear_payload(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Delete payload keys via `Points.DeletePayload`.
@@ -103,7 +104,7 @@ pub(crate) async fn execute_delete_payload(
     collection: &str,
     request: &qql_plan::types::DeletePayloadRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::DeletePayloadPoints {
         collection_name: collection.to_owned(),
@@ -117,7 +118,7 @@ pub(crate) async fn execute_delete_payload(
         .delete_payload(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_payload: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Delete named vectors via `Points.DeleteVectors`.
@@ -126,7 +127,7 @@ pub(crate) async fn execute_delete_vectors(
     collection: &str,
     request: &qql_plan::types::DeleteVectorRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::DeletePointVectors {
         collection_name: collection.to_owned(),
@@ -142,7 +143,7 @@ pub(crate) async fn execute_delete_vectors(
         .delete_vectors(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Overwrite point vectors via `Points.UpdateVectors`.
@@ -151,7 +152,7 @@ pub(crate) async fn execute_update_vectors(
     collection: &str,
     request: &qql_plan::types::UpdateVectorRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let points: Vec<qdrant::PointVectors> = request
         .points
         .iter()
@@ -173,7 +174,7 @@ pub(crate) async fn execute_update_vectors(
         .update_vectors(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
 /// Set payload fields via `Points.SetPayload`.
@@ -182,7 +183,7 @@ pub(crate) async fn execute_update_payload(
     collection: &str,
     request: &qql_plan::types::UpdatePayloadRequest,
     wait: bool,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<BackendResponse, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let payload_map: std::collections::HashMap<String, qdrant::Value> = request
         .payload
@@ -201,15 +202,20 @@ pub(crate) async fn execute_update_payload(
         .set_payload(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
-    Ok(mutation_response_from(resp))
+    Ok(mutation_response_to_typed(resp))
 }
 
-/// Convert a mutation batch and send via gRPC `UpdateBatch`.
+/// Convert a mutation batch and send via gRPC `UpdateBatch`. Per-item update
+/// results carry only status, so each item is typed as a status-only
+/// [`ExecData::Mutation`]; the executor derives upsert counts from the
+/// request. The proto batch response carries one `time`/`usage` pair for the
+/// whole round trip, not per item, so per-item telemetry stays `None` (adding
+/// the shared total to every item would multiply it in report aggregation).
 pub async fn execute_update_batch_grpc(
     client: &GrpcQdrant,
     collection: &str,
     batch: &qql_plan::UpdateBatchRequest,
-) -> Result<Vec<serde_json::Value>, QqlError> {
+) -> Result<Vec<BackendResponse>, QqlError> {
     let operations: Vec<qdrant::PointsUpdateOperation> = batch
         .operations
         .iter()
@@ -228,7 +234,14 @@ pub async fn execute_update_batch_grpc(
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_batch: {e}"), None))?;
 
-    Ok(resp.result.into_iter().map(update_result_to_json).collect())
+    Ok(resp
+        .result
+        .into_iter()
+        .map(|_| BackendResponse {
+            data: ExecData::Mutation { affected: None },
+            telemetry: None,
+        })
+        .collect())
 }
 
 pub(crate) fn to_points_update_operation(

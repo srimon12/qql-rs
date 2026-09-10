@@ -3,8 +3,6 @@ use qql_core::error::QqlError;
 use qql_core::parser;
 use qql_plan::{BatchGrouper, plan};
 
-use crate::executor::dml::query::extract_search_hits;
-use crate::executor::response::serialize_hits;
 use crate::executor::{ExecResponse, ExecutionReport, Executor, OnError};
 
 impl Executor {
@@ -39,7 +37,6 @@ impl Executor {
                         message: error.to_string(),
                         data: None,
                         telemetry: None,
-                        typed_hits: std::sync::OnceLock::new(),
                     });
                 }
             }
@@ -107,7 +104,6 @@ impl Executor {
                     message: e.to_string(),
                     data: None,
                     telemetry: None,
-                    typed_hits: std::sync::OnceLock::new(),
                 });
                 continue;
             }
@@ -133,7 +129,6 @@ impl Executor {
                         message: e.to_string(),
                         data: None,
                         telemetry: None,
-                        typed_hits: std::sync::OnceLock::new(),
                     });
                     continue;
                 }
@@ -155,7 +150,6 @@ impl Executor {
                         message: e.to_string(),
                         data: None,
                         telemetry: None,
-                        typed_hits: std::sync::OnceLock::new(),
                     });
                     continue;
                 }
@@ -194,7 +188,6 @@ impl Executor {
                 message: error.to_string(),
                 data: None,
                 telemetry: None,
-                typed_hits: std::sync::OnceLock::new(),
             }),
         }
         Ok(())
@@ -223,52 +216,10 @@ impl Executor {
             let expected = batch.searches.len();
             match self.client.execute_query_batch(&collection, &batch).await {
                 Ok(responses) if responses.len() == expected => {
-                    for mut value in responses {
-                        if let Some(message) = Self::batch_item_error(&value) {
-                            results.push(ExecResponse {
-                                ok: false,
-                                operation: "QUERY".to_string(),
-                                message,
-                                data: None,
-                                telemetry: None,
-                                typed_hits: std::sync::OnceLock::new(),
-                            });
-                            continue;
-                        }
-                        let (hits_val, count, typed) = {
-                            let pts_opt = if let Some(serde_json::Value::Object(obj)) =
-                                value.get_mut("result")
-                            {
-                                obj.remove("points")
-                            } else if let Some(serde_json::Value::Array(_)) = value.get("result") {
-                                value.as_object_mut().and_then(|o| o.remove("result"))
-                            } else if let Some(obj) = value.as_object_mut() {
-                                obj.remove("points")
-                            } else {
-                                None
-                            };
-                            if let Some(pts) = pts_opt {
-                                let c = pts.as_array().map(|a| a.len()).unwrap_or(0);
-                                (pts, c, None)
-                            } else {
-                                let hits = extract_search_hits(&value);
-                                let c = hits.len();
-                                let data = serialize_hits(&hits)?;
-                                (data, c, Some(hits))
-                            }
-                        };
-                        let mut response = ExecResponse {
-                            ok: true,
-                            operation: "QUERY".to_string(),
-                            message: format!("Found {} hits", count),
-                            data: Some(hits_val),
-                            telemetry: None,
-                            typed_hits: std::sync::OnceLock::new(),
-                        };
-                        if let Some(hits) = typed {
-                            response = response.with_typed_hits(hits);
-                        }
-                        results.push(response);
+                    for (response, op) in responses.into_iter().zip(operations.iter()) {
+                        // Batch items normalize exactly like singly dispatched
+                        // operations; REST parses each item at its boundary.
+                        results.push(Self::normalize_planned(op, response)?);
                     }
                 }
                 Ok(responses) => {
@@ -338,30 +289,14 @@ impl Executor {
                 .await;
         }
 
-        let (collection, labels, batch) = qql_plan::build_update_batch(&operations)?;
+        let (collection, _labels, batch) = qql_plan::build_update_batch(&operations)?;
         let expected = batch.operations.len();
         match self.client.execute_update_batch(&collection, &batch).await {
             Ok(responses) if responses.len() == expected => {
-                for (value, label) in responses.into_iter().zip(labels.iter()) {
-                    if let Some(message) = Self::batch_item_error(&value) {
-                        results.push(ExecResponse {
-                            ok: false,
-                            operation: (*label).to_string(),
-                            message,
-                            data: None,
-                            telemetry: None,
-                            typed_hits: std::sync::OnceLock::new(),
-                        });
-                        continue;
-                    }
-                    results.push(ExecResponse {
-                        ok: true,
-                        operation: (*label).to_string(),
-                        message: format!("{label} ok (batched)"),
-                        data: Some(value),
-                        telemetry: None,
-                        typed_hits: std::sync::OnceLock::new(),
-                    });
+                for (response, op) in responses.into_iter().zip(operations.iter()) {
+                    // Same normalization as single dispatch: upserts report
+                    // their request point count, other writes are status-only.
+                    results.push(Self::normalize_planned(op, response)?);
                 }
             }
             Ok(responses) => {
@@ -391,9 +326,5 @@ impl Executor {
             self.dispatch_or_collect(operation, false, results).await?;
         }
         Ok(())
-    }
-
-    fn batch_item_error(item: &serde_json::Value) -> Option<String> {
-        qql_plan::batch_item_error(item)
     }
 }

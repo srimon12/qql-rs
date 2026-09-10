@@ -20,7 +20,7 @@ function scrollReport(data) {
     ok: true,
     succeeded: 1,
     failed: 0,
-    results: [{ type: 'scroll', status: 'success', data }],
+    results: [{ ok: true, operation: 'SCROLL', message: 'ok', data }],
   });
 }
 

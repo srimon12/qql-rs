@@ -66,53 +66,43 @@ class TestDxImprovements(unittest.TestCase):
         )
 
     def test_execution_report_and_scored_point(self):
-        # 4, 5, 8. ScoredPoint, ExecutionReport backward compatibility and typed accessors
-        rep_dict = {
-            "ok": True,
-            "results": [
+        # 4, 5, 8. ScoredPoint, ExecutionReport typed accessors (no JSON
+        # envelope hydration: the report is built from typed specs).
+        rep = sdk.ExecutionReport.from_results(
+            [
                 {
-                    "ok": True,
                     "operation": "QUERY",
                     "message": "Found 2 hits",
-                    "data": [
+                    "hits": [
                         {
                             "id": 936746218411023069,
                             "score": 0.95,
-                            "payload": {"title": "Doc 1"},
-                            "text": "Doc 1",
+                            "payload": {"title": "Doc 1", "text": "Doc 1"},
                             "collection": "coll_a",
                         },
                         {
                             "id": "c87bb3c1-a201-447a-8f5f-1555df27d14d",
                             "score": 0.82,
-                            "payload": {"title": "Doc 2"},
-                            "text": "Doc 2",
+                            "payload": {"title": "Doc 2", "text": "Doc 2"},
                             "collection": "coll_a",
                         },
                     ],
                 },
                 {
-                    "ok": True,
                     "operation": "FACET",
                     "message": "Found 2 facet hit(s)",
-                    "data": [
+                    "facet": [
                         {"value": "tech", "count": 10},
                         {"value": "news", "count": 4},
                     ],
                 },
                 {
-                    "ok": True,
                     "operation": "COUNT",
                     "message": "Count: 42",
-                    "data": {"result": {"count": 42}},
+                    "count": 42,
                 },
-            ],
-            "succeeded": 3,
-            "failed": 0,
-        }
-
-        rep = sdk.ExecutionReport(rep_dict)
-        # Backward compatibility
+            ]
+        )
         self.assertTrue(rep.ok)
         self.assertTrue(rep["ok"])
         self.assertEqual(rep.succeeded, 3)
@@ -131,6 +121,8 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(hits[0]["title"], "Doc 1")
         self.assertEqual(hits[0].get("title"), "Doc 1")
         self.assertEqual(hits[0].collection, "coll_a")
+        # `text` is derived from the typed payload's `text` field.
+        self.assertEqual(hits[0].text, "Doc 1")
 
         # Point IDs accessor
         self.assertEqual(
@@ -146,9 +138,8 @@ class TestDxImprovements(unittest.TestCase):
         # Count accessor
         self.assertEqual(rep.count(2), 42)
 
-        # Vector and shard_key defaults and negative index safety
+        # Vector default and negative index safety
         self.assertIsNone(hits[0].vector)
-        self.assertIsNone(hits[0].shard_key)
         self.assertEqual(rep.hits(-10), [])
         self.assertEqual(rep.points(-10), [])
         self.assertEqual(rep.facet(-10), [])
@@ -156,52 +147,61 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(rep.groups(-10), [])
 
     def test_execution_report_groups_accessor(self):
-        # GROUP BY results normalize through report.groups() (pyqql parity
-        # with nqql's ExecutionReport.groups()).
+        # GROUP BY results come back as typed `{id, hits}` dicts whose hits
+        # are native ScoredPoint objects (pyqql parity with nqql's
+        # ExecutionReport.groups()).
         ExecutionReport = sdk.ExecutionReport
 
-        nested = ExecutionReport(
-            {
-                "ok": True,
-                "succeeded": 1,
-                "failed": 0,
-                "results": [
-                    {
-                        "ok": True,
-                        "operation": "QUERY_GROUPS",
-                        "message": "Found 2 group(s)",
-                        "data": {
-                            "result": {
-                                "groups": [
-                                    {"id": "a", "hits": [{"id": 1, "score": 0.9}]},
-                                    {"id": "b", "hits": [{"id": 2, "score": 0.8}]},
-                                ]
-                            },
-                            "status": "ok",
-                        },
-                    }
-                ],
-            }
+        grouped = ExecutionReport.from_results(
+            [
+                {
+                    "operation": "QUERY_GROUPS",
+                    "message": "Found 2 group(s)",
+                    "groups": [
+                        {"id": "a", "hits": [{"id": 1, "score": 0.9}]},
+                        {"id": "b", "hits": [{"id": 2, "score": 0.8}]},
+                    ],
+                }
+            ]
         )
-        self.assertEqual(len(nested.groups()), 2)
-        self.assertEqual(nested.groups()[0]["id"], "a")
-        bare = ExecutionReport(
-            {
-                "ok": True,
-                "succeeded": 1,
-                "failed": 0,
-                "results": [
-                    {
-                        "ok": True,
-                        "operation": "QUERY_GROUPS",
-                        "message": "Found 1 group(s)",
-                        "data": {"groups": [{"id": "x", "hits": []}]},
-                    }
-                ],
-            }
+        self.assertEqual(len(grouped.groups()), 2)
+        self.assertEqual(grouped.groups()[0]["id"], "a")
+        self.assertEqual(grouped.groups()[0]["hits"][0].id, 1)
+        self.assertEqual(ExecutionReport.from_results([]).groups(), [])
+
+    def test_execution_report_typed_metadata_accessors(self):
+        # New typed per-statement getters for the metadata ExecData variants.
+        ExecutionReport = sdk.ExecutionReport
+        rep = ExecutionReport.from_results(
+            [
+                {"operation": "SHOW_COLLECTIONS", "collections": ["docs", "images"]},
+                {
+                    "operation": "SHOW_COLLECTION",
+                    "collection": {
+                        "status": "green",
+                        "points_count": 12,
+                        "segments_count": 2,
+                    },
+                },
+                {"operation": "SHOW_SHARD_KEYS", "shard_keys": ["tenant_a", 7]},
+                {
+                    "operation": "SHOW_QUOTAS",
+                    "quotas": {"enabled": True, "max_disk_usage_percent": 80},
+                },
+            ]
         )
-        self.assertEqual(bare.groups()[0]["id"], "x")
-        self.assertEqual(ExecutionReport({}).groups(), [])
+        self.assertEqual(rep.collections(0), ["docs", "images"])
+        self.assertEqual(rep.collections(1), [])
+        info = rep.collection(1)
+        self.assertEqual(info["status"], "green")
+        self.assertEqual(info["points_count"], 12)
+        self.assertEqual(info["segments_count"], 2)
+        self.assertIsNone(rep.collection(0))
+        self.assertEqual(rep.shard_keys(2), ["tenant_a", 7])
+        self.assertEqual(rep.quotas(3)["max_disk_usage_percent"], 80)
+        self.assertIsNone(rep.quotas(0))
+        self.assertEqual(rep.collections(-10), [])
+        self.assertEqual(rep.shard_keys(-10), [])
 
     def test_typed_buffer_vector_params(self):
         # Buffer-protocol vectors bind identically to plain lists (no server).
@@ -280,6 +280,52 @@ class TestDxImprovements(unittest.TestCase):
         # Bytes are not float buffers — same unsupported-value error as before.
         with self.assertRaises(ValueError):
             sdk.parse(q)[0].bind({"v": b"\x00\x01"})
+
+    def test_long_float_lists_pack_as_f32_vectors(self):
+        # Flat list[float] params with >= 32 elements bind as f32 vectors
+        # (same representation as numpy / array.array buffers); shorter and
+        # nested float lists plus int lists keep exact Value::List semantics.
+        q = "QUERY :v FROM test_coll USING dense LIMIT 2"
+        f64_sentinel = 1.0000000001
+
+        long_bound = str(sdk.parse(q)[0].bind({"v": [f64_sentinel] + [0.5] * 31}))
+        self.assertIn("[1.0, 0.5", long_bound)
+        self.assertNotIn(str(f64_sentinel), long_bound)
+
+        short_bound = str(
+            sdk.parse("UPSERT INTO c VALUES {id: 1, x: :v}")[0].bind(
+                {"v": [f64_sentinel] + [0.5] * 30}
+            )
+        )
+        self.assertIn("[1.0000000001, 0.5", short_bound)
+
+        nested_bound = sdk.bind(
+            "QUERY VECTOR :v FROM test_coll USING dense",
+            {"v": [[f64_sentinel, 2.0]]},
+        )
+        self.assertIn("[[1.0000000001, 2.0]]", nested_bound)
+
+        int_bound = sdk.bind(
+            "QUERY [0.1] FROM test_coll WHERE x = :v", {"v": list(range(32))}
+        )
+        self.assertIn("[0, 1, 2,", int_bound)
+
+        # Non-finite floats still fail closed on both sides of the threshold.
+        for bad_vec in ([float("nan")] + [0.0] * 31, [float("nan")]):
+            with self.subTest(length=len(bad_vec)):
+                with self.assertRaises(ValueError):
+                    sdk.bind(q, {"v": bad_vec})
+
+        # Equivalence: list-bound long vectors match numpy f32 buffers.
+        try:
+            import numpy
+        except ImportError:
+            return
+        vec = [0.1 * i for i in range(128)]
+        self.assertEqual(
+            str(sdk.parse(q)[0].bind({"v": vec})),
+            str(sdk.parse(q)[0].bind({"v": numpy.array(vec, dtype=numpy.float32)})),
+        )
 
     def test_upsert_many_surface(self):
         # Bulk ingest lives on the client next to execute — one `:rows`

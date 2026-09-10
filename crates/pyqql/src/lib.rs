@@ -93,8 +93,8 @@ impl PyClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let oe = common::parse_on_error(on_error)?;
         let input = common::prepare_input(query, params)?;
-        let out = py.detach(|| common::run_input(&self.inner, &self.runtime, input, oe))?;
-        pythonize::pythonize(py, &out).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        let report = py.detach(|| common::run_input(&self.inner, &self.runtime, input, oe))?;
+        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
     }
 
     /// Async variant — accepts the same input types as `execute`.
@@ -112,13 +112,13 @@ impl PyClient {
         let oe = common::parse_on_error(on_error)?;
         let input = common::prepare_input(&query, params)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = common::run_async(&inner, input, oe)
+            let report = common::run_async(&inner, input, oe)
                 .await
                 .map_err(common::qql_py_error)?;
             Python::attach(|py| {
-                pythonize::pythonize(py, &val)
-                    .map(|b| b.unbind())
-                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+                Ok(common::PyExecutionReport::wrap(py, report)?
+                    .into_any()
+                    .unbind())
             })
         })
     }
@@ -190,13 +190,14 @@ impl PyClient {
                     .block_on(self.inner.upsert_many(collection, values, batch_size, oe))
             })
             .map_err(common::qql_py_error)?;
-        pythonize::pythonize(py, &report).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
     }
 }
 
 #[pymodule]
 fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     common::register_error_module("pyqql");
+    common::register_report_classes(m)?;
     m.add_class::<common::PyStmt>()?;
     m.add_class::<PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;

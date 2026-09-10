@@ -6,32 +6,43 @@ use super::query::{
     plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
     to_vector_input, to_vectors,
 };
-use super::responses::{facet_hit_to_json, get_points_envelope};
+use super::typed::{
+    collection_mutation_to_typed, facet_hit_to_typed, mutation_response_to_typed,
+    point_group_to_typed, retrieved_point_to_hit, scored_point_to_hit, telemetry_from_proto,
+    usage_to_json, usage_to_telemetry,
+};
+use crate::executor::{ExecData, ServerUsage};
 use crate::qdrant_grpc::qdrant;
+use qql_core::ast::{VectorDatatype, VectorDistance};
 use qql_core::parser::Parser;
 use qql_plan::types::{FilterExpression, MatchValue};
-use qql_plan::{PlanPointVectors, PlanQueryInput, PlanVectorValue};
+use qql_plan::{
+    DenseVectorParams, PlanFacetValue, PlanGroupId, PlanPointVectors, PlanQueryInput,
+    PlanVectorStruct, PlanVectorValue,
+};
+
+fn dense_params(datatype: Option<VectorDatatype>) -> DenseVectorParams {
+    DenseVectorParams {
+        size: 128,
+        distance: VectorDistance::Cosine,
+        hnsw_config: None,
+        quantization_config: None,
+        on_disk: None,
+        memory: None,
+        datatype,
+        multivector_config: None,
+    }
+}
 
 #[test]
 fn dense_vector_params_propagates_datatype() {
-    let params = vector_params(&serde_json::json!({
-        "size": 128,
-        "distance": "Cosine",
-        "datatype": "uint8",
-    }));
+    let params = vector_params(&dense_params(Some(VectorDatatype::Uint8)));
     assert_eq!(params.datatype, Some(qdrant::Datatype::Uint8 as i32));
 
-    let f16 = vector_params(&serde_json::json!({
-        "size": 64,
-        "distance": "Dot",
-        "datatype": "float16",
-    }));
+    let f16 = vector_params(&dense_params(Some(VectorDatatype::Float16)));
     assert_eq!(f16.datatype, Some(qdrant::Datatype::Float16 as i32));
 
-    let none = vector_params(&serde_json::json!({
-        "size": 32,
-        "distance": "Cosine",
-    }));
+    let none = vector_params(&dense_params(None));
     assert_eq!(none.datatype, None);
 }
 
@@ -345,9 +356,12 @@ fn create_collection_vectors_and_hnsw() {
 
     // vectors should contain dense → size 384, distance Cosine
     let vectors = req.vectors.as_ref().expect("vectors should be set");
-    let dense = vectors.get("dense").expect("dense vector config missing");
-    assert_eq!(dense["size"], 384);
-    assert_eq!(dense["distance"], "Cosine");
+    let qql_plan::DenseVectorsConfig::Named(map) = vectors else {
+        panic!("expected named vectors, got {vectors:?}");
+    };
+    let dense = map.get("dense").expect("dense vector config missing");
+    assert_eq!(dense.size, 384);
+    assert_eq!(dense.distance, VectorDistance::Cosine);
 
     // HNSW → gRPC conversion with m + ef_construct
     let hnsw_json = req.hnsw_config.as_ref().expect("hnsw_config should be set");
@@ -583,28 +597,37 @@ fn grpc_float_equality_filter_is_range() {
     }
 }
 
-/// GetPoints must wrap hits in `result.points` so hit extraction sees
-/// them (B-3 regression); a bare `result` array would report 0 hits.
+/// GetPoints must keep every hit (B-3 regression): the retired JSON path
+/// silently dropped them when the envelope shape was wrong, and the typed path
+/// maps every `RetrievedPoint` straight into a hit.
 #[test]
-fn grpc_get_points_envelope_keeps_hits_extractable() {
-    use crate::executor::dml::query::extract_search_hits;
+fn typed_get_points_keeps_every_hit() {
+    let point = |id: u64, title: &str| qdrant::RetrievedPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(id)),
+        }),
+        payload: [(
+            "title".to_string(),
+            proto_value(qdrant::value::Kind::StringValue(title.to_string())),
+        )]
+        .into_iter()
+        .collect(),
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    };
 
-    let envelope = get_points_envelope(
-        vec![
-            serde_json::json!({"id": 1, "payload": {"title": "a"}}),
-            serde_json::json!({"id": 2, "payload": {"title": "b"}}),
-        ],
-        0.0,
-    );
-    assert_eq!(envelope["result"]["points"].as_array().unwrap().len(), 2);
-    let hits = extract_search_hits(&envelope);
-    assert_eq!(hits.len(), 2, "GetPoints hits must survive hit extraction");
+    let hits: Vec<_> = vec![point(1, "a"), point(2, "b")]
+        .into_iter()
+        .map(|point| retrieved_point_to_hit(point).expect("retrieved point converts"))
+        .collect();
+    assert_eq!(hits.len(), 2, "GetPoints hits must survive conversion");
     assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(1));
     assert_eq!(hits[1].id, qql_plan::PlanPointId::Number(2));
-
-    // The empty case still yields zero hits, not an error.
-    let envelope = get_points_envelope(Vec::new(), 0.0);
-    assert_eq!(extract_search_hits(&envelope).len(), 0);
+    assert_eq!(
+        hits[1].payload.as_ref().expect("payload")["title"],
+        serde_json::json!("b")
+    );
 }
 
 /// IN/NOT IN lists must be homogeneous and int64-representable: valid
@@ -1016,51 +1039,55 @@ fn facet_counts_conversion_matches_plan() {
 }
 
 #[test]
-fn facet_hit_to_json_handles_all_variants() {
+fn facet_hit_to_typed_handles_all_variants() {
     use qdrant::facet_value::Variant;
     use qdrant::{FacetHit, FacetValue};
 
-    let hit_str = FacetHit {
-        value: Some(FacetValue {
-            variant: Some(Variant::StringValue("hotel".to_string())),
-        }),
-        count: 42,
-    };
-    assert_eq!(
-        facet_hit_to_json(hit_str),
-        serde_json::json!({ "value": "hotel", "count": 42 })
-    );
+    let cases = [
+        (
+            FacetHit {
+                value: Some(FacetValue {
+                    variant: Some(Variant::StringValue("hotel".to_string())),
+                }),
+                count: 42,
+            },
+            PlanFacetValue::Keyword("hotel".to_string()),
+            42,
+        ),
+        (
+            FacetHit {
+                value: Some(FacetValue {
+                    variant: Some(Variant::IntegerValue(101)),
+                }),
+                count: 7,
+            },
+            PlanFacetValue::Integer(101),
+            7,
+        ),
+        (
+            FacetHit {
+                value: Some(FacetValue {
+                    variant: Some(Variant::BoolValue(true)),
+                }),
+                count: 99,
+            },
+            PlanFacetValue::Bool(true),
+            99,
+        ),
+    ];
+    for (proto, value, count) in cases {
+        let typed = facet_hit_to_typed(proto).expect("facet converts");
+        assert_eq!(typed.value, value);
+        assert_eq!(typed.count, count);
+    }
 
-    let hit_int = FacetHit {
-        value: Some(FacetValue {
-            variant: Some(Variant::IntegerValue(101)),
-        }),
-        count: 7,
-    };
-    assert_eq!(
-        facet_hit_to_json(hit_int),
-        serde_json::json!({ "value": 101, "count": 7 })
-    );
-
-    let hit_bool = FacetHit {
-        value: Some(FacetValue {
-            variant: Some(Variant::BoolValue(true)),
-        }),
-        count: 99,
-    };
-    assert_eq!(
-        facet_hit_to_json(hit_bool),
-        serde_json::json!({ "value": true, "count": 99 })
-    );
-
-    let hit_none = FacetHit {
+    // A facet hit without a value is a backend contract violation.
+    let error = facet_hit_to_typed(FacetHit {
         value: None,
         count: 0,
-    };
-    assert_eq!(
-        facet_hit_to_json(hit_none),
-        serde_json::json!({ "value": null, "count": 0 })
-    );
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "QQL-BACKEND-ENVELOPE");
 }
 
 /// RT-01: unbound vector params fail closed on the gRPC path (an error, never
@@ -1095,4 +1122,337 @@ fn grpc_to_vectors_rejects_unbound_params() {
 
     let err = to_vectors(&PlanPointVectors::PositionalParam(1)).unwrap_err();
     assert_eq!(err.code, "QQL-BIND-MISSING-POSITIONAL");
+}
+
+// ── Typed read path: proto → BackendResponse, no JSON in between ──
+
+fn proto_value(kind: qdrant::value::Kind) -> qdrant::Value {
+    qdrant::Value { kind: Some(kind) }
+}
+
+fn sample_hardware_usage() -> qdrant::HardwareUsage {
+    qdrant::HardwareUsage {
+        cpu: 11,
+        payload_io_read: 22,
+        payload_io_write: 33,
+        payload_index_io_read: 44,
+        payload_index_io_write: 55,
+        vector_io_read: 66,
+        vector_io_write: 77,
+    }
+}
+
+fn sample_usage() -> qdrant::Usage {
+    qdrant::Usage {
+        hardware: Some(sample_hardware_usage()),
+        inference: Some(qdrant::InferenceUsage {
+            models: [("bm25".to_string(), qdrant::ModelUsage { tokens: 512 })]
+                .into_iter()
+                .collect(),
+        }),
+    }
+}
+
+/// `scored_point_to_hit` maps point id, score, payload, and typed vectors
+/// straight from the proto; `telemetry_from_proto` mirrors the same fields.
+#[test]
+fn typed_query_hit_maps_proto_directly() {
+    let usage = sample_usage();
+    let point = qdrant::ScoredPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(7)),
+        }),
+        payload: [
+            (
+                "title".to_string(),
+                proto_value(qdrant::value::Kind::StringValue("a".to_string())),
+            ),
+            (
+                "stars".to_string(),
+                proto_value(qdrant::value::Kind::IntegerValue(5)),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        score: 0.75,
+        version: 3,
+        vectors: Some(qdrant::VectorsOutput {
+            vectors_options: Some(qdrant::vectors_output::VectorsOptions::Vector(
+                qdrant::VectorOutput {
+                    vector: Some(qdrant::vector_output::Vector::Dense(qdrant::DenseVector {
+                        data: vec![0.5, 0.25],
+                    })),
+                    ..Default::default()
+                },
+            )),
+        }),
+        shard_key: None,
+        order_value: None,
+    };
+
+    let hit = scored_point_to_hit(point).expect("scored point converts");
+    assert_eq!(hit.id, qql_plan::PlanPointId::Number(7));
+    assert_eq!(hit.score, 0.75);
+    assert_eq!(
+        hit.payload.as_ref().expect("payload")["title"],
+        serde_json::json!("a")
+    );
+    assert_eq!(
+        hit.vector,
+        Some(PlanVectorStruct::Single(PlanVectorValue::Dense(vec![
+            0.5, 0.25
+        ]))),
+        "dense vectors convert without a JSON hop"
+    );
+
+    let telemetry = telemetry_from_proto(0.125, Some(&usage));
+    assert_eq!(
+        telemetry,
+        Some(crate::executor::ServerTelemetry {
+            time_s: Some(0.125),
+            usage: usage_to_telemetry(Some(&usage)),
+        })
+    );
+}
+
+/// Named proto vectors convert to [`PlanVectorStruct::Named`] with every
+/// value typed (dense and sparse entries).
+#[test]
+fn typed_named_vectors_convert_to_plan_struct() {
+    let vectors = qdrant::VectorsOutput {
+        vectors_options: Some(qdrant::vectors_output::VectorsOptions::Vectors(
+            qdrant::NamedVectorsOutput {
+                vectors: [
+                    (
+                        "dense".to_string(),
+                        qdrant::VectorOutput {
+                            vector: Some(qdrant::vector_output::Vector::Dense(
+                                qdrant::DenseVector {
+                                    data: vec![0.5, 0.25],
+                                },
+                            )),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "sparse".to_string(),
+                        qdrant::VectorOutput {
+                            vector: Some(qdrant::vector_output::Vector::Sparse(
+                                qdrant::SparseVector {
+                                    indices: vec![2, 9],
+                                    values: vec![1.5, 0.5],
+                                },
+                            )),
+                            ..Default::default()
+                        },
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )),
+    };
+    let converted = super::typed::vectors_output_to_typed(&vectors).expect("named vectors convert");
+    let PlanVectorStruct::Named(entries) = converted else {
+        panic!("expected named vector struct");
+    };
+    assert_eq!(entries["dense"], PlanVectorValue::Dense(vec![0.5, 0.25]));
+    assert_eq!(
+        entries["sparse"],
+        PlanVectorValue::Sparse {
+            indices: vec![2, 9],
+            values: vec![1.5, 0.5],
+        }
+    );
+}
+
+/// `retrieved_point_to_hit` (get / scroll) keeps UUID ids and the unscored
+/// `0.0` default.
+#[test]
+fn typed_retrieved_hit_maps_proto_directly() {
+    let point = qdrant::RetrievedPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(
+                "11111111-2222-3333-4444-555555555555".to_string(),
+            )),
+        }),
+        payload: Default::default(),
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    };
+    let hit = retrieved_point_to_hit(point).expect("retrieved point converts");
+    assert_eq!(
+        hit.id,
+        qql_plan::PlanPointId::String("11111111-2222-3333-4444-555555555555".to_string())
+    );
+    assert_eq!(hit.score, 0.0);
+    assert_eq!(hit.payload, None);
+    assert_eq!(hit.vector, None);
+}
+
+/// `point_group_to_typed` maps every `GroupId` variant, keeps ordered hits,
+/// and drops `lookup` points.
+#[test]
+fn typed_groups_map_proto_directly() {
+    use qdrant::group_id::Kind;
+
+    let point = |id: u64, score: f32| qdrant::ScoredPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(id)),
+        }),
+        payload: Default::default(),
+        score,
+        version: 0,
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    };
+
+    let groups: Vec<_> = [
+        qdrant::PointGroup {
+            id: Some(qdrant::GroupId {
+                kind: Some(Kind::UnsignedValue(7)),
+            }),
+            hits: vec![point(1, 0.75)],
+            lookup: Some(qdrant::RetrievedPoint {
+                id: Some(qdrant::PointId {
+                    point_id_options: Some(qdrant::point_id::PointIdOptions::Num(99)),
+                }),
+                ..Default::default()
+            }),
+        },
+        qdrant::PointGroup {
+            id: Some(qdrant::GroupId {
+                kind: Some(Kind::IntegerValue(-3)),
+            }),
+            hits: vec![point(2, 0.5)],
+            lookup: None,
+        },
+        qdrant::PointGroup {
+            id: Some(qdrant::GroupId {
+                kind: Some(Kind::StringValue("a".to_string())),
+            }),
+            hits: Vec::new(),
+            lookup: None,
+        },
+    ]
+    .into_iter()
+    .map(|group| point_group_to_typed(group).expect("group converts"))
+    .collect();
+
+    assert_eq!(groups[0].group_id, PlanGroupId::Unsigned(7));
+    assert_eq!(groups[1].group_id, PlanGroupId::Signed(-3));
+    assert_eq!(groups[2].group_id, PlanGroupId::Keyword("a".to_string()));
+    assert_eq!(groups[0].hits.len(), 1, "lookup points expand into no hits");
+}
+
+/// Missing proto ids / group ids / vector values fail closed instead of
+/// fabricating placeholder values.
+#[test]
+fn typed_converters_reject_missing_proto_values() {
+    let err = scored_point_to_hit(qdrant::ScoredPoint::default()).unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+    let err = point_group_to_typed(qdrant::PointGroup::default()).unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+    let err = super::typed::vectors_output_to_typed(&qdrant::VectorsOutput {
+        vectors_options: None,
+    })
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+}
+
+/// Write responses (upsert/delete/payload/vector ops) are status-only typed
+/// mutations with telemetry straight from the proto: the proto `UpdateResult`
+/// has no affected count (the executor derives upserts from the request).
+#[test]
+fn typed_mutation_response_is_status_only_with_telemetry() {
+    let usage = sample_usage();
+    let resp = qdrant::PointsOperationResponse {
+        result: Some(qdrant::UpdateResult {
+            operation_id: Some(42),
+            status: qdrant::UpdateStatus::Completed as i32,
+        }),
+        time: 0.25,
+        usage: Some(usage.clone()),
+    };
+
+    let typed = mutation_response_to_typed(resp);
+    assert_eq!(typed.data, ExecData::Mutation { affected: None });
+    assert_eq!(typed.telemetry, telemetry_from_proto(0.25, Some(&usage)));
+    assert_eq!(
+        serde_json::to_value(&typed.data).expect("serializes"),
+        serde_json::Value::Null,
+        "status-only mutations serialize as the report's null data"
+    );
+}
+
+/// Collection / shard-key mutations (proto bool status + time) are status-only
+/// typed mutations — no Raw envelope remains for status responses.
+#[test]
+fn typed_collection_mutation_is_status_only() {
+    let typed = collection_mutation_to_typed(0.125);
+    assert_eq!(typed.data, ExecData::Mutation { affected: None });
+    assert_eq!(typed.telemetry, telemetry_from_proto(0.125, None));
+}
+
+/// `usage_to_telemetry` must mirror `usage_to_json` + `ServerUsage::from_json`
+/// for every section combination (absent, empty, hardware-only,
+/// inference-only, both).
+#[test]
+fn usage_to_telemetry_matches_json_pipeline() {
+    let usage = sample_usage();
+    assert_eq!(
+        usage_to_telemetry(Some(&usage)),
+        ServerUsage::from_json(&usage_to_json(Some(&usage))),
+        "hardware + inference"
+    );
+
+    let hardware_only = qdrant::Usage {
+        hardware: usage.hardware,
+        inference: None,
+    };
+    assert_eq!(
+        usage_to_telemetry(Some(&hardware_only)),
+        ServerUsage::from_json(&usage_to_json(Some(&hardware_only))),
+        "hardware only"
+    );
+
+    let inference_only = qdrant::Usage {
+        hardware: None,
+        inference: usage.inference.clone(),
+    };
+    assert_eq!(
+        usage_to_telemetry(Some(&inference_only)),
+        ServerUsage::from_json(&usage_to_json(Some(&inference_only))),
+        "inference only"
+    );
+
+    let empty = qdrant::Usage {
+        hardware: None,
+        inference: None,
+    };
+    assert_eq!(usage_to_telemetry(Some(&empty)), None);
+    assert_eq!(ServerUsage::from_json(&usage_to_json(Some(&empty))), None);
+    assert_eq!(usage_to_telemetry(None), None);
+
+    let parsed = usage_to_telemetry(Some(&usage)).expect("usage present");
+    assert_eq!(
+        parsed.hardware,
+        Some(crate::executor::HardwareUsage {
+            cpu: 11,
+            payload_io_read: 22,
+            payload_io_write: 33,
+            payload_index_io_read: 44,
+            payload_index_io_write: 55,
+            vector_io_read: 66,
+            vector_io_write: 77,
+        })
+    );
+    assert_eq!(
+        parsed.inference.expect("inference present").models["bm25"].tokens,
+        512
+    );
 }

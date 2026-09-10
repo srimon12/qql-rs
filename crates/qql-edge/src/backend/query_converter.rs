@@ -2,18 +2,21 @@ use std::collections::HashMap;
 
 use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{
-    Condition, ContextPair as EdgeContextPair, ContextQuery, DecayKind, Direction, DiscoverQuery,
-    Fusion, GeoPoint, JsonPath, Mmr, NamedQuery, OrderBy, OrderByInterface, PayloadSelectorExclude,
+    ContextPair as EdgeContextPair, ContextQuery, DecayKind, Direction, DiscoverQuery, Fusion,
+    GeoPoint, JsonPath, Mmr, NamedQuery, OrderBy, OrderByInterface, PayloadSelectorExclude,
     PayloadSelectorInclude, Prefetch, QueryEnum, QueryRequest, RecommendQuery, Sample,
     ScoringQuery, SearchParams, VectorInternal, WithPayloadInterface, WithVector,
 };
 
 use qql_core::error::QqlError;
 use qql_plan::types::{
-    PayloadSelectorReq, PrefetchRequest, QueryRequest as PlanQueryRequest, QueryVariant,
-    SearchParamsRequest, VectorSelectorReq,
+    FormulaDefault, PayloadSelectorReq, PlanDecayKind, PlanFormula, PrefetchRequest,
+    QueryRequest as PlanQueryRequest, QueryVariant, SearchParamsRequest, VectorSelectorReq,
 };
 use qql_plan::{PlanQueryInput, PlanVectorValue};
+
+use super::error_map::{EdgeOp, edge_err};
+use super::filter_converter::convert_formula_condition;
 
 pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryRequest, QqlError> {
     if request.shard_key.is_some() {
@@ -205,15 +208,14 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
             }),
         })),
         QueryVariant::Formula(formula) => {
-            let formula_json = serde_json::to_value(&formula.formula)
-                .map_err(|e| edge_error(format!("serialize formula: {e}")))?;
-            let expression = json_to_expression(&formula_json)?;
+            let expression = plan_formula_to_edge(&formula.formula)?;
             let defaults = formula
                 .defaults
                 .as_ref()
-                .map(|d| {
-                    d.iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
+                .map(|defaults| {
+                    defaults
+                        .iter()
+                        .map(|(key, value)| (key.clone(), formula_default_to_json(value)))
                         .collect::<HashMap<_, _>>()
                 })
                 .unwrap_or_default();
@@ -224,9 +226,7 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
             };
             let parsed = edge_formula
                 .try_into()
-                .map_err(|e: qdrant_edge::OperationError| {
-                    edge_error(format!("failed to parse formula: {e}"))
-                })?;
+                .map_err(|e: qdrant_edge::OperationError| edge_err(EdgeOp::Formula, None, e))?;
             Ok(ScoringQuery::Formula(parsed))
         }
         QueryVariant::RelevanceFeedback { relevance_feedback } => {
@@ -299,191 +299,118 @@ fn plan_input_to_vector_internal(input: &PlanQueryInput) -> Result<VectorInterna
     }
 }
 
-fn json_to_expression(value: &serde_json::Value) -> Result<qdrant_edge::Expression, QqlError> {
+fn plan_formula_to_edge(expr: &PlanFormula) -> Result<qdrant_edge::Expression, QqlError> {
+    use qdrant_edge::Expression;
+    Ok(match expr {
+        PlanFormula::Constant(value) => Expression::Constant(*value as f32),
+        PlanFormula::Variable(name) => Expression::Variable(name.clone()),
+        PlanFormula::Sum { left, right } => Expression::Sum(vec![
+            plan_formula_to_edge(left)?,
+            plan_formula_to_edge(right)?,
+        ]),
+        PlanFormula::Sub { left, right } => Expression::Sum(vec![
+            plan_formula_to_edge(left)?,
+            Expression::Neg(Box::new(plan_formula_to_edge(right)?)),
+        ]),
+        PlanFormula::Mul { left, right } => Expression::Mult(vec![
+            plan_formula_to_edge(left)?,
+            plan_formula_to_edge(right)?,
+        ]),
+        PlanFormula::Div {
+            left,
+            right,
+            by_zero_default,
+        } => Expression::Div {
+            left: Box::new(plan_formula_to_edge(left)?),
+            right: Box::new(plan_formula_to_edge(right)?),
+            by_zero_default: by_zero_default.map(|value| value as f32),
+        },
+        PlanFormula::Neg(operand) => Expression::Neg(Box::new(plan_formula_to_edge(operand)?)),
+        PlanFormula::Abs(x) => Expression::Abs(Box::new(plan_formula_to_edge(x)?)),
+        PlanFormula::Sqrt(x) => Expression::Sqrt(Box::new(plan_formula_to_edge(x)?)),
+        PlanFormula::Log10(x) => Expression::Log10(Box::new(plan_formula_to_edge(x)?)),
+        PlanFormula::Ln(x) => Expression::Ln(Box::new(plan_formula_to_edge(x)?)),
+        PlanFormula::Exp(x) => Expression::Exp(Box::new(plan_formula_to_edge(x)?)),
+        // MAX / MIN / ACOSH are parseable QQL but the pinned qdrant-edge has
+        // no matching Expression variants — fail with the catalog error.
+        PlanFormula::Acosh(_) | PlanFormula::Max(_) | PlanFormula::Min(_) => {
+            return Err(crate::backend::unsupported::EdgeUnsupported::FormulaNary.error());
+        }
+        PlanFormula::Pow { base, exponent } => Expression::Pow {
+            base: Box::new(plan_formula_to_edge(base)?),
+            exponent: Box::new(plan_formula_to_edge(exponent)?),
+        },
+        PlanFormula::GeoDistance { lat, lon, field } => Expression::GeoDistance {
+            origin: GeoPoint {
+                lat: OrderedFloat(*lat),
+                lon: OrderedFloat(*lon),
+            },
+            to: parse_json_path(field)?,
+        },
+        PlanFormula::Decay {
+            kind,
+            x,
+            target,
+            scale,
+            midpoint,
+        } => Expression::Decay {
+            kind: match kind {
+                PlanDecayKind::Lin => DecayKind::Lin,
+                PlanDecayKind::Exp => DecayKind::Exp,
+                PlanDecayKind::Gauss => DecayKind::Gauss,
+            },
+            x: Box::new(plan_formula_to_edge(x)?),
+            target: target
+                .as_ref()
+                .map(|target| plan_formula_to_edge(target).map(Box::new))
+                .transpose()?,
+            midpoint: midpoint.map(|value| value as f32),
+            scale: scale.map(|value| value as f32),
+        },
+        PlanFormula::Condition(filter) => {
+            Expression::Condition(Box::new(convert_formula_condition(filter)?))
+        }
+        PlanFormula::Case { cond, then_, else_ } => {
+            // Same weighting as the REST lowering: cond * then + (1 - cond) * else.
+            let condition = plan_formula_to_edge(cond)?;
+            let one_minus = Expression::Sum(vec![
+                Expression::Constant(1.0),
+                Expression::Neg(Box::new(condition.clone())),
+            ]);
+            Expression::Sum(vec![
+                Expression::Mult(vec![condition, plan_formula_to_edge(then_)?]),
+                Expression::Mult(vec![one_minus, plan_formula_to_edge(else_)?]),
+            ])
+        }
+        PlanFormula::Datetime(value) => Expression::Datetime(value.clone()),
+        PlanFormula::DatetimeKey(key) => Expression::DatetimeKey(parse_json_path(key)?),
+    })
+}
+
+/// Convert a typed `DEFAULTS` binding to the edge API's JSON value domain.
+fn formula_default_to_json(value: &FormulaDefault) -> serde_json::Value {
     match value {
-        serde_json::Value::Number(n) => {
-            let value = n
-                .as_f64()
-                .ok_or_else(|| edge_error(format!("formula number is not representable: {n}")))?;
-            Ok(qdrant_edge::Expression::Constant(value as f32))
+        FormulaDefault::Null => serde_json::Value::Null,
+        FormulaDefault::Bool(value) => serde_json::Value::Bool(*value),
+        FormulaDefault::Int(value) => serde_json::Value::Number((*value).into()),
+        FormulaDefault::Float(value) => serde_json::Number::from_f64(*value)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        FormulaDefault::String(value) => serde_json::Value::String(value.clone()),
+        FormulaDefault::List(values) => {
+            serde_json::Value::Array(values.iter().map(formula_default_to_json).collect())
         }
-        serde_json::Value::String(s) if s == "$score" => {
-            Ok(qdrant_edge::Expression::Variable("score".to_string()))
-        }
-        serde_json::Value::String(s) => Ok(qdrant_edge::Expression::Variable(s.clone())),
-        serde_json::Value::Object(obj) => {
-            if let Some(arr) = obj.get("sum").and_then(|v| v.as_array()) {
-                let exprs: Vec<qdrant_edge::Expression> = arr
-                    .iter()
-                    .map(json_to_expression)
-                    .collect::<Result<_, _>>()?;
-                return Ok(qdrant_edge::Expression::Sum(exprs));
-            }
-            if let Some(arr) = obj.get("mult").and_then(|v| v.as_array()) {
-                let exprs: Vec<qdrant_edge::Expression> = arr
-                    .iter()
-                    .map(json_to_expression)
-                    .collect::<Result<_, _>>()?;
-                return Ok(qdrant_edge::Expression::Mult(exprs));
-            }
-            if let Some(val) = obj.get("neg") {
-                let expr = json_to_expression(val)?;
-                return Ok(qdrant_edge::Expression::Neg(Box::new(expr)));
-            }
-            if let Some(div_obj) = obj.get("div") {
-                let left = div_obj
-                    .get("left")
-                    .ok_or_else(|| edge_error("div missing 'left'"))?;
-                let right = div_obj
-                    .get("right")
-                    .ok_or_else(|| edge_error("div missing 'right'"))?;
-                let by_zero_default = div_obj
-                    .get("by_zero_default")
-                    .and_then(|v| v.as_f64())
-                    .map(|v| v as f32);
-                let left_expr = json_to_expression(left)?;
-                let right_expr = json_to_expression(right)?;
-                return Ok(qdrant_edge::Expression::Div {
-                    left: Box::new(left_expr),
-                    right: Box::new(right_expr),
-                    by_zero_default,
-                });
-            }
-            if let Some(val) = obj.get("abs") {
-                let expr = json_to_expression(val)?;
-                return Ok(qdrant_edge::Expression::Abs(Box::new(expr)));
-            }
-            if let Some(val) = obj.get("sqrt") {
-                let expr = json_to_expression(val)?;
-                return Ok(qdrant_edge::Expression::Sqrt(Box::new(expr)));
-            }
-            if let Some(val) = obj.get("log10") {
-                let expr = json_to_expression(val)?;
-                return Ok(qdrant_edge::Expression::Log10(Box::new(expr)));
-            }
-            if let Some(val) = obj.get("ln") {
-                let expr = json_to_expression(val)?;
-                return Ok(qdrant_edge::Expression::Ln(Box::new(expr)));
-            }
-            if let Some(val) = obj.get("exp") {
-                let expr = json_to_expression(val)?;
-                return Ok(qdrant_edge::Expression::Exp(Box::new(expr)));
-            }
-            if let Some(pow_obj) = obj.get("pow") {
-                let base = pow_obj
-                    .get("base")
-                    .ok_or_else(|| edge_error("pow missing 'base'"))?;
-                let exponent = pow_obj
-                    .get("exponent")
-                    .ok_or_else(|| edge_error("pow missing 'exponent'"))?;
-                let base_expr = json_to_expression(base)?;
-                let exponent_expr = json_to_expression(exponent)?;
-                return Ok(qdrant_edge::Expression::Pow {
-                    base: Box::new(base_expr),
-                    exponent: Box::new(exponent_expr),
-                });
-            }
-            if let Some(gd_obj) = obj.get("geo_distance") {
-                let origin = gd_obj
-                    .get("origin")
-                    .ok_or_else(|| edge_error("geo_distance missing 'origin'"))?;
-                let lat = origin
-                    .get("lat")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| edge_error("geo_distance origin missing 'lat'"))?;
-                let lon = origin
-                    .get("lon")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| edge_error("geo_distance origin missing 'lon'"))?;
-                let to_str = gd_obj
-                    .get("to")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| edge_error("geo_distance missing 'to'"))?;
-                let to: JsonPath =
-                    serde_json::from_value(serde_json::Value::String(to_str.to_string()))
-                        .map_err(|e| edge_error(format!("invalid geo_distance 'to': {e}")))?;
-                return Ok(qdrant_edge::Expression::GeoDistance {
-                    origin: GeoPoint {
-                        lat: OrderedFloat(lat),
-                        lon: OrderedFloat(lon),
-                    },
-                    to,
-                });
-            }
-
-            for (decay_key, decay_val) in obj.iter() {
-                let kind = match decay_key.as_str() {
-                    "lin_decay" => Some(DecayKind::Lin),
-                    "exp_decay" => Some(DecayKind::Exp),
-                    "gauss_decay" => Some(DecayKind::Gauss),
-                    _ => None,
-                };
-                if let Some(kind) = kind {
-                    let x_val = decay_val
-                        .get("x")
-                        .ok_or_else(|| edge_error(format!("{decay_key} missing 'x'")))?;
-                    let x = json_to_expression(x_val)?;
-                    let target = decay_val
-                        .get("target")
-                        .map(json_to_expression)
-                        .transpose()?
-                        .map(Box::new);
-                    let midpoint = decay_val
-                        .get("midpoint")
-                        .and_then(|v| v.as_f64())
-                        .map(|v| v as f32);
-                    let scale = decay_val
-                        .get("scale")
-                        .and_then(|v| v.as_f64())
-                        .map(|v| v as f32);
-                    return Ok(qdrant_edge::Expression::Decay {
-                        kind,
-                        x: Box::new(x),
-                        target,
-                        midpoint,
-                        scale,
-                    });
-                }
-            }
-
-            if obj.contains_key("key") && obj.contains_key("match") {
-                let condition: Condition = serde_json::from_value(value.clone())
-                    .map_err(|e| edge_error(format!("invalid formula condition: {e}")))?;
-                return Ok(qdrant_edge::Expression::Condition(Box::new(condition)));
-            }
-
-            // MAX / MIN / ACOSH are parseable QQL but the pinned qdrant-edge
-            // has no matching Expression variants — fail with the catalog
-            // error instead of a generic "unsupported expression".
-            if obj.contains_key("max") || obj.contains_key("min") || obj.contains_key("acosh") {
-                return Err(crate::backend::unsupported::EdgeUnsupported::FormulaNary.error());
-            }
-
-            if let Some(dt) = obj.get("datetime").and_then(|v| v.as_str()) {
-                return Ok(qdrant_edge::Expression::Datetime(dt.to_string()));
-            }
-
-            if let Some(dtk) = obj.get("datetime_key").and_then(|v| v.as_str()) {
-                let path: JsonPath =
-                    serde_json::from_value(serde_json::Value::String(dtk.to_string()))
-                        .map_err(|e| edge_error(format!("invalid datetime_key: {e}")))?;
-                return Ok(qdrant_edge::Expression::DatetimeKey(path));
-            }
-
-            Err(edge_error(format!(
-                "unsupported formula expression: {value}"
-            )))
-        }
-        other => Err(edge_error(format!("unsupported formula value: {other}"))),
+        FormulaDefault::Object(entries) => serde_json::Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (key.clone(), formula_default_to_json(value)))
+                .collect(),
+        ),
     }
 }
 
 pub(crate) fn convert_search_params(
     params: &SearchParamsRequest,
 ) -> Result<SearchParams, QqlError> {
-    if params.acorn.is_some() {
-        return Err(crate::backend::unsupported::EdgeUnsupported::Acorn.error());
-    }
     let idf = params
         .idf
         .as_ref()
@@ -513,7 +440,13 @@ pub(crate) fn convert_search_params(
             }
         }),
         indexed_only: params.indexed_only.unwrap_or(false),
-        acorn: None,
+        acorn: params
+            .acorn
+            .as_ref()
+            .map(|acorn| qdrant_edge::AcornSearchParams {
+                enable: acorn.enable,
+                max_selectivity: acorn.max_selectivity.map(OrderedFloat),
+            }),
         idf,
     })
 }
@@ -589,8 +522,8 @@ fn edge_error(message: impl Into<String>) -> QqlError {
 mod tests {
     use super::*;
     use qql_plan::types::{
-        DiscoverQuery as PlanDiscover, FormulaQuery, NearestQuery, OrderByQuery, PlanFormula,
-        RecommendQuery, RelevanceFeedbackInput,
+        DiscoverQuery as PlanDiscover, FormulaDefault, FormulaQuery, NearestQuery, OrderByQuery,
+        PlanFormula, RecommendQuery, RelevanceFeedbackInput,
     };
     use qql_plan::{PlanPointId, PlanQueryInput, PlanVectorValue};
 
@@ -782,6 +715,43 @@ mod tests {
         }
     }
 
+    /// ACORN params are a first-class `SearchParams` field on qdrant-edge
+    /// 0.8; the typed converter must pass them through, not reject them.
+    #[test]
+    fn test_acorn_search_params_conversion() {
+        let params = SearchParamsRequest {
+            hnsw_ef: None,
+            exact: None,
+            acorn: Some(qql_plan::types::AcornSearchParams {
+                enable: true,
+                max_selectivity: Some(0.4),
+            }),
+            indexed_only: None,
+            quantization: None,
+            idf: None,
+        };
+        let converted = convert_search_params(&params).expect("acorn conversion");
+        let acorn = converted.acorn.expect("acorn present");
+        assert!(acorn.enable);
+        assert_eq!(acorn.max_selectivity, Some(OrderedFloat(0.4)));
+
+        let disabled = convert_search_params(&SearchParamsRequest {
+            acorn: Some(qql_plan::types::AcornSearchParams {
+                enable: false,
+                max_selectivity: None,
+            }),
+            ..params
+        })
+        .expect("acorn conversion");
+        assert_eq!(
+            disabled.acorn,
+            Some(qdrant_edge::AcornSearchParams {
+                enable: false,
+                max_selectivity: None,
+            })
+        );
+    }
+
     #[test]
     fn test_sample_random_conversion() {
         let query = QueryVariant::Sample {
@@ -808,14 +778,12 @@ mod tests {
 
     #[test]
     fn test_formula_simple_conversion() {
-        let expr = qql_core::ast::FormulaExpr::Sum {
-            left: Box::new(qql_core::ast::FormulaExpr::Constant { value: 1.0 }),
-            right: Box::new(qql_core::ast::FormulaExpr::Variable {
-                name: "score".to_string(),
-            }),
+        let expr = PlanFormula::Sum {
+            left: Box::new(PlanFormula::Constant(1.0)),
+            right: Box::new(PlanFormula::Variable("$score".to_string())),
         };
         let query = QueryVariant::Formula(FormulaQuery {
-            formula: PlanFormula(expr),
+            formula: expr,
             defaults: None,
         });
         let result = convert_query(&query, None);
@@ -828,16 +796,14 @@ mod tests {
 
     #[test]
     fn test_formula_with_defaults() {
-        let expr = qql_core::ast::FormulaExpr::Mul {
-            left: Box::new(qql_core::ast::FormulaExpr::Variable {
-                name: "score".to_string(),
-            }),
-            right: Box::new(qql_core::ast::FormulaExpr::Constant { value: 2.0 }),
+        let expr = PlanFormula::Mul {
+            left: Box::new(PlanFormula::Variable("$score".to_string())),
+            right: Box::new(PlanFormula::Constant(2.0)),
         };
-        let mut defaults = serde_json::Map::new();
-        defaults.insert("score".to_string(), serde_json::json!(0.0));
+        let defaults =
+            std::collections::BTreeMap::from([("score".to_string(), FormulaDefault::Float(0.0))]);
         let query = QueryVariant::Formula(FormulaQuery {
-            formula: PlanFormula(expr),
+            formula: expr,
             defaults: Some(defaults),
         });
         let result = convert_query(&query, None);
@@ -849,21 +815,12 @@ mod tests {
     #[test]
     fn test_formula_nary_acosh_fail_closed() {
         for expr in [
-            qql_core::ast::FormulaExpr::Max {
-                args: vec![
-                    qql_core::ast::FormulaExpr::Constant { value: 1.0 },
-                    qql_core::ast::FormulaExpr::Constant { value: 2.0 },
-                ],
-            },
-            qql_core::ast::FormulaExpr::Min {
-                args: vec![qql_core::ast::FormulaExpr::Constant { value: 1.0 }],
-            },
-            qql_core::ast::FormulaExpr::Acosh {
-                x: Box::new(qql_core::ast::FormulaExpr::Constant { value: 1.0 }),
-            },
+            PlanFormula::Max(vec![PlanFormula::Constant(1.0), PlanFormula::Constant(2.0)]),
+            PlanFormula::Min(vec![PlanFormula::Constant(1.0)]),
+            PlanFormula::Acosh(Box::new(PlanFormula::Constant(1.0))),
         ] {
             let query = QueryVariant::Formula(FormulaQuery {
-                formula: PlanFormula(expr),
+                formula: expr,
                 defaults: None,
             });
             let result = convert_query(&query, None);
@@ -873,6 +830,64 @@ mod tests {
                 "wrong code for {err}"
             );
         }
+    }
+
+    /// A typed `$score` reference must map to the reserved score variable,
+    /// not to a payload path named `score`.
+    #[test]
+    fn test_formula_score_variable_is_not_a_payload_var() {
+        let query = QueryVariant::Formula(FormulaQuery {
+            formula: PlanFormula::Variable("$score".to_string()),
+            defaults: None,
+        });
+        match convert_query(&query, None).expect("formula conversion") {
+            ScoringQuery::Formula(parsed) => {
+                assert!(
+                    parsed.payload_vars.is_empty(),
+                    "expected reserved score variable, got payload vars {:?}",
+                    parsed.payload_vars
+                );
+            }
+            other => panic!("expected Formula, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_formula_decay_datetime_key_and_case_conversion() {
+        let decay = PlanFormula::Decay {
+            kind: qql_plan::types::PlanDecayKind::Exp,
+            x: Box::new(PlanFormula::DatetimeKey("judgment_date".to_string())),
+            target: Some(Box::new(PlanFormula::Datetime(
+                "2026-09-04T00:00:00Z".to_string(),
+            ))),
+            scale: Some(630720000.0),
+            midpoint: Some(0.5),
+        };
+        let query = QueryVariant::Formula(FormulaQuery {
+            formula: decay,
+            defaults: None,
+        });
+        assert!(convert_query(&query, None).is_ok(), "datetime decay");
+
+        let condition = qql_plan::types::FilterExpression::Single(Box::new(
+            qql_plan::types::FilterClause::Field(Box::new(qql_plan::types::FieldCondition {
+                key: "status".to_string(),
+                r#match: Some(qql_plan::types::MatchValue::Value {
+                    value: serde_json::json!("active"),
+                }),
+                ..Default::default()
+            })),
+        ));
+        let case = PlanFormula::Case {
+            cond: Box::new(PlanFormula::Condition(condition)),
+            then_: Box::new(PlanFormula::Constant(1.0)),
+            else_: Box::new(PlanFormula::Constant(0.0)),
+        };
+        let query = QueryVariant::Formula(FormulaQuery {
+            formula: case,
+            defaults: None,
+        });
+        assert!(convert_query(&query, None).is_ok(), "case condition");
     }
 
     #[test]

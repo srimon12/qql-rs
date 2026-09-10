@@ -227,7 +227,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             query: mut_query(*wait),
             body: body(request)?,
         },
-        // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
+        // DDL: REST shapes differ from plan IR — typed OpenAPI projections
         PlannedOperation::CreateCollection {
             collection,
             request,
@@ -235,7 +235,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(crate::ddl::create_collection_rest_body(request)?),
+            body: body(&crate::ddl::create_collection_rest_body(request))?,
         },
         PlannedOperation::UpdateCollection {
             collection,
@@ -244,7 +244,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Patch,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(crate::ddl::update_collection_rest_body(request)?),
+            body: body(request)?,
         },
         PlannedOperation::CreateIndex {
             collection,
@@ -258,7 +258,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             } else {
                 Vec::new()
             },
-            body: Some(crate::ddl::create_index_rest_body(request)),
+            body: body(&crate::ddl::create_index_rest_body(request))?,
         },
         PlannedOperation::CreateShardKey {
             collection,
@@ -481,7 +481,7 @@ mod tests {
         let op = plan(&clear).unwrap();
         match op {
             PlannedOperation::SetQuotas { request } => {
-                assert_eq!(request.max_disk_usage_percent, None);
+                assert_eq!(request.config.max_disk_usage_percent, None);
             }
             other => panic!("expected SetQuotas, got {other:?}"),
         }

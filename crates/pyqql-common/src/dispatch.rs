@@ -148,72 +148,62 @@ pub fn prepare_input(
     ))
 }
 
-/// Run a normalized [`Input`] on the blocking Tokio runtime.
+/// Run a normalized [`Input`] on the blocking Tokio runtime, returning the
+/// typed execution report (no JSON intermediate).
 pub fn run_input(
     executor: &qql::executor::Executor,
     runtime: &tokio::runtime::Runtime,
     input: Input,
     on_error: OnError,
-) -> PyResult<serde_json::Value> {
+) -> PyResult<qql::executor::ExecutionReport> {
     let stop = matches!(on_error, OnError::Stop);
     let map_err = crate::qql_py_error;
     match input {
-        Input::String(s) => {
-            let report = runtime
-                .block_on(executor.execute(&s, on_error))
-                .map_err(map_err)?;
-            Ok(serde_json::to_value(&report).unwrap_or_default())
-        }
+        Input::String(s) => runtime
+            .block_on(executor.execute(&s, on_error))
+            .map_err(map_err),
         Input::Stmt(s) => {
             let results = runtime
                 .block_on(executor.execute_batch_nodes(vec![s], stop))
                 .map_err(map_err)?;
-            let report = qql::executor::ExecutionReport::from_results(results);
-            Ok(serde_json::to_value(&report).unwrap_or_default())
+            Ok(qql::executor::ExecutionReport::from_results(results))
         }
         Input::StrList(strs) => {
             let refs: Vec<&str> = strs.iter().map(String::as_str).collect();
-            let report = runtime
+            runtime
                 .block_on(executor.execute_batch(&refs, on_error))
-                .map_err(map_err)?;
-            Ok(serde_json::to_value(&report).unwrap_or_default())
+                .map_err(map_err)
         }
         Input::StmtList(stmts) => {
             let results = runtime
                 .block_on(executor.execute_batch_nodes(stmts, stop))
                 .map_err(map_err)?;
-            let report = qql::executor::ExecutionReport::from_results(results);
-            Ok(serde_json::to_value(&report).unwrap_or_default())
+            Ok(qql::executor::ExecutionReport::from_results(results))
         }
     }
 }
 
-/// Run a normalized [`Input`] on an existing async context.
+/// Run a normalized [`Input`] on an existing async context, returning the
+/// typed execution report (no JSON intermediate).
 pub async fn run_async(
     executor: &qql::executor::Executor,
     input: Input,
     on_error: OnError,
-) -> Result<serde_json::Value, QqlError> {
+) -> Result<qql::executor::ExecutionReport, QqlError> {
     let stop = matches!(on_error, OnError::Stop);
     match input {
-        Input::String(s) => {
-            let report = executor.execute(&s, on_error).await?;
-            Ok(serde_json::to_value(&report).unwrap_or_default())
-        }
+        Input::String(s) => executor.execute(&s, on_error).await,
         Input::Stmt(s) => {
             let results = executor.execute_batch_nodes(vec![s], stop).await?;
-            let report = qql::executor::ExecutionReport::from_results(results);
-            Ok(serde_json::to_value(&report).unwrap_or_default())
+            Ok(qql::executor::ExecutionReport::from_results(results))
         }
         Input::StrList(strs) => {
             let refs: Vec<&str> = strs.iter().map(String::as_str).collect();
-            let report = executor.execute_batch(&refs, on_error).await?;
-            Ok(serde_json::to_value(&report).unwrap_or_default())
+            executor.execute_batch(&refs, on_error).await
         }
         Input::StmtList(stmts) => {
             let results = executor.execute_batch_nodes(stmts, stop).await?;
-            let report = qql::executor::ExecutionReport::from_results(results);
-            Ok(serde_json::to_value(&report).unwrap_or_default())
+            Ok(qql::executor::ExecutionReport::from_results(results))
         }
     }
 }
@@ -264,20 +254,4 @@ pub async fn run_analyze_async(
         }
     };
     Ok(serde_json::to_value(&report).unwrap_or_default())
-}
-/// Wrap a serialized report dict in the host module's Python-level
-/// `ExecutionReport` class (typed accessors), falling back to the plain dict
-/// when the import fails (e.g. during interpreter teardown).
-pub fn wrap_execution_report<'py>(
-    py: Python<'py>,
-    dict: Bound<'py, PyAny>,
-    module_name: &str,
-) -> PyResult<Bound<'py, PyAny>> {
-    if let Ok(module) = py.import(module_name)
-        && let Ok(report_cls) = module.getattr("ExecutionReport")
-        && let Ok(report) = report_cls.call1((&dict,))
-    {
-        return Ok(report);
-    }
-    Ok(dict)
 }

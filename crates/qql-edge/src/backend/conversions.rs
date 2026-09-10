@@ -1,8 +1,10 @@
-use qdrant_edge::{PointId, Record};
-use serde_json::Value;
+use std::collections::{BTreeMap, HashMap};
 
+use qdrant_edge::{PointId, Record};
+
+use qql::executor::{FacetHit, SearchHit};
 use qql_core::error::QqlError;
-use qql_plan::PlanPointId;
+use qql_plan::{PlanFacetValue, PlanPointId, PlanVectorStruct, PlanVectorValue};
 
 pub(crate) fn to_edge_id(id: impl IntoPlanPointId) -> Result<PointId, QqlError> {
     match id.into_plan_point_id() {
@@ -33,7 +35,7 @@ where
     ids.into_iter().map(to_edge_id).collect()
 }
 
-/// Accept typed plan IDs and legacy JSON values during the migration.
+/// Accept typed plan point IDs (owned or borrowed).
 pub(crate) trait IntoPlanPointId {
     fn into_plan_point_id(self) -> PlanPointId;
 }
@@ -50,83 +52,85 @@ impl IntoPlanPointId for &PlanPointId {
     }
 }
 
-impl IntoPlanPointId for serde_json::Value {
-    fn into_plan_point_id(self) -> PlanPointId {
-        match self {
-            Value::Number(n) => n
-                .as_u64()
-                .map(PlanPointId::Number)
-                .unwrap_or_else(|| PlanPointId::String(n.to_string())),
-            Value::String(s) => PlanPointId::String(s),
-            // Do NOT map unknown JSON shapes to id 0 — that silently rewrites
-            // deletes/retrieves. Use an unparseable string so to_edge_id errors.
-            other => PlanPointId::String(format!("__invalid_point_id__:{other}")),
-        }
-    }
-}
-
-pub(crate) fn from_edge_id(id: &PointId) -> Value {
+/// Typed plan ID from a `qdrant-edge` point ID (no JSON hop).
+pub(crate) fn from_edge_plan_id(id: &PointId) -> PlanPointId {
     match id {
-        PointId::NumId(n) => serde_json::json!(*n),
-        PointId::Uuid(u) => serde_json::json!(u.to_string()),
+        PointId::NumId(n) => PlanPointId::Number(*n),
+        PointId::Uuid(u) => PlanPointId::String(u.to_string()),
     }
 }
 
-pub(crate) fn from_edge_record(rec: Record) -> Value {
-    let id = from_edge_id(&rec.id);
-    let payload: Value = rec
-        .payload
-        .map(|p| {
-            let map: serde_json::Map<String, Value> = p.0.into_iter().collect();
-            Value::Object(map)
-        })
-        .unwrap_or(Value::Null);
-    let mut obj = serde_json::Map::new();
-    obj.insert("id".into(), id);
-    obj.insert("payload".into(), payload);
-    if let Some(vector) = rec.vector {
-        obj.insert("vector".into(), edge_vector_to_json(vector));
-    }
-    Value::Object(obj)
+fn from_edge_payload(payload: qdrant_edge::Payload) -> HashMap<String, serde_json::Value> {
+    payload.0.into_iter().collect()
 }
 
-pub(crate) fn from_edge_scored_point(point: qdrant_edge::ScoredPoint) -> Value {
-    let mut object = serde_json::Map::new();
-    object.insert("id".into(), from_edge_id(&point.id));
-    object.insert("score".into(), serde_json::json!(point.score));
-    object.insert("version".into(), serde_json::json!(point.version));
-    if let Some(payload) = point.payload {
-        object.insert(
-            "payload".into(),
-            serde_json::to_value(payload).unwrap_or(Value::Null),
-        );
+/// Typed search hit from a scored query point.
+pub(crate) fn from_edge_scored_point_to_hit(point: qdrant_edge::ScoredPoint) -> SearchHit {
+    SearchHit {
+        id: from_edge_plan_id(&point.id),
+        score: point.score,
+        payload: point.payload.map(from_edge_payload),
+        collection: None,
+        vector: point.vector.map(edge_vector_to_typed),
     }
-    if let Some(vector) = point.vector {
-        object.insert("vector".into(), edge_vector_to_json(vector));
-    }
-    Value::Object(object)
 }
 
-fn edge_vector_to_json(vector: qdrant_edge::VectorStructInternal) -> Value {
+/// Typed search hit from a scroll/retrieve record. Records carry no similarity
+/// score, so `score` is `0.0`.
+pub(crate) fn from_edge_record_to_hit(record: Record) -> SearchHit {
+    SearchHit {
+        id: from_edge_plan_id(&record.id),
+        score: 0.0,
+        payload: record.payload.map(from_edge_payload),
+        collection: None,
+        vector: record.vector.map(edge_vector_to_typed),
+    }
+}
+
+/// Typed facet entry from a `qdrant-edge` facet hit. Edge UUID facet values
+/// serialize as strings on the REST surface, so they become keywords here.
+pub(crate) fn from_edge_facet_hit(hit: qdrant_edge::FacetValueHit) -> FacetHit {
+    FacetHit {
+        value: match hit.value {
+            qdrant_edge::FacetValue::Keyword(keyword) => PlanFacetValue::Keyword(keyword),
+            qdrant_edge::FacetValue::Int(integer) => PlanFacetValue::Integer(integer),
+            qdrant_edge::FacetValue::Uuid(uuid) => {
+                PlanFacetValue::Keyword(uuid::Uuid::from_u128(uuid).to_string())
+            }
+            qdrant_edge::FacetValue::Bool(flag) => PlanFacetValue::Bool(flag),
+        },
+        count: hit.count as u64,
+    }
+}
+
+/// One `qdrant-edge` vector value → typed plan vector value.
+fn edge_vector_value_to_typed(vector: qdrant_edge::VectorInternal) -> PlanVectorValue {
     match vector {
-        qdrant_edge::VectorStructInternal::Single(values) => serde_json::json!(values),
-        qdrant_edge::VectorStructInternal::MultiDense(values) => {
-            serde_json::to_value(values).unwrap_or(Value::Null)
+        qdrant_edge::VectorInternal::Dense(values) => PlanVectorValue::Dense(values),
+        qdrant_edge::VectorInternal::Sparse(sparse) => PlanVectorValue::Sparse {
+            indices: sparse.indices,
+            values: sparse.values,
+        },
+        qdrant_edge::VectorInternal::MultiDense(multi) => {
+            PlanVectorValue::MultiDense(multi.into_multi_vectors())
         }
-        qdrant_edge::VectorStructInternal::Named(values) => Value::Object(
-            values
+    }
+}
+
+/// `qdrant-edge` vector struct → typed [`PlanVectorStruct`] (single or named).
+fn edge_vector_to_typed(vector: qdrant_edge::VectorStructInternal) -> PlanVectorStruct {
+    match vector {
+        qdrant_edge::VectorStructInternal::Single(values) => {
+            PlanVectorStruct::Single(PlanVectorValue::Dense(values))
+        }
+        qdrant_edge::VectorStructInternal::MultiDense(multi) => {
+            PlanVectorStruct::Single(PlanVectorValue::MultiDense(multi.into_multi_vectors()))
+        }
+        qdrant_edge::VectorStructInternal::Named(vectors) => PlanVectorStruct::Named(
+            vectors
                 .into_iter()
-                .map(|(name, value)| {
-                    let value = serde_json::to_value(value).unwrap_or(Value::Null);
-                    (name, value)
-                })
-                .collect(),
+                .map(|(name, vector)| (name.to_string(), edge_vector_value_to_typed(vector)))
+                .collect::<BTreeMap<_, _>>(),
         ),
     }
-}
-
-/// Wrap a `qdrant-edge` library error. These are low-level failures from the
-/// in-process HNSW engine (I/O, index corruption, lock poisoning, etc.).
-pub(crate) fn edge_err(e: impl std::fmt::Display) -> QqlError {
-    QqlError::execution("QQL-EDGE-LIB", format!("qdrant-edge: {e}"), None)
 }

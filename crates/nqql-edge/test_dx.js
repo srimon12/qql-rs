@@ -155,24 +155,25 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
     failed: 0,
     results: [
       {
-        type: 'query',
-        status: 'success',
+        ok: true,
+        operation: 'QUERY',
+        message: 'Found 2 hits',
         data: [
           { id: 1, score: 0.95, payload: { name: 'first' }, vector: [0.1, 0.2] },
           { id: 'uuid-2', score: 0.82, payload: { name: 'second' } },
-          'garbage-entry-is-filtered',
         ],
       },
       {
-        type: 'facet',
-        status: 'success',
+        ok: true,
+        operation: 'FACET',
+        message: 'Found 2 facet hit(s)',
         data: [{ value: 'red', count: 12 }, { value: 'blue', count: 8 }],
       },
       {
-        type: 'count',
-        status: 'success',
+        ok: true,
+        operation: 'COUNT',
         message: 'Count: 42',
-        data: { result: { count: 42 } },
+        data: { count: 42 },
       },
     ],
   };
@@ -183,7 +184,7 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(report.failed, 0);
 
   const hits = report.hits(0);
-  assert.strictEqual(hits.length, 2); // non-object entries filtered (pyqql parity)
+  assert.strictEqual(hits.length, 2);
   assert.strictEqual(hits[0].id, 1);
   assert.strictEqual(hits[0].score, 0.95);
   assert.strictEqual(hits[0].payload.name, 'first');
@@ -217,7 +218,7 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(empty.count(), 0);
   assert.deepStrictEqual(empty.groups(), []);
 
-  // Grouped query (GROUP BY): groups() normalizes the envelopes.
+  // Grouped query (GROUP BY): canonical `{groups: [...]}` payloads only.
   assert.deepStrictEqual(
     report.groups(9),
     [],
@@ -233,13 +234,10 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
         operation: 'QUERY_GROUPS',
         message: 'Found 2 group(s)',
         data: {
-          result: {
-            groups: [
-              { id: 'a', hits: [{ id: 1, score: 0.9 }] },
-              { id: 'b', hits: [{ id: 2, score: 0.8 }] },
-            ],
-          },
-          status: 'ok',
+          groups: [
+            { id: 'a', hits: [{ id: 1, score: 0.9 }] },
+            { id: 'b', hits: [{ id: 2, score: 0.8 }] },
+          ],
         },
       },
     ],
@@ -247,21 +245,8 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(grouped.groups().length, 2);
   assert.strictEqual(grouped.groups()[0].id, 'a');
   assert.strictEqual(grouped.groups()[1].hits.length, 1);
-  // Bare envelope (no result wrapper) normalizes too.
-  const bare = new sdk.ExecutionReport({
-    ok: true,
-    succeeded: 1,
-    failed: 0,
-    results: [
-      {
-        ok: true,
-        operation: 'QUERY_GROUPS',
-        message: 'Found 1 group(s)',
-        data: { groups: [{ id: 'x', hits: [] }] },
-      },
-    ],
-  });
-  assert.strictEqual(bare.groups()[0].id, 'x');
+  // A non-groups operation never guesses.
+  assert.deepStrictEqual(report.groups(1), []);
 
   // Facet report
   assert.strictEqual(report.facet(1).length, 2);

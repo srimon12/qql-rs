@@ -17,14 +17,15 @@ mod ddl_types;
 /// Filter lowering into OpenAPI-shaped `Filter` condition structures.
 pub mod filter;
 mod filter_types;
-mod formula;
+mod formula_types;
+/// Payload index request types (`CREATE INDEX`).
+mod index_types;
 /// Mutation lowering: upsert, delete, and payload/vector updates into wire bodies.
 pub mod mutation;
 mod mutation_types;
 mod params;
 pub mod plan;
 mod prefetch;
-mod quantization;
 /// Query lowering: `QUERY` statements into `/points/query` request bodies.
 pub mod query;
 mod query_types;
@@ -37,6 +38,7 @@ pub mod types;
 mod validate;
 
 pub use batch::BatchGrouper;
+pub use formula_types::{FormulaDefault, PlanDecayKind, PlanFormula};
 pub use plan::{
     BatchFamily, BatchKey, PlannedOperation, RestProjectionError, batch_item_error,
     build_query_batch, build_update_batch, ensure_no_unbound_params, parse_and_plan, plan,
@@ -44,6 +46,7 @@ pub use plan::{
 };
 pub use routing::{CompiledStatement, compile_statement};
 pub use semantic::{
-    PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanShardKey, PlanVectorValue,
+    PlanFacetValue, PlanGroupId, PlanPointId, PlanPointVectors, PlanQueryInput, PlanShardKey,
+    PlanVectorStruct, PlanVectorValue,
 };
 pub use types::*;

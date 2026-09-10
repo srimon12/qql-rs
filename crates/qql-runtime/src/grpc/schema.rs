@@ -6,11 +6,23 @@
 #![allow(deprecated)]
 
 use crate::backend::{
-    CollectionParamsSpec, CollectionSchema, PayloadIndexSpec, SparseVectorSpec, VectorSpec,
+    CollectionInfo, CollectionParamsSpec, CollectionSchema, PayloadIndexSpec, SparseVectorSpec,
+    VectorSpec,
 };
 use crate::qdrant_grpc::qdrant;
 
 use super::memory::memory_to_str;
+
+/// Map a proto `CollectionInfo` into the shared typed metadata: status,
+/// counts, and the vector/index schema (no JSON round-trip).
+pub(crate) fn collection_info_from_grpc(info: &qdrant::CollectionInfo) -> CollectionInfo {
+    CollectionInfo {
+        status: info.status.to_string(),
+        points_count: info.points_count.unwrap_or(0),
+        segments_count: info.segments_count,
+        schema: schema_from_grpc_collection(info),
+    }
+}
 
 /// Map gRPC collection info into the shared typed schema (no JSON round-trip).
 pub(crate) fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> CollectionSchema {

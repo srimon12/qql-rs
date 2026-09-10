@@ -12,8 +12,7 @@ use crate::qdrant_grpc::qdrant;
 
 use super::common::{shard_key_selector, to_point_id};
 use super::filter::{to_filter, to_filter_opt};
-use super::formula::ast_formula_to_grpc;
-use super::values::to_qdrant_value;
+use super::formula::{formula_default_to_grpc, plan_formula_to_grpc};
 
 pub(crate) fn to_query_points(
     req: &qql_plan::types::QueryRequest,
@@ -250,14 +249,17 @@ pub(crate) fn to_query_variant(
         }
         QueryVariant::Rrf(rrf) => Variant::Rrf(to_grpc_rrf(rrf)?),
         QueryVariant::Formula(fq) => Variant::Formula(qdrant::Formula {
-            expression: ast_formula_to_grpc(&fq.formula.0),
+            expression: Some(plan_formula_to_grpc(&fq.formula)?),
             defaults: fq
                 .defaults
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(k, v)| (k, to_qdrant_value(v)))
-                .collect(),
+                .as_ref()
+                .map(|defaults| {
+                    defaults
+                        .iter()
+                        .map(|(key, value)| (key.clone(), formula_default_to_grpc(value)))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
         QueryVariant::RelevanceFeedback { relevance_feedback } => {
             let feedback = relevance_feedback
@@ -523,6 +525,37 @@ pub(crate) fn points_and_filter_selector(
     } else {
         Ok(None)
     }
+}
+
+/// Build `GetPoints` from a planned points request — shared by the JSON and
+/// typed read paths so both send identical requests.
+pub(crate) fn to_get_points(
+    request: &qql_plan::types::PointsRequest,
+    collection: &str,
+) -> qdrant::GetPoints {
+    qdrant::GetPoints {
+        collection_name: collection.to_owned(),
+        ids: request.ids.iter().map(to_point_id).collect(),
+        with_payload: request.with_payload.as_ref().map(to_payload_selector),
+        with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
+        shard_key_selector: shard_key_selector(&request.shard_key),
+        ..Default::default()
+    }
+}
+
+/// Build `CountPoints` from a planned count request — shared by the JSON and
+/// typed read paths. QQL always counts exactly (`exact: Some(true)`).
+pub(crate) fn to_count_points(
+    request: &qql_plan::types::CountRequest,
+    collection: &str,
+) -> Result<qdrant::CountPoints, QqlError> {
+    Ok(qdrant::CountPoints {
+        collection_name: collection.to_owned(),
+        filter: to_filter_opt(request.filter.as_ref())?,
+        exact: Some(true),
+        shard_key_selector: shard_key_selector(&request.shard_key),
+        ..Default::default()
+    })
 }
 
 pub(crate) fn to_scroll_points(

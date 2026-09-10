@@ -6,14 +6,14 @@
 //!
 //! Layout:
 //!
-//! - [`common`] — JSON / shard-key / enum helpers
+//! - [`common`] — shard-key / enum helpers
 //! - [`ddl`] — collection & index converters (HNSW, optimizers, quantization,
 //!   vector params, payload index params)
 //! - [`query`] — query / point converters (`QueryPoints`, selectors, vectors)
 //! - [`filter`] — filter expression converters
 //! - [`formula`] — formula expression converters
 //! - [`values`] — payload value conversions (JSON ↔ proto)
-//! - [`responses`] — proto responses → REST-shaped JSON envelopes
+//! - [`typed`] — proto responses → typed executor IR (no JSON envelope anywhere)
 //! - [`execute`] — fast-path dispatch ([`execute_planned_grpc`])
 //! - [`execute_read`] / [`execute_write`] / [`execute_ddl`] — dispatch helpers
 #![allow(deprecated)]
@@ -27,9 +27,9 @@ mod execute_write;
 mod filter;
 mod formula;
 mod query;
-mod responses;
 #[cfg(test)]
 mod tests;
+mod typed;
 mod values;
 
 pub use execute::execute_planned_grpc;
@@ -41,7 +41,7 @@ pub use execute_write::execute_update_batch_grpc;
 pub(crate) mod test_api {
     pub(crate) use super::common::shard_key_selector;
     pub(crate) use super::query::{to_facet_counts, to_query_points, to_vector_input};
-    pub(crate) use super::responses::{facet_hit_to_json, usage_to_json};
+    pub(crate) use super::typed::{facet_hit_to_typed, usage_to_json};
 }
 
 #[cfg(test)]

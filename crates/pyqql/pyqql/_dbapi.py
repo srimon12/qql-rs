@@ -34,8 +34,7 @@ from ._errors import (
     Warning,
 )
 from ._dbapi_rows import map_result
-from ._dx_report import ExecutionReport
-from .pyqql import parse as _parse_statements
+from .pyqql import ExecutionReport, parse as _parse_statements
 
 apilevel = "2.0"
 threadsafety = 1
@@ -174,9 +173,10 @@ class Cursor:
         self._result_sets = []
         self._set_idx = 0
 
-    def _ingest(self, raw: Any, is_executemany: bool = False) -> None:
-        rep = raw if isinstance(raw, ExecutionReport) else ExecutionReport(raw)
-        results = rep.get("results", [])
+    def _ingest(self, raw: ExecutionReport, is_executemany: bool = False) -> None:
+        # `Client.execute` always returns the native report; any other client
+        # is a programmer error, not a shape to normalize.
+        results = raw.get("results", [])
         for idx, res in enumerate(results):
             if not res.get("ok", False):
                 raise OperationalError(
@@ -199,7 +199,7 @@ class Cursor:
                     except (TypeError, ValueError):
                         pass
                     continue
-                part_rows, part_desc = map_result(rep, idx)
+                part_rows, part_desc = map_result(raw, idx)
                 rows.extend(part_rows)
                 if description is None and part_desc is not None:
                     description = part_desc
@@ -228,7 +228,7 @@ class Cursor:
                     pass
                 self._result_sets.append(([], None, count))
                 continue
-            part_rows, part_desc = map_result(rep, idx)
+            part_rows, part_desc = map_result(raw, idx)
             rc = len(part_rows) if part_desc is not None else -1
             self._result_sets.append((part_rows, part_desc, rc))
 

@@ -7,6 +7,8 @@ use async_trait::async_trait;
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
+use crate::executor::response::BackendResponse;
+
 pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
 
 /// HTTP header / gRPC metadata key Qdrant echoes into its logs for request
@@ -105,31 +107,34 @@ pub trait QdrantOps: QdrantOpsBound {
         field_name: &str,
     ) -> Result<(), QqlError>;
 
-    /// Execute a pre-planned operation.
+    /// Execute a pre-planned operation and return its typed payload.
     ///
-    /// REST backends: `PlannedOperation` → `to_rest_route` → HTTP.
-    /// gRPC backends: `PlannedOperation` → protobuf directly.
+    /// REST backends project `PlannedOperation` → `to_rest_route` → HTTP and
+    /// strictly parse the per-operation OpenAPI shape at the transport
+    /// boundary. gRPC/edge convert proto / `qdrant-edge` values straight into
+    /// [`BackendResponse`].
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError>;
+    ) -> Result<BackendResponse, QqlError>;
 
     /// Send multiple `QueryRequest`s to the same collection in one network call
     /// via Qdrant's `/points/query/batch` (REST) or `QueryBatch` (gRPC) endpoint.
+    /// Returns one typed response per search, in order.
     async fn execute_query_batch(
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError>;
+    ) -> Result<Vec<BackendResponse>, QqlError>;
 
     /// Apply a series of point mutations in one network call via Qdrant's
     /// `POST /points/batch` (REST) or `UpdateBatch` (gRPC) endpoint.
-    /// Returns one result per operation, in order.
+    /// Returns one typed response per operation, in order.
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError>;
+    ) -> Result<Vec<BackendResponse>, QqlError>;
 
     /// Atomically update collection aliases (`POST /collections/aliases`).
     ///
@@ -138,6 +143,16 @@ pub trait QdrantOps: QdrantOpsBound {
         Err(QqlError::validation(
             "QQL-VALIDATION-ALIASES",
             "collection aliases are not supported on this backend",
+            None,
+        ))
+    }
+
+    /// Run backend storage optimizers (segment merge / index build). Default:
+    /// unsupported — only an in-process backend has an optimizer to run.
+    async fn optimize_collection(&self, _collection: &str) -> Result<bool, QqlError> {
+        Err(QqlError::validation(
+            "QQL-BACKEND-OPTIMIZE",
+            "optimize is not supported by this backend",
             None,
         ))
     }

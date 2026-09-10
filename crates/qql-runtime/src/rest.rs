@@ -12,6 +12,7 @@ use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 pub use crate::client::REQUEST_ID_HEADER;
 pub(crate) use crate::client::next_request_id;
 use crate::client::{CollectionInfo, QdrantOps};
+use crate::executor::response::{BackendResponse, ExecData};
 
 /// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
 pub const ROUTE_AFFINITY_HEADER: &str = "X-Qdrant-Route-Affinity";
@@ -245,23 +246,7 @@ impl RestQdrant {
 impl QdrantOps for RestQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let value: Value = self.call(Method::GET, "/collections", None).await?;
-        validate_success_envelope(&value, "list_collections")?;
-        let collections = value
-            .get("result")
-            .and_then(|r| r.get("collections"))
-            .and_then(|c| c.as_array())
-            .cloned()
-            .ok_or_else(|| {
-                QqlError::backend(
-                    "QQL-BACKEND-ENVELOPE",
-                    "list_collections response result.collections missing or not an array",
-                    None,
-                )
-            })?;
-        Ok(collections
-            .iter()
-            .filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from))
-            .collect())
+        crate::rest_response::parse_collection_names(&value)
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
@@ -286,21 +271,8 @@ impl QdrantOps for RestQdrant {
         let value: Value = self
             .call(Method::GET, &format!("/collections/{name}"), None)
             .await?;
-        validate_success_envelope(&value, "get_collection_info")?;
-        let result = value.get("result").cloned().unwrap_or(value);
-
-        let schema = crate::backend::schema_from_rest_result(&result);
-
-        let mut info: CollectionInfo = serde_json::from_value(result).map_err(|e| {
-            QqlError::backend(
-                "QQL-BACKEND-JSON",
-                format!("parse collection info: {e}"),
-                None,
-            )
-            .with_collection(name.to_string())
-        })?;
-        info.schema = schema;
-        Ok(info)
+        crate::rest_response::parse_collection_info(&value)
+            .map_err(|error| error.with_collection(name.to_string()))
     }
 
     async fn create_collection(
@@ -354,18 +326,20 @@ impl QdrantOps for RestQdrant {
         self.execute_planned(&op).await.map(|_| ())
     }
 
-    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
+    async fn execute_planned(
+        &self,
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<BackendResponse, QqlError> {
         if let qql_plan::PlannedOperation::CreateCollection {
             collection,
             request,
         } = op
         {
             self.create_collection_planned(collection, request).await?;
-            return Ok(serde_json::json!({
-                "result": true,
-                "status": "ok",
-                "time": 0.0,
-            }));
+            return Ok(BackendResponse {
+                data: ExecData::Mutation { affected: None },
+                telemetry: None,
+            });
         }
         let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
             qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
@@ -379,27 +353,28 @@ impl QdrantOps for RestQdrant {
                 None,
             ),
         })?;
-        self.execute_http(route).await
+        let envelope = self.execute_http(route).await?;
+        crate::rest_response::parse_planned(op, envelope)
     }
 
     async fn execute_query_batch(
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         let path = format!("/collections/{collection}/points/query/batch");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        result_array(&value, &path)
+        crate::rest_response::parse_query_batch(&value)
     }
 
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         let path = format!("/collections/{collection}/points/batch?wait=true");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        result_array(&value, &path)
+        crate::rest_response::parse_update_batch(&value)
     }
 
     async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
@@ -432,18 +407,15 @@ impl RestQdrant {
         collection: &str,
         req: &qql_plan::types::CreateCollectionRequest,
     ) -> Result<(), QqlError> {
-        let body = qql_plan::ddl::create_collection_rest_body(req).map_err(|e| match e {
-            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
-                "QQL-REST-CLIENT-SIDE",
-                format!("{stmt_type} cannot be executed as a single REST route"),
-                None,
-            ),
-            qql_plan::RestProjectionError::SerializeFailed { message } => QqlError::execution(
-                "QQL-PLAN-SERIALIZE",
-                format!("plan IR REST request body serialization failed: {message}"),
-                None,
-            ),
-        })?;
+        let body = serde_json::to_value(qql_plan::ddl::create_collection_rest_body(req)).map_err(
+            |error| {
+                QqlError::execution(
+                    "QQL-PLAN-SERIALIZE",
+                    format!("plan IR REST request body serialization failed: {error}"),
+                    None,
+                )
+            },
+        )?;
         self.call::<Value>(
             Method::PUT,
             &format!("/collections/{collection}"),
@@ -452,6 +424,13 @@ impl RestQdrant {
         .await?;
 
         if let Some(params_patch) = qql_plan::ddl::create_collection_deferred_params_rest(req) {
+            let params_patch = serde_json::to_value(&params_patch).map_err(|error| {
+                QqlError::execution(
+                    "QQL-PLAN-SERIALIZE",
+                    format!("plan IR REST request body serialization failed: {error}"),
+                    None,
+                )
+            })?;
             self.call::<Value>(
                 Method::PATCH,
                 &format!("/collections/{collection}"),
@@ -580,20 +559,6 @@ fn validate_success_envelope(value: &Value, operation: &str) -> Result<(), QqlEr
     Ok(())
 }
 
-fn result_array(value: &Value, operation: &str) -> Result<Vec<Value>, QqlError> {
-    value
-        .get("result")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| {
-            QqlError::backend(
-                "QQL-BACKEND-ENVELOPE",
-                format!("{operation} response result must be an array"),
-                None,
-            )
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,7 +571,6 @@ mod tests {
             "time": 0.001,
         });
         assert!(validate_success_envelope(&value, "test").is_ok());
-        assert!(result_array(&value, "test").is_ok());
     }
 
     #[test]

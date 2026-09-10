@@ -50,6 +50,32 @@ fn value_multivector_rows(flat_rows: &[Vec<f32>]) -> Value {
     value_multivector(&flat, dim)
 }
 
+/// Facet values are compared as their wire text: keyword verbatim, numbers and
+/// bools in canonical decimal form. District is keyword-only today; the other
+/// arms keep the comparison total without falling back to JSON.
+fn facet_value_string(value: qql_plan::PlanFacetValue) -> String {
+    match value {
+        qql_plan::PlanFacetValue::Keyword(s) => s,
+        qql_plan::PlanFacetValue::Integer(i) => i.to_string(),
+        qql_plan::PlanFacetValue::Bool(b) => b.to_string(),
+    }
+}
+
+/// Consume a single-statement report into its typed hits **without cloning**
+/// (the official SDK also moves its result vector out of the call). This keeps
+/// the timed path free of harness-side copies.
+fn report_hits(report: qql::executor::ExecutionReport) -> Vec<qql::executor::SearchHit> {
+    take_hits(report.results.into_iter().next().and_then(|r| r.data))
+}
+
+/// Typed hits out of response data, moving (never cloning) the hit vector.
+fn take_hits(data: Option<qql::executor::ExecData>) -> Vec<qql::executor::SearchHit> {
+    match data {
+        Some(qql::executor::ExecData::Hits(hits)) => hits,
+        _ => Vec::new(),
+    }
+}
+
 pub struct QqlScenarios {
     exec: Executor,
     prepared_dense: tokio::sync::OnceCell<PreparedStatement>,
@@ -154,36 +180,36 @@ impl QqlScenarios {
     }
 
     // ------------------------------------------------------------- reads ----
-    pub async fn query_dense(&self, name: &str, qvec: &[f32]) -> Result<Vec<serde_json::Value>> {
+    pub async fn query_dense(&self, name: &str, qvec: &[f32]) -> Result<Vec<qql::executor::SearchHit>> {
         let rep = self.exec.execute_with_named_params(
             &format!("QUERY :dv FROM {name} USING dense LIMIT 10"),
             &[("dv", value_dense(qvec))],
             OnError::Stop,
         ).await?;
-        Ok(rep.first_hits_raw())
+        Ok(report_hits(rep))
     }
 
     pub async fn query_dense_filtered(
         &self, name: &str, qvec: &[f32],
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<qql::executor::SearchHit>> {
         let rep = self.exec.execute_with_named_params(
             &format!("QUERY :dv FROM {name} USING dense WHERE price < 150.0 AND guests >= 2 LIMIT 10"),
             &[("dv", value_dense(qvec))],
             OnError::Stop,
         ).await?;
-        Ok(rep.first_hits_raw())
+        Ok(report_hits(rep))
     }
 
     /// Precomputed sparse query vector (the parity baseline).
     pub async fn query_sparse(
         &self, name: &str, sv: &serde_json::Value,
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<qql::executor::SearchHit>> {
         let rep = self.exec.execute_with_named_params(
             &format!("QUERY :sv FROM {name} USING bm25 LIMIT 10"),
             &[("sv", value_sparse(sv))],
             OnError::Stop,
         ).await?;
-        Ok(rep.first_hits_raw())
+        Ok(report_hits(rep))
     }
 
     /// Native in-process BM25: the qql runtime embeds the query TEXT locally
@@ -191,7 +217,7 @@ impl QqlScenarios {
     /// sparse path the official SDKs have no equivalent for.
     pub async fn query_sparse_native(
         &self, name: &str, text: &str,
-    ) -> Result<(Vec<serde_json::Value>, sparse::SparseVector)> {
+    ) -> Result<(Vec<qql::executor::SearchHit>, sparse::SparseVector)> {
         let sv = sparse::embed_query(text);
         let rep = self.exec.execute_with_named_params(
             &format!("QUERY :sv FROM {name} USING bm25 LIMIT 10"),
@@ -201,12 +227,12 @@ impl QqlScenarios {
             ]))],
             OnError::Stop,
         ).await?;
-        Ok((rep.first_hits_raw(), sv))
+        Ok((report_hits(rep), sv))
     }
 
     pub async fn query_hybrid(
         &self, name: &str, qvec: &[f32], sv: &serde_json::Value,
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<qql::executor::SearchHit>> {
         let rep = self.exec.execute_with_named_params(
             &format!(
                 "WITH d AS (QUERY :dv FROM {name} USING dense PARAMS (hnsw_ef = 128) LIMIT 50), \
@@ -215,18 +241,18 @@ impl QqlScenarios {
             &[("dv", value_dense(qvec)), ("sv", value_sparse(sv))],
             OnError::Stop,
         ).await?;
-        Ok(rep.first_hits_raw())
+        Ok(report_hits(rep))
     }
 
     pub async fn query_colbert(
         &self, name: &str, flat_rows: &[Vec<f32>],
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<qql::executor::SearchHit>> {
         let rep = self.exec.execute_with_named_params(
             &format!("QUERY :mv FROM {name} USING colbert LIMIT 10"),
             &[("mv", value_multivector_rows(flat_rows))],
             OnError::Stop,
         ).await?;
-        Ok(rep.first_hits_raw())
+        Ok(report_hits(rep))
     }
 
     pub async fn scroll_pages(
@@ -264,9 +290,14 @@ impl QqlScenarios {
 
     pub async fn facet_district(
         &self, name: &str,
-    ) -> Result<Vec<(serde_json::Value, u64)>> {
+    ) -> Result<Vec<(String, u64)>> {
         let report = self.exec.execute(&format!("FACET district FROM {name} LIMIT 20 EXACT true"), OnError::Stop).await?;
-        Ok(report.first_facet().unwrap_or_default())
+        Ok(report
+            .first_facet()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(value, count)| (facet_value_string(value), count))
+            .collect())
     }
 
     // ----------------------------------------------------------- writes ----
@@ -282,7 +313,7 @@ impl QqlScenarios {
 
     pub async fn prepared_rerun(
         &self, name: &str, qvecs: &[Vec<f32>],
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<Vec<qql::executor::SearchHit>> {
         let prepared = self.prepared_dense.get_or_try_init(|| async {
             let p = self.exec.prepare(&format!("QUERY :dv FROM {name} USING dense LIMIT 10")).await?;
             anyhow::ensure!(p.is_planned(), "dense query template should pre-plan (vector-only placeholders)");
@@ -295,7 +326,7 @@ impl QqlScenarios {
                 prepared,
                 &HashMap::from([("dv".to_string(), Value::F32Array(v.clone()))]),
             ).await?;
-            hits = resp.hits_json().map(|s| s.to_vec()).unwrap_or_default();
+            hits = take_hits(resp.data);
         }
         Ok(hits)
     }

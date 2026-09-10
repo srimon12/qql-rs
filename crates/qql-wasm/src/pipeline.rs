@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 use super::client::Client;
 use super::params::WasmOnError;
 use super::report::{WasmReport, exec_response};
-use super::response::{wasm_search_hits, wasm_success_response};
+use super::response::{hit_array, wasm_success_response};
 
 #[wasm_bindgen]
 impl Client {
@@ -188,13 +188,13 @@ impl Client {
                                     results.push(exec_response(false, "QUERY", &msg, None));
                                     continue;
                                 }
-                                let hits = wasm_search_hits(&value);
-                                let count = hits.as_array().map_or(0, Vec::len);
+                                let hits = hit_array(value.get("points"));
+                                let count = hits.len();
                                 results.push(exec_response(
                                     true,
                                     "QUERY",
                                     &format!("Found {count} hits"),
-                                    Some(hits),
+                                    Some(serde_json::Value::Array(hits)),
                                 ));
                             }
                         }
@@ -235,17 +235,29 @@ impl Client {
                                     .await?;
                             }
                         } else {
-                            for (value, label) in values.into_iter().zip(labels.iter()) {
+                            for ((value, label), operation) in
+                                values.into_iter().zip(labels.iter()).zip(operations.iter())
+                            {
                                 if let Some(msg) = batch_item_error(&value) {
                                     results.push(exec_response(false, label, &msg, None));
                                     continue;
                                 }
-                                results.push(exec_response(
-                                    true,
-                                    label,
-                                    &format!("{label} ok (batched)"),
-                                    Some(value),
-                                ));
+                                // Same normalization as single dispatch:
+                                // upserts report their request point count,
+                                // other writes are status-only (`null`).
+                                let data = match operation {
+                                    PlannedOperation::Upsert { request, .. } => {
+                                        Some(serde_json::json!({"count": request.points.len()}))
+                                    }
+                                    _ => None,
+                                };
+                                let message = match operation {
+                                    PlannedOperation::Upsert { request, .. } => {
+                                        format!("Upserted {} point(s)", request.points.len())
+                                    }
+                                    _ => format!("{label} ok"),
+                                };
+                                results.push(exec_response(true, label, &message, data));
                             }
                         }
                     }

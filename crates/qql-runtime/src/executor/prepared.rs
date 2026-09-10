@@ -168,7 +168,6 @@ impl Executor {
                     message: e.to_string(),
                     data: None,
                     telemetry: None,
-                    typed_hits: std::sync::OnceLock::new(),
                 }),
                 Err(e) => return Err(e),
             }

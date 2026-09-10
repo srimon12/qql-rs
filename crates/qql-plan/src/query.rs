@@ -5,7 +5,6 @@ use crate::types::*;
 use qql_core::ast::{FusionMethod, OrderDirection, QueryExpr, QueryInput, QueryStmt, VectorValue};
 use qql_core::error::QqlError;
 
-pub use crate::formula::lower_formula_expr;
 pub use crate::params::{lower_request_opts, lower_search_params, push_read_opts};
 pub use crate::prefetch::{lower_prefetch, lower_prefetch_with_ctes};
 
@@ -115,18 +114,19 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
             defaults,
             ..
         } => {
-            let defaults_map = if defaults.is_empty() {
+            let defaults = if defaults.is_empty() {
                 None
             } else {
-                let mut m = serde_json::Map::new();
-                for (key, value) in defaults {
-                    m.insert(key.clone(), crate::filter::value_to_json(value));
-                }
-                Some(m)
+                Some(
+                    defaults
+                        .iter()
+                        .map(|(key, value)| (key.clone(), FormulaDefault::from(value)))
+                        .collect(),
+                )
             };
             QueryVariant::Formula(FormulaQuery {
-                formula: PlanFormula(expression.as_ref().clone()),
-                defaults: defaults_map,
+                formula: PlanFormula::from(expression.as_ref()),
+                defaults,
             })
         }
         QueryExpr::RelevanceFeedback {

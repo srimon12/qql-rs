@@ -108,8 +108,12 @@ pub async fn handle_doctor(
     // Embed probe: sample request against EMBED_URL, report the real dim.
     let (endpoint_opt, model, expected_dim, dim_source) = resolve_embed_settings();
     let mut embed_line = String::from("embed: no EMBED_URL configured, literal vectors only");
+    // Updated only by the REST embed probe; grpc-only builds keep the defaults.
+    #[cfg_attr(not(feature = "rest"), allow(unused_mut))]
     let mut embed_observed: Option<usize> = None;
+    #[cfg_attr(not(feature = "rest"), allow(unused_mut))]
     let mut embed_ok = true;
+    #[cfg_attr(not(feature = "rest"), allow(unused_mut))]
     let mut embed_code: Option<String> = None;
     if let Some(endpoint) = endpoint_opt.as_deref() {
         #[cfg(feature = "rest")]
@@ -335,7 +339,7 @@ fn doctor_host_summary(
         hints.push("CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model");
     }
     if use_edge {
-        hints.push("edge has no GROUP BY, SHARD keys, ALTER COLLECTION, or ACORN");
+        hints.push("edge has no GROUP BY, SHARD keys, or ALTER COLLECTION");
     }
 
     serde_json::json!({
@@ -988,6 +992,8 @@ pub async fn handle_check(
     let needs_embed = stmts
         .as_ref()
         .is_some_and(|s| statements_need_embeddings(s));
+    // Updated only by the REST embed probe; grpc-only builds keep the default.
+    #[cfg_attr(not(feature = "rest"), allow(unused_mut))]
     let mut observed_dim: Option<usize> = None;
     if !needs_embed {
         push(

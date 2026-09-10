@@ -1,6 +1,6 @@
-//! Small JSON / shard-key helpers shared by the plan-to-gRPC converters.
+//! Small shard-key / enum helpers shared by the plan-to-gRPC converters.
 
-use qql_plan::{PlanPointId, PlanShardKey};
+use qql_plan::{IndexFieldType, PlanPointId, PlanShardKey};
 
 use crate::qdrant_grpc::qdrant;
 
@@ -20,65 +20,18 @@ pub(crate) fn shard_key_selector(key: &Option<PlanShardKey>) -> Option<qdrant::S
     })
 }
 
-pub(crate) fn json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
-    value.get(key).and_then(serde_json::Value::as_u64)
-}
-
-pub(crate) fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
-    value.get(key).and_then(serde_json::Value::as_bool)
-}
-
-pub(crate) fn distance(value: &serde_json::Value) -> i32 {
-    match value
-        .get("distance")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("Cosine")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "euclid" => qdrant::Distance::Euclid as i32,
-        "dot" => qdrant::Distance::Dot as i32,
-        "manhattan" => qdrant::Distance::Manhattan as i32,
-        _ => qdrant::Distance::Cosine as i32,
+/// Map a typed payload field schema onto the protobuf `FieldType` enum.
+pub(crate) fn field_type_to_proto(field_type: IndexFieldType) -> i32 {
+    match field_type {
+        IndexFieldType::Keyword => qdrant::FieldType::Keyword as i32,
+        IndexFieldType::Integer => qdrant::FieldType::Integer as i32,
+        IndexFieldType::Float => qdrant::FieldType::Float as i32,
+        IndexFieldType::Geo => qdrant::FieldType::Geo as i32,
+        IndexFieldType::Text => qdrant::FieldType::Text as i32,
+        IndexFieldType::Bool => qdrant::FieldType::Bool as i32,
+        IndexFieldType::Datetime => qdrant::FieldType::Datetime as i32,
+        IndexFieldType::Uuid => qdrant::FieldType::Uuid as i32,
     }
-}
-
-/// Map OpenAPI / JSON datatype strings onto the protobuf `Datatype` enum.
-pub(crate) fn datatype_from_json(value: &serde_json::Value) -> Option<i32> {
-    value
-        .get("datatype")
-        .and_then(serde_json::Value::as_str)
-        .map(|dt| match dt.to_ascii_lowercase().as_str() {
-            "float32" | "f32" => qdrant::Datatype::Float32 as i32,
-            "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
-            "float16" | "f16" => qdrant::Datatype::Float16 as i32,
-            "turbo4" | "t4" => qdrant::Datatype::Turbo4 as i32,
-            _ => qdrant::Datatype::Default as i32,
-        })
-}
-
-pub(crate) fn option_bool(
-    options: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Option<bool> {
-    options.get(key).and_then(serde_json::Value::as_bool)
-}
-
-pub(crate) fn option_u64(
-    options: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Option<u64> {
-    options.get(key).and_then(serde_json::Value::as_u64)
-}
-
-pub(crate) fn option_string(
-    options: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Option<String> {
-    options
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned)
 }
 
 pub(crate) fn to_point_id(id: &PlanPointId) -> qdrant::PointId {
@@ -90,15 +43,4 @@ pub(crate) fn to_point_id(id: &PlanPointId) -> qdrant::PointId {
             point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.clone())),
         },
     }
-}
-
-/// Read an index `memory` option into the proto `Memory` enum value.
-pub(crate) fn option_memory(
-    options: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Option<i32> {
-    options
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .and_then(crate::grpc::memory::memory_from_str)
 }

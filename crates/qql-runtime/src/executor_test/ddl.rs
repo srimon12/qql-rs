@@ -15,10 +15,12 @@ async fn show_collections_preserves_backend_data() {
         .unwrap();
 
     assert_eq!(report.results[0].operation, "SHOW_COLLECTIONS");
-    assert_eq!(
-        report.results[0].data.as_ref().unwrap()["result"]["collections"],
-        serde_json::json!([{"name": "alpha"}, {"name": "beta"}])
-    );
+    let collections = report.results[0]
+        .data
+        .as_ref()
+        .and_then(crate::executor::ExecData::collections)
+        .expect("SHOW COLLECTIONS keeps its typed list");
+    assert_eq!(collections, ["alpha", "beta"]);
 }
 
 #[tokio::test]

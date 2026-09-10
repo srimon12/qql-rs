@@ -20,94 +20,63 @@ _qdrant_ok = _qdrant_available()
 
 
 def _point_report(rows, operation="QUERY", message=None):
-    return {
-        "ok": True,
-        "results": [
+    return pyqql.ExecutionReport.from_results(
+        [
             {
-                "ok": True,
                 "operation": operation,
                 "message": message or f"Found {len(rows)} hits",
-                "data": rows,
+                "hits": rows,
             }
-        ],
-        "succeeded": 1,
-        "failed": 0,
-    }
+        ]
+    )
 
 
 def _count_report(n):
-    return {
-        "ok": True,
-        "results": [
-            {
-                "ok": True,
-                "operation": "COUNT",
-                "message": f"Count: {n}",
-                "data": {"result": {"count": n}},
-            }
-        ],
-        "succeeded": 1,
-        "failed": 0,
-    }
+    return pyqql.ExecutionReport.from_results(
+        [{"operation": "COUNT", "message": f"Count: {n}", "count": n}]
+    )
 
 
 def _facet_report(pairs):
-    return {
-        "ok": True,
-        "results": [
+    return pyqql.ExecutionReport.from_results(
+        [
             {
-                "ok": True,
                 "operation": "FACET",
                 "message": f"Found {len(pairs)} facet hit(s)",
-                "data": [{"value": v, "count": n} for v, n in pairs],
+                "facet": [{"value": v, "count": n} for v, n in pairs],
             }
-        ],
-        "succeeded": 1,
-        "failed": 0,
-    }
+        ]
+    )
 
 
 def _names_report(names):
-    return {
-        "ok": True,
-        "results": [
+    return pyqql.ExecutionReport.from_results(
+        [
             {
-                "ok": True,
                 "operation": "SHOW_COLLECTIONS",
                 "message": f"Found {len(names)} collection(s)",
-                "data": {"result": {"collections": [{"name": n} for n in names]}},
+                "collections": list(names),
             }
-        ],
-        "succeeded": 1,
-        "failed": 0,
-    }
+        ]
+    )
 
 
 def _groups_report(groups):
-    return {
-        "ok": True,
-        "results": [
+    return pyqql.ExecutionReport.from_results(
+        [
             {
-                "ok": True,
                 "operation": "QUERY_GROUPS",
                 "message": f"Found {len(groups)} group(s)",
-                "data": {"result": {"groups": groups}},
+                "groups": groups,
             }
-        ],
-        "succeeded": 1,
-        "failed": 0,
-    }
+        ]
+    )
 
 
 def _ddl_report(operation="CREATE_COLLECTION"):
-    return {
-        "ok": True,
-        "results": [
-            {"ok": True, "operation": operation, "message": f"{operation} ok"}
-        ],
-        "succeeded": 1,
-        "failed": 0,
-    }
+    return pyqql.ExecutionReport.from_results(
+        [{"operation": operation, "message": f"{operation} ok"}]
+    )
 
 
 class FakeClient:
@@ -125,26 +94,16 @@ class FakeClient:
             raise self.error
         if self.reports:
             return self.reports.pop(0)
-        return {"ok": True, "results": [], "succeeded": 0, "failed": 0}
+        return pyqql.ExecutionReport.from_results([])
 
     def upsert_many(self, collection, rows, batch_size=100, on_error="stop"):
         self.calls.append(("upsert_many", collection, list(rows), batch_size, on_error))
         if self.error is not None:
             raise self.error
         n = len(rows)
-        return {
-            "ok": True,
-            "results": [
-                {
-                    "ok": True,
-                    "operation": "UPSERT",
-                    "message": f"Upserted {n} point(s)",
-                    "data": {"count": n},
-                }
-            ],
-            "succeeded": 1,
-            "failed": 0,
-        }
+        return pyqql.ExecutionReport.from_results(
+            [{"operation": "UPSERT", "message": f"Upserted {n} point(s)", "count": n}]
+        )
 
     def close(self):
         self.closed = True
@@ -229,25 +188,12 @@ class TestDbapiModule(unittest.TestCase):
 
 class TestDbapiCursorOffline(unittest.TestCase):
     def test_nextset_multi_statement(self):
-        report = pyqql.ExecutionReport({
-            "ok": True,
-            "results": [
-                {
-                    "ok": True,
-                    "operation": "QUERY",
-                    "message": "Found 2 hits",
-                    "data": POINTS,
-                },
-                {
-                    "ok": True,
-                    "operation": "COUNT",
-                    "message": "Found 42 points",
-                    "data": {"count": 42},
-                }
-            ],
-            "succeeded": 2,
-            "failed": 0,
-        })
+        report = pyqql.ExecutionReport.from_results(
+            [
+                {"operation": "QUERY", "message": "Found 2 hits", "hits": POINTS},
+                {"operation": "COUNT", "message": "Found 42 points", "count": 42},
+            ]
+        )
         conn = pyqql.Connection(client=FakeClient(reports=[report]))
         cur = conn.cursor()
         cur.execute("QUERY [0.1] FROM docs; COUNT FROM docs;")
@@ -318,7 +264,11 @@ class TestDbapiCursorOffline(unittest.TestCase):
             [d[0] for d in cur.description], ["id", "score", "payload", "vector"]
         )
         fetched = cur.fetchall()
-        self.assertEqual(fetched[0], (7, 1.0, {"t": "x"}, [0.1, 0.2]))
+        # Vectors are typed f32; the serialized report widens them to f64.
+        self.assertEqual(fetched[0][:3], (7, 1.0, {"t": "x"}))
+        self.assertEqual(len(fetched[0][3]), 2)
+        self.assertAlmostEqual(fetched[0][3][0], 0.1, places=6)
+        self.assertAlmostEqual(fetched[0][3][1], 0.2, places=6)
         self.assertEqual(fetched[1], (8, 0.0, {}, None))
         columns = [d[0] for d in cur.description]
         as_dicts = [dict(zip(columns, row)) for row in fetched]
@@ -369,9 +319,12 @@ class TestDbapiCursorOffline(unittest.TestCase):
         cur = conn.cursor()
         cur.execute("QUERY 'x' FROM docs GROUP BY category LIMIT 5")
         self.assertEqual([d[0] for d in cur.description], ["group_id", "hits"])
-        self.assertEqual(
-            cur.fetchall(), [("a", [{"id": 1, "score": 0.9}]), ("b", [])]
-        )
+        rows = cur.fetchall()
+        self.assertEqual([row[0] for row in rows], ["a", "b"])
+        self.assertEqual(len(rows[0][1]), 1)
+        self.assertEqual(rows[0][1][0].id, 1)
+        self.assertEqual(rows[0][1][0].score, 0.9)
+        self.assertEqual(rows[1][1], [])
         self.assertEqual(cur.rowcount, 2)
 
     def test_ddl_has_no_result_set(self):
@@ -399,19 +352,9 @@ class TestDbapiCursorOffline(unittest.TestCase):
         self.assertEqual(params, {"v": [0.1, 0.2]})
 
     def test_failed_result_raises(self):
-        bad = {
-            "ok": False,
-            "results": [
-                {
-                    "ok": False,
-                    "operation": "BACKEND",
-                    "message": "boom",
-                    "data": None,
-                }
-            ],
-            "succeeded": 0,
-            "failed": 1,
-        }
+        bad = pyqql.ExecutionReport.from_results(
+            [{"operation": "BACKEND", "ok": False, "message": "boom"}]
+        )
         cur = pyqql.Connection(client=FakeClient(reports=[bad])).cursor()
         with self.assertRaises(pyqql.OperationalError):
             cur.execute("QUERY [0.1] FROM docs LIMIT 1")
@@ -470,25 +413,12 @@ class TestDbapiExecutemanyOffline(unittest.TestCase):
             cur.executemany(self.SQL, ["not-a-point"])
 
     def test_non_upsert_runs_statement_scoped_batch(self):
-        combined = {
-            "ok": True,
-            "results": [
-                {
-                    "ok": True,
-                    "operation": "COUNT",
-                    "message": "Count: 3",
-                    "data": {"result": {"count": 3}},
-                },
-                {
-                    "ok": True,
-                    "operation": "COUNT",
-                    "message": "Count: 1",
-                    "data": {"result": {"count": 1}},
-                },
-            ],
-            "succeeded": 2,
-            "failed": 0,
-        }
+        combined = pyqql.ExecutionReport.from_results(
+            [
+                {"operation": "COUNT", "message": "Count: 3", "count": 3},
+                {"operation": "COUNT", "message": "Count: 1", "count": 1},
+            ]
+        )
         fake = FakeClient(reports=[combined])
         cur = pyqql.Connection(client=fake).cursor()
         sql = "COUNT FROM docs WHERE tag = :t"

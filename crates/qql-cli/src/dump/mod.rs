@@ -209,8 +209,9 @@ async fn dump_collection_inner(
 
 /// Custom shard keys on the collection, sorted and deduplicated.
 ///
-/// Empty for auto-sharded collections. Accepts both wire shapes: REST wraps
-/// each key as `{"key": …}` while gRPC returns bare values.
+/// Empty for auto-sharded collections. Reads the typed
+/// [`ExecData::ShardKeys`](qql::executor::ExecData::ShardKeys) payload — both
+/// transports produce the same `PlanShardKey` values.
 pub(crate) async fn list_shard_keys(
     ops: &dyn QdrantOps,
     collection: &str,
@@ -219,25 +220,24 @@ pub(crate) async fn list_shard_keys(
         collection: collection.to_string(),
     };
     let response = ops.execute_planned(&op).await?;
-    Ok(parse_shard_key_list(&response))
+    Ok(response
+        .data
+        .shard_keys()
+        .map(parse_shard_key_list)
+        .unwrap_or_default())
 }
 
-/// Sorted, deduplicated shard keys from a `ListShardKeys` response body.
-pub(crate) fn parse_shard_key_list(response: &serde_json::Value) -> Vec<ShardKey> {
-    let result = response.get("result").unwrap_or(response);
-    let entries = result
-        .get("shard_keys")
-        .and_then(|k| k.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut keys: std::collections::HashMap<String, ShardKey> = std::collections::HashMap::new();
-    for entry in &entries {
-        let value = entry.get("key").unwrap_or(entry);
-        if let Some(key) = crate::migrate::discover::json_to_shard_key(value) {
-            keys.insert(key.to_string(), key);
-        }
+/// Sorted, deduplicated shard keys from a typed `ListShardKeys` payload.
+pub(crate) fn parse_shard_key_list(keys: &[PlanShardKey]) -> Vec<ShardKey> {
+    let mut deduped: std::collections::HashMap<String, ShardKey> = std::collections::HashMap::new();
+    for key in keys {
+        let key = match key {
+            PlanShardKey::Keyword(text) => ShardKey::Keyword(text.clone()),
+            PlanShardKey::Number(number) => ShardKey::Number(*number),
+        };
+        deduped.insert(key.to_string(), key);
     }
-    let mut out: Vec<(String, ShardKey)> = keys.into_iter().collect();
+    let mut out: Vec<(String, ShardKey)> = deduped.into_iter().collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out.into_iter().map(|(_, k)| k).collect()
 }

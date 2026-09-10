@@ -141,40 +141,35 @@ impl Executor {
         }
 
         use qql_plan::{PlannedOperation, types::CreateCollectionRequest};
-        let mut req = CreateCollectionRequest {
-            vectors: None,
-            sparse_vectors: None,
-            hnsw_config: None,
-            optimizers_config: None,
-            params: None,
-            quantization_config: None,
-            vectors_config: None,
-            shard_number: None,
-            sharding_method: None,
-            shard_keys: None,
-            payload: None,
-        };
+        let mut req = CreateCollectionRequest::default();
         if requested_dense {
             let dense_size = self.resolve_dense_vector_size(model).await?;
             let dense_name = explicit_dense.unwrap_or(crate::executor::DENSE_VECTOR_NAME);
-            let mut vectors = serde_json::Map::new();
+            let mut vectors = std::collections::BTreeMap::new();
             vectors.insert(
                 dense_name.to_string(),
-                serde_json::json!({
-                    "size": dense_size,
-                    "distance": "Cosine"
-                }),
+                qql_plan::DenseVectorParams {
+                    size: dense_size as u64,
+                    distance: qql_core::ast::VectorDistance::Cosine,
+                    hnsw_config: None,
+                    quantization_config: None,
+                    on_disk: None,
+                    memory: None,
+                    datatype: None,
+                    multivector_config: None,
+                },
             );
-            req.vectors = Some(vectors);
+            req.vectors = Some(qql_plan::DenseVectorsConfig::Named(vectors));
         }
         if requested_sparse {
             let sparse_name = explicit_sparse.unwrap_or(crate::executor::SPARSE_VECTOR_NAME);
-            let mut sparse = serde_json::Map::new();
+            let mut sparse = std::collections::BTreeMap::new();
             sparse.insert(
                 sparse_name.to_string(),
-                serde_json::json!({
-                    "modifier": "idf"
-                }),
+                qql_plan::SparseVectorParams {
+                    index: None,
+                    modifier: qql_plan::SparseModifier::Idf,
+                },
             );
             req.sparse_vectors = Some(sparse);
         }

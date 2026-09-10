@@ -6,11 +6,12 @@ use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::client::{CollectionInfo, QdrantOps};
+use crate::executor::response::BackendResponse;
 use crate::qdrant_grpc::qdrant;
 
 use super::client::GrpcQdrant;
 use super::error::grpc_error;
-use super::schema::schema_from_grpc_collection;
+use super::schema;
 
 #[async_trait]
 impl QdrantOps for GrpcQdrant {
@@ -48,12 +49,7 @@ impl QdrantOps for GrpcQdrant {
             .with_collection(name.to_string())
         })?;
 
-        Ok(CollectionInfo {
-            status: info.status.to_string(),
-            points_count: info.points_count.unwrap_or(0),
-            segments_count: info.segments_count,
-            schema: schema_from_grpc_collection(&info),
-        })
+        Ok(schema::collection_info_from_grpc(&info))
     }
 
     async fn create_collection(
@@ -115,7 +111,9 @@ impl QdrantOps for GrpcQdrant {
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError> {
+    ) -> Result<BackendResponse, QqlError> {
+        // Every operation converts its protobuf response straight into typed
+        // `BackendResponse` data — no JSON envelope, no envelope parser.
         crate::grpc_route::execute_planned_grpc(self, op).await
     }
 
@@ -123,7 +121,7 @@ impl QdrantOps for GrpcQdrant {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         crate::grpc_route::execute_query_batch_grpc(self, collection, batch).await
     }
 
@@ -131,7 +129,7 @@ impl QdrantOps for GrpcQdrant {
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         crate::grpc_route::execute_update_batch_grpc(self, collection, batch).await
     }
 

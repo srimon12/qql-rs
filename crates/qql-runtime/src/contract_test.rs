@@ -603,6 +603,117 @@ mod tests {
     }
 
     #[test]
+    fn rest_grpc_formula_case_condition_parity() {
+        let stmt = Parser::parse(
+            "QUERY FORMULA CASE WHEN status = 'active' THEN $score * 2 ELSE $score END \
+             FROM docs LIMIT 5;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+
+        // REST: `cond * then + (1 - cond) * else`, condition as a bare 0/1 term.
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        let cond = &body["query"]["formula"]["sum"][0]["mult"][0];
+        assert_eq!(cond["key"], "status");
+        assert_eq!(cond["match"]["value"], "active");
+
+        // gRPC: the same weighting, with the condition as a typed Condition.
+        let grpc = test_api::to_query_points(request, collection).unwrap();
+        use qdrant::expression::Variant as Ev;
+        use qdrant::query::Variant as Qv;
+        let Some(Qv::Formula(formula)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref())
+        else {
+            panic!("expected Formula query");
+        };
+        let Some(expression) = formula.expression.as_ref() else {
+            panic!("formula missing expression");
+        };
+        let Some(Ev::Sum(sum)) = expression.variant.as_ref() else {
+            panic!("expected Sum expression, got {:?}", expression.variant);
+        };
+        let Some(Ev::Mult(mult)) = sum.sum[0].variant.as_ref() else {
+            panic!("expected Mult expression, got {:?}", sum.sum[0].variant);
+        };
+        let Some(Ev::Condition(condition)) = mult.mult[0].variant.as_ref() else {
+            panic!(
+                "expected Condition expression, got {:?}",
+                mult.mult[0].variant
+            );
+        };
+        let Some(qdrant::condition::ConditionOneOf::Field(field)) =
+            condition.condition_one_of.as_ref()
+        else {
+            panic!(
+                "expected Field condition, got {:?}",
+                condition.condition_one_of
+            );
+        };
+        assert_eq!(field.key, "status");
+    }
+
+    #[test]
+    fn rest_grpc_formula_match_condition_parity() {
+        let stmt = Parser::parse(
+            "QUERY FORMULA CASE WHEN a = 1 AND b = 2 THEN $score ELSE 0 END FROM docs LIMIT 5;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        let compound = &body["query"]["formula"]["sum"][0]["mult"][0];
+        assert_eq!(compound["must"][0]["key"], "a");
+        assert_eq!(compound["must"][1]["key"], "b");
+
+        // A compound condition maps to a Filter condition on the gRPC side.
+        let grpc = test_api::to_query_points(request, collection).unwrap();
+        use qdrant::expression::Variant as Ev;
+        use qdrant::query::Variant as Qv;
+        let Some(Qv::Formula(formula)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref())
+        else {
+            panic!("expected Formula query");
+        };
+        let Some(Ev::Sum(sum)) = formula
+            .expression
+            .as_ref()
+            .and_then(|expression| expression.variant.as_ref())
+        else {
+            panic!("expected Sum expression");
+        };
+        let Some(Ev::Mult(mult)) = sum.sum[0].variant.as_ref() else {
+            panic!("expected Mult expression, got {:?}", sum.sum[0].variant);
+        };
+        let Some(Ev::Condition(condition)) = mult.mult[0].variant.as_ref() else {
+            panic!(
+                "expected Condition expression, got {:?}",
+                mult.mult[0].variant
+            );
+        };
+        let Some(qdrant::condition::ConditionOneOf::Filter(filter)) =
+            condition.condition_one_of.as_ref()
+        else {
+            panic!(
+                "expected Filter condition, got {:?}",
+                condition.condition_one_of
+            );
+        };
+        assert_eq!(filter.must.len(), 2, "AND carries both clauses: {filter:?}");
+    }
+
+    #[test]
     fn multi_dense_plan_vector_matches_rest_and_grpc_shape() {
         let multi = PlanVectorValue::MultiDense(vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
         let rest = serde_json::to_value(&multi).unwrap();
@@ -748,23 +859,22 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(&cc);
-        let rest = create_collection_rest_body(&req).unwrap();
+        let rest = serde_json::to_value(create_collection_rest_body(&req)).unwrap();
         assert_eq!(rest["replication_factor"], 2);
         assert_eq!(
             rest["vectors"]["v"]["quantization_config"]["scalar"]["quantile"],
             0.95
         );
 
-        // gRPC converters consume flat IR
-        let vp = crate::grpc_route::test_api_ddl::vector_params(
-            req.vectors.as_ref().unwrap().get("v").unwrap(),
-        );
+        // gRPC converters consume the same typed IR
+        let qql_plan::DenseVectorsConfig::Named(map) = req.vectors.as_ref().unwrap() else {
+            panic!("expected named vectors");
+        };
+        let vp = crate::grpc_route::test_api_ddl::vector_params(map.get("v").unwrap());
         assert_eq!(vp.size, 128);
         assert!(vp.hnsw_config.is_some());
         assert!(vp.quantization_config.is_some());
         assert!(vp.multivector_config.is_some());
-        let hnsw = req.hnsw_config.as_ref().map(|_| ());
-        let _ = hnsw;
         assert!(req.optimizers_config.is_some());
     }
 
@@ -921,7 +1031,8 @@ mod tests {
         assert!(fc.filter.is_some());
         assert!(fc.shard_key_selector.is_some());
 
-        // 3. Response conversion parity: gRPC FacetHit normalizes to REST shape
+        // 3. Response conversion: gRPC FacetHit normalizes to the typed value,
+        // which serializes as the OpenAPI `FacetValueHit` shape.
         let hit_str = qdrant::FacetHit {
             value: Some(qdrant::FacetValue {
                 variant: Some(qdrant::facet_value::Variant::StringValue(
@@ -930,7 +1041,9 @@ mod tests {
             }),
             count: 42,
         };
-        let normalized = test_api::facet_hit_to_json(hit_str);
+        let normalized =
+            serde_json::to_value(test_api::facet_hit_to_typed(hit_str).expect("facet converts"))
+                .expect("facet serializes");
         validate_ref(&openapi, "FacetValueHit", &normalized);
         assert_eq!(normalized["value"], "entire_home");
         assert_eq!(normalized["count"], 42);
