@@ -16,6 +16,7 @@
 
 pub mod config_builder;
 pub mod conversions;
+pub mod error_map;
 pub mod filter_converter;
 pub mod query_converter;
 pub mod unsupported;
@@ -36,9 +37,10 @@ use tokio::sync::{Mutex, RwLock};
 
 use config_builder::build_edge_config;
 use conversions::{
-    edge_err, from_edge_facet_hit, from_edge_record_to_hit, from_edge_scored_point_to_hit,
-    to_edge_id, to_edge_ids,
+    from_edge_facet_hit, from_edge_record_to_hit, from_edge_scored_point_to_hit, to_edge_id,
+    to_edge_ids,
 };
+use error_map::{EdgeOp, edge_err, edge_input_err};
 use filter_converter::convert_edge_filter;
 use query_converter::{
     convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
@@ -167,7 +169,8 @@ impl EdgeQdrant {
         let config_res = req.map(|r| build_edge_config(r, on_disk));
         let shard = tokio::task::spawn_blocking(move || -> Result<EdgeShard, QqlError> {
             if path.join("segments").exists() {
-                EdgeShard::load(&path, None).map_err(edge_err)
+                EdgeShard::load(&path, None)
+                    .map_err(|e| edge_err(EdgeOp::Load, Some(&collection), e))
             } else if create {
                 std::fs::create_dir_all(&path).map_err(|e| {
                     QqlError::execution(
@@ -182,7 +185,8 @@ impl EdgeQdrant {
                     None => EdgeConfigBuilder::new().on_disk_payload(on_disk).build(),
                 };
 
-                EdgeShard::new(&path, config).map_err(edge_err)
+                EdgeShard::new(&path, config)
+                    .map_err(|e| edge_err(EdgeOp::Create, Some(&collection), e))
             } else {
                 Err(QqlError::execution(
                     "QQL-EDGE-COLLECTION-NOT-FOUND",
@@ -218,7 +222,9 @@ impl EdgeQdrant {
     ) -> Result<Vec<SearchHit>, QqlError> {
         let shard = self.open_shard(collection).await?;
         let edge_req = convert_query_request(req)?;
-        let results = shard.query(edge_req).map_err(edge_err)?;
+        let results = shard
+            .query(edge_req)
+            .map_err(|e| edge_err(EdgeOp::Query, Some(collection), e))?;
         Ok(results
             .into_iter()
             .map(from_edge_scored_point_to_hit)
@@ -253,7 +259,7 @@ impl EdgeQdrant {
                 with_payload: Some(with_payload),
                 with_vector: Some(with_vector),
             })
-            .map_err(edge_err)?;
+            .map_err(|e| edge_err(EdgeOp::Retrieve, Some(collection), e))?;
         Ok(records.into_iter().map(from_edge_record_to_hit).collect())
     }
 
@@ -297,7 +303,9 @@ impl EdgeQdrant {
                 .transpose()?,
         };
 
-        let (records, _next) = shard.scroll(scroll_req).map_err(edge_err)?;
+        let (records, _next) = shard
+            .scroll(scroll_req)
+            .map_err(|e| edge_err(EdgeOp::Scroll, Some(collection), e))?;
         Ok(records.into_iter().map(from_edge_record_to_hit).collect())
     }
 
@@ -338,7 +346,9 @@ impl EdgeQdrant {
             PointInsertOperations::PointsList(parsed_points),
         ));
 
-        shard.update(op).map_err(edge_err)
+        shard
+            .update(op)
+            .map_err(|e| edge_err(EdgeOp::Upsert, Some(collection), e))
     }
 
     async fn execute_edge_delete(
@@ -371,7 +381,9 @@ impl EdgeQdrant {
             .with_collection(collection.to_string()));
         };
 
-        shard.update(operation).map_err(edge_err)
+        shard
+            .update(operation)
+            .map_err(|e| edge_err(EdgeOp::Delete, Some(collection), e))
     }
 
     async fn execute_edge_clear_payload(
@@ -406,7 +418,9 @@ impl EdgeQdrant {
             .with_collection(collection.to_string()));
         };
 
-        shard.update(operation).map_err(edge_err)
+        shard
+            .update(operation)
+            .map_err(|e| edge_err(EdgeOp::ClearPayload, Some(collection), e))
     }
 
     async fn execute_edge_delete_payload(
@@ -447,7 +461,9 @@ impl EdgeQdrant {
             },
         ));
 
-        shard.update(operation).map_err(edge_err)
+        shard
+            .update(operation)
+            .map_err(|e| edge_err(EdgeOp::DeletePayload, Some(collection), e))
     }
 
     async fn execute_edge_delete_vectors(
@@ -487,7 +503,9 @@ impl EdgeQdrant {
             .with_collection(collection.to_string()));
         };
 
-        shard.update(operation).map_err(edge_err)
+        shard
+            .update(operation)
+            .map_err(|e| edge_err(EdgeOp::DeleteVectors, Some(collection), e))
     }
 
     async fn execute_edge_update_vectors(
@@ -515,7 +533,9 @@ impl EdgeQdrant {
             },
         ));
 
-        shard.update(op).map_err(edge_err)
+        shard
+            .update(op)
+            .map_err(|e| edge_err(EdgeOp::UpdateVectors, Some(collection), e))
     }
 
     async fn execute_edge_update_payload(
@@ -560,7 +580,7 @@ impl EdgeQdrant {
 
         shard
             .update(UpdateOperation::PayloadOperation(op))
-            .map_err(edge_err)
+            .map_err(|e| edge_err(EdgeOp::UpdatePayload, Some(collection), e))
     }
 
     /// Run a planned count, returning the point count.
@@ -576,7 +596,9 @@ impl EdgeQdrant {
             filter,
             exact: req.exact.unwrap_or(true),
         };
-        let count = shard.count(count_req).map_err(edge_err)?;
+        let count = shard
+            .count(count_req)
+            .map_err(|e| edge_err(EdgeOp::Count, Some(collection), e))?;
         Ok(count as u64)
     }
 
@@ -593,18 +615,19 @@ impl EdgeQdrant {
         let mut edge_req = qdrant_edge::FacetRequest::new(key);
         if let Some(limit) = req.limit {
             edge_req.limit = usize::try_from(limit).map_err(|_| {
-                QqlError::execution(
-                    "QQL-EDGE-FACET",
-                    format!("facet limit {limit} exceeds platform usize"),
-                    None,
+                edge_input_err(
+                    EdgeOp::Facet,
+                    Some(collection),
+                    format!("limit {limit} exceeds platform usize"),
                 )
-                .with_collection(collection.to_string())
             })?;
         }
         edge_req.filter = convert_edge_filter(req.filter.as_ref())?;
         edge_req.exact = req.exact.unwrap_or(false);
 
-        let response = shard.facet(edge_req).map_err(edge_err)?;
+        let response = shard
+            .facet(edge_req)
+            .map_err(|e| edge_err(EdgeOp::Facet, Some(collection), e))?;
         Ok(response.hits.into_iter().map(from_edge_facet_hit).collect())
     }
 }
@@ -657,7 +680,9 @@ impl QdrantOps for EdgeQdrant {
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
         let shard = self.open_shard(name).await?;
-        let info = shard.info().map_err(edge_err)?;
+        let info = shard
+            .info()
+            .map_err(|e| edge_err(EdgeOp::Info, Some(name), e))?;
         let cfg = shard.config();
         let dense_vectors = cfg
             .vectors
@@ -832,7 +857,9 @@ impl QdrantOps for EdgeQdrant {
         let op =
             UpdateOperation::FieldIndexOperation(FieldIndexOperations::CreateIndex(create_index));
 
-        shard.update(op).map_err(edge_err)
+        shard
+            .update(op)
+            .map_err(|e| edge_err(EdgeOp::CreateIndex, Some(collection_name), e))
     }
 
     async fn delete_field_index(
@@ -856,7 +883,9 @@ impl QdrantOps for EdgeQdrant {
         let op = UpdateOperation::FieldIndexOperation(FieldIndexOperations::DeleteIndex(
             field_name_json,
         ));
-        shard.update(op).map_err(edge_err)
+        shard
+            .update(op)
+            .map_err(|e| edge_err(EdgeOp::DropIndex, Some(collection_name), e))
     }
 
     async fn execute_planned(
@@ -1006,9 +1035,10 @@ impl QdrantOps for EdgeQdrant {
 
     async fn optimize_collection(&self, collection: &str) -> Result<bool, QqlError> {
         let shard = self.open_shard(collection).await?;
-        tokio::task::spawn_blocking(move || shard.optimize().map_err(edge_err))
+        tokio::task::spawn_blocking(move || shard.optimize())
             .await
             .map_err(|e| spawn_error("optimize", e))?
+            .map_err(|e| edge_err(EdgeOp::Optimize, Some(collection), e))
     }
 
     async fn execute_query_batch(
@@ -1194,7 +1224,7 @@ mod tests {
                 .expect("typed count");
             assert_eq!(response.data, ExecData::Count(2));
 
-            // Facet → Facet (previously rejected with QQL-EDGE-FACET).
+            // Facet → Facet (previously rejected as unsupported offline).
             let facet = plan_one("FACET city FROM docs");
             let response = backend
                 .execute_planned(&facet)
@@ -1484,9 +1514,8 @@ mod tests {
         });
     }
 
-    /// FACET used to fail offline with QQL-EDGE-FACET ("currently only
-    /// supported via REST"). Driving the full executor proves dispatch now
-    /// selects the typed edge path and FACET succeeds end to end.
+    /// FACET used to be rejected offline. Driving the full executor proves
+    /// dispatch selects the typed edge path and FACET succeeds end to end.
     #[test]
     fn executor_facet_succeeds_end_to_end() {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1542,6 +1571,236 @@ mod tests {
             assert!(entries.contains(&(PlanFacetValue::Keyword("SF".into()), 1)));
 
             executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// A read against a nonexistent collection keeps the typed not-found code
+    /// (no ghost collection, no generic engine error).
+    #[test]
+    fn missing_collection_reports_typed_not_found() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("missing-collection");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+
+            let error = backend
+                .execute_planned(&plan_one("SHOW COLLECTION never_created"))
+                .await
+                .expect_err("missing collection must fail");
+            assert_eq!(error.code, "QQL-EDGE-COLLECTION-NOT-FOUND");
+            assert_eq!(error.field("collection"), Some("never_created"));
+
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// A wrong-dimension upsert is rejected by the engine and keeps its precise
+    /// category instead of collapsing into a generic library error.
+    #[test]
+    fn engine_dimension_mismatch_reports_dimension_code() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("engine-dimension");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
+                ))
+                .await
+                .expect("create collection");
+
+            let error = backend
+                .execute_planned(&plan_one(
+                    "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 2.0]}}",
+                ))
+                .await
+                .expect_err("dimension mismatch must fail");
+            assert_eq!(error.code, "QQL-EDGE-DIMENSION");
+            assert_eq!(error.field("operation"), Some("upsert"));
+            assert_eq!(error.field("collection"), Some("docs"));
+            assert!(
+                error.message.contains("Vector dimension error"),
+                "engine cause lost: {}",
+                error.message
+            );
+
+            backend.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// Non-UUID string point IDs are rejected before the engine call, with the
+    /// dedicated id-conversion code.
+    #[test]
+    fn invalid_string_point_id_reports_code() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("invalid-point-id");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
+                ))
+                .await
+                .expect("create collection");
+
+            let error = backend
+                .execute_planned(&plan_one("QUERY POINTS ('doc-1') FROM docs"))
+                .await
+                .expect_err("non-UUID string id must fail");
+            assert_eq!(error.code, "QQL-EDGE-INVALID-POINT-ID");
+            assert!(
+                error.message.contains("doc-1"),
+                "id lost from message: {}",
+                error.message
+            );
+
+            backend.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// A corrupted shard config makes `EdgeShard::load` fail; the failure must
+    /// surface as the engine-storage code with the crate's own cause text.
+    #[test]
+    fn corrupted_shard_load_reports_storage_code() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("corrupt-shard");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
+                ))
+                .await
+                .expect("create collection");
+            backend.close().await.expect("close edge backend");
+
+            // Corrupt the persisted shard config so the next load fails inside
+            // qdrant-edge (`ServiceError` from the JSON read).
+            std::fs::write(dir.join("docs").join("edge_config.json"), b"{ not json")
+                .expect("corrupt config");
+
+            let error = backend
+                .execute_planned(&plan_one("SHOW COLLECTION docs"))
+                .await
+                .expect_err("corrupt shard must fail to load");
+            assert_eq!(error.code, "QQL-EDGE-STORAGE");
+            assert_eq!(error.field("operation"), Some("load"));
+            assert_eq!(error.field("collection"), Some("docs"));
+            assert!(
+                error.message.contains("qdrant-edge load failed:"),
+                "operation context lost: {}",
+                error.message
+            );
+
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// An I/O failure creating the collection directory (base path is a file)
+    /// reports the dedicated storage-path code.
+    #[test]
+    fn create_directory_io_failure_reports_code() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let base = temp_dir("create-dir-io");
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::write(&base, b"not a directory").expect("seed file");
+            let backend = EdgeQdrant::new(&base, false);
+
+            let error = backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(1, COSINE))",
+                ))
+                .await
+                .expect_err("create_dir_all over a file must fail");
+            assert_eq!(error.code, "QQL-EDGE-CREATE-DIR");
+
+            let _ = std::fs::remove_file(&base);
+        });
+    }
+
+    /// `GROUP BY` is still rejected by qql-edge, but the message must say it is
+    /// not exposed yet — qdrant-edge's `query_groups` does exist.
+    #[test]
+    fn group_by_rejection_names_the_edge_gap() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("group-by-gap");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            seed_docs(&backend).await;
+
+            let error = backend
+                .execute_planned(&plan_one(
+                    "QUERY [1.0, 0.0, 0.0] FROM docs USING dense GROUP BY city LIMIT 10",
+                ))
+                .await
+                .expect_err("GROUP BY must stay rejected");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-GROUP-BY");
+            assert!(
+                error.message.contains("does not yet expose"),
+                "stale capability claim: {}",
+                error.message
+            );
+
+            backend.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// `PARAMS (acorn = …)` executes on edge: qdrant-edge 0.8 models ACORN as
+    /// a first-class `SearchParams` field, so the query must reach the engine.
+    #[test]
+    fn acorn_params_execute_on_edge() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("acorn");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            seed_docs(&backend).await;
+
+            let query = plan_one(
+                "QUERY [1.0, 0.0, 0.0] FROM docs USING dense WHERE city = 'NYC' \
+                 PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5",
+            );
+            let response = backend
+                .execute_planned(&query)
+                .await
+                .expect("ACORN query must execute offline");
+            let ExecData::Hits(hits) = &response.data else {
+                panic!("expected typed hits, got {:?}", response.data);
+            };
+            assert_eq!(hits.len(), 2);
+
+            backend.close().await.expect("close edge backend");
             let _ = std::fs::remove_dir_all(dir);
         });
     }

@@ -5,9 +5,9 @@ Node N-API bindings for **local** QQL: qdrant-edge + FastEmbed, no remote Qdrant
 ## Proposition
 
 Same language as `@veristamp/nqql`, executed in-process (qdrant-edge **0.8**).
-Cluster features (`GROUP BY`, `SHARD`, ACORN, **`SHOW QUOTAS` / `SET QUOTA`**, …)
-return explicit `QQL-EDGE-UNSUPPORTED-*` errors. Sparse `PARAMS (idf = …)` is
-supported offline.
+Cluster features (`GROUP BY`, `SHARD`, **`SHOW QUOTAS` / `SET QUOTA`**, …)
+return explicit `QQL-EDGE-UNSUPPORTED-*` errors. Sparse `PARAMS (idf = …)` and
+ACORN search params are supported offline.
 
 ## Install
 

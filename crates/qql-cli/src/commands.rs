@@ -339,7 +339,7 @@ fn doctor_host_summary(
         hints.push("CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model");
     }
     if use_edge {
-        hints.push("edge has no GROUP BY, SHARD keys, ALTER COLLECTION, or ACORN");
+        hints.push("edge has no GROUP BY, SHARD keys, or ALTER COLLECTION");
     }
 
     serde_json::json!({

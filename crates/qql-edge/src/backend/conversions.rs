@@ -134,9 +134,3 @@ fn edge_vector_to_typed(vector: qdrant_edge::VectorStructInternal) -> PlanVector
         ),
     }
 }
-
-/// Wrap a `qdrant-edge` library error. These are low-level failures from the
-/// in-process HNSW engine (I/O, index corruption, lock poisoning, etc.).
-pub(crate) fn edge_err(e: impl std::fmt::Display) -> QqlError {
-    QqlError::execution("QQL-EDGE-LIB", format!("qdrant-edge: {e}"), None)
-}

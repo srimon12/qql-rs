@@ -100,7 +100,7 @@ builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
 
 * **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (11 required methods plus a defaulted `close()`) and optional `Embedder`. Calls `prepare_statement` (**schema vector resolution first**, then embeddings, then upsert schema prep) → `plan()` → batch classification / dispatch. DDL flows through `plan()` → REST projection → `execute_route()` or `execute_grpc_route()`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
 
-* **`qql-edge`**: In-process vector search using qdrant-edge + optional fastembed-rs. Zero network. Implements `QdrantOps` with batch methods fanning out to individual routes (no native edge batch RPC). Uses `qdrant-edge` 0.7.x.
+* **`qql-edge`**: In-process vector search using qdrant-edge + optional fastembed-rs. Zero network. Implements `QdrantOps` with batch methods fanning out to individual routes (no native edge batch RPC). Uses `qdrant-edge` 0.8.x. Engine failures map per `OperationError` variant to stable `QQL-EDGE-*` codes (`backend/error_map.rs`); `QQL-EDGE-LIB` no longer exists.
 
 * **`qql-cli`**: CLI binary. Uses the executor via REST/adapter construction.
 

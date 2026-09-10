@@ -565,13 +565,11 @@ invalid fixtures are normative for those cases.
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
 | `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
-| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
-| `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
@@ -580,7 +578,6 @@ invalid fixtures are normative for those cases.
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
 | `QQL-VALIDATION-IDF` | Malformed `idf` search param at parse time |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
-| `QQL-EDGE-FACET` | `FACET` has no offline route — run it against remote Qdrant |
 
 New error codes may refine cases in a v1 minor release. A code already asserted
 by a v1 fixture cannot change before v2.

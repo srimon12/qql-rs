@@ -15,6 +15,7 @@ use qql_plan::types::{
 };
 use qql_plan::{PlanQueryInput, PlanVectorValue};
 
+use super::error_map::{EdgeOp, edge_err};
 use super::filter_converter::convert_formula_condition;
 
 pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryRequest, QqlError> {
@@ -225,9 +226,7 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
             };
             let parsed = edge_formula
                 .try_into()
-                .map_err(|e: qdrant_edge::OperationError| {
-                    edge_error(format!("failed to parse formula: {e}"))
-                })?;
+                .map_err(|e: qdrant_edge::OperationError| edge_err(EdgeOp::Formula, None, e))?;
             Ok(ScoringQuery::Formula(parsed))
         }
         QueryVariant::RelevanceFeedback { relevance_feedback } => {
@@ -412,9 +411,6 @@ fn formula_default_to_json(value: &FormulaDefault) -> serde_json::Value {
 pub(crate) fn convert_search_params(
     params: &SearchParamsRequest,
 ) -> Result<SearchParams, QqlError> {
-    if params.acorn.is_some() {
-        return Err(crate::backend::unsupported::EdgeUnsupported::Acorn.error());
-    }
     let idf = params
         .idf
         .as_ref()
@@ -444,7 +440,13 @@ pub(crate) fn convert_search_params(
             }
         }),
         indexed_only: params.indexed_only.unwrap_or(false),
-        acorn: None,
+        acorn: params
+            .acorn
+            .as_ref()
+            .map(|acorn| qdrant_edge::AcornSearchParams {
+                enable: acorn.enable,
+                max_selectivity: acorn.max_selectivity.map(OrderedFloat),
+            }),
         idf,
     })
 }
@@ -711,6 +713,43 @@ mod tests {
             }
             other => panic!("expected OrderBy, got {other:?}"),
         }
+    }
+
+    /// ACORN params are a first-class `SearchParams` field on qdrant-edge
+    /// 0.8; the typed converter must pass them through, not reject them.
+    #[test]
+    fn test_acorn_search_params_conversion() {
+        let params = SearchParamsRequest {
+            hnsw_ef: None,
+            exact: None,
+            acorn: Some(qql_plan::types::AcornSearchParams {
+                enable: true,
+                max_selectivity: Some(0.4),
+            }),
+            indexed_only: None,
+            quantization: None,
+            idf: None,
+        };
+        let converted = convert_search_params(&params).expect("acorn conversion");
+        let acorn = converted.acorn.expect("acorn present");
+        assert!(acorn.enable);
+        assert_eq!(acorn.max_selectivity, Some(OrderedFloat(0.4)));
+
+        let disabled = convert_search_params(&SearchParamsRequest {
+            acorn: Some(qql_plan::types::AcornSearchParams {
+                enable: false,
+                max_selectivity: None,
+            }),
+            ..params
+        })
+        .expect("acorn conversion");
+        assert_eq!(
+            disabled.acorn,
+            Some(qdrant_edge::AcornSearchParams {
+                enable: false,
+                max_selectivity: None,
+            })
+        );
     }
 
     #[test]

@@ -318,7 +318,7 @@ search-param    = "hnsw_ef", "=", positive-integer
 | `timeout` | REST **query string** `?timeout=N` / gRPC `timeout` field | Seconds, min 1; overrides global server timeout for this request |
 | `consistency` | REST **query string** `?consistency=` / gRPC `read_consistency` | Factor `N`, or `majority` \| `quorum` \| `all` (OpenAPI `ReadConsistency`) |
 
-`acorn = true` enables ACORN which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled. Optional `max_selectivity` is a number in `(0, 1]` and **requires** `acorn = true` (e.g. `PARAMS (acorn = true, max_selectivity = 0.4)`). **Not supported on edge.**
+`acorn = true` enables ACORN which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled. Optional `max_selectivity` is a number in `(0, 1]` and **requires** `acorn = true` (e.g. `PARAMS (acorn = true, max_selectivity = 0.4)`). Supported offline on qdrant-edge 0.8+.
 
 `quantization` accepts a JSON object with `ignore`, `rescore`, and `oversampling` fields matching Qdrant's `QuantizationSearchParams`.
 

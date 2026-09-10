@@ -136,10 +136,11 @@ Intel Mac users should disable default features and use `http-embedding` or
 | Feature | Edge |
 |---------|------|
 | `PARAMS (idf = 'global' \| WHERE <filter>)` | **Supported** (qdrant-edge 0.8) |
+| `PARAMS (acorn = …, max_selectivity = …)` | **Supported** (qdrant-edge 0.8 wires ACORN into HNSW search) |
 | `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
 | `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
 | `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
-| `SHARD` / `GROUP BY` / ACORN / timeout / consistency | Still unsupported (table below) |
+| `SHARD` / `GROUP BY` / timeout / consistency | Still unsupported (table below) |
 
 ```sql
 -- Sparse IDF corpus works offline (edge 0.8+)
@@ -172,7 +173,6 @@ Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE`/`DROP SHARD KEY` |
 | `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, …) |
-| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = …)` |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = …)` |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |

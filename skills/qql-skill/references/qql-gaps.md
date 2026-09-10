@@ -14,9 +14,10 @@ missing** features that already ship.
 | CLIP `IMAGE` + CLIP text dense | **Opt-in** `image_model` (local **paths** only) |
 | Cross-encoder `CROSS RERANK` | **Opt-in** `reranker_model` / `rerank_endpoint` |
 | `GROUP BY` / query groups | **No** — `QQL-EDGE-UNSUPPORTED-GROUP-BY`; use remote Qdrant |
-| `SHARD`, `ALTER COLLECTION`, ACORN | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
+| `SHARD`, `ALTER COLLECTION` | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
 | `SHOW QUOTAS` / `SET QUOTA` | **No** — `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST `/quotas` only) |
 | `PARAMS (idf = …)` | **Yes** on qdrant-edge **0.8+** (per-query sparse IDF corpus) |
+| `PARAMS (acorn = …, max_selectivity = …)` | **Yes** on qdrant-edge **0.8+** |
 | Batch query/update | Fan-out only (not one native batch RPC) |
 | `PARAMS (timeout / consistency)` | Rejected fail-loud (`QQL-EDGE-UNSUPPORTED-TIMEOUT` / `…-CONSISTENCY`) |
 | Route affinity (`X-Qdrant-Route-Affinity`) | **N/A** — single-node process; no replica pin |
@@ -58,7 +59,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Hybrid shorthand | `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
 | Request timeout | `PARAMS (timeout = 30)` → REST `?timeout=30` / gRPC `timeout` (seconds) |
 | Read consistency | `PARAMS (consistency = majority\|quorum\|all\|N)` → OpenAPI `ReadConsistency` |
-| ACORN params (remote) | `PARAMS (acorn = true, max_selectivity = 0.4)` — not on edge |
+| ACORN params | `PARAMS (acorn = true, max_selectivity = 0.4)` — remote Qdrant and edge 0.8+ |
 | Cluster quotas (REST) | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` — full replace; not gRPC/edge |
 | Memory placement | `memory = 'cold'\|'cached'\|'pinned'` on VECTOR / HNSW / SPARSE / QUANTIZATION / indexes; `payload_memory` in `PARAMS` (no `pinned`) |
 | TurboQuant dense | `WITH VECTOR (…, datatype = 'turbo4')` |

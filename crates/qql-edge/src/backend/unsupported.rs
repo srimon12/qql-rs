@@ -25,8 +25,6 @@ pub enum EdgeUnsupported {
     AlterCollection,
     /// Collection `WITH PARAMS` (replication, etc.) at create time.
     CollectionParams,
-    /// `PARAMS (acorn = …)`.
-    Acorn,
     /// `PARAMS (timeout = …)`.
     Timeout,
     /// `PARAMS (consistency = …)`.
@@ -51,7 +49,6 @@ impl EdgeUnsupported {
             Self::ShardKeyDdl => "QQL-EDGE-UNSUPPORTED-SHARD-KEY",
             Self::AlterCollection => "QQL-EDGE-UNSUPPORTED-ALTER",
             Self::CollectionParams => "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS",
-            Self::Acorn => "QQL-EDGE-UNSUPPORTED-ACORN",
             Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
             Self::Consistency => "QQL-EDGE-UNSUPPORTED-CONSISTENCY",
             Self::Quota => "QQL-EDGE-UNSUPPORTED-QUOTA",
@@ -72,7 +69,6 @@ impl EdgeUnsupported {
             Self::ShardKeyDdl => "CREATE/DROP SHARD KEY",
             Self::AlterCollection => "ALTER COLLECTION",
             Self::CollectionParams => "collection WITH PARAMS (replication, etc.)",
-            Self::Acorn => "PARAMS (acorn = …)",
             Self::Timeout => "PARAMS (timeout = …)",
             Self::Consistency => "PARAMS (consistency = …)",
             Self::Quota => "SHOW QUOTAS / SET QUOTA",
@@ -85,16 +81,19 @@ impl EdgeUnsupported {
 
     pub fn why(self) -> &'static str {
         match self {
-            Self::GroupBy => "qdrant-edge has no /points/query/groups endpoint",
+            Self::GroupBy => {
+                "qql-edge does not yet expose grouped queries (qdrant-edge's query_groups is not wired into the executor)"
+            }
             Self::ShardRouting | Self::CollectionSharding | Self::ShardKeyDdl => {
                 "qql-edge is a single-node process with no custom shard keys"
             }
-            Self::AlterCollection => "qql-edge does not support collection mutation after create",
-            Self::CollectionParams => {
-                "edge storage is configured via LocalExecutorOptions, not collection PARAMS"
+            Self::AlterCollection => {
+                "qql-edge does not yet expose collection mutation after create (qdrant-edge persists HNSW/optimizer config only)"
             }
-            Self::Acorn => "ACORN is a clustered Qdrant HNSW search feature unavailable offline",
-            Self::Timeout => "qql-edge runs in-process without network RPC timeouts",
+            Self::CollectionParams => {
+                "replication / write-consistency / payload-placement collection params have no offline equivalent; payload placement is configured via LocalExecutorOptions"
+            }
+            Self::Timeout => "qdrant-edge query requests carry no timeout field",
             Self::Consistency => {
                 "qql-edge is a single-node in-process engine without replica consistency levels"
             }
@@ -107,9 +106,7 @@ impl EdgeUnsupported {
             Self::PointReferenceQuery => {
                 "offline path must materialize vectors (TEXT/VECTOR) before search"
             }
-            Self::FormulaNary => {
-                "the pinned qdrant-edge predates the acosh / max / min Expression variants"
-            }
+            Self::FormulaNary => "qdrant-edge 0.8 has no ACOSH / MAX / MIN Expression variants",
             Self::Route { .. } => "this route is not implemented by the edge backend",
         }
     }
@@ -178,7 +175,6 @@ mod tests {
             EdgeUnsupported::ShardKeyDdl,
             EdgeUnsupported::AlterCollection,
             EdgeUnsupported::CollectionParams,
-            EdgeUnsupported::Acorn,
             EdgeUnsupported::RecommendAverageVector,
             EdgeUnsupported::Quota,
             EdgeUnsupported::PointReferenceQuery,
