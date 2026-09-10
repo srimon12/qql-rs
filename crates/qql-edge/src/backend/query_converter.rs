@@ -39,6 +39,7 @@ fn reject_request_level(
     shard_key: Option<&qql_plan::semantic::PlanShardKey>,
     timeout: Option<u64>,
     consistency: Option<&qql_plan::types::ReadConsistencyParam>,
+    lookup_from: Option<&qql_plan::types::LookupRequest>,
 ) -> Result<(), QqlError> {
     if shard_key.is_some() {
         return Err(unsupported_shard());
@@ -48,6 +49,9 @@ fn reject_request_level(
     }
     if consistency.is_some() {
         return Err(crate::backend::unsupported::EdgeUnsupported::Consistency.error());
+    }
+    if lookup_from.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::PointReferenceQuery.error());
     }
     Ok(())
 }
@@ -82,6 +86,7 @@ pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryR
         request.shard_key.as_ref(),
         request.timeout,
         request.consistency.as_ref(),
+        request.lookup_from.as_ref(),
     )?;
     convert_shared_query(SharedQueryFields {
         query: &request.query,
@@ -114,6 +119,7 @@ pub(crate) fn convert_query_groups_request(
         request.shard_key.as_ref(),
         request.timeout,
         request.consistency.as_ref(),
+        request.lookup_from.as_ref(),
     )?;
     let query = convert_shared_query(SharedQueryFields {
         query: &request.query,
@@ -159,6 +165,9 @@ pub(crate) fn convert_group_output(
 }
 
 fn convert_prefetch(request: &PrefetchRequest) -> Result<Prefetch, QqlError> {
+    if request.lookup_from.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::PointReferenceQuery.error());
+    }
     Ok(Prefetch {
         prefetches: request
             .prefetch
@@ -213,23 +222,22 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
                 .map(plan_input_to_vector_internal)
                 .collect::<Result<_, _>>()?;
             let reco = RecommendQuery::new(positives, negatives);
-            let strategy = recommend.strategy.as_deref().unwrap_or("average_vector");
-            let query_enum = match strategy {
-                "best_score" => QueryEnum::RecommendBestScore(NamedQuery {
+            let query_enum = match recommend.strategy.as_deref() {
+                Some("best_score") => QueryEnum::RecommendBestScore(NamedQuery {
                     query: reco,
                     using: using.map(str::to_string),
                 }),
-                "sum_scores" => QueryEnum::RecommendSumScores(NamedQuery {
+                Some("sum_scores") => QueryEnum::RecommendSumScores(NamedQuery {
                     query: reco,
                     using: using.map(str::to_string),
                 }),
-                "average_vector" => {
+                None | Some("average_vector") => {
                     return Err(
                         crate::backend::unsupported::EdgeUnsupported::RecommendAverageVector
                             .error(),
                     );
                 }
-                other => {
+                Some(other) => {
                     return Err(edge_error(format!(
                         "unsupported recommend strategy '{other}'"
                     )));
@@ -753,6 +761,26 @@ mod tests {
             }
             other => panic!("expected RecommendSumScores, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_recommend_omitted_strategy_rejected_as_average_vector() {
+        let query = QueryVariant::Recommend {
+            recommend: RecommendQuery {
+                positive: vec![PlanQueryInput::Vector(PlanVectorValue::Dense(vec![
+                    1.0, 0.0, 0.0,
+                ]))],
+                negative: vec![],
+                strategy: None,
+            },
+        };
+        let error = convert_query(&query, Some("dense")).expect_err("default strategy");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY");
+        assert!(
+            error.message.contains("average_vector"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

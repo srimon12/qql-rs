@@ -1,6 +1,10 @@
 //! Edge collection configuration builder passing through dense/sparse vector configs, HNSW, quantization, and optimizers.
 
-use qdrant_edge::EdgeConfigBuilder;
+use qdrant_edge::{
+    BinaryQuantizationConfig, BinaryQuantizationEncoding, BinaryQuantizationQueryEncoding,
+    CompressionRatio, EdgeConfigBuilder, ProductQuantizationConfig, QuantizationConfig,
+    ScalarQuantizationConfig, ScalarType,
+};
 
 use qql_core::ast::{MemoryPlacement, VectorDatatype, VectorDistance};
 use qql_core::error::QqlError;
@@ -82,22 +86,65 @@ pub(crate) fn edge_hnsw_config(
     edge_hnsw_config_over(config, &qdrant_edge::HnswIndexConfig::default())
 }
 
+/// Overlay a plan optimizer patch onto an existing engine config.
+///
+/// `set_optimizers_config` replaces the whole blob, so a partial
+/// `ALTER … WITH OPTIMIZERS (indexing_threshold = …)` must keep the other
+/// keys already persisted on the shard.
+pub(crate) fn overlay_optimizers(
+    plan: &OptimizersConfig,
+    base: &qdrant_edge::EdgeOptimizersConfig,
+) -> Result<qdrant_edge::EdgeOptimizersConfig, QqlError> {
+    let patch = edge_optimizers_config(plan)?;
+    Ok(qdrant_edge::EdgeOptimizersConfig {
+        deleted_threshold: patch.deleted_threshold.or(base.deleted_threshold),
+        vacuum_min_vector_number: patch
+            .vacuum_min_vector_number
+            .or(base.vacuum_min_vector_number),
+        default_segment_number: patch.default_segment_number.or(base.default_segment_number),
+        max_segment_size: patch.max_segment_size.or(base.max_segment_size),
+        indexing_threshold: patch.indexing_threshold.or(base.indexing_threshold),
+        prevent_unoptimized: patch.prevent_unoptimized.or(base.prevent_unoptimized),
+    })
+}
+
 /// Field-merge a plan HNSW config over `base`.
 ///
-/// Used for per-vector overrides with the resolved collection-wide config as
-/// base (the engine replaces rather than merges per-vector configs), and for
-/// plain configs with engine defaults as base.
-fn edge_hnsw_config_over(
+/// Used for per-vector overrides, `ALTER COLLECTION` (live shard config as
+/// base), and plain create-time configs (engine defaults as base). Engine
+/// `Memory` is not re-exported, so that one field is the only serde hop.
+#[allow(deprecated)]
+pub(crate) fn edge_hnsw_config_over(
     config: &HnswConfig,
     base: &qdrant_edge::HnswIndexConfig,
 ) -> Result<qdrant_edge::HnswIndexConfig, QqlError> {
-    let mut merged = serde_json::to_value(base).map_err(|e| edge_config_error(e.to_string()))?;
-    let provided = serde_json::to_value(config).map_err(|e| edge_config_error(e.to_string()))?;
-    if let (Some(base), serde_json::Value::Object(provided)) = (merged.as_object_mut(), provided) {
-        base.extend(provided);
+    let mut merged = *base;
+    if let Some(m) = config.m {
+        merged.m = usize_config("hnsw.m", m)?;
     }
-    serde_json::from_value(merged)
-        .map_err(|error| edge_config_error(format!("invalid HNSW configuration: {error}")))
+    if let Some(ef_construct) = config.ef_construct {
+        merged.ef_construct = usize_config("hnsw.ef_construct", ef_construct)?;
+    }
+    if let Some(full_scan_threshold) = config.full_scan_threshold {
+        merged.full_scan_threshold = usize_config("hnsw.full_scan_threshold", full_scan_threshold)?;
+    }
+    if let Some(max_indexing_threads) = config.max_indexing_threads {
+        merged.max_indexing_threads =
+            usize_config("hnsw.max_indexing_threads", max_indexing_threads)?;
+    }
+    if let Some(on_disk) = config.on_disk {
+        merged.on_disk = Some(on_disk);
+    }
+    if let Some(payload_m) = config.payload_m {
+        merged.payload_m = Some(usize_config("hnsw.payload_m", payload_m)?);
+    }
+    if let Some(inline_storage) = config.inline_storage {
+        merged.inline_storage = Some(inline_storage);
+    }
+    if let Some(memory) = config.memory {
+        merged.memory = Some(edge_memory(memory)?);
+    }
+    Ok(merged)
 }
 
 /// Lower a plan optimizer config into the qdrant-edge optimizer config type.
@@ -124,9 +171,26 @@ pub(crate) fn edge_optimizers_config(
                 .with_field("config_key", key));
         }
     }
-    let val = serde_json::to_value(config).map_err(|e| edge_config_error(e.to_string()))?;
-    serde_json::from_value::<qdrant_edge::EdgeOptimizersConfig>(val)
-        .map_err(|error| edge_config_error(format!("invalid optimizer configuration: {error}")))
+    Ok(qdrant_edge::EdgeOptimizersConfig {
+        deleted_threshold: config.deleted_threshold,
+        vacuum_min_vector_number: config
+            .vacuum_min_vector_number
+            .map(|value| usize_config("optimizers.vacuum_min_vector_number", value))
+            .transpose()?,
+        default_segment_number: config
+            .default_segment_number
+            .map(|value| usize_config("optimizers.default_segment_number", value))
+            .transpose()?,
+        max_segment_size: config
+            .max_segment_size
+            .map(|value| usize_config("optimizers.max_segment_size", value))
+            .transpose()?,
+        indexing_threshold: config
+            .indexing_threshold
+            .map(|value| usize_config("optimizers.indexing_threshold", value))
+            .transpose()?,
+        prevent_unoptimized: config.prevent_unoptimized,
+    })
 }
 
 fn edge_vector_params(
@@ -218,16 +282,108 @@ fn edge_sparse_vector_params(
 
 /// Lower a plan quantization config onto the engine type.
 ///
-/// The plan types mirror the OpenAPI schema field-for-field — including the
-/// 1.19 `memory` placement and the deprecated `always_ram` flag — so the serde
-/// bridge is exact. A malformed family (e.g. an unknown scalar `type`) fails
-/// closed here instead of being silently ignored.
+/// Families map field-for-field. Engine `Memory` is not re-exported, so
+/// placement is the one serde hop (a lowercase keyword). Turbo bit-size is
+/// the same: the engine enum is crate-private, so that one string is decoded
+/// through serde rather than a whole-config JSON round-trip.
+#[allow(deprecated)]
 fn edge_quantization_config(
     config: &qql_plan::QuantizationConfig,
-) -> Result<qdrant_edge::QuantizationConfig, QqlError> {
-    let value = serde_json::to_value(config).map_err(|e| edge_config_error(e.to_string()))?;
-    serde_json::from_value(value)
-        .map_err(|error| edge_config_error(format!("invalid quantization configuration: {error}")))
+) -> Result<QuantizationConfig, QqlError> {
+    match config {
+        qql_plan::QuantizationConfig::Scalar { scalar } => {
+            if !scalar.qtype.eq_ignore_ascii_case("int8") {
+                return Err(edge_config_error(format!(
+                    "scalar quantization type '{}' is not supported (expected int8)",
+                    scalar.qtype
+                )));
+            }
+            Ok(QuantizationConfig::from(ScalarQuantizationConfig {
+                r#type: ScalarType::Int8,
+                quantile: scalar.quantile.map(|value| value as f32),
+                always_ram: scalar.always_ram,
+                memory: scalar.memory.map(edge_memory).transpose()?,
+            }))
+        }
+        qql_plan::QuantizationConfig::Product { product } => {
+            Ok(QuantizationConfig::from(ProductQuantizationConfig {
+                compression: edge_compression(&product.compression)?,
+                always_ram: product.always_ram,
+                memory: product.memory.map(edge_memory).transpose()?,
+            }))
+        }
+        qql_plan::QuantizationConfig::Binary { binary } => {
+            Ok(QuantizationConfig::from(BinaryQuantizationConfig {
+                always_ram: binary.always_ram,
+                memory: binary.memory.map(edge_memory).transpose()?,
+                encoding: binary
+                    .encoding
+                    .as_deref()
+                    .map(edge_binary_encoding)
+                    .transpose()?,
+                query_encoding: binary
+                    .query_encoding
+                    .as_deref()
+                    .map(edge_binary_query_encoding)
+                    .transpose()?,
+            }))
+        }
+        qql_plan::QuantizationConfig::Turbo { turbo } => {
+            // `TurboQuantBitSize` is not re-exported; decode the one keyword.
+            let mut body = serde_json::Map::new();
+            if let Some(bits) = turbo.bits.as_ref() {
+                body.insert("bits".into(), serde_json::Value::String(bits.clone()));
+            }
+            if let Some(always_ram) = turbo.always_ram {
+                body.insert("always_ram".into(), serde_json::Value::Bool(always_ram));
+            }
+            if let Some(memory) = turbo.memory {
+                body.insert(
+                    "memory".into(),
+                    serde_json::Value::String(memory.as_str().to_string()),
+                );
+            }
+            serde_json::from_value(serde_json::json!({ "turbo": body })).map_err(|error| {
+                edge_config_error(format!("invalid turbo quantization configuration: {error}"))
+            })
+        }
+    }
+}
+
+fn edge_compression(value: &str) -> Result<CompressionRatio, QqlError> {
+    match value {
+        "x4" => Ok(CompressionRatio::X4),
+        "x8" => Ok(CompressionRatio::X8),
+        "x16" => Ok(CompressionRatio::X16),
+        "x32" => Ok(CompressionRatio::X32),
+        "x64" => Ok(CompressionRatio::X64),
+        other => Err(edge_config_error(format!(
+            "product quantization compression '{other}' is not supported (expected x4, x8, x16, x32, or x64)"
+        ))),
+    }
+}
+
+fn edge_binary_encoding(value: &str) -> Result<BinaryQuantizationEncoding, QqlError> {
+    match value {
+        "one_bit" => Ok(BinaryQuantizationEncoding::OneBit),
+        "two_bits" => Ok(BinaryQuantizationEncoding::TwoBits),
+        "one_and_half_bits" => Ok(BinaryQuantizationEncoding::OneAndHalfBits),
+        other => Err(edge_config_error(format!(
+            "binary quantization encoding '{other}' is not supported (expected one_bit, two_bits, or one_and_half_bits)"
+        ))),
+    }
+}
+
+fn edge_binary_query_encoding(value: &str) -> Result<BinaryQuantizationQueryEncoding, QqlError> {
+    match value {
+        "default" => Ok(BinaryQuantizationQueryEncoding::Default),
+        "binary" => Ok(BinaryQuantizationQueryEncoding::Binary),
+        "scalar4bits" => Ok(BinaryQuantizationQueryEncoding::Scalar4Bits),
+        "scalar8bits" => Ok(BinaryQuantizationQueryEncoding::Scalar8Bits),
+        other => Err(edge_config_error(format!(
+            "binary query encoding '{other}' is not supported (expected default, binary, scalar4bits, or scalar8bits)"
+        ))),
+    }
 }
 
 /// Map the plan's dense/sparse datatype onto the engine's storage datatype.
@@ -261,6 +417,28 @@ fn resolve_on_disk(on_disk: Option<bool>, memory: Option<MemoryPlacement>) -> Op
         Some(MemoryPlacement::Cached | MemoryPlacement::Cold) => Some(true),
         None => on_disk,
     }
+}
+
+/// Decode a placement keyword into an engine `Memory` value.
+///
+/// qdrant-edge does not re-export `Memory`; the field type is inferred from
+/// the assignment site (`HnswIndexConfig::memory`, quantization configs).
+pub(crate) fn edge_memory<T: serde::de::DeserializeOwned>(
+    placement: MemoryPlacement,
+) -> Result<T, QqlError> {
+    serde_json::from_value(serde_json::Value::String(placement.as_str().to_string())).map_err(
+        |error| {
+            edge_config_error(format!(
+                "invalid memory placement '{}': {error}",
+                placement.as_str()
+            ))
+        },
+    )
+}
+
+fn usize_config(field: &str, value: u64) -> Result<usize, QqlError> {
+    usize::try_from(value)
+        .map_err(|error| edge_config_error(format!("{field} is too large: {error}")))
 }
 
 fn edge_config_error(message: impl Into<String>) -> QqlError {
@@ -509,6 +687,51 @@ mod tests {
             Some(qdrant_edge::VectorStorageDatatype::Float16)
         );
         assert_eq!(params.modifier, Some(qdrant_edge::Modifier::Idf));
+    }
+
+    /// Collection-wide `WITH HNSW (memory = pinned)` reaches the engine enum.
+    #[test]
+    fn hnsw_memory_is_passed_through() {
+        let req = CreateCollectionRequest {
+            vectors: Some(DenseVectorsConfig::Single(dense(
+                None, None, None, None, None,
+            ))),
+            hnsw_config: Some(hnsw(None, None, Some(MemoryPlacement::Pinned))),
+            ..Default::default()
+        };
+        let config = build_edge_config(&req, false).expect("edge config");
+        let expected = qdrant_edge::HnswIndexConfig {
+            memory: Some(edge_memory(MemoryPlacement::Pinned).expect("pinned")),
+            ..qdrant_edge::HnswIndexConfig::default()
+        };
+        assert_eq!(config.hnsw_config().memory, expected.memory);
+    }
+
+    /// Unknown scalar/product keywords fail closed instead of a serde drop.
+    #[test]
+    fn quantization_unknown_keywords_fail_closed() {
+        let error = edge_quantization_config(&qql_plan::QuantizationConfig::Scalar {
+            scalar: qql_plan::ScalarQuantization {
+                qtype: "float32".into(),
+                quantile: None,
+                always_ram: None,
+                memory: None,
+            },
+        })
+        .expect_err("bad scalar type");
+        assert_eq!(error.code, "QQL-EDGE-CONFIG");
+        assert!(error.message.contains("int8"), "{}", error.message);
+
+        let error = edge_quantization_config(&qql_plan::QuantizationConfig::Product {
+            product: qql_plan::ProductQuantization {
+                compression: "x2".into(),
+                always_ram: None,
+                memory: None,
+            },
+        })
+        .expect_err("bad compression");
+        assert_eq!(error.code, "QQL-EDGE-CONFIG");
+        assert!(error.message.contains("x4"), "{}", error.message);
     }
 
     /// `turbo4` is dense-only; a sparse index requesting it fails closed.

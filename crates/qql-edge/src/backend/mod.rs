@@ -18,6 +18,7 @@ pub mod config_builder;
 pub mod conversions;
 pub mod error_map;
 pub mod filter_converter;
+pub mod index_schema;
 pub mod query_converter;
 pub mod unsupported;
 pub mod vector_parser;
@@ -29,19 +30,20 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use qdrant_edge::{
     CreateIndex, EdgeConfig, EdgeConfigBuilder, EdgeShard, EdgeShardRead, FieldIndexOperations,
-    PayloadFieldSchema, PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation,
-    VectorOperations, VectorStructPersisted, WalOptions, WithPayloadInterface, WithVector,
+    PointInsertOperations, PointOperations, UpdateOperation, VectorOperations,
+    VectorStructPersisted, WalOptions, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
-use config_builder::{build_edge_config, edge_hnsw_config, edge_optimizers_config};
+use config_builder::{build_edge_config, edge_hnsw_config_over, overlay_optimizers};
 use conversions::{
     from_edge_facet_hit, from_edge_group_to_typed, from_edge_record_to_hit,
     from_edge_scored_point_to_hit, hydrate_edge_groups, to_edge_id, to_edge_ids,
 };
 use error_map::{EdgeOp, edge_err, edge_input_err};
 use filter_converter::convert_edge_filter;
+use index_schema::edge_payload_field_schema;
 use query_converter::{
     convert_group_output, convert_order_by_interface, convert_query_groups_request,
     convert_query_request, convert_with_payload, convert_with_vector, parse_json_path,
@@ -72,6 +74,15 @@ pub struct EdgeQdrant {
     wal_segment_capacity: Option<usize>,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
     opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+}
+
+/// How `open_shard_inner` treats a missing vs existing collection directory.
+#[derive(Clone, Copy)]
+enum OpenMode {
+    /// Reads and mutations: missing collection is `QQL-EDGE-COLLECTION-NOT-FOUND`.
+    MustExist,
+    /// `CREATE COLLECTION`: existing `segments/` is `QQL-EDGE-COLLECTION-EXISTS`.
+    CreateExclusive,
 }
 
 /// Helper: create a spawn_blocking error with the operation name for context.
@@ -141,22 +152,14 @@ impl EdgeQdrant {
     /// `QQL-EDGE-COLLECTION-NOT-FOUND` instead of materialising a ghost
     /// collection, matching the remote backends' 404 semantics.
     async fn open_shard(&self, name: &str) -> Result<Arc<EdgeShard>, QqlError> {
-        self.open_shard_inner(name, None, false).await
-    }
-
-    async fn open_shard_with_req(
-        &self,
-        name: &str,
-        req: Option<&CreateCollectionRequest>,
-    ) -> Result<Arc<EdgeShard>, QqlError> {
-        self.open_shard_inner(name, req, true).await
+        self.open_shard_inner(name, None, OpenMode::MustExist).await
     }
 
     async fn open_shard_inner(
         &self,
         name: &str,
         req: Option<&CreateCollectionRequest>,
-        create: bool,
+        mode: OpenMode,
     ) -> Result<Arc<EdgeShard>, QqlError> {
         {
             let shards = self.shards.read().await;
@@ -188,6 +191,14 @@ impl EdgeQdrant {
         let config_res = req.map(|r| build_edge_config(r, on_disk));
         let shard = tokio::task::spawn_blocking(move || -> Result<EdgeShard, QqlError> {
             if path.join("segments").exists() {
+                if matches!(mode, OpenMode::CreateExclusive) {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE-COLLECTION-EXISTS",
+                        format!("collection '{collection}' already exists"),
+                        None,
+                    )
+                    .with_collection(collection));
+                }
                 // Override only the WAL capacity; every other unspecified
                 // parameter resolves to the shard's persisted config.
                 let load_config = wal_segment_capacity.map(|capacity| EdgeConfig {
@@ -199,7 +210,7 @@ impl EdgeQdrant {
                 });
                 EdgeShard::load(&path, load_config)
                     .map_err(|e| edge_err(EdgeOp::Load, Some(&collection), e))
-            } else if create {
+            } else if matches!(mode, OpenMode::CreateExclusive) {
                 std::fs::create_dir_all(&path).map_err(|e| {
                     QqlError::execution(
                         "QQL-EDGE-CREATE-DIR",
@@ -285,19 +296,35 @@ impl EdgeQdrant {
             .query_groups(edge_req)
             .map_err(|e| edge_err(EdgeOp::Query, Some(collection), e))?;
 
-        let ids: Vec<qdrant_edge::PointId> = groups
-            .iter()
-            .flat_map(|group| group.hits.iter().map(|hit| hit.id))
-            .collect();
-        if !ids.is_empty() {
-            let records = shard
-                .retrieve(qdrant_edge::RetrieveRequest {
-                    point_ids: ids,
-                    with_payload: Some(with_payload),
-                    with_vector: Some(with_vector),
-                })
-                .map_err(|e| edge_err(EdgeOp::Retrieve, Some(collection), e))?;
-            hydrate_edge_groups(&mut groups, records);
+        // The grouping driver always fetches the group_by field. When the
+        // caller asked for neither payload nor vectors, strip that leftover
+        // locally instead of a retrieve that would return empty records.
+        let skip_hydrate = matches!(
+            (&with_payload, &with_vector),
+            (WithPayloadInterface::Bool(false), WithVector::Bool(false))
+        );
+        if skip_hydrate {
+            for group in &mut groups {
+                for hit in &mut group.hits {
+                    hit.payload = None;
+                    hit.vector = None;
+                }
+            }
+        } else {
+            let ids: Vec<qdrant_edge::PointId> = groups
+                .iter()
+                .flat_map(|group| group.hits.iter().map(|hit| hit.id))
+                .collect();
+            if !ids.is_empty() {
+                let records = shard
+                    .retrieve(qdrant_edge::RetrieveRequest {
+                        point_ids: ids,
+                        with_payload: Some(with_payload),
+                        with_vector: Some(with_vector),
+                    })
+                    .map_err(|e| edge_err(EdgeOp::Retrieve, Some(collection), e))?;
+                hydrate_edge_groups(&mut groups, records);
+            }
         }
 
         groups
@@ -778,8 +805,14 @@ impl QdrantOps for EdgeQdrant {
                     qdrant_edge::Distance::Manhattan => "Manhattan",
                 }
                 .to_string(),
-                hnsw: None,
-                quantization: None,
+                hnsw: params
+                    .hnsw_config
+                    .and_then(|hnsw| serde_json::to_value(hnsw).ok())
+                    .and_then(|value| value.as_object().cloned()),
+                quantization: params
+                    .quantization_config
+                    .as_ref()
+                    .and_then(|quant| serde_json::to_value(quant).ok()),
                 multivector: params.multivector_config.as_ref().map(|mv| {
                     let mut map = serde_json::Map::new();
                     map.insert(
@@ -800,18 +833,45 @@ impl QdrantOps for EdgeQdrant {
                     }
                     .to_string()
                 }),
-                // qdrant-edge 0.8 still surfaces `on_disk` rather than
-                // the full memory placement enum on its public config.
                 memory: None,
             })
             .collect();
         let sparse_vectors = cfg
             .sparse_vectors
-            .keys()
-            .map(|k| qql::backend::SparseVectorSpec {
-                name: k.clone(),
-                index: None,
-                modifier: None,
+            .iter()
+            .map(|(name, params)| {
+                let mut index = serde_json::Map::new();
+                if let Some(threshold) = params.full_scan_threshold {
+                    index.insert(
+                        "full_scan_threshold".into(),
+                        serde_json::json!(threshold as u64),
+                    );
+                }
+                if let Some(on_disk) = params.on_disk {
+                    index.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
+                }
+                if let Some(datatype) = params.datatype {
+                    index.insert(
+                        "datatype".into(),
+                        serde_json::Value::String(
+                            match datatype {
+                                qdrant_edge::VectorStorageDatatype::Float32 => "float32",
+                                qdrant_edge::VectorStorageDatatype::Float16 => "float16",
+                                qdrant_edge::VectorStorageDatatype::Uint8 => "uint8",
+                                qdrant_edge::VectorStorageDatatype::Turbo4 => "turbo4",
+                            }
+                            .into(),
+                        ),
+                    );
+                }
+                qql::backend::SparseVectorSpec {
+                    name: name.clone(),
+                    index: (!index.is_empty()).then_some(index),
+                    modifier: params.modifier.map(|modifier| match modifier {
+                        qdrant_edge::Modifier::Idf => "idf".into(),
+                        qdrant_edge::Modifier::None => "none".into(),
+                    }),
+                }
             })
             .collect();
 
@@ -824,6 +884,20 @@ impl QdrantOps for EdgeQdrant {
                 dense_vectors,
                 sparse_vectors,
                 vectors,
+                hnsw: serde_json::to_value(cfg.hnsw_config())
+                    .ok()
+                    .and_then(|value| value.as_object().cloned()),
+                optimizers: serde_json::to_value(cfg.optimizers())
+                    .ok()
+                    .and_then(|value| value.as_object().cloned()),
+                quantization: cfg
+                    .quantization_config
+                    .as_ref()
+                    .and_then(|quant| serde_json::to_value(quant).ok()),
+                params: qql::backend::CollectionParamsSpec {
+                    on_disk_payload: cfg.on_disk_payload,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         })
@@ -834,15 +908,8 @@ impl QdrantOps for EdgeQdrant {
         collection_name: &str,
         req: &CreateCollectionRequest,
     ) -> Result<(), QqlError> {
-        if self.collection_exists(collection_name).await? {
-            return Err(QqlError::execution(
-                "QQL-EDGE-COLLECTION-EXISTS",
-                format!("collection '{collection_name}' already exists"),
-                None,
-            )
-            .with_collection(collection_name.to_string()));
-        }
-        self.open_shard_with_req(collection_name, Some(req)).await?;
+        self.open_shard_inner(collection_name, Some(req), OpenMode::CreateExclusive)
+            .await?;
         Ok(())
     }
 
@@ -865,13 +932,13 @@ impl QdrantOps for EdgeQdrant {
         }
         let shard = self.open_shard(collection_name).await?;
         if let Some(hnsw) = req.hnsw_config.as_ref() {
-            let hnsw = edge_hnsw_config(hnsw)?;
+            let hnsw = edge_hnsw_config_over(hnsw, &shard.config().hnsw_config())?;
             shard
                 .set_hnsw_config(hnsw)
                 .map_err(|e| edge_err(EdgeOp::AlterCollection, Some(collection_name), e))?;
         }
         if let Some(optimizers) = req.optimizers_config.as_ref() {
-            let optimizers = edge_optimizers_config(optimizers)?;
+            let optimizers = overlay_optimizers(optimizers, &shard.config().optimizers())?;
             shard
                 .set_optimizers_config(optimizers)
                 .map_err(|e| edge_err(EdgeOp::AlterCollection, Some(collection_name), e))?;
@@ -925,18 +992,7 @@ impl QdrantOps for EdgeQdrant {
     ) -> Result<(), QqlError> {
         let shard = self.open_shard(collection_name).await?;
 
-        let schema_type = match req.field_schema {
-            qql_plan::IndexFieldType::Keyword => PayloadSchemaType::Keyword,
-            qql_plan::IndexFieldType::Uuid => PayloadSchemaType::Uuid,
-            qql_plan::IndexFieldType::Integer => PayloadSchemaType::Integer,
-            qql_plan::IndexFieldType::Float => PayloadSchemaType::Float,
-            qql_plan::IndexFieldType::Bool => PayloadSchemaType::Bool,
-            qql_plan::IndexFieldType::Geo => PayloadSchemaType::Geo,
-            qql_plan::IndexFieldType::Text => PayloadSchemaType::Text,
-            qql_plan::IndexFieldType::Datetime => PayloadSchemaType::Datetime,
-        };
-
-        let field_schema = Some(PayloadFieldSchema::FieldType(schema_type));
+        let field_schema = Some(edge_payload_field_schema(req)?);
         let field_name: qdrant_edge::JsonPath = serde_json::from_value(serde_json::Value::String(
             req.field_name.clone(),
         ))
@@ -2086,6 +2142,22 @@ mod tests {
                 assert_eq!(config.optimizers().indexing_threshold, Some(500));
             }
 
+            backend
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH HNSW (ef_construct = 200) \
+                     WITH OPTIMIZERS (deleted_threshold = 0.3)",
+                ))
+                .await
+                .expect("partial ALTER must merge");
+            {
+                let shard = backend.open_shard("docs").await.expect("open shard");
+                let config = shard.config();
+                assert_eq!(config.hnsw_config().m, 32, "partial ALTER must keep m");
+                assert_eq!(config.hnsw_config().ef_construct, 200);
+                assert_eq!(config.optimizers().indexing_threshold, Some(500));
+                assert_eq!(config.optimizers().deleted_threshold, Some(0.3));
+            }
+
             // Persisted: a fresh backend sees the updated engine config.
             backend.close().await.expect("close edge backend");
             let reopened = EdgeQdrant::new(&dir, false);
@@ -2093,7 +2165,9 @@ mod tests {
                 let shard = reopened.open_shard("docs").await.expect("reopen shard");
                 let config = shard.config();
                 assert_eq!(config.hnsw_config().m, 32);
+                assert_eq!(config.hnsw_config().ef_construct, 200);
                 assert_eq!(config.optimizers().indexing_threshold, Some(500));
+                assert_eq!(config.optimizers().deleted_threshold, Some(0.3));
             }
 
             let error = reopened

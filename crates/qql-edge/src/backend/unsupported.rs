@@ -82,7 +82,9 @@ impl EdgeUnsupported {
             Self::Timeout => "PARAMS (timeout = …)",
             Self::Consistency => "PARAMS (consistency = …)",
             Self::Quota => "SHOW QUOTAS / SET QUOTA",
-            Self::RecommendAverageVector => "RECOMMEND STRATEGY average_vector",
+            Self::RecommendAverageVector => {
+                "RECOMMEND STRATEGY average_vector (QQL default when STRATEGY is omitted)"
+            }
             Self::PointReferenceQuery => "point-id query inputs without embedded vectors",
             Self::FormulaNary => "MAX / MIN / ACOSH formula functions",
             Self::Route { path_hint } => path_hint,

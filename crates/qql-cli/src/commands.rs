@@ -1103,6 +1103,9 @@ pub async fn handle_edge_bootstrap(
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = crate::config::EdgeConfig::load()?.apply_environment();
+    if collection == ".qql-bootstrap" {
+        return Err("collection name '.qql-bootstrap' is reserved for snapshot staging".into());
+    }
     let target = config.data_dir.join(collection);
     let replaced = target.exists();
     if replaced && !force {
@@ -1115,8 +1118,14 @@ pub async fn handle_edge_bootstrap(
     }
     std::fs::create_dir_all(&config.data_dir)?;
 
-    // Fresh staging workspace; a previous failed run is discarded.
+    // Staging lives beside collections, never inside one. A leftover
+    // `previous/` from a half-finished --force swap is restored first so a
+    // retry cannot delete the only copy of the old collection.
     let workspace = config.data_dir.join(".qql-bootstrap").join(collection);
+    let leftover = workspace.join("previous");
+    if leftover.exists() && !target.exists() {
+        std::fs::rename(&leftover, &target)?;
+    }
     if workspace.exists() {
         std::fs::remove_dir_all(&workspace)?;
     }
@@ -1158,7 +1167,14 @@ pub async fn handle_edge_bootstrap(
     }
     if let Err(error) = std::fs::rename(&stage, &target) {
         if previous.exists() {
-            let _ = std::fs::rename(&previous, &target);
+            std::fs::rename(&previous, &target).map_err(|restore| {
+                format!(
+                    "failed to move the verified snapshot into {} ({error}); \
+                     previous collection is still at {} (restore failed: {restore})",
+                    target.display(),
+                    previous.display()
+                )
+            })?;
         }
         let _ = std::fs::remove_dir_all(&workspace);
         return Err(format!(
@@ -1169,7 +1185,27 @@ pub async fn handle_edge_bootstrap(
     }
 
     // Verify the shard loads from its final path before reporting success.
-    let summary = qql_edge::inspect_shard(&target)?;
+    // A failed inspect after a successful rename restores the previous
+    // collection when one existed; the workspace is not deleted if restore
+    // fails, so the previous copy stays on disk.
+    let summary = match qql_edge::inspect_shard(&target) {
+        Ok(summary) => summary,
+        Err(error) => {
+            if previous.exists() {
+                let _ = std::fs::remove_dir_all(&target);
+                if let Err(restore) = std::fs::rename(&previous, &target) {
+                    return Err(format!(
+                        "snapshot failed to load ({error}); previous collection is still at {} \
+                         (restore failed: {restore})",
+                        previous.display()
+                    )
+                    .into());
+                }
+            }
+            let _ = std::fs::remove_dir_all(&workspace);
+            return Err(error.into());
+        }
+    };
     if previous.exists() {
         let _ = std::fs::remove_dir_all(&previous);
     }
@@ -1193,7 +1229,7 @@ pub async fn handle_edge_bootstrap(
                 "shard_id": chosen,
                 "shard_count": listing.shard_count,
                 "local_shard_ids": listing.local_shard_ids,
-                "remote_shards": listing.remote_shard_count,
+                "remote_shards": listing.remote_shard_ids.len(),
                 "snapshot_bytes": bytes,
                 "points_count": summary.points_count,
                 "indexed_vectors_count": summary.indexed_vectors_count,

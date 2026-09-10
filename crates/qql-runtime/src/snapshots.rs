@@ -29,8 +29,8 @@ use crate::rest::classify_backend_error_code;
 pub struct RemoteShardListing {
     /// Shard ids hosted on the node that answered, sorted and deduplicated.
     pub local_shard_ids: Vec<u32>,
-    /// Number of shards hosted on other nodes.
-    pub remote_shard_count: usize,
+    /// Shard ids hosted on other nodes, sorted and deduplicated.
+    pub remote_shard_ids: Vec<u32>,
     /// Total shard count reported by the cluster info endpoint.
     pub shard_count: u64,
 }
@@ -57,7 +57,6 @@ struct LocalShard {
 
 #[derive(Deserialize)]
 struct RemoteShard {
-    #[allow(dead_code)]
     shard_id: u32,
 }
 
@@ -153,9 +152,17 @@ impl RemoteSnapshotClient {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
+        let remote_shard_ids: Vec<u32> = envelope
+            .result
+            .remote_shards
+            .iter()
+            .map(|shard| shard.shard_id)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         Ok(RemoteShardListing {
             local_shard_ids,
-            remote_shard_count: envelope.result.remote_shards.len(),
+            remote_shard_ids,
             shard_count: envelope.result.shard_count,
         })
     }
@@ -249,15 +256,19 @@ pub fn select_shard_id(
             None,
         ));
     }
-    if listing.remote_shard_count == 0 && listing.local_shard_ids.len() == 1 {
-        return Ok(listing.local_shard_ids[0]);
+    let mut distinct: BTreeSet<u32> = listing.local_shard_ids.iter().copied().collect();
+    distinct.extend(listing.remote_shard_ids.iter().copied());
+    if distinct.len() == 1
+        && let Some(&shard_id) = listing.local_shard_ids.first()
+    {
+        return Ok(shard_id);
     }
     Err(QqlError::execution(
         "QQL-SNAPSHOT-SHARD",
         format!(
-            "collection has {} shard(s): local {:?}, {} remote; a qdrant-edge collection is a \
+            "collection has {} shard(s): local {:?}, remote {:?}; a qdrant-edge collection is a \
              single shard — pass --shard-id to seed one of them",
-            listing.shard_count, listing.local_shard_ids, listing.remote_shard_count
+            listing.shard_count, listing.local_shard_ids, listing.remote_shard_ids
         ),
         None,
     ))
@@ -280,37 +291,42 @@ fn http_error(status: u16, body: &str, collection: &str, url: &str) -> QqlError 
 mod tests {
     use super::*;
 
-    fn listing(local: &[u32], remote: usize, total: u64) -> RemoteShardListing {
+    fn listing(local: &[u32], remote: &[u32], total: u64) -> RemoteShardListing {
         RemoteShardListing {
             local_shard_ids: local.to_vec(),
-            remote_shard_count: remote,
+            remote_shard_ids: remote.to_vec(),
             shard_count: total,
         }
     }
 
     #[test]
     fn single_shard_is_auto_selected() {
-        assert_eq!(select_shard_id(&listing(&[0], 0, 1), None).unwrap(), 0);
-        assert_eq!(select_shard_id(&listing(&[7], 0, 1), None).unwrap(), 7);
+        assert_eq!(select_shard_id(&listing(&[0], &[], 1), None).unwrap(), 0);
+        assert_eq!(select_shard_id(&listing(&[7], &[], 1), None).unwrap(), 7);
+    }
+
+    #[test]
+    fn replicated_single_shard_is_auto_selected() {
+        assert_eq!(select_shard_id(&listing(&[0], &[0], 1), None).unwrap(), 0);
     }
 
     #[test]
     fn multi_shard_without_override_fails_closed() {
-        let error = select_shard_id(&listing(&[0, 1], 0, 2), None).expect_err("multi shard");
+        let error = select_shard_id(&listing(&[0, 1], &[], 2), None).expect_err("multi shard");
         assert_eq!(error.code, "QQL-SNAPSHOT-SHARD");
         assert!(error.message.contains("--shard-id"), "{}", error.message);
 
-        let error = select_shard_id(&listing(&[0], 2, 3), None).expect_err("remote shards");
+        let error = select_shard_id(&listing(&[0], &[1], 2), None).expect_err("remote shards");
         assert_eq!(error.code, "QQL-SNAPSHOT-SHARD");
     }
 
     #[test]
     fn explicit_shard_must_be_local() {
         assert_eq!(
-            select_shard_id(&listing(&[0, 1], 0, 2), Some(1)).unwrap(),
+            select_shard_id(&listing(&[0, 1], &[], 2), Some(1)).unwrap(),
             1
         );
-        let error = select_shard_id(&listing(&[0], 0, 1), Some(9)).expect_err("not local");
+        let error = select_shard_id(&listing(&[0], &[], 1), Some(9)).expect_err("not local");
         assert_eq!(error.code, "QQL-SNAPSHOT-SHARD");
         assert!(error.message.contains("shard 9"), "{}", error.message);
     }

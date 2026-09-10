@@ -9,7 +9,7 @@ use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::executor::response::BackendResponse;
 
-pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
+pub use crate::backend::CollectionInfo;
 
 /// HTTP header / gRPC metadata key Qdrant echoes into its logs for request
 /// correlation (`x-request-id`). QQL generates one per request so a
@@ -40,15 +40,6 @@ pub struct VectorTopology {
     pub sparse_vector: Option<String>,
     /// Multivector (ColBERT) vector name used for rerank, when present.
     pub rerank_vector: Option<String>,
-}
-
-/// Grouped query result: one group key and its ordered hits.
-#[derive(Debug, Clone)]
-pub struct PointGroup {
-    /// Group key value as returned by Qdrant (JSON-typed).
-    pub id: serde_json::Value,
-    /// Scored points in this group, in backend order.
-    pub hits: Vec<ScoredPoint>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

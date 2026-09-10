@@ -342,6 +342,7 @@ mod tests {
             EdgeOp::DropIndex,
             EdgeOp::Optimize,
             EdgeOp::Info,
+            EdgeOp::Snapshot,
             EdgeOp::AlterCollection,
             EdgeOp::Formula,
         ];
