@@ -75,10 +75,19 @@ qql-plan: plan() → Result<PlannedOperation, PlanError>
     │                                                  └── REST: serialized JSON
     │                                                  └── gRPC: execute_grpc_route() typed protobuf conversion
     │
-    └── response normalization (ExecResponse)
+    └── response normalization (ExecResponse from typed ExecData)
 ```
 
 Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path, query, body }` is the **REST projection** of a plan, not the source of truth. Semantic types (`PlanQueryInput`, `PlanPointId`, `PlanVectorValue`) remain typed until a transport boundary. gRPC converts typed plan structs directly to protobuf via `to_query_points`, `to_vector_input`, `plan_vector_to_proto`, etc. — no JSON intermediary for query vectors or point IDs. Formula lowering still emits `serde_json::Value` (lower_formula_expr → to_formula_expression round-trips through JSON).
+
+Canonical response is `BackendResponse { data: ExecData, telemetry }` where
+`ExecData = Hits(Vec<SearchHit>) | Count(u64) | Facet(Vec<FacetHit>) | Raw(Value)`.
+gRPC and edge produce it **directly** from protobuf / `qdrant_edge` types (no
+proto→JSON or edge→JSON envelope); REST parses its HTTP JSON into `ExecData`
+once at the boundary. `Raw` is the explicit shrinking fallback (DDL, mutations,
+groups). One normalization builds `ExecResponse` in all cases; bindings consume
+`ExecData::Hits` natively (native `#[pyclass] ExecutionReport`/`ScoredPoint` in
+`pyqql-common`).
 
 ### Crate Division Boundaries
 
@@ -95,7 +104,7 @@ Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path,
 * **`qql-cli`**: CLI binary. Uses the executor via REST/adapter construction.
 
 * **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `qql_plan::routing::compile_statement`), and `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
-* **Binding dedup (anti-drift)**: server/edge pairs share a common crate — `pyqql-common` (PyO3: `Stmt`, parser functions, error mapping, `prepare_input`/`run_input`/`run_async` dispatch) and `nqql-common` (NAPI logic without `#[napi]` macros; the SDK crates keep thin `#[napi]` wrappers). All SDKs route parameter binding through `qql_core::params_json` (the single batch contract: `plan_statement_params` + `bind_stmt_with_params` / `bind_str_with_params`) and operator parsing through `ComparisonOp::parse_inject_op`. The JS wrapper layer (`dx-common.js`), Python report classes (`_dx_report.py`), and `test_dx.js` are byte-identical copies across the two SDKs of each language, enforced by a CI diff check — edit both copies or neither.
+* **Binding dedup (anti-drift)**: server/edge pairs share a common crate — `pyqql-common` (PyO3: `Stmt`, parser functions, error mapping, `prepare_input`/`run_input`/`run_async` dispatch) and `nqql-common` (NAPI logic without `#[napi]` macros; the SDK crates keep thin `#[napi]` wrappers). All SDKs route parameter binding through `qql_core::params_json` (the single batch contract: `plan_statement_params` + `bind_stmt_with_params` / `bind_str_with_params`) and operator parsing through `ComparisonOp::parse_inject_op`. The JS wrapper layer (`dx-common.js`, `test_dx.js`) and Python shared files (`_errors.py`, `test_dx.py`) are byte-identical copies across the two SDKs of each language, enforced by a CI diff check — edit both copies or neither.
 
 ### Permanently Removed Abstractions
 
@@ -117,6 +126,7 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest survives only as a test-only harness in `qql-conformance` (dev-dependency that compiles `language/v1/grammar.pest` and gates the fixture corpus), never in `qql-core`. `qql-grammar-gen` instead derives keyword tables, TextMate/TS artifacts, and the generated pest copy from `grammar.pest`
 - `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
 - `CollectionSchema` (client.rs) — removed duplicate; backend schema is the only source
+- `QdrantOps::execute_planned_typed` and the JSON-returning `QdrantOps::execute_planned` — replaced by the single typed `execute_planned -> BackendResponse`. `BackendResponse::from_envelope` is gone; the REST envelope parser is crate-private (`crate::envelope::parse_backend_response`)
 
 ### Current QueryExpr Variants (13 total)
 
@@ -154,16 +164,16 @@ pub trait QdrantOps: Send + Sync {
     async fn create_field_index(&self, collection_name: &str, req: &qql_plan::CreateIndexRequest) -> Result<(), QqlError>;
     async fn delete_field_index(&self, collection_name: &str, field_name: &str) -> Result<(), QqlError>;
 
-    // Execution via PlannedOperation IR
-    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<serde_json::Value, QqlError>;
+    // Execution via PlannedOperation IR — the canonical typed entry point
+    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<BackendResponse, QqlError>;
 
-    // Batch methods
-    async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest) -> Result<Vec<serde_json::Value>, QqlError>;
-    async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest) -> Result<Vec<serde_json::Value>, QqlError>;
+    // Batch methods: one typed response per item, in order
+    async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest) -> Result<Vec<BackendResponse>, QqlError>;
+    async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest) -> Result<Vec<BackendResponse>, QqlError>;
 }
 ```
 
-Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON.
+Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON. REST parses its own JSON envelope at the transport boundary (`crate::envelope::parse_backend_response`): `RestQdrant::execute_planned` returns typed `BackendResponse` directly. gRPC and edge convert proto / `qdrant-edge` values straight into `BackendResponse` for reads; operations not typed yet (groups, mutations, DDL) temporarily keep their JSON builders + the shared envelope parser behind `TODO(R2/R3)` arms, which the later lanes delete.
 
 ### Statement → Endpoint Matrix (25 REST routes)
 
@@ -233,7 +243,7 @@ All generated route payloads are validated directly against Qdrant's official
 
 1. **Size Constraints**: Target <400 lines per file where possible. Split large files into modules.
 2. **Error Propagation**: Dispatch directly; bubble up downstream errors. No pre-emptive checks.
-3. **No JSON-as-IR**: `RequestBody` is typed. JSON only at the REST boundary, except for DDL sub-configs and formula expressions which still use JSON within gRPC conversion.
+3. **No JSON-as-IR**: `RequestBody` and `BackendResponse`/`ExecData` are typed. JSON only at the REST boundary (request and response), except for DDL sub-configs and formula expressions which still use JSON within gRPC conversion. gRPC and edge typed reads never build a JSON envelope; their untyped fallback arms temporarily reuse JSON builders + the shared parser (`TODO(R2/R3)`). `Raw(Value)` is the explicit shrinking fallback for schemaless DDL/metadata/quota envelopes only.
 4. **No duplicate planners**: `qql_plan::plan::plan()` is the single fallible planner. `routing::try_route()` is the fallible REST projection; the deprecated `route()` wrapper is removed. DDL goes through the same planner.
 5. **No glue code**: Each layer has one responsibility. No wrappers around wrappers.
 
