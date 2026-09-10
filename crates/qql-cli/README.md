@@ -87,7 +87,7 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | — | Offline cross-encoder (also falls back to `RERANK_MODEL`) |
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | — | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true` | `true`/`false`/`1`/`0` — payloads on disk |
-| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; Rust/CLI only) |
+| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; also exposed by the Python/Node edge SDKs) |
 | `EMBED_URL` | `--embed-url` | — | HTTP embedding endpoint |
 | `EMBED_KEY` | `--embed-key` | — | HTTP Bearer token |
 | `EMBED_MODEL` | `--embed-model` | `nomic-embed-text` | HTTP embedding model ID |

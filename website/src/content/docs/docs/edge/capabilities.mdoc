@@ -43,7 +43,7 @@ Qdrant" hint.
 | Create-time per-vector engine config | yes | `WITH VECTOR` (storage/datatype), `WITH HNSW`, `WITH QUANTIZATION`, `WITH SPARSE` all lower onto the engine config; `memory` tiers map to the engine's RAM/mmap switch |
 | Background optimization | no | `qql edge optimize` runs the blocking optimizer loop; `prevent_unoptimized` defers point visibility until it runs |
 | Remote → edge snapshot seed | yes | `qql edge bootstrap` streams a server shard snapshot (config + built HNSW + quantized data); snapshot *creation* is remote-side only |
-| WAL capacity tuning | partial | Rust/CLI only (`--wal-segment-mb`, `LocalExecutorOptions::wal_segment_capacity`); Python/Node cannot set it in qdrant-edge 0.8 |
+| WAL capacity tuning | yes | Rust (`LocalExecutorOptions::wal_segment_capacity`), CLI (`--wal-segment-mb`), Python (`wal_segment_mb`), Node (`walSegmentMb`); qdrant-edge 0.8's own Python binding cannot set it |
 | `CREATE/DROP INDEX` | yes | keyword (incl. `prefix`), integer, float, bool, geo, text, datetime, uuid |
 | `SHOW COLLECTIONS` / `SHOW COLLECTION` | yes | |
 | Query/update batching | partial | fan-out, not a native batch RPC |

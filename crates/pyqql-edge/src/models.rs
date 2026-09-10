@@ -1,8 +1,32 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
+use qql_core::error::QqlError;
 use std::sync::atomic::AtomicBool;
 
 use crate::PyClient;
+use pyqql_common::qql_py_value_error;
+
+/// Parse ``wal_segment_mb`` (whole MiB) into the byte capacity
+/// [`qql_edge::LocalExecutorOptions::wal_segment_capacity`] expects.
+///
+/// ``None`` keeps the qdrant-edge default (32 MiB). Zero, negative,
+/// fractional, non-finite, or overflowing values fail closed with
+/// ``QQL-VALIDATION-CONFIG`` instead of silently rounding or clamping.
+#[cfg(feature = "fastembed-local")]
+fn wal_segment_capacity(mb: Option<f64>) -> Result<Option<usize>, QqlError> {
+    let Some(mb) = mb else {
+        return qql_edge::wal_segment_capacity_bytes(None);
+    };
+    if !mb.is_finite() || mb.fract() != 0.0 || mb < 1.0 {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            "wal_segment_mb must be a positive whole number of MiB; omit it for the qdrant-edge 32 MiB default",
+            None,
+        ));
+    }
+    // `as` saturates; the shared helper rejects any byte count that overflows.
+    qql_edge::wal_segment_capacity_bytes(Some(mb as u64))
+}
 
 /// List dense ONNX models available for ``local_executor(model=...)``.
 ///
@@ -34,7 +58,7 @@ pub fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false))]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, wal_segment_mb=None))]
 pub fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
@@ -45,11 +69,14 @@ pub fn local_executor(
     reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
+    wal_segment_mb: Option<f64>,
 ) -> PyResult<PyClient> {
+    let wal_segment_capacity = wal_segment_capacity(wal_segment_mb).map_err(qql_py_value_error)?;
     let exec = qql_edge::local_executor_with_options(
         data_dir,
         qql_edge::LocalExecutorOptions {
             on_disk_payload,
+            wal_segment_capacity,
             model,
             sparse_model,
             multi_model,
@@ -100,6 +127,7 @@ pub fn execute<'py>(
         reranker_model,
         cache_dir,
         show_download_progress,
+        None,
     )?;
     let res = client.execute(py, query, params, on_error);
     let _ = client.close();
@@ -136,6 +164,7 @@ pub fn execute_async<'py>(
         reranker_model,
         cache_dir,
         show_download_progress,
+        None,
     )?;
     let input = pyqql_common::prepare_input(&query, params)?;
     let on_error = pyqql_common::parse_on_error(on_error)?;
@@ -180,4 +209,26 @@ pub fn http_executor(
         runtime: rt,
         closed: AtomicBool::new(false),
     })
+}
+
+#[cfg(test)]
+#[cfg(feature = "fastembed-local")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wal_segment_mb_converts_to_bytes() {
+        assert_eq!(wal_segment_capacity(None).unwrap(), None);
+        assert_eq!(wal_segment_capacity(Some(1.0)).unwrap(), Some(1 << 20));
+        assert_eq!(wal_segment_capacity(Some(4.0)).unwrap(), Some(4 << 20));
+    }
+
+    #[test]
+    fn wal_segment_mb_rejects_invalid_values() {
+        for bad in [0.0, -1.0, 1.5, f64::NAN, f64::INFINITY, 1e30] {
+            let err = wal_segment_capacity(Some(bad))
+                .expect_err(&format!("wal_segment_mb={bad} must fail closed"));
+            assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "wal_segment_mb={bad}");
+        }
+    }
 }

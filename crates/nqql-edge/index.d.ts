@@ -146,6 +146,11 @@ export interface LocalExecutorOptions {
   cacheDir?: string;
   /** Show HuggingFace download progress (default false) */
   showDownloadProgress?: boolean;
+  /** WAL segment capacity in MiB for local edge shards (default 32); whole
+   * numbers >= 1 only. Shrinks the pre-allocated WAL footprint of tiny
+   * embedded shards; the resolved capacity persists in `edge_config.json`.
+   * Invalid values fail with `QQL-VALIDATION-CONFIG`. */
+  walSegmentMb?: number;
 }
 
 export interface StandaloneOptions {

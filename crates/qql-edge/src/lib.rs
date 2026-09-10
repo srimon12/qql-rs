@@ -59,8 +59,10 @@ pub struct LocalExecutorOptions {
     /// each WAL segment to this size (default 32 MiB), which dominates the
     /// on-disk footprint of small embedded shards. `None` keeps the engine
     /// default (and, for existing shards, the capacity persisted in
-    /// `edge_config.json`). Python/Node bindings cannot set this in
-    /// qdrant-edge 0.8 — it is a Rust-only engine knob.
+    /// `edge_config.json`). Hosts configure it in MiB —
+    /// [`wal_segment_capacity_bytes`] performs the conversion: the CLI via
+    /// `--wal-segment-mb`, Python via `wal_segment_mb`, and Node via
+    /// `walSegmentMb`.
     pub wal_segment_capacity: Option<usize>,
     /// Local ONNX dense model name. See [`resolve_embedding_model`] for accepted forms.
     /// `None` → default `BGESmallENV15` (384-d).
@@ -89,6 +91,38 @@ pub struct LocalExecutorOptions {
     /// Show HuggingFace download progress bars (default: `false`).
     #[cfg(feature = "fastembed-local")]
     pub show_download_progress: bool,
+}
+
+/// Convert a MiB WAL segment capacity into the byte count
+/// [`LocalExecutorOptions::wal_segment_capacity`] expects.
+///
+/// Host surfaces configure the knob in whole MiB (CLI `--wal-segment-mb`,
+/// Python `wal_segment_mb`, Node `walSegmentMb`). `None` keeps the engine
+/// default (32 MiB); zero or a value that overflows `usize` bytes fails closed
+/// with `QQL-VALIDATION-CONFIG` instead of silently producing a nonsensical
+/// WAL capacity.
+pub fn wal_segment_capacity_bytes(
+    mb: Option<u64>,
+) -> Result<Option<usize>, qql_core::error::QqlError> {
+    match mb {
+        None => Ok(None),
+        Some(0) => Err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            "wal_segment_mb must be greater than zero; omit it for the qdrant-edge 32 MiB default",
+            None,
+        )),
+        Some(mb) => usize::try_from(mb)
+            .ok()
+            .and_then(|mb| mb.checked_mul(1024 * 1024))
+            .map(Some)
+            .ok_or_else(|| {
+                qql_core::error::QqlError::validation(
+                    "QQL-VALIDATION-CONFIG",
+                    "wal_segment_mb is too large for this platform",
+                    None,
+                )
+            }),
+    }
 }
 
 /// Build a fully-local [`Executor`] backed by fastembed-rs and qdrant-edge.
@@ -380,6 +414,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn wal_segment_capacity_bytes_scales_mib() {
+        assert_eq!(wal_segment_capacity_bytes(None).unwrap(), None);
+        assert_eq!(wal_segment_capacity_bytes(Some(4)).unwrap(), Some(4 << 20));
+    }
+
+    #[test]
+    fn wal_segment_capacity_bytes_rejects_zero_and_overflow() {
+        let zero = wal_segment_capacity_bytes(Some(0)).expect_err("zero must fail closed");
+        assert_eq!(zero.code, "QQL-VALIDATION-CONFIG");
+        let overflow =
+            wal_segment_capacity_bytes(Some(u64::MAX)).expect_err("overflow must fail closed");
+        assert_eq!(overflow.code, "QQL-VALIDATION-CONFIG");
     }
 
     #[test]

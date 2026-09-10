@@ -38,6 +38,10 @@ function normalizeLocalOptions(options) {
       typeof options.showDownloadProgress === "boolean"
         ? options.showDownloadProgress
         : undefined,
+    // Forwarded raw so invalid values (0, negative, fractional, non-numeric)
+    // reach the native validation and fail closed with QQL-VALIDATION-CONFIG
+    // instead of being silently dropped.
+    walSegmentMb: options.walSegmentMb,
   };
 }
 

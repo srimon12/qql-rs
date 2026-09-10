@@ -90,7 +90,7 @@ time you run a command with `--edge`.
 |---|---|
 | `--data-dir` | Directory for persistent qdrant-edge data |
 | `--in-memory` | Keep payloads in RAM instead of persisting them to disk |
-| `--wal-segment-mb N` | WAL segment capacity in MiB (default: qdrant-edge 32 MiB; Rust/CLI only) |
+| `--wal-segment-mb N` | WAL segment capacity in MiB (default: qdrant-edge 32 MiB; also exposed by the Python/Node edge SDKs) |
 | `--embedder fastembed\|http` | Embedding backend (default `fastembed`) |
 | `--model` | Local FastEmbed dense model name or alias |
 | `--sparse-model` | Offline sparse model for fastembed (e.g. `splade`, `bge-m3`) |

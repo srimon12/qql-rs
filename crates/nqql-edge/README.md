@@ -44,6 +44,20 @@ await client.close();
 console.log(version, listEmbeddingModels().length);
 ```
 
+### WAL footprint
+
+qdrant-edge pre-allocates each write-ahead-log segment (default 32 MiB), which
+dominates the on-disk footprint of small embedded shards. Pass whole MiB to
+`walSegmentMb` to shrink it; the resolved capacity persists in the shard's
+`edge_config.json`:
+
+```javascript
+const client = localExecutor("./qql-data", { walSegmentMb: 8 });
+```
+
+When unset, the 32 MiB engine default applies. Zero, negative, fractional, or
+overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
+
 ## API
 
 | Export | Role |

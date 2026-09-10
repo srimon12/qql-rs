@@ -123,7 +123,7 @@ Use it with: qql --edge exec "SHOW COLLECTIONS"
 |---|---|---|
 | `--data-dir <dir>` | `~/.qql/edge-data` | Directory for persistent qdrant-edge data |
 | `--in-memory` | off | Keep payloads in memory instead of persisting them to disk (sets `on_disk_payload=false`) |
-| `--wal-segment-mb <n>` | qdrant-edge 32 MiB | WAL segment capacity in MiB. qdrant-edge pre-allocates each segment to this size, which otherwise dominates the on-disk footprint of small embedded shards. Must be greater than zero; Rust/CLI only (the Python/Node bindings cannot set it in qdrant-edge 0.8) |
+| `--wal-segment-mb <n>` | qdrant-edge 32 MiB | WAL segment capacity in MiB. qdrant-edge pre-allocates each segment to this size, which otherwise dominates the on-disk footprint of small embedded shards. Must be greater than zero; also exposed by the Python/Node edge SDKs (qdrant-edge 0.8's own Python binding cannot set it) |
 
 ### Embedding model flags (fastembed)
 

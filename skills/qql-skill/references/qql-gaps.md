@@ -19,7 +19,7 @@ missing** features that already ship.
 | Remote → edge seed | **Yes (CLI)** — `qql edge bootstrap <collection> --from <url> [--shard-id N] [--force]`; single-shard auto-discovery, multi-shard fails closed (`QQL-SNAPSHOT-SHARD`) |
 | Edge snapshot **creation** | **No** — qdrant-edge 0.8 exposes unpack/apply only; publish edge → remote with `qql --edge migrate … --target-url`, never by copying shard files |
 | Edge → edge migration | **No** — rejected before executors start; seed devices from a server snapshot instead |
-| WAL segment capacity | **Rust/CLI only** — `--wal-segment-mb` / `QQL_EDGE_WAL_SEGMENT_MB` / `LocalExecutorOptions::wal_segment_capacity`; Python/Node cannot set it in qdrant-edge 0.8 |
+| WAL segment capacity | **All SDKs** — Rust `LocalExecutorOptions::wal_segment_capacity`, CLI `--wal-segment-mb` / `QQL_EDGE_WAL_SEGMENT_MB`, Python `local_executor(..., wal_segment_mb=N)`, Node `localExecutor(dir, { walSegmentMb: N })`; qdrant-edge 0.8's own Python binding cannot set it |
 | `ALTER COLLECTION … WITH VECTOR <name> (…)` | **Yes (REST/gRPC)** — per-vector `HNSW` / `QUANTIZATION` / storage diffs; unnamed `WITH VECTOR (…)` targets the default vector. Edge: per-vector `HNSW` only; other fields → `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF`, sparse → `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` |
 | `SHARD`, shard-key DDL | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
 | `ALTER COLLECTION` | **Partial** — remote: global + per-vector HNSW/quantization/storage; edge: global `HNSW` / `OPTIMIZERS` and per-vector `HNSW` persist, `WITH PARAMS` / `QUANTIZATION` / other per-vector fields reject per field |

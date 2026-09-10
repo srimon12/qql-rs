@@ -121,6 +121,7 @@ const {
  *   rerankerModel?: string,
  *   cacheDir?: string,
  *   showDownloadProgress?: boolean,
+ *   walSegmentMb?: number,
  * }} [options] - boolean is legacy `onDiskPayload`; object is preferred.
  * @returns {Client}
  *
@@ -129,6 +130,7 @@ const {
  *   const exec = localExecutor('./data', false);
  *   const exec = localExecutor('./data', { model: 'AllMiniLML6V2', onDiskPayload: false });
  *   const exec = localExecutor('./data', { sparseModel: 'splade', rerankerModel: 'bge-reranker-base' });
+ *   const exec = localExecutor('./data', { walSegmentMb: 8 });  // 8 MiB WAL segments
  */
 function localExecutor(dataDir, options) {
   if (typeof dataDir !== 'string' || !dataDir) {

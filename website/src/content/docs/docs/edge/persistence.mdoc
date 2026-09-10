@@ -120,7 +120,8 @@ The capacity is now exposed through qql-edge:
 | CLI | `qql config edge --wal-segment-mb 4` (or `qql edge bootstrap` / `qql edge optimize` with the persisted config) |
 | Environment | `QQL_EDGE_WAL_SEGMENT_MB=4` |
 | Rust | `LocalExecutorOptions { wal_segment_capacity: Some(4 * 1024 * 1024), .. }` or `EdgeQdrant::with_wal_segment_capacity(...)` |
-| Python / Node | not available in qdrant-edge 0.8 (`wal_options` is a Rust-only engine surface) |
+| Python | `local_executor(..., wal_segment_mb=4)` |
+| Node | `localExecutor(dir, { walSegmentMb: 4 })` (qdrant-edge 0.8's own Python binding cannot set it) |
 
 The override applies when a shard is created **and** when one is loaded: the
 resolved value is persisted in `edge_config.json`, so opening the shard later

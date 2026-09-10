@@ -32,7 +32,19 @@ test("localExecutor forwards sparse/multi/image/reranker model slots", () => {
     rerankerModel: "bge-reranker-base",
     cacheDir: "/var/cache",
     showDownloadProgress: true,
+    walSegmentMb: undefined,
   });
+});
+
+test("localExecutor forwards walSegmentMb for native validation", () => {
+  // Valid whole MiB survives; absent stays undefined (engine 32 MiB default).
+  assert.strictEqual(normalizeLocalOptions({ walSegmentMb: 8 }).walSegmentMb, 8);
+  assert.strictEqual(normalizeLocalOptions({}).walSegmentMb, undefined);
+  // Invalid values are NOT dropped here — the Rust side rejects them with
+  // QQL-VALIDATION-CONFIG instead of silently falling back to the default.
+  assert.strictEqual(normalizeLocalOptions({ walSegmentMb: 0 }).walSegmentMb, 0);
+  assert.strictEqual(normalizeLocalOptions({ walSegmentMb: -1 }).walSegmentMb, -1);
+  assert.strictEqual(normalizeLocalOptions({ walSegmentMb: 1.5 }).walSegmentMb, 1.5);
 });
 
 test("localExecutor boolean legacy maps to onDiskPayload", () => {

@@ -189,6 +189,7 @@ def local_executor(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
+    wal_segment_mb: Optional[int] = None,
 ) -> Client: ...
 def http_executor(
     data_dir: str,

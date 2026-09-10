@@ -69,10 +69,17 @@ compatibility and maps to `onDiskPayload`):
 | `rerankerModel` | `null` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
 | `cacheDir` | fastembed default | Directory for downloaded models |
 | `showDownloadProgress` | `false` | Show Hugging Face progress bars |
+| `walSegmentMb` | `null` *(32 MiB)* | WAL segment capacity in whole MiB; lower values shrink the pre-allocated on-disk WAL footprint |
 
 Models are locked at construction. A `USING MODEL '…'` clause naming a
 different model fails loudly instead of switching silently — see
 [models](/docs/edge/models/).
+
+qdrant-edge pre-allocates each WAL segment (default 32 MiB), which dominates
+the on-disk footprint of small embedded shards. Set `walSegmentMb` (whole MiB
+`>= 1`) to shrink it; the resolved capacity persists in the collection's
+`edge_config.json`, and invalid values fail closed with
+`QQL-VALIDATION-CONFIG`.
 
 ### `httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload?)`
 

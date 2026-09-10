@@ -64,6 +64,7 @@ pyqql_edge.local_executor(
     reranker_model=None,
     cache_dir=None,
     show_download_progress=False,
+    wal_segment_mb=None,
 )
 ```
 
@@ -78,6 +79,7 @@ pyqql_edge.local_executor(
 | `reranker_model` | `None` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
 | `cache_dir` | `None` | Directory for downloaded models |
 | `show_download_progress` | `False` | Show Hugging Face progress bars |
+| `wal_segment_mb` | `None` *(32 MiB)* | WAL segment capacity in whole MiB; lower values shrink the pre-allocated on-disk WAL footprint |
 
 Usage example:
 
@@ -95,6 +97,12 @@ client = pyqql_edge.local_executor(
 Models are locked at construction. Passing a `USING MODEL '…'` clause that
 names a different model fails loudly instead of switching silently — see
 [models](/docs/edge/models/).
+
+qdrant-edge pre-allocates each WAL segment (default 32 MiB), which dominates
+the on-disk footprint of small embedded shards. Set `wal_segment_mb` (whole
+MiB `>= 1`) to shrink it; the resolved capacity persists in the collection's
+`edge_config.json`, and invalid values fail closed with
+`QQL-VALIDATION-CONFIG`. qdrant-edge 0.8's own Python binding cannot set this.
 
 ### `http_executor()`
 

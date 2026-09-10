@@ -398,6 +398,34 @@ pub struct LocalExecutorOptions {
     pub cache_dir: Option<String>,
     /// Show HuggingFace download progress (default `false`).
     pub show_download_progress: Option<bool>,
+    /// WAL segment capacity in MiB for local edge shards (default: the
+    /// qdrant-edge 32 MiB per-segment pre-allocation). Lower values shrink the
+    /// on-disk footprint of tiny embedded shards; the resolved capacity
+    /// persists in the shard's `edge_config.json`. Must be a whole number
+    /// `>= 1`; invalid values fail with `QQL-VALIDATION-CONFIG`.
+    pub wal_segment_mb: Option<f64>,
+}
+
+/// Parse `walSegmentMb` (whole MiB) into the byte capacity
+/// [`qql_edge::LocalExecutorOptions::wal_segment_capacity`] expects.
+///
+/// `None` keeps the qdrant-edge default (32 MiB). Zero, negative, fractional,
+/// non-finite, or overflowing values fail closed with
+/// `QQL-VALIDATION-CONFIG`.
+#[cfg(feature = "fastembed-local")]
+fn wal_segment_capacity(mb: Option<f64>) -> Result<Option<usize>, qql_core::error::QqlError> {
+    let Some(mb) = mb else {
+        return qql_edge::wal_segment_capacity_bytes(None);
+    };
+    if !mb.is_finite() || mb.fract() != 0.0 || mb < 1.0 {
+        return Err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            "walSegmentMb must be a positive whole number of MiB; omit it for the qdrant-edge 32 MiB default",
+            None,
+        ));
+    }
+    // `as` saturates; the shared helper rejects any byte count that overflows.
+    qql_edge::wal_segment_capacity_bytes(Some(mb as u64))
 }
 
 /// Create a fully-local edge executor backed by fastembed-rs and qdrant-edge.
@@ -423,10 +451,13 @@ pub fn local_executor(
     options: Option<LocalExecutorOptions>,
 ) -> napi::Result<JsClient> {
     let opts = options.unwrap_or_default();
+    let wal_segment_capacity =
+        wal_segment_capacity(opts.wal_segment_mb).map_err(common::to_napi_err)?;
     let exec = qql_edge::local_executor_with_options(
         data_dir,
         qql_edge::LocalExecutorOptions {
             on_disk_payload: opts.on_disk_payload.unwrap_or(true),
+            wal_segment_capacity,
             model: opts.model,
             sparse_model: opts.sparse_model,
             multi_model: opts.multi_model,
@@ -542,6 +573,9 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
         show_download_progress: options
             .and_then(|o| o.get("showDownloadProgress"))
             .and_then(|v| v.as_bool()),
+        // The WAL knob is a localExecutor option; one-shot execute keeps the
+        // engine default (the JS wrapper does not forward it here).
+        wal_segment_mb: None,
     }
 }
 

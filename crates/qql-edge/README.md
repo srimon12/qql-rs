@@ -91,8 +91,9 @@ configured `base_path`.
   `LocalExecutorOptions::wal_segment_capacity` (bytes) or
   `EdgeQdrant::with_wal_segment_capacity(Some(bytes))` to shrink it; the resolved
   value persists in `edge_config.json`, so later loads without the knob keep it.
-  This is a Rust-only engine surface — Python/Node bindings cannot set it in
-  qdrant-edge 0.8.
+  The Python (`local_executor(..., wal_segment_mb=N)`) and Node
+  (`localExecutor(dir, { walSegmentMb: N })`) edge SDKs expose the same knob in
+  whole MiB; qdrant-edge 0.8's own Python binding cannot set it.
 - **Snapshot seeding**: `qql_edge::{unpack_snapshot, inspect_shard}` wrap the
   engine's snapshot API (unpack into a directory, then load and count) so callers
   never unpack or merge archives by hand.

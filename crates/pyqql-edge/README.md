@@ -44,6 +44,21 @@ pyqql_edge.inject_filter(stmt, "org_id", "=", "acme")
 client.close()
 ```
 
+### WAL footprint
+
+qdrant-edge pre-allocates each write-ahead-log segment (default 32 MiB), which
+dominates the on-disk footprint of small embedded shards. Pass whole MiB to
+`wal_segment_mb` to shrink it; the resolved capacity persists in the shard's
+`edge_config.json`:
+
+```python
+client = pyqql_edge.local_executor("./qdrant_data", wal_segment_mb=8)
+```
+
+`None` (the default) keeps the 32 MiB engine default. Zero, negative,
+fractional, or overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
+qdrant-edge 0.8's own Python binding does not expose this knob.
+
 ## API
 
 | Export | Role |

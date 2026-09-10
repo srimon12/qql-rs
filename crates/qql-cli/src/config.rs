@@ -8,8 +8,9 @@ pub struct EdgeConfig {
     pub data_dir: PathBuf,
     pub on_disk_payload: bool,
     /// WAL segment capacity in MiB for local edge shards. `None` keeps the
-    /// qdrant-edge default (32 MiB pre-allocated per segment). Rust-only: the
-    /// Python/Node bindings cannot set it in qdrant-edge 0.8.
+    /// qdrant-edge default (32 MiB pre-allocated per segment). Also exposed by
+    /// the Python/Node edge SDKs; qdrant-edge 0.8's own Python binding cannot
+    /// set it.
     pub wal_segment_mb: Option<u64>,
     pub embedder: String,
     pub model: Option<String>,
