@@ -71,6 +71,12 @@ qql exec "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_
 | `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | — | Image/CLIP embedding endpoint |
 | `RERANK_URL` / `RERANK_KEY` / `RERANK_MODEL` | — | Cross-encoder reranking endpoint |
 
+Sparse document encoding is **always local** (`qdrant/bm25`-compatible), even on
+the remote path. Tune it in `~/.qql/config.json` via `bm25_k1` / `bm25_b` /
+`bm25_avg_len` (defaults `1.2` / `0.75` / `256`; write-path only; invalid values
+fail closed with `QQL-VALIDATION-CONFIG`). It applies only when an HTTP embedder
+is configured (`EMBED_URL`), since `TEXT` resolution requires an embedder.
+
 ### Local Edge Backend (`qql config edge`)
 
 Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, and
@@ -88,6 +94,9 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | — | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true` | `true`/`false`/`1`/`0` — payloads on disk |
 | `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; also exposed by the Python/Node edge SDKs) |
+| `QQL_EDGE_BM25_K1` | `--bm25-k1` | `1.2` | Client-side BM25 `k1` for the local sparse document encoder (write-path only; malformed values fail closed) |
+| `QQL_EDGE_BM25_B` | `--bm25-b` | `0.75` | Client-side BM25 `b` length normalization in `[0, 1]` |
+| `QQL_EDGE_BM25_AVG_LEN` | `--bm25-avg-len` | `256` | Client-side BM25 expected average document length in tokens |
 | `EMBED_URL` | `--embed-url` | — | HTTP embedding endpoint |
 | `EMBED_KEY` | `--embed-key` | — | HTTP Bearer token |
 | `EMBED_MODEL` | `--embed-model` | `nomic-embed-text` | HTTP embedding model ID |

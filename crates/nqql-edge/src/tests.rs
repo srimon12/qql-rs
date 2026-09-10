@@ -46,6 +46,26 @@ fn standalone_local_opts_no_sparse_model_is_none() {
 }
 
 #[test]
+fn standalone_local_opts_forwards_bm25_params() {
+    let camel = serde_json::json!({ "bm25K1": 2.0, "bm25B": 0.5, "bm25AvgLen": 8 });
+    let lo = standalone_local_opts(Some(&camel));
+    assert_eq!(lo.bm25_k1, Some(2.0));
+    assert_eq!(lo.bm25_b, Some(0.5));
+    assert_eq!(lo.bm25_avg_len, Some(8.0));
+
+    let snake = serde_json::json!({ "bm25_k1": 1.5, "bm25_b": 0.25, "bm25_avg_len": 16 });
+    let lo = standalone_local_opts(Some(&snake));
+    assert_eq!(lo.bm25_k1, Some(1.5));
+    assert_eq!(lo.bm25_b, Some(0.25));
+    assert_eq!(lo.bm25_avg_len, Some(16.0));
+
+    // Malformed values must not silently fall back to defaults.
+    let bad = serde_json::json!({ "bm25K1": "nope" });
+    let lo = standalone_local_opts(Some(&bad));
+    assert!(lo.bm25_k1.expect("Some(NaN)").is_nan());
+}
+
+#[test]
 fn wal_segment_mb_converts_to_bytes() {
     assert_eq!(wal_segment_capacity(None).unwrap(), None);
     assert_eq!(wal_segment_capacity(Some(1.0)).unwrap(), Some(1 << 20));
@@ -206,6 +226,9 @@ fn http_executor_native_symbol_constructs_client() {
         "mock".to_string(),
         4,
         Some(false),
+        None,
+        None,
+        None,
     )
     .expect("http_executor must construct a client");
 

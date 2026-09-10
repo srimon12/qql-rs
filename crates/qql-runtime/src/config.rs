@@ -85,7 +85,8 @@ pub struct QqlConfig {
     /// Per-request timeout in seconds; `0` disables the timeout.
     #[serde(default)]
     pub request_timeout: u64,
-    /// BM25 `k1` override; `None` uses the Qdrant default (`1.2`).
+    /// BM25 `k1` override for client-side (local) document sparse embedding;
+    /// `None` uses the Qdrant default (`1.2`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bm25_k1: Option<f64>,
     /// BM25 `b` override; `None` uses the Qdrant default (`0.75`).
@@ -93,10 +94,17 @@ pub struct QqlConfig {
     pub bm25_b: Option<f64>,
     /// BM25 average document length override; `None` uses the Qdrant default (`256`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bm25_avg_dl: Option<f64>,
+    pub bm25_avg_len: Option<f64>,
 }
 
 impl QqlConfig {
+    /// Resolve the configured client-side BM25 document parameters, validating
+    /// them fail-closed (`QQL-VALIDATION-CONFIG`) before any document is
+    /// written. Unset fields keep the Qdrant `qdrant/bm25` defaults.
+    pub fn bm25_params(&self) -> Result<qql_embed::Bm25Params, QqlError> {
+        qql_embed::Bm25Params::resolve(self.bm25_k1, self.bm25_b, self.bm25_avg_len)
+    }
+
     /// Ensure and return the QQL config directory (`$HOME/.qql`).
     pub fn config_dir() -> Result<PathBuf, QqlError> {
         let home = std::env::var("HOME")
@@ -149,5 +157,48 @@ impl QqlConfig {
             QqlError::execution("QQL-CONFIG", format!("failed to write config: {}", e), None)
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QqlConfig;
+
+    #[test]
+    fn bm25_params_resolve_and_validate_fail_closed() {
+        let defaults = QqlConfig::default().bm25_params().expect("defaults valid");
+        assert_eq!(defaults.k1(), 1.2);
+        assert_eq!(defaults.b(), 0.75);
+        assert_eq!(defaults.avg_len(), 256.0);
+
+        let configured = QqlConfig {
+            bm25_k1: Some(2.0),
+            bm25_b: Some(0.5),
+            bm25_avg_len: Some(8.0),
+            ..Default::default()
+        }
+        .bm25_params()
+        .expect("valid overrides");
+        assert_eq!(configured.k1(), 2.0);
+        assert_eq!(configured.b(), 0.5);
+        assert_eq!(configured.avg_len(), 8.0);
+
+        for cfg in [
+            QqlConfig {
+                bm25_k1: Some(0.0),
+                ..Default::default()
+            },
+            QqlConfig {
+                bm25_b: Some(1.5),
+                ..Default::default()
+            },
+            QqlConfig {
+                bm25_avg_len: Some(f64::NAN),
+                ..Default::default()
+            },
+        ] {
+            let err = cfg.bm25_params().expect_err("must fail closed");
+            assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+        }
     }
 }

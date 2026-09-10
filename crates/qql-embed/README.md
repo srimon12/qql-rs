@@ -58,7 +58,9 @@ pub trait Embedder: Send + Sync {
 Dense embedding is **batched by model** when the target is single-vector dense.
 Sparse is role-split: queries embed with unit term weights
 (`embed_sparse_query`), documents with BM25 term-frequency saturation
-(`embed_sparse_document`) — both matching Qdrant's `qdrant/bm25` defaults.
+(`embed_sparse_document`) — both matching Qdrant's `qdrant/bm25` defaults
+(tunable via [`Embedder::bm25_params`](https://docs.rs/qql-embed), see
+[SparseEmbedder](#sparseembedder--local-wire-compatible-bm25)).
 Multivector defaults reject until the host opts in (`embed_multi`), as does
 image embedding (`embed_image`).
 
@@ -159,6 +161,54 @@ let q = SparseEmbedder::embed_query("quantum computing");   // unit weights
 let d = SparseEmbedder::embed_document("quantum computing"); // tf saturation
 // q/d.indices: [u32; N], q/d.values: [f32; N]
 ```
+
+### Tuning `k1`, `b`, `avg_len`
+
+`qql_embed::Bm25Params` makes the BM25 hyperparameters configurable:
+
+```rust
+use qql_embed::{Bm25Params};
+
+// Defaults: 1.2 / 0.75 / 256 (Qdrant qdrant/bm25).
+let params = Bm25Params::new(1.2, 0.75, 8.0)?;
+let d = qql_embed::sparse::embed_document_with_params("short doc", &params);
+// or, via the helper:
+let d = qql_embed::SparseEmbedder::embed_document_with("short doc", &params);
+```
+
+This is a **client-side, write-path-only** setting:
+
+- It shapes **documents** only — `k1` controls tf saturation, `b` controls
+  length normalization, and `avg_len` is the expected average document length
+  in tokens. A wrong `avg_len` silently misjudges every document (rare terms
+  and long docs get the wrong normalization), so estimate it from the corpus
+  being written.
+- It does **not** change query-side weights (always unit) and does **not**
+  change server-side `qdrant/bm25` inference — the server keeps its own
+  defaults unless configured separately.
+- It is **not** a collection/wire setting: existing vectors keep the weights
+  they were written with. Re-ingest to apply a change.
+- Invalid values fail closed with `QQL-VALIDATION-CONFIG`: `k1 > 0`,
+  `b` in `[0, 1]`, `avg_len > 0`, all finite (NaN/±Inf rejected).
+
+Unset configuration is byte-identical to the previous hardcoded behavior
+(`Bm25Params::default()` == `1.2 / 0.75 / 256`).
+
+Host surfaces:
+
+| Host | How to set |
+|---|---|
+| Rust | `qql_embed::Bm25Params`; `Embedder::bm25_params` override; `HttpEmbedderOptions { bm25_k1, bm25_b, bm25_avg_len, .. }`; `qql::config::QqlConfig.bm25_*`; `qql_edge::{LocalExecutorOptions, FastEmbedderOptions}` |
+| Python (`pyqql`) | `pyqql.HttpEmbedder(..., bm25_k1=, bm25_b=, bm25_avg_len=)` or the `embedder={...}` dict keys |
+| Python (`pyqql-edge`) | `local_executor(..., bm25_k1=, bm25_b=, bm25_avg_len=)`, one-shot `execute`/`execute_async` kwargs, `http_executor(..., bm25_k1=, ...)` |
+| Node (`nqql`) | `new Client({ embedder: { bm25K1, bm25B, bm25AvgLen } })` (snake_case aliases accepted) |
+| Node (`nqql-edge`) | `localExecutor(dir, { bm25K1, bm25B, bm25AvgLen })`, `httpExecutor(..., bm25K1, bm25B, bm25AvgLen)`, standalone `execute({ bm25K1, ... })` |
+| CLIs | `qql config edge --bm25-k1/--bm25-b/--bm25-avg-len` + `QQL_EDGE_BM25_*`; remote CLI config `~/.qql/config.json` `bm25_k1`/`bm25_b`/`bm25_avg_len` |
+| WASM | `client.setBm25Params(k1, b, avgLen)` |
+
+They only apply when the built-in local BM25 encoder is used. When an ONNX
+sparse model (SPLADE / BGE-M3) or a remote sparse endpoint is configured, sparse
+vectors come from that model and these parameters are inert.
 
 Vectors produced here can be mixed with server-side `qdrant/bm25` inference on
 the same collection (a golden test pins the exact server output from the

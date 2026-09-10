@@ -91,6 +91,20 @@ pub struct LocalExecutorOptions {
     /// Show HuggingFace download progress bars (default: `false`).
     #[cfg(feature = "fastembed-local")]
     pub show_download_progress: bool,
+    /// Client-side BM25 `k1` for the local wire-compatible document encoder
+    /// (used when no offline sparse model is configured). `None` keeps the
+    /// Qdrant `qdrant/bm25` default (`1.2`). Write-path only; invalid values
+    /// fail closed with `QQL-VALIDATION-CONFIG` at executor construction.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_k1: Option<f64>,
+    /// Client-side BM25 `b` (`[0, 1]`); `None` keeps the Qdrant default
+    /// (`0.75`). See [`Self::bm25_k1`].
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_b: Option<f64>,
+    /// Client-side BM25 expected average document length in tokens; `None`
+    /// keeps the Qdrant default (`256`). See [`Self::bm25_k1`].
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_avg_len: Option<f64>,
 }
 
 /// Convert a MiB WAL segment capacity into the byte count
@@ -164,6 +178,9 @@ pub fn local_executor_with_options(
         reranker_model: opts.reranker_model,
         cache_dir: opts.cache_dir,
         show_download_progress: opts.show_download_progress,
+        bm25_k1: opts.bm25_k1,
+        bm25_b: opts.bm25_b,
+        bm25_avg_len: opts.bm25_avg_len,
     })?;
 
     // Pin collection vector size to the actual model dimension. Without this,
@@ -414,6 +431,110 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    #[cfg(feature = "fastembed-local")]
+    fn local_executor_options_bm25_defaults_are_unset() {
+        let opts = LocalExecutorOptions::default();
+        assert_eq!(opts.bm25_k1, None);
+        assert_eq!(opts.bm25_b, None);
+        assert_eq!(opts.bm25_avg_len, None);
+    }
+
+    /// Executor-level end-to-end: BM25 parameters configured on the embedder
+    /// must land in the sparse vector qdrant-edge actually stores for a TEXT
+    /// upsert, matching `qql_embed::sparse::embed_document_with_params`.
+    ///
+    /// Uses the edge HTTP executor so no ONNX model is needed: dense/multi
+    /// inference goes to the (unused) endpoint, while sparse document encoding
+    /// is the local wire-compatible BM25 path.
+    #[test]
+    #[cfg(feature = "http-embedding")]
+    fn configured_bm25_params_land_in_stored_sparse_vector() {
+        use qql::embedder::HttpEmbedderOptions;
+        use qql::executor::OnError;
+        use qql_plan::{PlanVectorStruct, PlanVectorValue};
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let data_dir =
+                std::env::temp_dir().join(format!("qql-edge-bm25-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&data_dir);
+
+            let params = qql_embed::Bm25Params::new(2.0, 0.5, 4.0).expect("valid params");
+            let executor = http_executor_with_options_and_wal(
+                &data_dir,
+                false,
+                None,
+                HttpEmbedderOptions {
+                    endpoint: "http://127.0.0.1:9/v1/embeddings".to_string(),
+                    api_key: String::new(),
+                    model: "unused-dense".to_string(),
+                    dimension: 3,
+                    bm25_k1: Some(params.k1()),
+                    bm25_b: Some(params.b()),
+                    bm25_avg_len: Some(params.avg_len()),
+                    ..Default::default()
+                },
+            )
+            .expect("http edge executor");
+
+            let report = executor
+                .execute("CREATE COLLECTION bm25_docs (sparse SPARSE)", OnError::Stop)
+                .await
+                .expect("create collection");
+            assert!(report.ok, "create failed: {report:?}");
+
+            let text = "cat sat mat cat";
+            let report = executor
+                .execute(
+                    &format!("UPSERT INTO bm25_docs VALUES {{id: 1, text: '{text}'}}"),
+                    OnError::Stop,
+                )
+                .await
+                .expect("upsert");
+            assert!(report.ok, "upsert failed: {report:?}");
+
+            let report = executor
+                .execute(
+                    "QUERY POINTS (1) FROM bm25_docs WITH VECTOR true",
+                    OnError::Stop,
+                )
+                .await
+                .expect("point lookup");
+            assert!(report.ok, "lookup failed: {report:?}");
+            let hits = report.results[0].hits_ref().expect("hits");
+            let vector = hits[0].vector.as_ref().expect("stored vector");
+            let stored = match vector {
+                PlanVectorStruct::Single(v) => v,
+                PlanVectorStruct::Named(map) => map.get("sparse").expect("sparse named vector"),
+            };
+            let (indices, values) = match stored {
+                PlanVectorValue::Sparse { indices, values } => (indices, values),
+                other => panic!("expected sparse vector, got {other:?}"),
+            };
+
+            let expected = qql_embed::sparse::embed_document_with_params(text, &params);
+            assert_eq!(*indices, expected.indices, "stored indices must match");
+            assert_eq!(values.len(), expected.values.len());
+            for (got, want) in values.iter().zip(&expected.values) {
+                assert!(
+                    (got - want).abs() < 1e-6,
+                    "stored BM25 weight {got} != configured {want}"
+                );
+            }
+
+            // The configured k1/b/avg_len genuinely differ from the defaults.
+            let default = qql_embed::sparse::embed_document(text);
+            assert_ne!(*values, default.values);
+
+            executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(data_dir);
+        });
     }
 
     #[test]

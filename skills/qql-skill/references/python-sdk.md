@@ -83,7 +83,7 @@ Client(
 - `url`: Qdrant REST (or gRPC) endpoint
 - `api_key`: Optional API key for authenticated Qdrant instances (sent as `api-key` header)
 - `use_grpc`: Set `True` to use gRPC transport (requires `--features grpc` build)
-- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys
+- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys. Sparse document encoding is always local (HTTP serves dense/multi/image/rerank only), so the dict/class also accepts `bm25_k1`, `bm25_b`, `bm25_avg_len` for the local BM25 encoder (write-path only; defaults 1.2 / 0.75 / 256; invalid values raise `QQL-VALIDATION-CONFIG`).
 - `route_affinity`: Optional Qdrant 1.19 read-affinity key, pinning reads to a
   stable replica. Sent as `X-Qdrant-Route-Affinity` (REST) / gRPC metadata
   `x-qdrant-route-affinity`. Empty string is treated as unset. Readable via
@@ -102,6 +102,17 @@ client = Client("http://localhost:6333", embedder={
     "api_key": "",
     "model": "all-minilm:l6-v2",
     "dimension": 384,
+})
+
+# Local sparse BM25 tuning (document side only; re-ingest to apply)
+client = Client("http://localhost:6333", embedder={
+    "endpoint": "http://localhost:11434/v1/embeddings",
+    "api_key": "",
+    "model": "all-minilm:l6-v2",
+    "dimension": 384,
+    "bm25_k1": 2.0,       # tf saturation (default 1.2)
+    "bm25_b": 0.5,        # length normalization, [0, 1] (default 0.75)
+    "bm25_avg_len": 8.0,  # expected avg doc length in tokens (default 256)
 })
 
 # With read affinity (Qdrant 1.19+)

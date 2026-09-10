@@ -10,9 +10,10 @@ use fastembed::{
     SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextRerank,
 };
 
+use ordered_float::NotNan;
 use qdrant_edge::bm25_embed::{EdgeBm25, EdgeBm25Config};
 use qql_core::error::QqlError;
-use qql_embed::{Embedder, JointEmbeddingOutput, SparseVector};
+use qql_embed::{Bm25Params, Embedder, JointEmbeddingOutput, SparseVector};
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
     QqlError::execution("QQL-EDGE-EMBED", msg, None)
@@ -24,6 +25,26 @@ fn to_qql_sparse(sv: qdrant_edge::SparseVector) -> SparseVector {
         indices: sv.indices,
         values: sv.values,
     }
+}
+
+/// Map validated [`Bm25Params`] onto qdrant-edge's [`EdgeBm25Config`]
+/// (document-side `k`/`b`/`avg_len` only; tokenizer/stemming/stopwords keep
+/// the engine defaults).
+///
+/// [`Bm25Params::new`] already rejects NaN/±Inf, so the `NotNan` conversions
+/// are infallible in practice; they are mapped instead of unwrapped so an
+/// impossible failure would still surface as a typed error.
+fn edge_bm25_config(params: &Bm25Params) -> Result<EdgeBm25Config, QqlError> {
+    let k = NotNan::new(params.k1()).map_err(|e| err(format!("invalid bm25 k1: {e}")))?;
+    let b = NotNan::new(params.b()).map_err(|e| err(format!("invalid bm25 b: {e}")))?;
+    let avg_len =
+        NotNan::new(params.avg_len()).map_err(|e| err(format!("invalid bm25 avg_len: {e}")))?;
+    Ok(EdgeBm25Config {
+        k,
+        b,
+        avg_len,
+        ..Default::default()
+    })
 }
 
 /// Validate `model` against the embedder's sparse configuration: with a
@@ -124,6 +145,18 @@ pub struct FastEmbedderOptions {
     /// Show HuggingFace download progress (default: `false` for bindings —
     /// progress bars on a Node/Python stderr are noise).
     pub show_download_progress: bool,
+    /// Client-side BM25 `k1` for the local wire-compatible fallback used when
+    /// no fastembed sparse model is configured. `None` → Qdrant
+    /// `qdrant/bm25` default (`1.2`). **Write-path only**: shapes document tf
+    /// saturation; query weights stay unit and server-side inference is
+    /// untouched. Invalid values fail closed with `QQL-VALIDATION-CONFIG`.
+    pub bm25_k1: Option<f64>,
+    /// Client-side BM25 `b` (length normalization, `[0, 1]`); `None` → `0.75`.
+    /// See [`Self::bm25_k1`].
+    pub bm25_b: Option<f64>,
+    /// Client-side BM25 expected average document length in tokens; `None` →
+    /// `256`. See [`Self::bm25_k1`].
+    pub bm25_avg_len: Option<f64>,
 }
 
 struct DenseSlot {
@@ -172,6 +205,9 @@ pub struct FastEmbedder {
     /// sparse model is configured. Query/document roles produce the same
     /// token IDs and weights as the Qdrant server's `qdrant/bm25`.
     bm25: EdgeBm25,
+    /// Validated parameters the fallback `bm25` was built with (exposed via
+    /// [`Embedder::bm25_params`]).
+    bm25_params: Bm25Params,
 }
 
 type CacheKey = (String, String);
@@ -225,11 +261,17 @@ impl FastEmbedder {
             reranker_model: None,
             cache_dir,
             show_download_progress: options.show_download_progress,
+            bm25_k1: None,
+            bm25_b: None,
+            bm25_avg_len: None,
         })
     }
 
     /// Construct from high-level options (dense + optional multi, cache, progress).
     pub fn try_with_options(opts: FastEmbedderOptions) -> Result<Self, QqlError> {
+        // Validate client-side BM25 parameters before any model work.
+        let bm25_params = Bm25Params::resolve(opts.bm25_k1, opts.bm25_b, opts.bm25_avg_len)?;
+
         let dense_model = match opts.model.as_deref() {
             None | Some("") => EmbeddingModel::default(),
             Some(name) => resolve_embedding_model(name)?,
@@ -458,10 +500,11 @@ impl FastEmbedder {
             multi,
             image,
             reranker,
-            // Default config (k=1.2, b=0.75, avg_len=256, English stemming +
-            // stopwords) is always valid, so init cannot fail here.
-            bm25: EdgeBm25::new(EdgeBm25Config::default())
+            // Document-side k/b/avg_len come from validated `Bm25Params`;
+            // tokenizer/stemming/stopwords keep the engine's English defaults.
+            bm25: EdgeBm25::new(edge_bm25_config(&bm25_params)?)
                 .map_err(|e| err(format!("edge BM25 init failed: {e}")))?,
+            bm25_params,
         })
     }
 
@@ -969,6 +1012,13 @@ impl Embedder for FastEmbedder {
         self.accepts_model(model)
     }
 
+    /// Document-side BM25 hyperparameters the fallback encoder was built with.
+    /// When a fastembed sparse model is configured, sparse inference is
+    /// ONNX-backed and these values are not used.
+    fn bm25_params(&self) -> Bm25Params {
+        self.bm25_params
+    }
+
     // image_dimension is not on Embedder trait; use dimension() for dense CLIP text.
     // Image dim available via FastEmbedder::image_dimension().
 
@@ -1419,5 +1469,53 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn edge_bm25_config_maps_validated_params() {
+        let params = Bm25Params::resolve(Some(2.0), Some(0.5), Some(12.0)).unwrap();
+        let cfg = edge_bm25_config(&params).unwrap();
+        assert_eq!(cfg.k.into_inner(), 2.0);
+        assert_eq!(cfg.b.into_inner(), 0.5);
+        assert_eq!(cfg.avg_len.into_inner(), 12.0);
+        assert_eq!(cfg.language, None, "language defaults stay untouched");
+    }
+
+    #[test]
+    fn edge_bm25_config_default_matches_engine_default() {
+        // `Bm25Params::default` must map onto the engine's own defaults, so an
+        // unset configuration changes nothing for existing edge documents.
+        let mapped = edge_bm25_config(&Bm25Params::default()).unwrap();
+        assert_eq!(mapped, EdgeBm25Config::default());
+
+        let engine_default = EdgeBm25::new(EdgeBm25Config::default()).unwrap();
+        let engine_mapped = EdgeBm25::new(mapped).unwrap();
+        let text = "Recipe for baking chocolate chip cookies";
+        let a = engine_default.embed_document(text);
+        let b = engine_mapped.embed_document(text);
+        assert_eq!(a.indices, b.indices);
+        assert_eq!(a.values, b.values);
+    }
+
+    #[test]
+    fn edge_bm25_config_applied_params_change_document_vectors() {
+        // Non-default k1/b/avg_len must land in the document weights, and the
+        // engine encoder must agree with `qql_embed::sparse` to f32 tolerance.
+        let params = Bm25Params::resolve(Some(2.0), Some(0.25), Some(4.0)).unwrap();
+        let engine = EdgeBm25::new(edge_bm25_config(&params).unwrap()).unwrap();
+        let text = "cat sat mat cat";
+        let got = engine.embed_document(text);
+        let want = qql_embed::sparse::embed_document_with_params(text, &params);
+        assert_eq!(got.indices, want.indices);
+        for (g, w) in got.values.iter().zip(&want.values) {
+            assert!((g - w).abs() < 1e-6, "edge {g} != qql-embed {w}");
+        }
+
+        let default = EdgeBm25::new(EdgeBm25Config::default()).unwrap();
+        assert_ne!(
+            default.embed_document(text).values,
+            got.values,
+            "configured params must differ from the engine defaults"
+        );
     }
 }

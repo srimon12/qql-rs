@@ -44,6 +44,10 @@ const client = new Client({
         apiKey: "",
         model: "all-minilm:l6-v2",
         dimension: 384,
+        // Local sparse BM25 document tuning (write-path only; re-ingest to apply)
+        bm25K1: 2.0,      // tf saturation (default 1.2)
+        bm25B: 0.5,       // length normalization, [0, 1] (default 0.75)
+        bm25AvgLen: 8.0,  // expected avg doc length in tokens (default 256)
     },
 });
 

@@ -84,6 +84,18 @@ class HttpEmbedder {
         throw new TypeError(`HttpEmbedder ${key} must be a positive integer`);
       }
     }
+    // Client-side BM25 document params: type-checked here, range-checked
+    // fail-closed by the native layer (`QQL-VALIDATION-CONFIG`).
+    for (const [camel, snake] of [
+      ['bm25K1', 'bm25_k1'],
+      ['bm25B', 'bm25_b'],
+      ['bm25AvgLen', 'bm25_avg_len'],
+    ]) {
+      const value = options[camel] ?? options[snake];
+      if (value !== undefined && typeof value !== 'number') {
+        throw new TypeError(`HttpEmbedder ${camel} must be a number`);
+      }
+    }
     this.endpoint = options.endpoint;
     this.apiKey = apiKey ?? '';
     this.model = options.model;
@@ -99,6 +111,9 @@ class HttpEmbedder {
     this.rerankEndpoint = options.rerankEndpoint ?? options.rerank_endpoint ?? '';
     this.rerankApiKey = options.rerankApiKey ?? options.rerank_api_key ?? '';
     this.rerankModel = options.rerankModel ?? options.rerank_model ?? '';
+    this.bm25K1 = options.bm25K1 ?? options.bm25_k1;
+    this.bm25B = options.bm25B ?? options.bm25_b;
+    this.bm25AvgLen = options.bm25AvgLen ?? options.bm25_avg_len;
   }
 }
 

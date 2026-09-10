@@ -34,6 +34,30 @@ Sparse defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical
 token IDs via qdrant-edge); set `sparse_model` for real SPLADE/BGE-M3
 sparse inference.
 
+### Tuning the local BM25 encoder
+
+`LocalExecutorOptions { bm25_k1, bm25_b, bm25_avg_len, .. }` (and the
+`FastEmbedderOptions` equivalents) tune the **document-side** local BM25
+encoder used when no `sparse_model` is configured. Defaults stay
+`1.2 / 0.75 / 256` (Qdrant `qdrant/bm25`). It is a client-side, write-path-only
+knob: query weights stay unit, server-side inference is untouched, and vectors
+already written keep their weights — re-ingest to apply. Invalid values fail
+closed with `QQL-VALIDATION-CONFIG`. Same knobs on `HttpEmbedderOptions` for
+the edge HTTP executor (dense via HTTP, sparse still local).
+
+```rust
+// Title-heavy corpus: average title is ~8 tokens, not 256.
+let mut exec = local_executor_with_options(
+    "/tmp/qql-titles",
+    LocalExecutorOptions {
+        bm25_avg_len: Some(8.0),
+        ..Default::default()
+    },
+)?;
+// CREATE COLLECTION titles (sparse SPARSE);
+// UPSERT INTO titles VALUES {id: 1, text: 'a short title'};  // uses avg_len=8
+```
+
 ```rust
 // Offline CLIP text + vision
 let mut clip = local_executor_with_options(
@@ -142,7 +166,7 @@ Intel Mac users should disable default features and use `http-embedding` or
   sample, formula, relevance-feedback, and order-by queries; point-reference
   and text inputs that cannot be embedded locally are rejected
 - Model-based sparse inference, multivector, and `CROSS RERANK` require the matching models to be opted in
-- Sparse (`sparse_model`) defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical token IDs via qdrant-edge); opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference
+- Sparse (`sparse_model`) defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical token IDs via qdrant-edge); opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference. The local BM25 document encoder is tunable via `bm25_k1` / `bm25_b` / `bm25_avg_len` (client-side, write-path only; invalid values fail closed with `QQL-VALIDATION-CONFIG`)
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
 - Route affinity is a remote-client transport feature (`RestQdrant` /

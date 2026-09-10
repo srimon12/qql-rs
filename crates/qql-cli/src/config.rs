@@ -24,6 +24,16 @@ pub struct EdgeConfig {
     pub reranker_model: Option<String>,
     pub cache_dir: Option<PathBuf>,
     pub show_download_progress: bool,
+    /// Client-side BM25 `k1` for the local wire-compatible document encoder
+    /// (used when no offline sparse model is configured). `None` → Qdrant
+    /// `qdrant/bm25` default (`1.2`). Write-path only; invalid values fail
+    /// closed with `QQL-VALIDATION-CONFIG`.
+    pub bm25_k1: Option<f64>,
+    /// Client-side BM25 `b` (`[0, 1]`); `None` → `0.75`.
+    pub bm25_b: Option<f64>,
+    /// Client-side BM25 expected average document length in tokens;
+    /// `None` → `256`.
+    pub bm25_avg_len: Option<f64>,
     pub embed_url: Option<String>,
     pub embed_key: String,
     pub embed_model: String,
@@ -55,6 +65,9 @@ impl Default for EdgeConfig {
             reranker_model: None,
             cache_dir: None,
             show_download_progress: false,
+            bm25_k1: None,
+            bm25_b: None,
+            bm25_avg_len: None,
             embed_url: None,
             embed_key: String::new(),
             embed_model: "nomic-embed-text".to_string(),
@@ -159,6 +172,15 @@ impl EdgeConfig {
         if let Some(value) = env_string("QQL_EDGE_CACHE_DIR") {
             self.cache_dir = Some(PathBuf::from(value));
         }
+        if let Some(value) = env_f64("QQL_EDGE_BM25_K1") {
+            self.bm25_k1 = Some(value);
+        }
+        if let Some(value) = env_f64("QQL_EDGE_BM25_B") {
+            self.bm25_b = Some(value);
+        }
+        if let Some(value) = env_f64("QQL_EDGE_BM25_AVG_LEN") {
+            self.bm25_avg_len = Some(value);
+        }
         if let Some(value) = env_bool("QQL_EDGE_ON_DISK") {
             self.on_disk_payload = value;
         }
@@ -233,6 +255,19 @@ fn env_usize(name: &str) -> Option<usize> {
     env_string(name)?.parse().ok()
 }
 
+/// Parse a float env override, mapping malformed values to `NaN` so they fail
+/// closed in the BM25 validator (`QQL-VALIDATION-CONFIG`) instead of being
+/// silently ignored.
+#[cfg(feature = "edge")]
+fn env_f64(name: &str) -> Option<f64> {
+    parse_bm25_env(env_string(name))
+}
+
+#[cfg(feature = "edge")]
+fn parse_bm25_env(value: Option<String>) -> Option<f64> {
+    Some(value?.parse().unwrap_or(f64::NAN))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +295,43 @@ mod tests {
         assert!(cfg.multi_model.is_none());
         assert!(cfg.image_model.is_none());
         assert!(cfg.reranker_model.is_none());
+    }
+
+    #[test]
+    fn edge_config_default_keeps_bm25_unset() {
+        let cfg = EdgeConfig::default();
+        assert_eq!(cfg.bm25_k1, None);
+        assert_eq!(cfg.bm25_b, None);
+        assert_eq!(cfg.bm25_avg_len, None);
+    }
+
+    #[test]
+    fn edge_config_bm25_values_roundtrip_through_json() {
+        let cfg = EdgeConfig {
+            bm25_k1: Some(2.0),
+            bm25_b: Some(0.5),
+            bm25_avg_len: Some(8.0),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&cfg).expect("serialize");
+        let back: EdgeConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.bm25_k1, Some(2.0));
+        assert_eq!(back.bm25_b, Some(0.5));
+        assert_eq!(back.bm25_avg_len, Some(8.0));
+    }
+
+    #[test]
+    #[cfg(feature = "edge")]
+    fn parse_bm25_env_malformed_values_fail_closed_as_nan() {
+        // Malformed numbers must not be silently dropped: NaN fails the BM25
+        // validator so the executor refuses to start instead.
+        assert!(
+            parse_bm25_env(Some("not-a-number".into()))
+                .unwrap()
+                .is_nan()
+        );
+        assert!(parse_bm25_env(Some(f64::NAN.to_string())).unwrap().is_nan());
+        assert_eq!(parse_bm25_env(Some("2.5".into())), Some(2.5));
+        assert_eq!(parse_bm25_env(None), None);
     }
 }

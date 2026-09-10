@@ -726,6 +726,9 @@ pub(crate) fn executor_for(
                         rerank_endpoint,
                         rerank_api_key,
                         rerank_model,
+                        bm25_k1: config.bm25_k1,
+                        bm25_b: config.bm25_b,
+                        bm25_avg_len: config.bm25_avg_len,
                     },
                 )?;
                 Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
@@ -775,6 +778,9 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
                 reranker_model: config.reranker_model.clone(),
                 cache_dir: config.cache_dir,
                 show_download_progress: show_progress,
+                bm25_k1: config.bm25_k1,
+                bm25_b: config.bm25_b,
+                bm25_avg_len: config.bm25_avg_len,
             };
             qql_edge::local_executor_with_options(config.data_dir, options)
                 .map_err(|error| format!("edge initialization failed: {error}").into())
@@ -803,6 +809,9 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
                     rerank_endpoint: None,
                     rerank_api_key: None,
                     rerank_model: config.reranker_model,
+                    bm25_k1: config.bm25_k1,
+                    bm25_b: config.bm25_b,
+                    bm25_avg_len: config.bm25_avg_len,
                 },
             )
             .map_err(|error| format!("edge initialization failed: {error}").into())
@@ -931,6 +940,8 @@ pub fn handle_configure_edge(
                 .into(),
         );
     }
+    // Fail closed at save time: k1 > 0, b in [0, 1], avg_len > 0, all finite.
+    qql::embedder::Bm25Params::resolve(config.bm25_k1, config.bm25_b, config.bm25_avg_len)?;
     let path = config.save()?;
     println!("Saved edge configuration to {}", path.display());
     println!("Use it with: qql --edge exec \"SHOW COLLECTIONS\"");

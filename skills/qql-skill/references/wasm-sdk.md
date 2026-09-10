@@ -91,6 +91,21 @@ Single dense model per client: a `MODEL 'name'` clause other than empty or
 configured model (same rule on the sparse leg: non-default sparse models are
 rejected with `QQL-EMBEDDING-SPARSE`, otherwise local BM25 runs in-browser).
 
+### Local BM25 tuning
+
+Sparse `TEXT` inputs (and the sparse leg of `HYBRID`) are encoded locally with
+wire-compatible BM25. Tune the **document** side before upserting:
+
+```js
+client.setBm25Params(2.0, 0.5, 8.0); // k1, b, avg_len — throws on invalid values
+```
+
+Defaults are Qdrant's `1.2 / 0.75 / 256`. Client-side, write-path only: query
+weights stay unit, server-side inference is untouched, and vectors already
+written keep their weights — re-ingest to apply. Invalid values throw the
+`QQL-VALIDATION-CONFIG` error (`k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`, all
+finite).
+
 ### JS Function Embedder
 
 For Transformers.js, custom providers, or in-browser models:

@@ -404,6 +404,16 @@ pub struct LocalExecutorOptions {
     /// persists in the shard's `edge_config.json`. Must be a whole number
     /// `>= 1`; invalid values fail with `QQL-VALIDATION-CONFIG`.
     pub wal_segment_mb: Option<f64>,
+    /// Client-side BM25 `k1` for the local wire-compatible document encoder
+    /// (used when no offline sparse model is configured). Write-path only:
+    /// shapes document tf saturation; query weights stay unit and server-side
+    /// inference is untouched. Default `1.2`; invalid values fail with
+    /// `QQL-VALIDATION-CONFIG`.
+    pub bm25_k1: Option<f64>,
+    /// Client-side BM25 `b` length normalization in `[0, 1]` (default `0.75`).
+    pub bm25_b: Option<f64>,
+    /// Client-side BM25 expected average document length in tokens (default `256`).
+    pub bm25_avg_len: Option<f64>,
 }
 
 /// Parse `walSegmentMb` (whole MiB) into the byte capacity
@@ -465,6 +475,9 @@ pub fn local_executor(
             reranker_model: opts.reranker_model,
             cache_dir: opts.cache_dir.map(std::path::PathBuf::from),
             show_download_progress: opts.show_download_progress.unwrap_or(false),
+            bm25_k1: opts.bm25_k1,
+            bm25_b: opts.bm25_b,
+            bm25_avg_len: opts.bm25_avg_len,
         },
     )
     .map_err(common::to_napi_err)?;
@@ -512,9 +525,12 @@ pub struct EmbeddingModelInfoJs {
 /// - `embedModel` — model name, e.g. `"text-embedding-3-small"`
 /// - `embedDim` — expected output dimension
 ///
-/// `onDiskPayload` defaults to `true`.
+/// `onDiskPayload` defaults to `true`. `bm25K1` / `bm25B` / `bm25AvgLen`
+/// configure the **local** BM25 document encoder used for sparse vectors
+/// (write-path only; defaults 1.2 / 0.75 / 256).
 #[cfg(feature = "http-embedding")]
 #[napi(js_name = httpExecutor, catch_unwind)]
+#[allow(clippy::too_many_arguments)]
 pub fn http_executor(
     data_dir: String,
     url: String,
@@ -522,15 +538,25 @@ pub fn http_executor(
     embed_model: String,
     embed_dim: u32,
     on_disk_payload: Option<bool>,
+    bm25_k1: Option<f64>,
+    bm25_b: Option<f64>,
+    bm25_avg_len: Option<f64>,
 ) -> napi::Result<JsClient> {
     let on_disk = on_disk_payload.unwrap_or(true);
-    let exec = qql_edge::http_executor(
+    let exec = qql_edge::http_executor_with_options_and_wal(
         data_dir,
         on_disk,
-        url,
-        embed_key,
-        embed_model,
-        embed_dim as usize,
+        None,
+        qql::embedder::HttpEmbedderOptions {
+            endpoint: url,
+            api_key: embed_key,
+            model: embed_model,
+            dimension: embed_dim as usize,
+            bm25_k1,
+            bm25_b,
+            bm25_avg_len,
+            ..Default::default()
+        },
     )
     .map_err(common::to_napi_err)?;
     Ok(JsClient::from_executor(exec))
@@ -573,10 +599,30 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
         show_download_progress: options
             .and_then(|o| o.get("showDownloadProgress"))
             .and_then(|v| v.as_bool()),
+        // Client-side BM25 document params; forwarded raw so invalid values
+        // fail closed in the Rust validator (`QQL-VALIDATION-CONFIG`).
+        bm25_k1: option_f64(options, "bm25K1", "bm25_k1"),
+        bm25_b: option_f64(options, "bm25B", "bm25_b"),
+        bm25_avg_len: option_f64(options, "bm25AvgLen", "bm25_avg_len"),
         // The WAL knob is a localExecutor option; one-shot execute keeps the
         // engine default (the JS wrapper does not forward it here).
         wal_segment_mb: None,
     }
+}
+
+/// Read a numeric option by camelCase or snake_case name; malformed values are
+/// turned into `NaN` so the fail-closed Rust validator rejects them instead of
+/// silently falling back to defaults.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn option_f64(options: Option<&serde_json::Value>, camel: &str, snake: &str) -> Option<f64> {
+    let value = options?.get(camel).or_else(|| options?.get(snake))?;
+    if value.is_null() {
+        return None;
+    }
+    if let Some(n) = value.as_f64() {
+        return Some(n);
+    }
+    Some(f64::NAN)
 }
 
 /// Build the one-shot edge client for the standalone `execute` / `executeStmt`
@@ -618,6 +664,9 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
                 .and_then(|o| o.get("embedDim"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
+            let bm25_k1 = option_f64(options, "bm25K1", "bm25_k1");
+            let bm25_b = option_f64(options, "bm25B", "bm25_b");
+            let bm25_avg_len = option_f64(options, "bm25AvgLen", "bm25_avg_len");
             return http_executor(
                 data_dir.to_string(),
                 embed_url.to_string(),
@@ -625,6 +674,9 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
                 embed_model.to_string(),
                 embed_dim,
                 Some(on_disk),
+                bm25_k1,
+                bm25_b,
+                bm25_avg_len,
             );
         }
     }
@@ -664,7 +716,7 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
 #[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
 #[napi(
     catch_unwind,
-    ts_args_type = "stmt: Stmt, options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
+    ts_args_type = "stmt: Stmt, options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number; bm25K1?: number; bm25B?: number; bm25AvgLen?: number }"
 )]
 pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
     let client = standalone_client(options.as_ref())?;
@@ -692,7 +744,7 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
 #[cfg(all(feature = "fastembed-local", not(feature = "http-embedding")))]
 #[napi(
     catch_unwind,
-    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean }"
+    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; bm25K1?: number; bm25B?: number; bm25AvgLen?: number }"
 )]
 pub async fn execute(
     query: serde_json::Value,
@@ -711,7 +763,7 @@ pub async fn execute(
 #[cfg(feature = "http-embedding")]
 #[napi(
     catch_unwind,
-    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
+    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number; bm25K1?: number; bm25B?: number; bm25AvgLen?: number }"
 )]
 pub async fn execute(
     query: serde_json::Value,

@@ -151,6 +151,15 @@ export interface LocalExecutorOptions {
    * embedded shards; the resolved capacity persists in `edge_config.json`.
    * Invalid values fail with `QQL-VALIDATION-CONFIG`. */
   walSegmentMb?: number;
+  /** Client-side BM25 `k1` for the local sparse document encoder (default 1.2).
+   * Write-path only: shapes documents written after the setting; query weights
+   * stay unit and server-side inference is untouched. Invalid values fail with
+   * `QQL-VALIDATION-CONFIG`. */
+  bm25K1?: number;
+  /** Client-side BM25 `b` length normalization in [0, 1] (default 0.75). */
+  bm25B?: number;
+  /** Client-side BM25 expected average document length in tokens (default 256). */
+  bm25AvgLen?: number;
 }
 
 export interface StandaloneOptions {
@@ -180,6 +189,13 @@ export interface StandaloneOptions {
   embedModel?: string;
   /** Override: output dimension for HTTP embedding */
   embedDim?: number;
+  /** Client-side BM25 `k1` for the local sparse document encoder (default 1.2;
+   * write-path only). Invalid values fail with `QQL-VALIDATION-CONFIG`. */
+  bm25K1?: number;
+  /** Client-side BM25 `b` length normalization in [0, 1] (default 0.75). */
+  bm25B?: number;
+  /** Client-side BM25 expected average document length in tokens (default 256). */
+  bm25AvgLen?: number;
   /** onError behaviour */
   onError?: "stop" | "continue";
   /** Parameter bindings */
@@ -318,6 +334,9 @@ export function httpExecutor(
   embedModel: string,
   embedDim: number,
   onDiskPayload?: boolean,
+  bm25K1?: number,
+  bm25B?: number,
+  bm25AvgLen?: number,
 ): Client;
 
 /**

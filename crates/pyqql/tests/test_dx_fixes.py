@@ -189,3 +189,64 @@ class TestVerdictRoundTwo(unittest.TestCase):
         )[0]
         bound = stmt.bind({"rank": 5})
         self.assertIn("GAUSS_DECAY(rank", str(bound))
+
+
+class TestBm25EmbedderParams(unittest.TestCase):
+    """Client-side BM25 document params on the remote SDK's HttpEmbedder.
+
+    Sparse document encoding is always local (the HTTP endpoint only serves
+    dense/multi/image/rerank), so the tuning knobs ride the embedder config.
+    Constructor-only: no network is touched.
+    """
+
+    ENDPOINT = "http://127.0.0.1:9/v1/embeddings"
+
+    def test_http_embedder_accepts_valid_bm25_params(self):
+        emb = pyqql.HttpEmbedder(
+            self.ENDPOINT,
+            "unused-dense",
+            3,
+            bm25_k1=2.0,
+            bm25_b=0.5,
+            bm25_avg_len=8.0,
+        )
+        self.assertIsNotNone(emb)
+
+    def test_http_embedder_rejects_invalid_bm25_params(self):
+        for kwargs in (
+            {"bm25_k1": 0.0},
+            {"bm25_k1": -1.0},
+            {"bm25_b": -0.1},
+            {"bm25_b": 1.5},
+            {"bm25_avg_len": 0.0},
+            {"bm25_b": float("nan")},
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                pyqql.HttpEmbedder(self.ENDPOINT, "unused-dense", 3, **kwargs)
+            self.assertIn("QQL-VALIDATION-CONFIG", str(ctx.exception), f"{kwargs}")
+
+    def test_client_embedder_dict_rejects_invalid_bm25_params(self):
+        with self.assertRaises(ValueError) as ctx:
+            pyqql.Client(
+                embedder={
+                    "endpoint": self.ENDPOINT,
+                    "model": "unused-dense",
+                    "dimension": 3,
+                    "bm25_b": 1.5,
+                }
+            )
+        self.assertIn("QQL-VALIDATION-CONFIG", str(ctx.exception))
+
+    def test_client_embedder_dict_accepts_bm25_params(self):
+        # Valid values must not abort client construction (no network yet).
+        client = pyqql.Client(
+            embedder={
+                "endpoint": self.ENDPOINT,
+                "model": "unused-dense",
+                "dimension": 3,
+                "bm25_k1": 2.0,
+                "bm25_b": 0.5,
+                "bm25_avg_len": 8.0,
+            }
+        )
+        client.close()

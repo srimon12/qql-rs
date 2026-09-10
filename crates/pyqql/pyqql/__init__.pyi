@@ -156,6 +156,9 @@ class HttpEmbedder:
         rerank_endpoint: Optional[str] = None,
         rerank_api_key: Optional[str] = None,
         rerank_model: Optional[str] = None,
+        bm25_k1: Optional[float] = None,
+        bm25_b: Optional[float] = None,
+        bm25_avg_len: Optional[float] = None,
     ) -> None: ...
 
 class Client:

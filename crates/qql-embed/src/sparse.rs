@@ -6,11 +6,23 @@
 //! mirrors the server defaults: word tokenizer (split on non-alphanumeric),
 //! Unicode lowercasing, English stopword removal, and English snowball
 //! stemming. Queries embed with unit term weights; documents with BM25
-//! term-frequency saturation (k1=1.2, b=0.75, avg_len=256). IDF is applied
-//! server-side via the sparse vector `modifier: idf`.
+//! term-frequency saturation (k1=1.2, b=0.75, avg_len=256, or explicit
+//! [`Bm25Params`]). IDF is applied server-side via the sparse vector
+//! `modifier: idf`.
 //!
 //! Because token IDs and formulas match the server, vectors produced here can
 //! be mixed with server-side `qdrant/bm25` inference on the same collection.
+//!
+//! ### Tuning BM25 (`k1`, `b`, `avg_len`)
+//!
+//! [`Bm25Params`] is a **client-side, write-path-only** setting: it shapes how
+//! *documents* are encoded (tf saturation via `k1`, length normalization via
+//! `b`, and the expected average document length via `avg_len`). It is not a
+//! collection or wire setting, does not affect query-side weights (always unit
+//! weights), and does not change server-side `qdrant/bm25` inference. A wrong
+//! `avg_len` silently misjudges every document, so tune it to the corpus being
+//! written; documents embedded before the change keep their vectors — re-ingest
+//! to apply.
 //!
 //! ### FastEmbed Query Weighting Parity Note
 //! FastEmbed's Python `Qdrant/bm25` emits a uniform scaling factor (~1.665) on query
@@ -22,6 +34,7 @@ use std::sync::LazyLock;
 
 use murmur3_32::Murmur3;
 use phf::phf_set;
+use qql_core::error::QqlError;
 use rust_stemmers::{Algorithm, Stemmer};
 
 /// Sparse embedding (indices + values). Transport-neutral — not a protobuf type.
@@ -40,6 +53,95 @@ pub const DEFAULT_B: f64 = 0.75;
 /// BM25 expected average document length in tokens, matching Qdrant's
 /// `qdrant/bm25` default.
 pub const DEFAULT_AVGDL: f64 = 256.0;
+
+/// Validated BM25 hyperparameters for **document-side** local encoding.
+///
+/// Only documents are affected: query text always embeds with unit term
+/// weights, and IDF is applied by the backend from the sparse vector's
+/// `modifier: idf`. This is a client-side, write-path-only knob — it is not a
+/// collection/wire setting, and it does not change server-side `qdrant/bm25`
+/// inference. Vectors written before a change stay as written; re-ingest to
+/// apply new parameters.
+///
+/// Construct via [`Bm25Params::new`] (or [`Bm25Params::resolve`] for optional
+/// overrides); invalid values fail closed with `QQL-VALIDATION-CONFIG`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bm25Params {
+    k1: f64,
+    b: f64,
+    avg_len: f64,
+}
+
+impl Default for Bm25Params {
+    /// Qdrant's `qdrant/bm25` defaults: `k1 = 1.2`, `b = 0.75`,
+    /// `avg_len = 256`. Unset configuration keeps this exact behavior.
+    fn default() -> Self {
+        Self {
+            k1: DEFAULT_K1,
+            b: DEFAULT_B,
+            avg_len: DEFAULT_AVGDL,
+        }
+    }
+}
+
+impl Bm25Params {
+    /// Validate and build explicit BM25 parameters.
+    ///
+    /// `k1` must be finite and `> 0`, `b` finite and within `[0, 1]`, and
+    /// `avg_len` finite and `> 0`. NaN and ±Inf are rejected for all three.
+    pub fn new(k1: f64, b: f64, avg_len: f64) -> Result<Self, QqlError> {
+        if !k1.is_finite() || k1 <= 0.0 {
+            return Err(config_error(
+                "bm25 k1 must be a finite number greater than zero".to_string(),
+            ));
+        }
+        if !b.is_finite() || !(0.0..=1.0).contains(&b) {
+            return Err(config_error(
+                "bm25 b must be a finite number in [0, 1]".to_string(),
+            ));
+        }
+        if !avg_len.is_finite() || avg_len <= 0.0 {
+            return Err(config_error(
+                "bm25 avg_len must be a finite number greater than zero".to_string(),
+            ));
+        }
+        Ok(Self { k1, b, avg_len })
+    }
+
+    /// Resolve optional overrides on top of [`Bm25Params::default`]; `None`
+    /// keeps the corresponding Qdrant `qdrant/bm25` default.
+    pub fn resolve(
+        k1: Option<f64>,
+        b: Option<f64>,
+        avg_len: Option<f64>,
+    ) -> Result<Self, QqlError> {
+        let defaults = Self::default();
+        Self::new(
+            k1.unwrap_or(defaults.k1),
+            b.unwrap_or(defaults.b),
+            avg_len.unwrap_or(defaults.avg_len),
+        )
+    }
+
+    /// Term-frequency saturation (`k1`).
+    pub fn k1(&self) -> f64 {
+        self.k1
+    }
+
+    /// Document-length normalization factor (`b`), `0` = none, `1` = full.
+    pub fn b(&self) -> f64 {
+        self.b
+    }
+
+    /// Expected average document length in tokens (`avg_len`).
+    pub fn avg_len(&self) -> f64 {
+        self.avg_len
+    }
+}
+
+fn config_error(message: String) -> QqlError {
+    QqlError::validation("QQL-VALIDATION-CONFIG", message, None)
+}
 
 /// Token → `u32` ID. Wire-compatible with Qdrant's BM25 sparse vectors:
 /// murmur3 32-bit (seed 0), then `|i32|` to make it positive.
@@ -359,15 +461,33 @@ pub fn embed_document(text: &str) -> SparseVector {
     embed_document_with(text, DEFAULT_K1, DEFAULT_B, DEFAULT_AVGDL)
 }
 
+/// Embed document text with validated [`Bm25Params`].
+///
+/// Prefer this over [`embed_document_with`] on configurable paths: the
+/// parameters are validated once at construction instead of sanitized per call.
+pub fn embed_document_with_params(text: &str, params: &Bm25Params) -> SparseVector {
+    embed_document_impl(text, params.k1, params.b, params.avg_len)
+}
+
 /// Embed document text with explicit BM25 parameters.
 ///
 /// `avgdl <= 0` or non-finite falls back to [`DEFAULT_AVGDL`] (it is a
-/// divisor). Frequencies are counted per token ID: on the rare murmur3
-/// collision two terms merge into one dimension with summed counts, which
-/// keeps output deterministic across runs (the server's own per-string
-/// counting is randomized there, so collided IDs carry no cross-implementation
-/// contract).
+/// divisor). `k1` and `b` are used as given — prefer
+/// [`embed_document_with_params`] for fail-closed validation. Frequencies are
+/// counted per token ID: on the rare murmur3 collision two terms merge into
+/// one dimension with summed counts, which keeps output deterministic across
+/// runs (the server's own per-string counting is randomized there, so collided
+/// IDs carry no cross-implementation contract).
 pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVector {
+    let safe_avgdl = if avgdl.is_finite() && avgdl > 0.0 {
+        avgdl
+    } else {
+        DEFAULT_AVGDL
+    };
+    embed_document_impl(text, k1, b, safe_avgdl)
+}
+
+fn embed_document_impl(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVector {
     let mut token_ids: Vec<u32> = Vec::with_capacity(text.len() / 6 + 1);
     for_each_token_id(text, |id| {
         token_ids.push(id);
@@ -378,12 +498,7 @@ pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVec
     }
 
     let doc_len = token_ids.len() as f64;
-    let safe_avgdl = if avgdl.is_finite() && avgdl > 0.0 {
-        avgdl
-    } else {
-        DEFAULT_AVGDL
-    };
-    let denom_scale = k1 * (1.0 - b + b * doc_len / safe_avgdl);
+    let denom_scale = k1 * (1.0 - b + b * doc_len / avgdl);
     let k1p1 = k1 + 1.0;
 
     token_ids.sort_unstable();

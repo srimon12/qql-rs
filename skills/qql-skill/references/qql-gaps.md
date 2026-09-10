@@ -20,6 +20,7 @@ missing** features that already ship.
 | Edge snapshot **creation** | **No** — qdrant-edge 0.8 exposes unpack/apply only; publish edge → remote with `qql --edge migrate … --target-url`, never by copying shard files |
 | Edge → edge migration | **No** — rejected before executors start; seed devices from a server snapshot instead |
 | WAL segment capacity | **All SDKs** — Rust `LocalExecutorOptions::wal_segment_capacity`, CLI `--wal-segment-mb` / `QQL_EDGE_WAL_SEGMENT_MB`, Python `local_executor(..., wal_segment_mb=N)`, Node `localExecutor(dir, { walSegmentMb: N })`; qdrant-edge 0.8's own Python binding cannot set it |
+| Local BM25 tuning (`k1`/`b`/`avg_len`) | **All SDKs, document side** — Rust `Bm25Params` / `LocalExecutorOptions::bm25_*` / `FastEmbedderOptions` / `HttpEmbedderOptions`, CLI `qql config edge --bm25-*` / `QQL_EDGE_BM25_*`, Python `local_executor(..., bm25_k1=, bm25_b=, bm25_avg_len=)` + `http_executor` + remote `pyqql.HttpEmbedder`, Node `{ bm25K1, bm25B, bm25AvgLen }` + remote `embedder`, WASM `setBm25Params(k1, b, avgLen)`. Client-side, write-path only: query weights stay unit, server-side inference untouched; defaults 1.2 / 0.75 / 256; invalid values → `QQL-VALIDATION-CONFIG`; **re-ingest to apply** (not a collection/ALTER setting) |
 | `ALTER COLLECTION … WITH VECTOR <name> (…)` | **Yes (REST/gRPC)** — per-vector `HNSW` / `QUANTIZATION` / storage diffs; unnamed `WITH VECTOR (…)` targets the default vector. Edge: per-vector `HNSW` only; other fields → `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF`, sparse → `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` |
 | `SHARD`, shard-key DDL | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
 | `ALTER COLLECTION` | **Partial** — remote: global + per-vector HNSW/quantization/storage; edge: global `HNSW` / `OPTIMIZERS` and per-vector `HNSW` persist, `WITH PARAMS` / `QUANTIZATION` / other per-vector fields reject per field |
@@ -75,6 +76,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Memory placement | `memory = 'cold'\|'cached'\|'pinned'` on VECTOR / HNSW / SPARSE / QUANTIZATION / indexes; `payload_memory` in `PARAMS` (no `pinned`) |
 | Per-vector ALTER diffs | `ALTER COLLECTION c WITH VECTOR <name> (HNSW (…), QUANTIZATION (…), VECTOR (…))` / `WITH SPARSE <name> (SPARSE (…))` → typed PATCH `vectors` / `sparse_vectors` maps (gRPC `VectorsConfigDiff`) |
 | TurboQuant dense | `WITH VECTOR (…, datatype = 'turbo4')` |
+| Client-side BM25 tuning | `Bm25Params::new/1.2,0.75,256-defaults` · `HttpEmbedderOptions.bm25_*` · `qql_edge::{LocalExecutorOptions,FastEmbedderOptions}.bm25_*` · Python `bm25_k1`/`bm25_b`/`bm25_avg_len` · Node `bm25K1`/`bm25B`/`bm25AvgLen` · WASM `setBm25Params` — document-side only, write-path, re-ingest to apply |
 | Keyword prefix | Index `WITH (prefix = true)`; filter `field MATCH PREFIX '…'` |
 | Slice sampling | `WHERE SLICE (total, index)` |
 | Sparse IDF corpus | `PARAMS (idf = 'global' \| WHERE <filter>)` — remote + edge 0.8+ |

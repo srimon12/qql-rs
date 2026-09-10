@@ -293,6 +293,15 @@ enum ConfigCommand {
         /// Offline sparse model for fastembed (e.g. splade, bge-m3).
         #[arg(long)]
         sparse_model: Option<String>,
+        /// Client-side BM25 k1 for local sparse document encoding (default: 1.2).
+        #[arg(long)]
+        bm25_k1: Option<f64>,
+        /// Client-side BM25 b length normalization in [0, 1] (default: 0.75).
+        #[arg(long)]
+        bm25_b: Option<f64>,
+        /// Client-side BM25 expected average document length in tokens (default: 256).
+        #[arg(long)]
+        bm25_avg_len: Option<f64>,
         /// Offline multivector model for fastembed (e.g. bge-m3).
         #[arg(long)]
         multi_model: Option<String>,
@@ -743,6 +752,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 embedder,
                 model,
                 sparse_model,
+                bm25_k1,
+                bm25_b,
+                bm25_avg_len,
                 multi_model,
                 image_model,
                 reranker_model,
@@ -767,6 +779,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 embedder,
                 model,
                 sparse_model,
+                bm25_k1,
+                bm25_b,
+                bm25_avg_len,
                 multi_model,
                 image_model,
                 reranker_model,

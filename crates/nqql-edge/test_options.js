@@ -33,7 +33,26 @@ test("localExecutor forwards sparse/multi/image/reranker model slots", () => {
     cacheDir: "/var/cache",
     showDownloadProgress: true,
     walSegmentMb: undefined,
+    bm25K1: undefined,
+    bm25B: undefined,
+    bm25AvgLen: undefined,
   });
+});
+
+test("localExecutor forwards bm25 document params raw for native validation", () => {
+  const opts = normalizeLocalOptions({
+    bm25K1: 2.0,
+    bm25B: 0.5,
+    bm25AvgLen: 8,
+  });
+  assert.strictEqual(opts.bm25K1, 2.0);
+  assert.strictEqual(opts.bm25B, 0.5);
+  assert.strictEqual(opts.bm25AvgLen, 8);
+  // Invalid values are NOT dropped here — the Rust side rejects them with
+  // QQL-VALIDATION-CONFIG instead of silently using the defaults.
+  assert.strictEqual(normalizeLocalOptions({ bm25K1: 0 }).bm25K1, 0);
+  assert.strictEqual(normalizeLocalOptions({ bm25B: -1 }).bm25B, -1);
+  assert.strictEqual(normalizeLocalOptions({ bm25AvgLen: Number.NaN }).bm25AvgLen, Number.NaN);
 });
 
 test("localExecutor forwards walSegmentMb for native validation", () => {
@@ -76,6 +95,9 @@ test("standalone options forward edge model slots and embed fields", () => {
     embedKey: "k",
     embedModel: "nomic-embed-text",
     embedDim: 768,
+    bm25K1: 1.5,
+    bm25B: 0.6,
+    bm25AvgLen: 32,
     onError: "continue",
   });
   assert.strictEqual(opts.sparseModel, "splade");
@@ -86,6 +108,9 @@ test("standalone options forward edge model slots and embed fields", () => {
   assert.strictEqual(opts.embedKey, "k");
   assert.strictEqual(opts.embedModel, "nomic-embed-text");
   assert.strictEqual(opts.embedDim, 768);
+  assert.strictEqual(opts.bm25K1, 1.5);
+  assert.strictEqual(opts.bm25B, 0.6);
+  assert.strictEqual(opts.bm25AvgLen, 32);
   assert.strictEqual(opts.onError, "continue");
   assert.strictEqual(opts.dataDir, "/data");
 });
@@ -96,6 +121,9 @@ test("standalone options apply defaults", () => {
   assert.strictEqual(opts.onDiskPayload, true);
   assert.strictEqual(opts.model, undefined);
   assert.strictEqual(opts.embedUrl, undefined);
+  assert.strictEqual(opts.bm25K1, undefined);
+  assert.strictEqual(opts.bm25B, undefined);
+  assert.strictEqual(opts.bm25AvgLen, undefined);
 });
 
 test("standalone options forward params for prepared statements", () => {
