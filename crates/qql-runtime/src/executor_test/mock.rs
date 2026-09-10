@@ -10,6 +10,9 @@ use crate::client::{CollectionInfo, QdrantOps};
 use crate::config::QqlConfig;
 use crate::executor::Executor;
 use crate::executor::response::{BackendResponse, ExecData};
+use crate::executor::telemetry::{
+    HardwareUsage, InferenceUsage, ModelUsage, ServerTelemetry, ServerUsage,
+};
 
 pub struct MockQdrantClient {
     pub exists: bool,
@@ -27,15 +30,16 @@ pub struct MockQdrantClient {
     pub info_call_count: Arc<Mutex<usize>>,
     pub exists_call_count: Arc<Mutex<usize>>,
     pub created_collections: Arc<Mutex<HashSet<String>>>,
-    /// Per-collection mock points returned by `execute_planned` when non-empty.
-    /// Key: collection name, Value: JSON object with a "points" array.
-    pub point_map: Arc<Mutex<HashMap<String, serde_json::Value>>>,
+    /// Per-collection typed payload returned by `execute_planned` for reads
+    /// when present. Key: collection name, Value: the typed [`ExecData`] the
+    /// backend "returned" (hits, groups, facet, …).
+    pub point_map: Arc<Mutex<HashMap<String, ExecData>>>,
     /// When true, `execute_query_batch` fails (simulating a batch RPC error).
     pub fail_query_batch: Arc<Mutex<bool>>,
     /// When non-zero, `execute_planned` fails on that call number (1-based).
     pub fail_execute_planned_call: Arc<Mutex<usize>>,
-    /// When set, `execute_planned` returns it directly instead of parsing the
-    /// mock's envelope (typed backend-response injection).
+    /// When set, `execute_planned` returns it directly instead of the mock's
+    /// default per-op typed response (backend-response injection).
     pub typed_response: Arc<Mutex<Option<BackendResponse>>>,
 }
 
@@ -144,10 +148,10 @@ impl QdrantOps for MockQdrantClient {
                 .lock()
                 .unwrap()
                 .insert(collection.clone());
-            return crate::envelope::parse_backend_response(
-                op,
-                serde_json::json!({"result": true, "status": "ok", "time": 0.0}),
-            );
+            return Ok(BackendResponse {
+                data: ExecData::Mutation { affected: None },
+                telemetry: Some(mock_telemetry()),
+            });
         }
         let route = qql_plan::plan::to_rest_route(op).expect("rest route");
         if route.path.contains("nonexistent") {
@@ -158,51 +162,30 @@ impl QdrantOps for MockQdrantClient {
             ));
         }
         if matches!(op, qql_plan::PlannedOperation::ListCollections) {
-            return crate::envelope::parse_backend_response(
-                op,
-                serde_json::json!({
-                    "result": {
-                        "collections": self
-                            .collections
-                            .iter()
-                            .map(|name| serde_json::json!({"name": name}))
-                            .collect::<Vec<_>>(),
-                    }
-                }),
-            );
+            return Ok(BackendResponse {
+                data: ExecData::Collections(self.collections.clone()),
+                telemetry: None,
+            });
         }
-        // Return per-collection mock points when configured.
+        // Typed per-collection payload when configured.
         if let qql_plan::PlannedOperation::Query { collection, .. }
         | qql_plan::PlannedOperation::QueryGroups { collection, .. }
         | qql_plan::PlannedOperation::Facet { collection, .. }
         | qql_plan::PlannedOperation::GetPoints { collection, .. } = op
-            && let Some(points) = self.point_map.lock().unwrap().get(collection)
+            && let Some(data) = self.point_map.lock().unwrap().get(collection)
         {
-            return crate::envelope::parse_backend_response(op, points.clone());
+            return Ok(BackendResponse {
+                data: data.clone(),
+                telemetry: None,
+            });
         }
-        // Default envelope carries server telemetry so telemetry extraction
-        // is exercised end-to-end; the `point_map` path above stays bare on
-        // purpose (None-where-absent coverage).
-        crate::envelope::parse_backend_response(
-            op,
-            serde_json::json!({
-                "result": {"points": []},
-                "status": "ok",
-                "time": 0.0025,
-                "usage": {
-                    "hardware": {
-                        "cpu": 10,
-                        "payload_io_read": 1,
-                        "payload_io_write": 2,
-                        "payload_index_io_read": 3,
-                        "payload_index_io_write": 4,
-                        "vector_io_read": 5,
-                        "vector_io_write": 6
-                    },
-                    "inference": {"models": {"mock-model": {"tokens": 7}}}
-                }
-            }),
-        )
+        // Default typed payload carries server telemetry so the typed
+        // telemetry path is exercised end-to-end; the `point_map` path above
+        // stays bare on purpose (None-where-absent coverage).
+        Ok(BackendResponse {
+            data: self.default_data(op),
+            telemetry: Some(mock_telemetry()),
+        })
     }
 
     async fn execute_query_batch(
@@ -219,8 +202,7 @@ impl QdrantOps for MockQdrantClient {
                 None,
             ));
         }
-        // Empty typed batch results: the shared parser is REST-only, and the
-        // mock has no transport envelope to parse.
+        // Empty typed batch results: the mock has no per-search fixtures.
         Ok(batch
             .searches
             .iter()
@@ -246,6 +228,51 @@ impl QdrantOps for MockQdrantClient {
                 telemetry: None,
             })
             .collect())
+    }
+}
+
+impl MockQdrantClient {
+    /// Typed default payload per operation, mirroring what a well-formed
+    /// backend would answer when no `point_map` fixture is set.
+    fn default_data(&self, op: &qql_plan::PlannedOperation) -> ExecData {
+        use qql_plan::PlannedOperation;
+        match op {
+            PlannedOperation::Query { .. }
+            | PlannedOperation::Scroll { .. }
+            | PlannedOperation::GetPoints { .. } => ExecData::Hits(Vec::new()),
+            PlannedOperation::QueryGroups { .. } => ExecData::Groups(Vec::new()),
+            PlannedOperation::Count { .. } => ExecData::Count(0),
+            PlannedOperation::Facet { .. } => ExecData::Facet(Vec::new()),
+            PlannedOperation::ListCollections => ExecData::Collections(self.collections.clone()),
+            PlannedOperation::GetCollection { .. } => {
+                ExecData::Collection(self.info.clone().unwrap_or_default())
+            }
+            PlannedOperation::ListShardKeys { .. } => ExecData::ShardKeys(Vec::new()),
+            PlannedOperation::GetQuotas => ExecData::Quotas(qql_plan::QuotaConfig::default()),
+            PlannedOperation::SetQuotas { request } => ExecData::Quotas(request.config.clone()),
+            _ => ExecData::Mutation { affected: None },
+        }
+    }
+}
+
+/// Default mock server telemetry (`time` + hardware/inference usage).
+fn mock_telemetry() -> ServerTelemetry {
+    ServerTelemetry {
+        time_s: Some(0.0025),
+        usage: Some(ServerUsage {
+            hardware: Some(HardwareUsage {
+                cpu: 10,
+                payload_io_read: 1,
+                payload_io_write: 2,
+                payload_index_io_read: 3,
+                payload_index_io_write: 4,
+                vector_io_read: 5,
+                vector_io_write: 6,
+            }),
+            inference: Some(InferenceUsage {
+                models: HashMap::from([("mock-model".to_string(), ModelUsage { tokens: 7 })]),
+            }),
+        }),
     }
 }
 

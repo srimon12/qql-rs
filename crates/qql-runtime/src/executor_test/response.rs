@@ -1,4 +1,5 @@
 use crate::executor::{ExecData, ExecResponse, ExecutionReport, FacetHit, SearchHit};
+use qql_plan::{PlanFacetValue, PlanVectorStruct, PlanVectorValue};
 
 #[test]
 fn test_execution_report_counts_mixed_results() {
@@ -25,22 +26,25 @@ fn test_execution_report_counts_mixed_results() {
 }
 
 #[test]
-fn test_search_hit_preserves_vector() {
-    let raw = serde_json::json!({
-        "result": [
-            {
-                "id": 1,
-                "score": 0.88,
-                "vector": [0.1, 0.2, 0.3],
-                "payload": {"title": "hello"}
-            }
-        ]
-    });
-    let hits = crate::envelope::extract_search_hits(&raw);
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(1));
-    assert_eq!(hits[0].score, 0.88);
-    assert_eq!(hits[0].vector, Some(serde_json::json!([0.1, 0.2, 0.3])));
+fn test_search_hit_carries_typed_vector() {
+    let hit = SearchHit {
+        id: qql_plan::PlanPointId::Number(1),
+        score: 0.88,
+        payload: Some(std::collections::HashMap::from([(
+            "title".to_string(),
+            serde_json::json!("hello"),
+        )])),
+        collection: None,
+        vector: Some(PlanVectorStruct::Single(PlanVectorValue::Dense(vec![
+            0.5, 0.25, 0.125,
+        ]))),
+    };
+    assert_eq!(hit.id, qql_plan::PlanPointId::Number(1));
+    assert_eq!(hit.score, 0.88);
+    assert_eq!(
+        serde_json::to_value(&hit).unwrap()["vector"],
+        serde_json::json!([0.5, 0.25, 0.125])
+    );
 }
 
 #[cfg(feature = "rest")]
@@ -73,7 +77,6 @@ fn test_exec_response_and_report_helpers() {
     let hit = SearchHit {
         id: qql_plan::PlanPointId::Number(42),
         score: 0.95,
-        text: Some("hello".into()),
         payload: None,
         collection: None,
         vector: None,
@@ -106,11 +109,11 @@ fn test_exec_response_and_report_helpers() {
         message: "Facet hits: 2".into(),
         data: Some(ExecData::Facet(vec![
             FacetHit {
-                value: serde_json::json!("Mitte"),
+                value: PlanFacetValue::Keyword("Mitte".into()),
                 count: 10,
             },
             FacetHit {
-                value: serde_json::json!("Pankow"),
+                value: PlanFacetValue::Keyword("Pankow".into()),
                 count: 5,
             },
         ])),
@@ -118,7 +121,7 @@ fn test_exec_response_and_report_helpers() {
     };
     let facet_pairs = facet_resp.facet().expect("should parse facet pairs");
     assert_eq!(facet_pairs.len(), 2);
-    assert_eq!(facet_pairs[0].0, serde_json::json!("Mitte"));
+    assert_eq!(facet_pairs[0].0, PlanFacetValue::Keyword("Mitte".into()));
     assert_eq!(facet_pairs[0].1, 10);
 
     let report = ExecutionReport::from_results(vec![query_resp, count_resp, facet_resp]);

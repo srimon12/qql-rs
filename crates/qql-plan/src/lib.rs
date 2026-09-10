@@ -44,6 +44,7 @@ pub use plan::{
 };
 pub use routing::{CompiledStatement, compile_statement};
 pub use semantic::{
-    PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanShardKey, PlanVectorValue,
+    PlanFacetValue, PlanFormula, PlanGroupId, PlanPointId, PlanPointVectors, PlanQueryInput,
+    PlanShardKey, PlanVectorStruct, PlanVectorValue,
 };
 pub use types::*;

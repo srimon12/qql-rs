@@ -529,17 +529,14 @@ pub(crate) fn lower_set_quota(
     use qql_core::ast::Value;
 
     let mut request = SetQuotaRequest {
-        enabled: None,
-        max_resident_memory_percent: None,
-        max_disk_usage_percent: None,
-        release_margin_percent: None,
+        config: QuotaConfig::default(),
         wait: stmt.wait,
     };
     for (key, value) in &stmt.config {
         let lower = key.to_ascii_lowercase();
         match lower.as_str() {
             "enabled" => match value {
-                Value::Bool(b) => request.enabled = Some(*b),
+                Value::Bool(b) => request.config.enabled = Some(*b),
                 _ => {
                     return Err(QqlError::validation(
                         "QQL-PLAN-QUOTA",
@@ -582,9 +579,11 @@ fn apply_quota_percent(
         qql_core::ast::Value::Int(n) if *n >= min as i64 && (*n as u64) <= max => {
             let n = *n as u64;
             match key {
-                "max_resident_memory_percent" => request.max_resident_memory_percent = Some(n),
-                "max_disk_usage_percent" => request.max_disk_usage_percent = Some(n),
-                _ => request.release_margin_percent = Some(n),
+                "max_resident_memory_percent" => {
+                    request.config.max_resident_memory_percent = Some(n)
+                }
+                "max_disk_usage_percent" => request.config.max_disk_usage_percent = Some(n),
+                _ => request.config.release_margin_percent = Some(n),
             }
         }
         _ => {

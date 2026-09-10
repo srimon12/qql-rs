@@ -1,16 +1,19 @@
 use std::collections::HashMap;
 
-use serde::de::Error as DeError;
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 
-use qql_plan::PlanPointId;
+use qql_plan::{
+    PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey, PlanVectorStruct, QuotaConfig,
+};
+
+use crate::backend::CollectionInfo;
 
 use super::telemetry::{PhaseTimings, ServerTelemetry, ServerUsage};
 
 /// Single-statement execution outcome: status, operation label, message, data,
 /// and optional server telemetry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExecResponse {
     /// Whether the statement succeeded.
     pub ok: bool,
@@ -18,21 +21,21 @@ pub struct ExecResponse {
     pub operation: String,
     /// Human-readable summary or error text.
     pub message: String,
-    /// Typed payload (search hits, count, facet entries, or a raw envelope),
-    /// when the operation returns data.
+    /// Typed payload (search hits, count, facet entries, …), when the
+    /// operation returns data.
     pub data: Option<ExecData>,
     /// Server telemetry (`time` + hardware/inference `usage`) when the
     /// backend reported it. `None` where the route/transport carries none
     /// (batch items, collection DDL over gRPC, mocks without timing).
     /// `skip_serializing_if` keeps the pre-telemetry JSON shape byte-identical
-    /// when no telemetry was reported; `default` reads old payloads back.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// when no telemetry was reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<ServerTelemetry>,
 }
 
 /// Canonical cross-SDK execution result. Every `client.execute(…)` call
 /// returns this shape regardless of input type (string / Stmt / array).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExecutionReport {
     /// Whether every statement succeeded (`failed == 0`).
     pub ok: bool,
@@ -44,9 +47,8 @@ pub struct ExecutionReport {
     pub failed: usize,
     /// Report-level telemetry totals (server times summed, hardware counters
     /// summed, per-model tokens summed). `None` when no response reported
-    /// telemetry. Same back-compat serde contract as
-    /// [`ExecResponse::telemetry`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// telemetry; omitted from the serialized shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<ServerTelemetry>,
 }
 
@@ -102,7 +104,7 @@ impl ExecutionReport {
     }
 
     /// Return facet entries as `(value, count)` pairs from statement `stmt`.
-    pub fn facet(&self, stmt: usize) -> Option<Vec<(serde_json::Value, u64)>> {
+    pub fn facet(&self, stmt: usize) -> Option<Vec<(PlanFacetValue, u64)>> {
         self.results.get(stmt).and_then(|r| r.facet())
     }
 
@@ -122,7 +124,7 @@ impl ExecutionReport {
     }
 
     /// Return the facet pairs from the first statement.
-    pub fn first_facet(&self) -> Option<Vec<(serde_json::Value, u64)>> {
+    pub fn first_facet(&self) -> Option<Vec<(PlanFacetValue, u64)>> {
         self.facet(0)
     }
 }
@@ -130,7 +132,7 @@ impl ExecutionReport {
 /// Structured `EXPLAIN ANALYZE` report: the static plan summary plus the
 /// measured execution. JSON-serializable; returned by
 /// [`Executor::explain_analyze`](super::Executor::explain_analyze).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AnalyzeReport {
     /// Whether the analyzed statement succeeded (errors surface as `Err`).
     pub ok: bool,
@@ -141,10 +143,10 @@ pub struct AnalyzeReport {
     pub phases: PhaseTimings,
     /// Total server time in seconds (summed per-response `time`); `None`
     /// when the backend reported none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_time_s: Option<f64>,
     /// Merged hardware/inference usage; `None` when the backend reported none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ServerUsage>,
     /// The statement's execution response(s), in order (one entry: analyze
     /// is single-statement, like Postgres `EXPLAIN ANALYZE`).
@@ -164,7 +166,7 @@ pub enum OnError {
 }
 
 /// Normalized search hit returned inside `ExecResponse` data.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SearchHit {
     /// Point ID (integer or string/UUID).
     pub id: PlanPointId,
@@ -174,20 +176,18 @@ pub struct SearchHit {
     /// `0.949999988079071`): Qdrant's own JSON text and the native Python
     /// `ScoredPoint.score` getter both use that form, so the JSON report view
     /// and the typed view agree.
-    #[serde(default, serialize_with = "serialize_score_f32")]
+    #[serde(serialize_with = "serialize_score_f32")]
     pub score: f32,
-    /// Payload text extracted for text-centric results, when present.
-    pub text: Option<String>,
     /// Point payload when requested via `WITH PAYLOAD`.
     pub payload: Option<HashMap<String, serde_json::Value>>,
     /// Source collection. Populated by cross-collection operations (e.g.
     /// CROSS RERANK) so results are unambiguous when multiple collections
     /// share the same point id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
     /// Vector(s) returned when requested via `WITH VECTOR`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vector: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector: Option<PlanVectorStruct>,
 }
 
 /// Serialize an f32 with its shortest round-trip decimal (`0.95`), matching
@@ -207,31 +207,41 @@ where
 ///
 /// Serializes to Qdrant's group shape `{"id": …, "hits": […]}` so report JSON
 /// and SDK `.groups()` consumers read the same field names as the backend.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GroupedSearchResult {
-    /// Group key value as returned by Qdrant (JSON-typed).
+    /// Group key value as returned by Qdrant.
     #[serde(rename = "id")]
-    pub group_id: serde_json::Value,
+    pub group_id: PlanGroupId,
     /// Search hits in this group, in backend order.
     pub hits: Vec<SearchHit>,
 }
 
 /// One facet entry: value + occurrence count.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FacetHit {
-    /// Facet value as returned by Qdrant (JSON-typed).
-    pub value: serde_json::Value,
+    /// Facet value as returned by Qdrant.
+    pub value: PlanFacetValue,
     /// Number of points carrying this value.
     pub count: u64,
 }
 
-/// Transport-neutral typed payload of one operation result.
+/// Transport-neutral typed payload of one operation result. Closed by
+/// construction: every backend response shape the transports can produce has a
+/// variant here — there is no JSON passthrough.
 ///
 /// Serialization emits the report JSON shapes SDK consumers already read:
 /// `Hits` → array of [`SearchHit`], `Groups` → `{"groups": [{"id", "hits"}]}`,
 /// `Count` → `{"count": n}`, `Facet` → array of `{"value": …, "count": n}`,
 /// `Mutation { affected: Some(n) }` → `{"count": n}`,
-/// `Mutation { affected: None }` → `null`, `Raw` → the envelope verbatim.
+/// `Mutation { affected: None }` → `null`,
+/// `Collections` → `{"collections": ["name", …]}`,
+/// `Collection` → the [`CollectionInfo`] object,
+/// `ShardKeys` → `{"shard_keys": [key, …]}`,
+/// `Quotas` → the [`QuotaConfig`] object.
+// `CollectionInfo` is the largest variant (nested vector/index schema); the
+// enum stays cloneable and is not hot-path cloned, so boxing it would only add
+// indirection to the public IR shape.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecData {
     /// Query / scroll / retrieve hits, in backend order.
@@ -248,8 +258,14 @@ pub enum ExecData {
         /// Number of points written, when the operation reports one.
         affected: Option<u64>,
     },
-    /// Schemaless DDL / metadata / quota envelopes not yet modelled.
-    Raw(serde_json::Value),
+    /// Collection names (`SHOW COLLECTIONS`).
+    Collections(Vec<String>),
+    /// Collection metadata (`SHOW COLLECTION`).
+    Collection(CollectionInfo),
+    /// Custom shard keys (`SHOW SHARD KEYS`).
+    ShardKeys(Vec<PlanShardKey>),
+    /// Cluster-wide quota configuration (`SHOW QUOTAS` / `SET QUOTA`).
+    Quotas(QuotaConfig),
 }
 
 impl Serialize for ExecData {
@@ -275,62 +291,19 @@ impl Serialize for ExecData {
                 map.end()
             }
             ExecData::Mutation { affected: None } => serializer.serialize_none(),
-            ExecData::Raw(value) => value.serialize(serializer),
+            ExecData::Collections(collections) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("collections", collections)?;
+                map.end()
+            }
+            ExecData::Collection(info) => info.serialize(serializer),
+            ExecData::ShardKeys(keys) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("shard_keys", keys)?;
+                map.end()
+            }
+            ExecData::Quotas(config) => config.serialize(serializer),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for ExecData {
-    /// Shape-detecting parse for tests, mocks, and stored reports: object with
-    /// a `groups` array → [`ExecData::Groups`]; array of `{value, count}` →
-    /// [`ExecData::Facet`]; array of objects containing `id` → [`ExecData::Hits`];
-    /// object with numeric `count` and no `result` wrapper → [`ExecData::Count`];
-    /// everything else → [`ExecData::Raw`]. An empty array is read as empty
-    /// [`ExecData::Hits`] (the pre-typing `hits()` behavior).
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        Ok(match value {
-            serde_json::Value::Array(items) if items.is_empty() => ExecData::Hits(Vec::new()),
-            serde_json::Value::Array(items) => {
-                if items
-                    .iter()
-                    .all(|item| item.get("value").is_some() && item.get("count").is_some())
-                {
-                    let facet: Vec<FacetHit> =
-                        serde_json::from_value(serde_json::Value::Array(items))
-                            .map_err(DeError::custom)?;
-                    ExecData::Facet(facet)
-                } else if items.iter().all(|item| item.get("id").is_some()) {
-                    let hits: Vec<SearchHit> =
-                        serde_json::from_value(serde_json::Value::Array(items))
-                            .map_err(DeError::custom)?;
-                    ExecData::Hits(hits)
-                } else {
-                    ExecData::Raw(serde_json::Value::Array(items))
-                }
-            }
-            serde_json::Value::Object(map)
-                if map.get("groups").is_some_and(serde_json::Value::is_array) =>
-            {
-                let groups = map
-                    .get("groups")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!([]));
-                let groups: Vec<GroupedSearchResult> =
-                    serde_json::from_value(groups).map_err(DeError::custom)?;
-                ExecData::Groups(groups)
-            }
-            serde_json::Value::Object(map) => {
-                match map.get("count").and_then(serde_json::Value::as_u64) {
-                    Some(count) if !map.contains_key("result") => ExecData::Count(count),
-                    _ => ExecData::Raw(serde_json::Value::Object(map)),
-                }
-            }
-            other => ExecData::Raw(other),
-        })
     }
 }
 
@@ -380,42 +353,64 @@ impl ExecData {
         }
     }
 
-    /// Borrow the raw envelope when this payload is not yet modelled
-    /// (DDL / metadata / quota responses).
-    pub fn as_raw(&self) -> Option<&serde_json::Value> {
+    /// Borrow collection names when this is a [`ExecData::Collections`] payload.
+    pub fn collections(&self) -> Option<&[String]> {
         match self {
-            ExecData::Raw(value) => Some(value),
+            ExecData::Collections(collections) => Some(collections),
             _ => None,
         }
     }
 
-    /// Whether the payload carries no records: empty `Hits`/`Groups`/`Facet`,
-    /// or a `Raw` null / empty array / empty object. `Count` and `Mutation`
-    /// are never empty (zero is a result).
+    /// Borrow collection metadata when this is an [`ExecData::Collection`] payload.
+    pub fn collection(&self) -> Option<&CollectionInfo> {
+        match self {
+            ExecData::Collection(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// Borrow custom shard keys when this is an [`ExecData::ShardKeys`] payload.
+    pub fn shard_keys(&self) -> Option<&[PlanShardKey]> {
+        match self {
+            ExecData::ShardKeys(keys) => Some(keys),
+            _ => None,
+        }
+    }
+
+    /// Borrow the quota configuration when this is a [`ExecData::Quotas`] payload.
+    pub fn quotas(&self) -> Option<&QuotaConfig> {
+        match self {
+            ExecData::Quotas(config) => Some(config),
+            _ => None,
+        }
+    }
+
+    /// Whether the payload carries no records: empty
+    /// `Hits`/`Groups`/`Facet`/`Collections`/`ShardKeys`. `Count`, `Mutation`,
+    /// `Collection`, and `Quotas` are never empty (a zero count or an
+    /// unlimited quota config is a result).
     pub fn is_empty(&self) -> bool {
         match self {
             ExecData::Hits(hits) => hits.is_empty(),
             ExecData::Groups(groups) => groups.is_empty(),
-            ExecData::Count(_) => false,
+            ExecData::Count(_)
+            | ExecData::Mutation { .. }
+            | ExecData::Collection(_)
+            | ExecData::Quotas(_) => false,
             ExecData::Facet(hits) => hits.is_empty(),
-            ExecData::Mutation { .. } => false,
-            ExecData::Raw(value) => match value {
-                serde_json::Value::Null => true,
-                serde_json::Value::Array(items) => items.is_empty(),
-                serde_json::Value::Object(map) => map.is_empty(),
-                _ => false,
-            },
+            ExecData::Collections(collections) => collections.is_empty(),
+            ExecData::ShardKeys(keys) => keys.is_empty(),
         }
     }
 }
 
 /// Typed backend response: data + telemetry, no transport JSON envelope.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BackendResponse {
     /// Typed operation payload.
     pub data: ExecData,
     /// Server telemetry extracted from the transport envelope, when present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<ServerTelemetry>,
 }
 
@@ -450,7 +445,7 @@ impl ExecResponse {
     }
 
     /// Return facet entries as `(value, count)` pairs, if present.
-    pub fn facet(&self) -> Option<Vec<(serde_json::Value, u64)>> {
+    pub fn facet(&self) -> Option<Vec<(PlanFacetValue, u64)>> {
         let entries = self.data.as_ref()?.facet()?;
         Some(
             entries

@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::backend::CollectionInfo;
-use crate::executor::response::OnError;
+use crate::executor::response::{GroupedSearchResult, OnError, SearchHit};
 use crate::executor::{ExecData, Executor};
+use qql_plan::{PlanGroupId, PlanPointId};
 
 use super::mock::{MockEmbedder, MockQdrantClient, collection_with_vectors, test_config};
 
@@ -195,19 +196,25 @@ async fn test_grouped_offset_applied_exactly_once() {
     // so the backend never applies it. Simulate a server returning `limit`
     // groups and assert the result is exactly `user_limit` groups starting at
     // the offset — a double application would drop or duplicate groups.
+    let group = |id: &str, point: u64, score: f32| GroupedSearchResult {
+        group_id: PlanGroupId::Keyword(id.into()),
+        hits: vec![SearchHit {
+            id: PlanPointId::Number(point),
+            score,
+            payload: None,
+            collection: None,
+            vector: None,
+        }],
+    };
     let client = MockQdrantClient {
         info: Some(collection_with_vectors(&["dense"], &["sparse"])),
         point_map: Arc::new(Mutex::new(HashMap::from([(
             "docs".to_string(),
-            serde_json::json!({
-                "result": {
-                    "groups": [
-                        {"id": "a", "hits": [{"id": 1, "score": 1.0}]},
-                        {"id": "b", "hits": [{"id": 2, "score": 0.9}]},
-                        {"id": "c", "hits": [{"id": 3, "score": 0.8}]},
-                    ]
-                }
-            }),
+            ExecData::Groups(vec![
+                group("a", 1, 1.0),
+                group("b", 2, 0.9),
+                group("c", 3, 0.8),
+            ]),
         )]))),
         ..Default::default()
     };
@@ -235,10 +242,10 @@ async fn test_grouped_offset_applied_exactly_once() {
     );
     assert_eq!(
         groups[0].group_id,
-        serde_json::json!("b"),
+        PlanGroupId::Keyword("b".into()),
         "groups must start at the offset"
     );
-    assert_eq!(groups[1].group_id, serde_json::json!("c"));
+    assert_eq!(groups[1].group_id, PlanGroupId::Keyword("c".into()));
 }
 
 #[tokio::test]
@@ -539,24 +546,9 @@ async fn same_collection_query_batch_yields_per_statement_hits() {
     };
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    // Bypass the mock's uniform batch response: drive the extraction the
-    // way flush_planned_group does, on the real per-item shapes.
-    let item_a = serde_json::json!({
-        "points": [
-            {"id": 1483, "score": 0.9, "payload": {"text": "a"}},
-            {"id": 582, "score": 0.8, "payload": {"text": "b"}}
-        ]
-    });
-    let item_b = serde_json::json!({
-        "points": [{"id": 1787, "score": 0.7, "payload": {"text": "c"}}]
-    });
-    let hits_a = crate::envelope::extract_search_hits(&item_a);
-    let hits_b = crate::envelope::extract_search_hits(&item_b);
-    assert_eq!(hits_a.len(), 2, "batch item A must yield its 2 hits");
-    assert_eq!(hits_a[0].id, qql_plan::PlanPointId::Number(1483));
-    assert_eq!(hits_b.len(), 1, "batch item B must yield its 1 hit");
-
-    // End-to-end: the batched executor reports one response per statement.
+    // Per-item strict parsing (each `QueryResponse` carries `points` at its
+    // top level) lives in `rest_response::tests`; here we pin the end-to-end
+    // executor behavior: one response per statement, in order.
     let report = executor
         .execute_batch(
             &[

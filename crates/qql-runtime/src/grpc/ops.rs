@@ -11,7 +11,7 @@ use crate::qdrant_grpc::qdrant;
 
 use super::client::GrpcQdrant;
 use super::error::grpc_error;
-use super::schema::schema_from_grpc_collection;
+use super::schema;
 
 #[async_trait]
 impl QdrantOps for GrpcQdrant {
@@ -49,12 +49,7 @@ impl QdrantOps for GrpcQdrant {
             .with_collection(name.to_string())
         })?;
 
-        Ok(CollectionInfo {
-            status: info.status.to_string(),
-            points_count: info.points_count.unwrap_or(0),
-            segments_count: info.segments_count,
-            schema: schema_from_grpc_collection(&info),
-        })
+        Ok(schema::collection_info_from_grpc(&info))
     }
 
     async fn create_collection(

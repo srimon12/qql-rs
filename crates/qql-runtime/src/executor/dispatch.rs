@@ -134,17 +134,7 @@ impl Executor {
                 (format!("Found {count} facet hit(s)"), Some(response.data))
             }
             PlannedOperation::ListCollections => {
-                let count = response
-                    .data
-                    .as_raw()
-                    .and_then(|envelope| {
-                        envelope
-                            .get("result")
-                            .and_then(|value| value.get("collections"))
-                            .or_else(|| envelope.get("collections"))
-                            .and_then(serde_json::Value::as_array)
-                    })
-                    .map_or(0, Vec::len);
+                let count = response.data.collections().map_or(0, <[String]>::len);
                 (format!("Found {count} collection(s)"), Some(response.data))
             }
             PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(response.data)),
@@ -225,7 +215,10 @@ impl Executor {
                 | ExecData::Count(_)
                 | ExecData::Facet(_)
                 | ExecData::Mutation { .. }
-                | ExecData::Raw(_) => Vec::new(),
+                | ExecData::Collections(_)
+                | ExecData::Collection(_)
+                | ExecData::ShardKeys(_)
+                | ExecData::Quotas(_) => Vec::new(),
             };
             for mut hit in hits {
                 hit.collection = Some(collection.clone());
@@ -259,16 +252,14 @@ impl Executor {
         let mut docs = Vec::with_capacity(hits.len());
         let mut keep_idx = Vec::with_capacity(hits.len());
         for (i, hit) in hits.iter().enumerate() {
-            let from_payload = hit
+            // The rerank field always comes from the payload: hits no longer
+            // carry a denormalized `text` mirror.
+            let text = hit
                 .payload
                 .as_ref()
                 .and_then(|p| p.get(field))
-                .and_then(|v| v.as_str());
-            let text = match from_payload {
-                Some(s) if !s.is_empty() => s,
-                _ if field.eq_ignore_ascii_case("text") => hit.text.as_deref().unwrap_or(""),
-                _ => "",
-            };
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if text.is_empty() {
                 continue;
             }

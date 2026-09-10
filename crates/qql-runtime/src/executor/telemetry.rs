@@ -7,11 +7,11 @@
 //!   dependencies; `qql-runtime` has no `tracing` infra to reuse) around the
 //!   existing execute path. Millisecond floats.
 //! - [`ServerTelemetry`] — Qdrant's `time` (server seconds, float) plus the
-//!   hardware/inference `usage` object, extracted leniently from REST JSON
-//!   envelopes (`{result, status, time, usage}` per `openapi.json`) and from
-//!   the gRPC REST-shaped envelopes (`grpc_route` passes `usage` through in
-//!   the same shape). Anything absent or misshapen becomes `None` — missing
-//!   telemetry never fails a query.
+//!   hardware/inference `usage` object. REST extracts both leniently from the
+//!   JSON envelope (`{result, status, time, usage}` per `openapi.json`);
+//!   gRPC converts the proto `Usage` straight into [`ServerUsage`]. Anything
+//!   absent or misshapen becomes `None` — missing telemetry never fails a
+//!   query.
 
 use std::collections::HashMap;
 

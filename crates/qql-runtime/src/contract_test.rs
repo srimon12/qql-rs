@@ -921,7 +921,8 @@ mod tests {
         assert!(fc.filter.is_some());
         assert!(fc.shard_key_selector.is_some());
 
-        // 3. Response conversion parity: gRPC FacetHit normalizes to REST shape
+        // 3. Response conversion: gRPC FacetHit normalizes to the typed value,
+        // which serializes as the OpenAPI `FacetValueHit` shape.
         let hit_str = qdrant::FacetHit {
             value: Some(qdrant::FacetValue {
                 variant: Some(qdrant::facet_value::Variant::StringValue(
@@ -930,7 +931,9 @@ mod tests {
             }),
             count: 42,
         };
-        let normalized = test_api::facet_hit_to_json(hit_str);
+        let normalized =
+            serde_json::to_value(test_api::facet_hit_to_typed(hit_str).expect("facet converts"))
+                .expect("facet serializes");
         validate_ref(&openapi, "FacetValueHit", &normalized);
         assert_eq!(normalized["value"], "entire_home");
         assert_eq!(normalized["count"], 42);

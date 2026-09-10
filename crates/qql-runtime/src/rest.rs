@@ -246,23 +246,7 @@ impl RestQdrant {
 impl QdrantOps for RestQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let value: Value = self.call(Method::GET, "/collections", None).await?;
-        validate_success_envelope(&value, "list_collections")?;
-        let collections = value
-            .get("result")
-            .and_then(|r| r.get("collections"))
-            .and_then(|c| c.as_array())
-            .cloned()
-            .ok_or_else(|| {
-                QqlError::backend(
-                    "QQL-BACKEND-ENVELOPE",
-                    "list_collections response result.collections missing or not an array",
-                    None,
-                )
-            })?;
-        Ok(collections
-            .iter()
-            .filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from))
-            .collect())
+        crate::rest_response::parse_collection_names(&value)
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
@@ -287,21 +271,8 @@ impl QdrantOps for RestQdrant {
         let value: Value = self
             .call(Method::GET, &format!("/collections/{name}"), None)
             .await?;
-        validate_success_envelope(&value, "get_collection_info")?;
-        let result = value.get("result").cloned().unwrap_or(value);
-
-        let schema = crate::backend::schema_from_rest_result(&result);
-
-        let mut info: CollectionInfo = serde_json::from_value(result).map_err(|e| {
-            QqlError::backend(
-                "QQL-BACKEND-JSON",
-                format!("parse collection info: {e}"),
-                None,
-            )
-            .with_collection(name.to_string())
-        })?;
-        info.schema = schema;
-        Ok(info)
+        crate::rest_response::parse_collection_info(&value)
+            .map_err(|error| error.with_collection(name.to_string()))
     }
 
     async fn create_collection(
@@ -365,14 +336,10 @@ impl QdrantOps for RestQdrant {
         } = op
         {
             self.create_collection_planned(collection, request).await?;
-            return crate::envelope::parse_backend_response(
-                op,
-                serde_json::json!({
-                    "result": true,
-                    "status": "ok",
-                    "time": 0.0,
-                }),
-            );
+            return Ok(BackendResponse {
+                data: ExecData::Mutation { affected: None },
+                telemetry: None,
+            });
         }
         let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
             qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
@@ -387,7 +354,7 @@ impl QdrantOps for RestQdrant {
             ),
         })?;
         let envelope = self.execute_http(route).await?;
-        crate::envelope::parse_backend_response(op, envelope)
+        crate::rest_response::parse_planned(op, envelope)
     }
 
     async fn execute_query_batch(
@@ -397,13 +364,7 @@ impl QdrantOps for RestQdrant {
     ) -> Result<Vec<BackendResponse>, QqlError> {
         let path = format!("/collections/{collection}/points/query/batch");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        let items = result_array(&value, &path)?;
-        let mut responses = Vec::with_capacity(items.len());
-        for item in items {
-            ensure_batch_item_ok(&item)?;
-            responses.push(crate::envelope::parse_query_batch_item(&item));
-        }
-        Ok(responses)
+        crate::rest_response::parse_query_batch(&value)
     }
 
     async fn execute_update_batch(
@@ -413,18 +374,7 @@ impl QdrantOps for RestQdrant {
     ) -> Result<Vec<BackendResponse>, QqlError> {
         let path = format!("/collections/{collection}/points/batch?wait=true");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        let items = result_array(&value, &path)?;
-        let mut responses = Vec::with_capacity(items.len());
-        for item in items {
-            ensure_batch_item_ok(&item)?;
-            // The mutation payload is request-derived in the executor's
-            // normalization; the per-item update result carries only status.
-            responses.push(BackendResponse {
-                data: ExecData::Mutation { affected: None },
-                telemetry: None,
-            });
-        }
-        Ok(responses)
+        crate::rest_response::parse_update_batch(&value)
     }
 
     async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
@@ -605,30 +555,6 @@ fn validate_success_envelope(value: &Value, operation: &str) -> Result<(), QqlEr
     Ok(())
 }
 
-fn result_array(value: &Value, operation: &str) -> Result<Vec<Value>, QqlError> {
-    value
-        .get("result")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| {
-            QqlError::backend(
-                "QQL-BACKEND-ENVELOPE",
-                format!("{operation} response result must be an array"),
-                None,
-            )
-        })
-}
-
-/// Qdrant batch endpoints answer per item; a 200 response can still carry
-/// per-item failures (`status: "error"`). Surface the first one as a batch
-/// error so the executor's continue path retries the group individually.
-fn ensure_batch_item_ok(item: &Value) -> Result<(), QqlError> {
-    match qql_plan::batch_item_error(item) {
-        Some(message) => Err(QqlError::backend("QQL-BACKEND-BATCH", message, None)),
-        None => Ok(()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,7 +567,6 @@ mod tests {
             "time": 0.001,
         });
         assert!(validate_success_envelope(&value, "test").is_ok());
-        assert!(result_array(&value, "test").is_ok());
     }
 
     #[test]

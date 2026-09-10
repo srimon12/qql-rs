@@ -1,22 +1,23 @@
-//! Typed result IR: `ExecData` accessors, shape-detecting deserialization,
-//! and the REST envelope → typed parser (`envelope::parse_backend_response`).
+//! Typed result IR: `ExecData` payload shapes, accessors, and executor
+//! normalization over directly-constructed [`BackendResponse`]s.
 //!
 //! The wire contract stays report-JSON-compatible: `ExecData` serializes to
 //! the same report JSON shapes (hits array, `{"count": n}`, facet array,
-//! `{"groups": […]}` for groups, raw envelope), so SDK consumers keep reading
-//! the shapes they already read.
+//! `{"groups": […]}` for groups, `{"collections": […]}` for lists, the
+//! collection info object, `{"shard_keys": […]}`), so SDK consumers keep
+//! reading the shapes they already read.
 
 use serde_json::json;
 
 use super::mock::{MockQdrantClient, collection_with_vectors, test_config};
 use crate::executor::response::{BackendResponse, GroupedSearchResult};
 use crate::executor::{ExecData, ExecResponse, Executor, FacetHit, OnError, SearchHit};
+use qql_plan::{PlanFacetValue, PlanGroupId, PlanVectorStruct, PlanVectorValue};
 
 fn hit(id: u64, score: f32) -> SearchHit {
     SearchHit {
         id: qql_plan::PlanPointId::Number(id),
         score,
-        text: None,
         payload: None,
         collection: None,
         vector: None,
@@ -28,10 +29,10 @@ fn planned(sql: &str) -> qql_plan::PlannedOperation {
 }
 
 #[test]
-fn exec_data_serializes_legacy_report_shapes() {
+fn exec_data_serializes_report_shapes() {
     assert_eq!(
         serde_json::to_value(ExecData::Hits(vec![hit(1, 0.5)])).unwrap(),
-        json!([{"id": 1, "score": 0.5, "text": null, "payload": null}])
+        json!([{"id": 1, "score": 0.5, "payload": null}])
     );
     assert_eq!(
         serde_json::to_value(ExecData::Count(3)).unwrap(),
@@ -39,24 +40,52 @@ fn exec_data_serializes_legacy_report_shapes() {
     );
     assert_eq!(
         serde_json::to_value(ExecData::Facet(vec![FacetHit {
-            value: json!("books"),
+            value: PlanFacetValue::Keyword("books".into()),
             count: 15
         }]))
         .unwrap(),
         json!([{"value": "books", "count": 15}])
     );
     assert_eq!(
-        serde_json::to_value(ExecData::Raw(json!({"result": true}))).unwrap(),
-        json!({"result": true})
+        serde_json::to_value(ExecData::Collections(vec!["a".into(), "b".into()])).unwrap(),
+        json!({"collections": ["a", "b"]})
     );
     assert_eq!(
+        serde_json::to_value(ExecData::ShardKeys(vec![
+            qql_plan::PlanShardKey::Keyword("acme".into()),
+            qql_plan::PlanShardKey::Number(101),
+        ]))
+        .unwrap(),
+        json!({"shard_keys": ["acme", 101]})
+    );
+    assert_eq!(
+        serde_json::to_value(ExecData::Quotas(qql_plan::QuotaConfig {
+            enabled: Some(true),
+            ..Default::default()
+        }))
+        .unwrap(),
+        json!({"enabled": true})
+    );
+
+    let info = ExecData::Collection(crate::backend::CollectionInfo {
+        status: "green".into(),
+        points_count: 12,
+        segments_count: 2,
+        ..Default::default()
+    });
+    let value = serde_json::to_value(&info).unwrap();
+    assert_eq!(value["status"], "green");
+    assert_eq!(value["points_count"], 12);
+    assert_eq!(value["segments_count"], 2);
+
+    assert_eq!(
         serde_json::to_value(ExecData::Groups(vec![GroupedSearchResult {
-            group_id: json!("a"),
+            group_id: PlanGroupId::Keyword("a".into()),
             hits: vec![hit(1, 1.0)],
         }]))
         .unwrap(),
         json!({"groups": [{"id": "a", "hits": [
-            {"id": 1, "score": 1.0, "text": null, "payload": null}
+            {"id": 1, "score": 1.0, "payload": null}
         ]}]})
     );
     assert_eq!(
@@ -70,114 +99,63 @@ fn exec_data_serializes_legacy_report_shapes() {
 }
 
 #[test]
-fn exec_data_deserializes_by_shape() {
-    let hits: ExecData = serde_json::from_value(json!([{"id": 1, "score": 0.5}])).unwrap();
+fn exec_data_accessors_and_emptiness() {
+    let hits = ExecData::Hits(vec![SearchHit {
+        id: qql_plan::PlanPointId::Number(1),
+        score: 0.5,
+        payload: None,
+        collection: None,
+        vector: Some(PlanVectorStruct::Single(PlanVectorValue::Dense(vec![0.5]))),
+    }]);
     assert_eq!(hits.hits().unwrap()[0].id, qql_plan::PlanPointId::Number(1));
+    assert!(!hits.is_empty());
+    assert!(ExecData::Hits(Vec::new()).is_empty());
+    assert!(ExecData::Groups(Vec::new()).is_empty());
+    assert!(ExecData::Facet(Vec::new()).is_empty());
+    assert!(ExecData::Collections(Vec::new()).is_empty());
+    assert!(ExecData::ShardKeys(Vec::new()).is_empty());
+    assert!(!ExecData::Count(0).is_empty());
+    assert!(!ExecData::Mutation { affected: None }.is_empty());
+    assert!(!ExecData::Quotas(qql_plan::QuotaConfig::default()).is_empty());
 
-    let facet: ExecData = serde_json::from_value(json!([{"value": "books", "count": 15}])).unwrap();
+    let collections = ExecData::Collections(vec!["docs".into()]);
     assert_eq!(
-        facet,
-        ExecData::Facet(vec![FacetHit {
-            value: json!("books"),
-            count: 15
-        }])
+        collections.collections(),
+        Some(["docs".to_string()].as_slice())
     );
-
-    let count: ExecData = serde_json::from_value(json!({"count": 42})).unwrap();
-    assert_eq!(count, ExecData::Count(42));
-
-    let groups: ExecData =
-        serde_json::from_value(json!({"groups": [{"id": "a", "hits": [{"id": 1}]}]})).unwrap();
-    assert_eq!(groups.groups().unwrap()[0].group_id, json!("a"));
-    assert_eq!(groups.groups().unwrap()[0].hits.len(), 1);
-
-    // `result`-wrapped count objects are envelopes, not bare counts.
-    let raw: ExecData = serde_json::from_value(json!({"result": {"count": 42}})).unwrap();
-    assert!(raw.as_raw().is_some());
-
-    // Empty arrays read as "no hits", matching the pre-typing accessor.
-    let empty: ExecData = serde_json::from_value(json!([])).unwrap();
-    assert_eq!(empty, ExecData::Hits(Vec::new()));
-    assert!(empty.is_empty());
+    let shard_keys = ExecData::ShardKeys(vec![qql_plan::PlanShardKey::Number(7)]);
+    assert_eq!(
+        shard_keys.shard_keys(),
+        Some([qql_plan::PlanShardKey::Number(7)].as_slice())
+    );
+    let quotas = ExecData::Quotas(qql_plan::QuotaConfig {
+        enabled: Some(true),
+        ..Default::default()
+    });
+    assert_eq!(quotas.quotas().unwrap().enabled, Some(true));
+    let info = ExecData::Collection(crate::backend::CollectionInfo::default());
+    assert!(info.collection().is_some());
 }
 
 #[test]
-fn parse_backend_response_types_query_hits_and_telemetry() {
-    let op = planned("QUERY TEXT 'search' MODEL 'm' FROM docs USING dense LIMIT 2");
-    let response = crate::envelope::parse_backend_response(
-        &op,
-        json!({
-            "result": {"points": [{"id": 1, "score": 0.9, "payload": {"text": "a"}}]},
-            "status": "ok",
-            "time": 0.25
-        }),
-    )
-    .unwrap();
-    let hits = response.data.hits().expect("query envelope yields hits");
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(1));
-    assert_eq!(
-        serde_json::to_value(hits).unwrap()[0]["id"],
-        1,
-        "hits stay serializable in place"
-    );
-    assert!((response.telemetry.unwrap().time_s.unwrap() - 0.25).abs() < f64::EPSILON);
-}
-
-#[test]
-fn parse_backend_response_types_count_and_facet() {
-    let op = planned("COUNT FROM docs");
-    let response = crate::envelope::parse_backend_response(
-        &op,
-        json!({"result": {"count": 7}, "status": "ok", "time": 0.1}),
-    )
-    .unwrap();
-    assert_eq!(response.data.count(), Some(7));
-
-    // Missing count defaults to 0, as before.
-    let response =
-        crate::envelope::parse_backend_response(&op, json!({"result": {}, "status": "ok"}))
-            .unwrap();
-    assert_eq!(response.data.count(), Some(0));
-
-    let op = planned("FACET category FROM docs LIMIT 10");
-    let response = crate::envelope::parse_backend_response(
-        &op,
-        json!({"result": {"hits": [{"value": "electronics", "count": 12}]}}),
-    )
-    .unwrap();
-    assert_eq!(
-        response.data.facet(),
-        Some(
-            [FacetHit {
-                value: json!("electronics"),
-                count: 12
-            }]
-            .as_slice()
-        )
-    );
-}
-
-#[test]
-fn parse_backend_response_types_groups_and_normalization_trims_offset() {
+fn grouped_normalization_trims_offset_exactly_once() {
     let op = planned(
         "QUERY TEXT 'x' MODEL 'm' FROM docs USING dense AS DENSE \
          GROUP BY category LIMIT 2 OFFSET 1",
     );
-    let response = crate::envelope::parse_backend_response(
-        &op,
-        json!({
-            "result": {"groups": [
-                {"id": "a", "hits": [{"id": 1}]},
-                {"id": "b", "hits": [{"id": 2}]},
-                {"id": "c", "hits": [{"id": 3}]}
-            ]},
-            "status": "ok"
-        }),
-    )
-    .unwrap();
-    let groups = response.data.groups().expect("groups are typed");
-    assert_eq!(groups.len(), 3, "parsing must not trim group_offset");
+    let response = BackendResponse {
+        data: ExecData::Groups(
+            ["a", "b", "c"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, id)| GroupedSearchResult {
+                    group_id: PlanGroupId::Keyword(id.into()),
+                    hits: vec![hit(i as u64 + 1, 1.0)],
+                })
+                .collect(),
+        ),
+        telemetry: None,
+    };
 
     // Normalization applies the client-side offset exactly once.
     let normalized = Executor::normalize_planned(&op, response).unwrap();
@@ -187,18 +165,9 @@ fn parse_backend_response_types_groups_and_normalization_trims_offset() {
         .and_then(ExecData::groups)
         .expect("typed groups survive normalization");
     assert_eq!(groups.len(), 2, "offset must drop exactly one group");
-    assert_eq!(groups[0].group_id, json!("b"));
-    assert_eq!(groups[1].group_id, json!("c"));
+    assert_eq!(groups[0].group_id, PlanGroupId::Keyword("b".into()));
+    assert_eq!(groups[1].group_id, PlanGroupId::Keyword("c".into()));
     assert_eq!(normalized.message, "Found 2 group(s)");
-}
-
-#[test]
-fn parse_backend_response_passes_unmodelled_ops_through_raw() {
-    let op = planned("DELETE FROM docs WHERE id = 1");
-    let envelope = json!({"result": {"status": "completed"}, "status": "ok"});
-    let response = crate::envelope::parse_backend_response(&op, envelope.clone()).unwrap();
-    assert_eq!(response.data.as_raw(), Some(&envelope));
-    assert!(response.telemetry.is_none());
 }
 
 #[test]
@@ -232,18 +201,21 @@ fn exec_response_serves_typed_data() {
         operation: "FACET".into(),
         message: "Found 1 facet hit(s)".into(),
         data: Some(ExecData::Facet(vec![FacetHit {
-            value: json!("books"),
+            value: PlanFacetValue::Keyword("books".into()),
             count: 15,
         }])),
         telemetry: None,
     };
-    assert_eq!(facet.facet(), Some(vec![(json!("books"), 15)]));
+    assert_eq!(
+        facet.facet(),
+        Some(vec![(PlanFacetValue::Keyword("books".into()), 15)])
+    );
     assert!(facet.hits().is_none());
     assert!(facet.count().is_none());
 }
 
 #[test]
-fn mutation_serializes_as_count_and_reads_back_as_count() {
+fn mutation_serializes_as_count() {
     let resp = ExecResponse {
         ok: true,
         operation: "UPSERT".into(),
@@ -267,22 +239,6 @@ fn mutation_serializes_as_count_and_reads_back_as_count() {
         serde_json::Value::Null
     );
     assert_eq!(status_only.count(), None);
-}
-
-#[test]
-fn response_round_trips_through_json() {
-    let resp = ExecResponse {
-        ok: true,
-        operation: "QUERY".into(),
-        message: "Found 1 hits".into(),
-        data: Some(ExecData::Hits(vec![hit(1, 0.9)])),
-        telemetry: None,
-    };
-    let value = serde_json::to_value(&resp).unwrap();
-    assert_eq!(value["data"][0]["id"], 1, "legacy hits array shape");
-    let back: ExecResponse = serde_json::from_value(value).unwrap();
-    assert_eq!(back.hits().unwrap().len(), 1);
-    assert_eq!(back.ids(), vec![1]);
 }
 
 #[tokio::test]
@@ -313,13 +269,14 @@ async fn dispatch_uses_typed_backend_response() {
 }
 
 #[tokio::test]
-async fn dispatch_parses_backend_envelope() {
+async fn dispatch_serves_typed_point_map() {
     let mut client = MockQdrantClient::default();
     client.info = Some(collection_with_vectors(&["dense"], &[]));
-    client.point_map.lock().unwrap().insert(
-        "docs".to_string(),
-        json!({"result": {"points": [{"id": 1, "score": 0.9}]}}),
-    );
+    client
+        .point_map
+        .lock()
+        .unwrap()
+        .insert("docs".to_string(), ExecData::Hits(vec![hit(1, 0.9)]));
     let planned_calls = client.execute_planned_call_count.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
@@ -329,7 +286,7 @@ async fn dispatch_parses_backend_envelope() {
             OnError::Stop,
         )
         .await
-        .expect("envelope response executes");
+        .expect("typed response executes");
     assert_eq!(report.ids(0), vec![1]);
     assert_eq!(*planned_calls.lock().unwrap(), 1);
 }

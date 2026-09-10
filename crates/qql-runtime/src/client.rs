@@ -110,8 +110,9 @@ pub trait QdrantOps: QdrantOpsBound {
     /// Execute a pre-planned operation and return its typed payload.
     ///
     /// REST backends project `PlannedOperation` → `to_rest_route` → HTTP and
-    /// parse their JSON envelope at the transport boundary. gRPC/edge convert
-    /// proto / `qdrant-edge` values straight into [`BackendResponse`].
+    /// strictly parse the per-operation OpenAPI shape at the transport
+    /// boundary. gRPC/edge convert proto / `qdrant-edge` values straight into
+    /// [`BackendResponse`].
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,

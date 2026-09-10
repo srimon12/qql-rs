@@ -470,9 +470,8 @@ mod tests {
             let cols = report.results[0]
                 .data
                 .as_ref()
-                .and_then(|d| d.as_raw())
-                .and_then(|d| d["result"]["collections"].as_array())
-                .expect("collections array");
+                .and_then(|d| d.collections())
+                .expect("collections list");
             assert!(
                 cols.is_empty(),
                 "read operations must not create collections: {cols:?}"
@@ -516,9 +515,8 @@ mod tests {
             let cols = report.results[0]
                 .data
                 .as_ref()
-                .and_then(|d| d.as_raw())
-                .and_then(|d| d["result"]["collections"].as_array())
-                .map(|c| c.len())
+                .and_then(|d| d.collections())
+                .map(<[String]>::len)
                 .unwrap_or(0);
             assert_eq!(
                 cols, 1,

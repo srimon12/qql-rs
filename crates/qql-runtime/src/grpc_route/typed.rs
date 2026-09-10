@@ -1,22 +1,22 @@
 //! Proto responses → typed executor IR, skipping the REST-shaped JSON envelope.
 //!
 //! Every operation the gRPC adapter executes converts its protobuf response
-//! straight into [`BackendResponse`] data here — the REST envelope parser is
-//! never involved. Field mapping mirrors the (now REST-only) envelope parser
-//! (`crate::envelope::parse_backend_response`) exactly, with two documented
-//! exceptions:
+//! straight into [`BackendResponse`] data here — point IDs, vectors, group
+//! ids, facet values, and collection metadata are typed end to end, with no
+//! JSON detour. A proto response that violates its contract (a missing point
+//! id, vector, group id, or facet value) fails with `QQL-BACKEND-ENVELOPE`
+//! instead of fabricating a placeholder.
 //!
-//! - `SearchHit::text` stays `None` (the typed IR keeps payload text inside
-//!   `payload`; the envelope parser additionally mirrors a payload `text` key
-//!   onto the hit).
-//! - grouped `lookup` points are dropped (the typed IR does not model them,
-//!   and the envelope parser's serde decode drops them too).
-//!
-//! Parity is pinned by the tests in `tests.rs`.
+//! Two wire fields have no typed IR representation and are dropped with a
+//! documented rationale: `next_page_offset` (callers derive the cursor from
+//! the last hit id) and grouped `lookup` points.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use qql_plan::PlanPointId;
+use qql_core::error::QqlError;
+use qql_plan::{
+    PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey, PlanVectorStruct, PlanVectorValue,
+};
 
 use crate::executor::response::{
     BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit,
@@ -26,26 +26,37 @@ use crate::executor::telemetry::{
 };
 use crate::qdrant_grpc::qdrant;
 
-use super::responses::vectors_output_to_json;
 use super::values::qdrant_value_to_json;
 
-/// Proto `PointId` → typed plan id, mirroring the REST envelope parser's
-/// JSON decode (`extract_search_hits`): a missing id becomes `<missing-id>`,
-/// an optionless `PointId` serializes as JSON null.
-pub(crate) fn point_id_to_plan(id: Option<&qdrant::PointId>) -> PlanPointId {
+fn envelope_err(message: impl Into<String>) -> QqlError {
+    QqlError::backend("QQL-BACKEND-ENVELOPE", message.into(), None)
+}
+
+/// Proto `PointId` → typed plan id. A missing id or an optionless `PointId`
+/// is a backend contract violation, not a fabricated `<missing-id>` string.
+pub(crate) fn point_id_to_plan(id: Option<&qdrant::PointId>) -> Result<PlanPointId, QqlError> {
     use qdrant::point_id::PointIdOptions;
-    let Some(point_id) = id else {
-        return PlanPointId::String("<missing-id>".to_string());
-    };
+    let point_id = id.ok_or_else(|| envelope_err("point is missing its id"))?;
     match &point_id.point_id_options {
-        Some(PointIdOptions::Num(n)) => PlanPointId::Number(*n),
-        Some(PointIdOptions::Uuid(s)) => PlanPointId::String(s.clone()),
-        None => PlanPointId::String("null".to_string()),
+        Some(PointIdOptions::Num(n)) => Ok(PlanPointId::Number(*n)),
+        Some(PointIdOptions::Uuid(s)) => Ok(PlanPointId::String(s.clone())),
+        None => Err(envelope_err("point id carries neither num nor uuid")),
+    }
+}
+
+/// Proto `ShardKey` → typed plan shard key.
+pub(crate) fn shard_key_to_plan(key: &qdrant::ShardKey) -> Result<PlanShardKey, QqlError> {
+    match &key.key {
+        Some(qdrant::shard_key::Key::Keyword(keyword)) => {
+            Ok(PlanShardKey::Keyword(keyword.clone()))
+        }
+        Some(qdrant::shard_key::Key::Number(number)) => Ok(PlanShardKey::Number(*number)),
+        None => Err(envelope_err("shard key carries no value")),
     }
 }
 
 /// Payload map → typed payload: empty becomes `None`, matching the REST
-/// envelope parser (absent/`null` payload reads as `None`).
+/// strict parser (absent/`null` payload reads as `None`).
 fn payload_to_typed(
     payload: HashMap<String, qdrant::Value>,
 ) -> Option<HashMap<String, serde_json::Value>> {
@@ -61,79 +72,116 @@ fn payload_to_typed(
     }
 }
 
-fn vector_to_typed(vectors: &Option<qdrant::VectorsOutput>) -> Option<serde_json::Value> {
-    vectors.as_ref().map(vectors_output_to_json)
+/// One proto `VectorOutput` → typed vector value.
+fn vector_output_to_plan(vo: &qdrant::VectorOutput) -> Result<PlanVectorValue, QqlError> {
+    use qdrant::vector_output;
+    match &vo.vector {
+        Some(vector_output::Vector::Dense(dense)) => Ok(PlanVectorValue::Dense(dense.data.clone())),
+        Some(vector_output::Vector::Sparse(sparse)) => Ok(PlanVectorValue::Sparse {
+            indices: sparse.indices.clone(),
+            values: sparse.values.clone(),
+        }),
+        Some(vector_output::Vector::MultiDense(multi)) => Ok(PlanVectorValue::MultiDense(
+            multi.vectors.iter().map(|d| d.data.clone()).collect(),
+        )),
+        None => Err(envelope_err("vector output carries no vector")),
+    }
+}
+
+/// Proto `VectorsOutput` → typed [`PlanVectorStruct`] (single or named set).
+pub(crate) fn vectors_output_to_typed(
+    vectors: &qdrant::VectorsOutput,
+) -> Result<PlanVectorStruct, QqlError> {
+    use qdrant::vectors_output::VectorsOptions;
+    match &vectors.vectors_options {
+        Some(VectorsOptions::Vector(vo)) => {
+            Ok(PlanVectorStruct::Single(vector_output_to_plan(vo)?))
+        }
+        Some(VectorsOptions::Vectors(named)) => {
+            let entries = named
+                .vectors
+                .iter()
+                .map(|(name, vo)| Ok((name.clone(), vector_output_to_plan(vo)?)))
+                .collect::<Result<BTreeMap<_, _>, QqlError>>()?;
+            Ok(PlanVectorStruct::Named(entries))
+        }
+        None => Err(envelope_err("vectors output carries no vector options")),
+    }
+}
+
+fn vector_to_typed(
+    vectors: &Option<qdrant::VectorsOutput>,
+) -> Result<Option<PlanVectorStruct>, QqlError> {
+    vectors.as_ref().map(vectors_output_to_typed).transpose()
 }
 
 /// Proto `ScoredPoint` → [`SearchHit`]. `version`, `shard_key` and
-/// `order_value` are absent from the hit IR (envelope extraction drops them
-/// too). `text` stays `None`; see the module docs.
-pub(crate) fn scored_point_to_hit(p: qdrant::ScoredPoint) -> SearchHit {
-    SearchHit {
-        id: point_id_to_plan(p.id.as_ref()),
+/// `order_value` are absent from the hit IR.
+pub(crate) fn scored_point_to_hit(p: qdrant::ScoredPoint) -> Result<SearchHit, QqlError> {
+    Ok(SearchHit {
+        id: point_id_to_plan(p.id.as_ref())?,
         score: p.score,
-        text: None,
         payload: payload_to_typed(p.payload),
         collection: None,
-        vector: vector_to_typed(&p.vectors),
-    }
+        vector: vector_to_typed(&p.vectors)?,
+    })
 }
 
-/// Proto `RetrievedPoint` → [`SearchHit`] with an unscored `0.0` score,
-/// matching envelope extraction for get/scroll points.
-pub(crate) fn retrieved_point_to_hit(p: qdrant::RetrievedPoint) -> SearchHit {
-    SearchHit {
-        id: point_id_to_plan(p.id.as_ref()),
+/// Proto `RetrievedPoint` → [`SearchHit`] with an unscored `0.0` score.
+pub(crate) fn retrieved_point_to_hit(p: qdrant::RetrievedPoint) -> Result<SearchHit, QqlError> {
+    Ok(SearchHit {
+        id: point_id_to_plan(p.id.as_ref())?,
         score: 0.0,
-        text: None,
         payload: payload_to_typed(p.payload),
         collection: None,
-        vector: vector_to_typed(&p.vectors),
-    }
+        vector: vector_to_typed(&p.vectors)?,
+    })
 }
 
-/// Proto `GroupId` → JSON group key, mirroring the REST group `id` shape:
-/// unsigned and signed integers both as JSON numbers, strings as strings, and
-/// a missing kind as `null`.
-fn group_id_to_value(id: &qdrant::GroupId) -> serde_json::Value {
+/// Proto `GroupId` → typed group key.
+fn group_id_to_plan(id: &qdrant::GroupId) -> Result<PlanGroupId, QqlError> {
     match &id.kind {
-        Some(qdrant::group_id::Kind::UnsignedValue(n)) => serde_json::json!(*n),
-        Some(qdrant::group_id::Kind::IntegerValue(i)) => serde_json::json!(*i),
-        Some(qdrant::group_id::Kind::StringValue(s)) => serde_json::json!(s),
-        None => serde_json::Value::Null,
+        Some(qdrant::group_id::Kind::UnsignedValue(n)) => Ok(PlanGroupId::Unsigned(*n)),
+        Some(qdrant::group_id::Kind::IntegerValue(i)) => Ok(PlanGroupId::Signed(*i)),
+        Some(qdrant::group_id::Kind::StringValue(s)) => Ok(PlanGroupId::Keyword(s.clone())),
+        None => Err(envelope_err("group id carries no value")),
     }
 }
 
-/// Proto `PointGroup` → typed [`GroupedSearchResult`]. Hits reuse
-/// [`scored_point_to_hit`]; `lookup` has no typed IR field and is dropped.
-pub(crate) fn point_group_to_typed(g: qdrant::PointGroup) -> GroupedSearchResult {
-    GroupedSearchResult {
-        group_id: g
-            .id
-            .as_ref()
-            .map_or(serde_json::Value::Null, group_id_to_value),
-        hits: g.hits.into_iter().map(scored_point_to_hit).collect(),
-    }
+/// Proto `PointGroup` → typed [`GroupedSearchResult`]. `lookup` has no typed
+/// IR field and is dropped.
+pub(crate) fn point_group_to_typed(g: qdrant::PointGroup) -> Result<GroupedSearchResult, QqlError> {
+    let id =
+        g.id.as_ref()
+            .ok_or_else(|| envelope_err("group is missing its id"))?;
+    Ok(GroupedSearchResult {
+        group_id: group_id_to_plan(id)?,
+        hits: g
+            .hits
+            .into_iter()
+            .map(scored_point_to_hit)
+            .collect::<Result<_, _>>()?,
+    })
 }
 
-/// Proto `FacetHit` → typed [`FacetHit`], mirroring `facet_hit_to_json`.
-pub(crate) fn facet_hit_to_typed(hit: qdrant::FacetHit) -> FacetHit {
+/// Proto `FacetHit` → typed [`FacetHit`].
+pub(crate) fn facet_hit_to_typed(hit: qdrant::FacetHit) -> Result<FacetHit, QqlError> {
     use qdrant::facet_value::Variant;
     let value = match hit.value.and_then(|v| v.variant) {
-        Some(Variant::StringValue(s)) => serde_json::Value::String(s),
-        Some(Variant::IntegerValue(i)) => serde_json::json!(i),
-        Some(Variant::BoolValue(b)) => serde_json::Value::Bool(b),
-        None => serde_json::Value::Null,
+        Some(Variant::StringValue(s)) => PlanFacetValue::Keyword(s),
+        Some(Variant::IntegerValue(i)) => PlanFacetValue::Integer(i),
+        Some(Variant::BoolValue(b)) => PlanFacetValue::Bool(b),
+        None => return Err(envelope_err("facet hit is missing its value")),
     };
-    FacetHit {
+    Ok(FacetHit {
         value,
         count: hit.count,
-    }
+    })
 }
 
-/// Typed `usage` from the proto message, mirroring `usage_to_json` +
-/// `ServerUsage::from_json` semantics exactly: `None` when the report is
-/// absent or both sections are absent; sections are independent otherwise.
+/// Typed `usage` from the proto message, mirroring `ServerUsage::from_json`
+/// semantics exactly: `None` when the report is absent or both sections are
+/// absent; sections are independent otherwise.
 pub(crate) fn usage_to_telemetry(usage: Option<&qdrant::Usage>) -> Option<ServerUsage> {
     let report = usage?;
     let hardware = report.hardware.map(|h| HardwareUsage {
@@ -161,10 +209,9 @@ pub(crate) fn usage_to_telemetry(usage: Option<&qdrant::Usage>) -> Option<Server
     })
 }
 
-/// Build `ServerTelemetry` from proto `time` + `usage`, mirroring
-/// `ServerTelemetry::from_envelope_opt` over the JSON envelope the retired
-/// fallback path built. Proto `time` is non-optional and every response type
-/// on this path carries it, so the result is always `Some`.
+/// Build `ServerTelemetry` from proto `time` + `usage`. Proto `time` is
+/// non-optional and every response type on this path carries it, so the
+/// result is always `Some`.
 pub(crate) fn telemetry_from_proto(
     time: f64,
     usage: Option<&qdrant::Usage>,
@@ -196,4 +243,39 @@ pub(crate) fn collection_mutation_to_typed(time: f64) -> BackendResponse {
         data: ExecData::Mutation { affected: None },
         telemetry: telemetry_from_proto(time, None),
     }
+}
+
+/// Test-only parity oracle: convert a gRPC `Usage` into the REST `usage` JSON
+/// shape consumed by [`ServerUsage::from_json`]. Production code never builds
+/// response JSON — REST telemetry stays a lenient JSON parse, and gRPC
+/// telemetry converts proto → [`ServerUsage`] directly via
+/// [`usage_to_telemetry`].
+#[cfg(test)]
+pub(crate) fn usage_to_json(usage: Option<&qdrant::Usage>) -> serde_json::Value {
+    let Some(report) = usage else {
+        return serde_json::Value::Null;
+    };
+    let hardware = report.hardware.as_ref().map(|h| {
+        serde_json::json!({
+            "cpu": h.cpu,
+            "payload_io_read": h.payload_io_read,
+            "payload_io_write": h.payload_io_write,
+            "payload_index_io_read": h.payload_index_io_read,
+            "payload_index_io_write": h.payload_index_io_write,
+            "vector_io_read": h.vector_io_read,
+            "vector_io_write": h.vector_io_write,
+        })
+    });
+    let inference = report.inference.as_ref().map(|inf| {
+        let models: serde_json::Map<String, serde_json::Value> = inf
+            .models
+            .iter()
+            .map(|(name, m)| (name.clone(), serde_json::json!({ "tokens": m.tokens })))
+            .collect();
+        serde_json::json!({ "models": models })
+    });
+    serde_json::json!({
+        "hardware": hardware,
+        "inference": inference,
+    })
 }

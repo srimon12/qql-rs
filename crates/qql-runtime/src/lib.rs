@@ -52,11 +52,6 @@ pub mod config;
 /// Remote embedding-server adapter ([`HttpEmbedder`](embedder::HttpEmbedder))
 /// implementing the `qql-embed` [`Embedder`](embedder::Embedder) trait.
 pub mod embedder;
-/// REST-shaped envelope → typed response IR parsing. REST is the only
-/// production transport that speaks JSON envelopes; the executor's unit-test
-/// doubles reuse the parser under `cfg(test)`.
-#[cfg(any(feature = "rest", test))]
-mod envelope;
 /// The executor: parse → prepare → plan → batch → dispatch.
 pub mod executor;
 /// Tonic channel client and typed protobuf conversions for the gRPC transport.
@@ -76,6 +71,10 @@ pub mod qdrant_grpc;
 /// `QdrantOps` over JSON HTTP.
 #[cfg(feature = "rest")]
 pub mod rest;
+/// Strict per-operation REST response parsing (OpenAPI shapes only, no
+/// fallbacks). Used exclusively by the REST transport.
+#[cfg(feature = "rest")]
+mod rest_response;
 /// Sparse vector helpers re-exported from `qql-embed` (wire-compatible BM25).
 pub mod sparse;
 
@@ -88,8 +87,9 @@ pub use qql_core::ast::{ComparisonOp, Stmt, Value, VectorValue, inject_filter};
 pub use qql_core::error::{ErrorKind, QqlError, Span};
 pub use qql_core::parser::Parser;
 pub use qql_plan::{
-    CreateCollectionRequest, CreateIndexRequest, PlannedOperation, QueryBatchRequest,
-    UpdateBatchRequest, UpdateCollectionRequest,
+    CreateCollectionRequest, CreateIndexRequest, PlanFacetValue, PlanGroupId, PlanPointId,
+    PlanShardKey, PlanVectorStruct, PlanVectorValue, PlannedOperation, QueryBatchRequest,
+    QuotaConfig, UpdateBatchRequest, UpdateCollectionRequest,
 };
 
 // Sparse unit tests live in `qql-embed` (shared implementation).

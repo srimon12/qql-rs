@@ -18,6 +18,6 @@ mod error;
 pub(crate) mod memory;
 mod ops;
 mod points;
-mod schema;
+pub(crate) mod schema;
 
 pub use client::{GrpcQdrant, REQUEST_ID_METADATA, ROUTE_AFFINITY_METADATA};

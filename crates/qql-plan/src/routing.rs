@@ -481,7 +481,7 @@ mod tests {
         let op = plan(&clear).unwrap();
         match op {
             PlannedOperation::SetQuotas { request } => {
-                assert_eq!(request.max_disk_usage_percent, None);
+                assert_eq!(request.config.max_disk_usage_percent, None);
             }
             other => panic!("expected SetQuotas, got {other:?}"),
         }

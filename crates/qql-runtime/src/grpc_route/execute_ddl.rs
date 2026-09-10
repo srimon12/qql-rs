@@ -1,15 +1,16 @@
 //! DDL execution: collections / indexes / shard keys.
 //!
-//! Status-only successes convert to `ExecData::Mutation { affected: None }`
-//! straight from the proto bool/time; genuinely schemaless payloads
-//! (collection info, collection lists, shard-key lists) stay [`ExecData::Raw`]
-//! with their REST-shaped metadata JSON built from the proto.
+//! Every response converts straight into typed `ExecData`: status-only
+//! successes become `Mutation { affected: None }`, collection lists become
+//! `Collections`, collection metadata becomes `Collection`, and shard-key
+//! lists become `ShardKeys`. No JSON envelope is built anywhere.
 
 use qql_core::error::QqlError;
 
 use crate::executor::response::{BackendResponse, ExecData};
 use crate::grpc::GrpcQdrant;
 use crate::grpc::memory::memory_from_str;
+use crate::grpc::schema::collection_info_from_grpc;
 use crate::qdrant_grpc::qdrant;
 
 use super::ddl::{
@@ -17,9 +18,9 @@ use super::ddl::{
     payload_index_params, quantization_config_diff, quantization_config_from_plan,
     sparse_vector_params, vector_params,
 };
-use super::responses::{collection_info_to_json, list_collections_response_to_json};
 use super::typed::{
-    collection_mutation_to_typed, mutation_response_to_typed, telemetry_from_proto,
+    collection_mutation_to_typed, mutation_response_to_typed, shard_key_to_plan,
+    telemetry_from_proto,
 };
 
 /// Create a collection, then apply deferred params and shard keys.
@@ -293,10 +294,10 @@ pub(crate) async fn execute_list_collections(
         .list_collections_raw()
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("list: {e}"), None))?;
-    let time = resp.time;
+    let telemetry = telemetry_from_proto(resp.time, None);
     Ok(BackendResponse {
-        data: ExecData::Raw(list_collections_response_to_json(resp)),
-        telemetry: telemetry_from_proto(time, None),
+        data: ExecData::Collections(resp.collections.into_iter().map(|c| c.name).collect()),
+        telemetry,
     })
 }
 
@@ -309,10 +310,18 @@ pub(crate) async fn execute_get_collection(
         .collection_info_raw(collection.to_owned())
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None))?;
-    let time = resp.time;
+    let info = resp.result.ok_or_else(|| {
+        QqlError::backend(
+            "QQL-GRPC-NO-RESULT",
+            "collection_info response missing result field",
+            None,
+        )
+        .with_collection(collection.to_string())
+    })?;
+    let telemetry = telemetry_from_proto(resp.time, None);
     Ok(BackendResponse {
-        data: ExecData::Raw(collection_info_to_json(resp)),
-        telemetry: telemetry_from_proto(time, None),
+        data: ExecData::Collection(collection_info_from_grpc(&info)),
+        telemetry,
     })
 }
 
@@ -328,23 +337,27 @@ pub(crate) async fn execute_list_shard_keys(
         .list_shard_keys(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("list_shard_keys: {e}"), None))?;
-    let time = resp.time;
-    let keys: Vec<serde_json::Value> = resp
+    let telemetry = telemetry_from_proto(resp.time, None);
+    let keys = resp
         .shard_keys
         .into_iter()
-        .filter_map(|d| d.key)
-        .map(|sk| match sk.key {
-            Some(qdrant::shard_key::Key::Keyword(s)) => serde_json::Value::String(s),
-            Some(qdrant::shard_key::Key::Number(n)) => serde_json::Value::Number((n).into()),
-            None => serde_json::Value::Null,
+        .map(|description| {
+            description
+                .key
+                .as_ref()
+                .ok_or_else(|| {
+                    QqlError::backend(
+                        "QQL-BACKEND-ENVELOPE",
+                        "shard key description is missing its key",
+                        None,
+                    )
+                    .with_collection(collection.to_string())
+                })
+                .and_then(shard_key_to_plan)
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(BackendResponse {
-        data: ExecData::Raw(serde_json::json!({
-            "result": { "shard_keys": keys },
-            "status": "ok",
-            "time": time,
-        })),
-        telemetry: telemetry_from_proto(time, None),
+        data: ExecData::ShardKeys(keys),
+        telemetry,
     })
 }

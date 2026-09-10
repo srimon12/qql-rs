@@ -25,8 +25,8 @@ use crate::grpc::GrpcQdrant;
 ///
 /// This is the single fast path for gRPC backends: there is no intermediate
 /// REST `Route` projection, no JSON serialisation/deserialisation, and no
-/// response envelope parsing. `Raw` responses remain only for schemaless
-/// metadata (collection info/lists, shard-key lists).
+/// response envelope parsing — every response shape has a typed `ExecData`
+/// variant built straight from the protobuf message.
 pub async fn execute_planned_grpc(
     client: &GrpcQdrant,
     op: &qql_plan::PlannedOperation,

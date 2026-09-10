@@ -3,7 +3,9 @@
 
 use super::mock::{MockQdrantClient, collection_with_vectors, test_config};
 use crate::executor::telemetry::{ServerTelemetry, ServerUsage};
-use crate::executor::{AnalyzeReport, ExecResponse, ExecutionReport, Executor, OnError};
+use crate::executor::{
+    AnalyzeReport, ExecData, ExecResponse, ExecutionReport, Executor, OnError, SearchHit,
+};
 
 fn query_executor() -> Executor {
     let mut client = MockQdrantClient::default();
@@ -13,7 +15,7 @@ fn query_executor() -> Executor {
 }
 
 #[tokio::test]
-async fn telemetry_populates_from_mock_envelope() {
+async fn telemetry_populates_from_mock_typed_response() {
     let executor = query_executor();
     let report = executor
         .execute(
@@ -25,7 +27,7 @@ async fn telemetry_populates_from_mock_envelope() {
     let tel = report.results[0]
         .telemetry
         .as_ref()
-        .expect("mock envelope carries telemetry");
+        .expect("mock typed response carries telemetry");
     assert!((tel.time_s.unwrap() - 0.0025).abs() < f64::EPSILON);
     let usage = tel.usage.as_ref().expect("mock usage present");
     let hw = usage.hardware.as_ref().expect("mock hardware present");
@@ -40,16 +42,20 @@ async fn telemetry_populates_from_mock_envelope() {
 
 #[tokio::test]
 async fn telemetry_none_where_backend_sends_none() {
-    // `point_map` values are bare `{"result": …}` shapes with no
-    // time/usage — extraction must yield None, not an error.
+    // `point_map` fixtures carry no telemetry — it must stay None, not a
+    // fabricated timing.
     let mut client = MockQdrantClient::default();
     client.exists = true;
     client.info = Some(collection_with_vectors(&["dense"], &[]));
     client.point_map.lock().unwrap().insert(
         "docs".to_string(),
-        serde_json::json!({"result": {"points": [
-            {"id": 1, "score": 0.9, "payload": {}}
-        ]}}),
+        ExecData::Hits(vec![SearchHit {
+            id: qql_plan::PlanPointId::Number(1),
+            score: 0.9,
+            payload: Some(std::collections::HashMap::new()),
+            collection: None,
+            vector: None,
+        }]),
     );
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let report = executor
@@ -95,38 +101,34 @@ fn telemetry_extraction_is_lenient_never_failing() {
 }
 
 #[test]
-fn telemetry_serialization_stays_back_compatible() {
-    // Old payloads (no `telemetry` key) deserialize; `None` serializes
-    // without the key, so the pre-telemetry shape is byte-identical.
-    let old: ExecResponse = serde_json::from_value(serde_json::json!({
-        "ok": true, "operation": "QUERY", "message": "Found 0 hits", "data": []
-    }))
-    .unwrap();
-    assert!(old.telemetry.is_none());
-    let val = serde_json::to_value(&old).unwrap();
+fn telemetry_serialization_omits_none() {
+    // `None` serializes without the key, so the pre-telemetry shape is
+    // byte-identical for responses and reports at the top level.
+    let resp = ExecResponse {
+        ok: true,
+        operation: "QUERY".into(),
+        message: "Found 0 hits".into(),
+        data: None,
+        telemetry: None,
+    };
+    let val = serde_json::to_value(&resp).unwrap();
     assert!(!val.as_object().unwrap().contains_key("telemetry"));
 
-    let old_report: ExecutionReport = serde_json::from_value(serde_json::json!({
-        "ok": true, "results": [], "succeeded": 0, "failed": 0
-    }))
-    .unwrap();
-    assert!(old_report.telemetry.is_none());
-    let val = serde_json::to_value(&old_report).unwrap();
+    let report = ExecutionReport::from_results(vec![resp.clone()]);
+    let val = serde_json::to_value(&report).unwrap();
     assert!(!val.as_object().unwrap().contains_key("telemetry"));
 
-    // Populated telemetry round-trips.
+    // Populated telemetry serializes in place.
     let tel = ServerTelemetry::from_envelope(&serde_json::json!({
         "time": 0.1, "usage": {"hardware": {"cpu": 1}}
     }));
     let resp = ExecResponse {
-        ok: true,
-        operation: "QUERY".into(),
-        message: "ok".into(),
-        data: None,
         telemetry: Some(tel),
+        ..resp
     };
-    let back: ExecResponse = serde_json::from_value(serde_json::to_value(&resp).unwrap()).unwrap();
-    assert_eq!(back.telemetry.unwrap().time_s, Some(0.1));
+    let val = serde_json::to_value(&resp).unwrap();
+    assert_eq!(val["telemetry"]["time_s"], serde_json::json!(0.1));
+    assert_eq!(val["telemetry"]["usage"]["hardware"]["cpu"], 1);
 }
 
 #[test]
@@ -218,8 +220,8 @@ async fn explain_analyze_end_to_end_shape() {
 #[tokio::test]
 async fn explain_analyze_covers_write_routes_and_rejects_scripts() {
     let executor = query_executor();
-    // Write route: UPSERT normalizes into a fresh `{"count": n}` body, but
-    // telemetry is extracted from the raw envelope first.
+    // Write route: UPSERT normalizes into a fresh `{"count": n}` body while
+    // the typed backend response's telemetry is carried through.
     let report = executor
         .explain_analyze(
             "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2, 0.3]};",
@@ -256,8 +258,7 @@ async fn explain_analyze_covers_write_routes_and_rejects_scripts() {
 }
 
 #[test]
-fn normalize_planned_keeps_telemetry_out_of_the_error_path() {
-    // Garbage telemetry must not fail normalization.
+fn normalize_planned_moves_telemetry_onto_the_response() {
     let op = qql_plan::PlannedOperation::Count {
         collection: "docs".to_string(),
         request: qql_plan::CountRequest {
@@ -266,30 +267,24 @@ fn normalize_planned_keeps_telemetry_out_of_the_error_path() {
             shard_key: None,
         },
     };
-    let resp = Executor::normalize_planned(
-        &op,
-        crate::envelope::parse_backend_response(
-            &op,
-            serde_json::json!({"result": {"count": 3}, "status": "ok", "time": "soon", "usage": 42}),
-        )
-        .expect("garbage telemetry still parses"),
-    )
-    .expect("garbage telemetry never fails");
-    assert!(resp.telemetry.is_none());
+    let response = crate::executor::BackendResponse {
+        data: ExecData::Count(3),
+        telemetry: Some(ServerTelemetry {
+            time_s: Some(0.01),
+            usage: Some(ServerUsage {
+                hardware: None,
+                inference: Some(crate::executor::InferenceUsage {
+                    models: std::collections::HashMap::from([(
+                        "e5".to_string(),
+                        crate::executor::ModelUsage { tokens: 9 },
+                    )]),
+                }),
+            }),
+        }),
+    };
+    let resp = Executor::normalize_planned(&op, response).expect("normalization keeps telemetry");
     assert_eq!(resp.count(), Some(3));
-
-    // Well-formed telemetry attaches without disturbing the payload.
-    let resp = Executor::normalize_planned(
-        &op,
-        crate::envelope::parse_backend_response(
-            &op,
-            serde_json::json!({"result": {"count": 3}, "status": "ok", "time": 0.01,
-                "usage": {"inference": {"models": {"e5": {"tokens": 9}}}}}),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let tel = resp.telemetry.as_ref().unwrap();
+    let tel = resp.telemetry.as_ref().expect("telemetry carried");
     assert!((tel.time_s.unwrap() - 0.01).abs() < f64::EPSILON);
     assert_eq!(
         tel.usage

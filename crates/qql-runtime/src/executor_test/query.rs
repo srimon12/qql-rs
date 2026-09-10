@@ -5,7 +5,28 @@ use super::mock::{
     test_config, test_local_config,
 };
 use crate::client::CollectionInfo;
-use crate::executor::{Executor, OnError};
+use crate::executor::{ExecData, Executor, FacetHit, OnError, SearchHit};
+use qql_plan::{PlanFacetValue, PlanPointId};
+
+/// Typed hit fixture with string payload values.
+fn hit(id: PlanPointId, score: f32, payload: &[(&str, &str)]) -> SearchHit {
+    SearchHit {
+        id,
+        score,
+        payload: if payload.is_empty() {
+            None
+        } else {
+            Some(
+                payload
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+                    .collect(),
+            )
+        },
+        collection: None,
+        vector: None,
+    }
+}
 
 #[tokio::test]
 async fn test_do_query_basic() {
@@ -292,15 +313,19 @@ async fn cross_rerank_preserves_same_id_different_collections() {
     client.info = Some(collection_with_vectors(&["dense"], &[]));
     client.point_map.lock().unwrap().insert(
         "coll_a".to_string(),
-        serde_json::json!({"result": {"points": [
-            {"id": "1", "score": 0.9, "payload": {"body": "alpha body text"}}
-        ]}}),
+        ExecData::Hits(vec![hit(
+            PlanPointId::String("1".into()),
+            0.9,
+            &[("body", "alpha body text")],
+        )]),
     );
     client.point_map.lock().unwrap().insert(
         "coll_b".to_string(),
-        serde_json::json!({"result": {"points": [
-            {"id": "1", "score": 0.8, "payload": {"body": "beta body text"}}
-        ]}}),
+        ExecData::Hits(vec![hit(
+            PlanPointId::String("1".into()),
+            0.8,
+            &[("body", "beta body text")],
+        )]),
     );
 
     let embedder = Arc::new(MockEmbedder {
@@ -408,9 +433,11 @@ async fn cross_rerank_missing_payload_field_errors() {
     client.info = Some(collection_with_vectors(&["dense"], &[]));
     client.point_map.lock().unwrap().insert(
         "docs".to_string(),
-        serde_json::json!({"result": {"points": [
-            {"id": 1, "score": 0.9, "payload": {"title": "no body here"}}
-        ]}}),
+        ExecData::Hits(vec![hit(
+            PlanPointId::Number(1),
+            0.9,
+            &[("title", "no body here")],
+        )]),
     );
     let embedder = Arc::new(MockEmbedder {
         dense: vec![0.1, 0.2, 0.3],
@@ -469,10 +496,10 @@ async fn cross_rerank_score_cardinality_mismatch_errors() {
     client.info = Some(collection_with_vectors(&["dense"], &[]));
     client.point_map.lock().unwrap().insert(
         "docs".to_string(),
-        serde_json::json!({"result": {"points": [
-            {"id": 1, "score": 0.9, "payload": {"body": "first document"}},
-            {"id": 2, "score": 0.8, "payload": {"body": "second document"}}
-        ]}}),
+        ExecData::Hits(vec![
+            hit(PlanPointId::Number(1), 0.9, &[("body", "first document")]),
+            hit(PlanPointId::Number(2), 0.8, &[("body", "second document")]),
+        ]),
     );
     let embedder = Arc::new(FixedScoreEmbedder { scores: vec![0.5] });
     let executor =
@@ -503,10 +530,14 @@ async fn numeric_and_string_ids_preserve_json_types() {
     client.info = Some(collection_with_vectors(&["dense"], &[]));
     client.point_map.lock().unwrap().insert(
         "test_coll".to_string(),
-        serde_json::json!({"result": {"points": [
-            {"id": 42, "score": 0.9, "payload": {"title": "numeric id"}},
-            {"id": "b3e0c0ea-52aa-4ebc-bd89-e137b0196ce2", "score": 0.8, "payload": {"title": "uuid id"}}
-        ]}}),
+        ExecData::Hits(vec![
+            hit(PlanPointId::Number(42), 0.9, &[("title", "numeric id")]),
+            hit(
+                PlanPointId::String("b3e0c0ea-52aa-4ebc-bd89-e137b0196ce2".into()),
+                0.8,
+                &[("title", "uuid id")],
+            ),
+        ]),
     );
 
     let executor = Executor::new(Box::new(client), Some(test_local_config()));
@@ -531,16 +562,16 @@ async fn facet_response_normalizes_hits_in_data() {
     client.info = Some(collection_with_vectors(&["dense"], &[]));
     client.point_map.lock().unwrap().insert(
         "test_coll".to_string(),
-        serde_json::json!({
-            "result": {
-                "hits": [
-                    {"value": "electronics", "count": 12},
-                    {"value": "clothing", "count": 5}
-                ]
+        ExecData::Facet(vec![
+            FacetHit {
+                value: PlanFacetValue::Keyword("electronics".into()),
+                count: 12,
             },
-            "status": "ok",
-            "time": 0.002
-        }),
+            FacetHit {
+                value: PlanFacetValue::Keyword("clothing".into()),
+                count: 5,
+            },
+        ]),
     );
 
     let executor = Executor::new(Box::new(client), Some(test_local_config()));
@@ -554,7 +585,10 @@ async fn facet_response_normalizes_hits_in_data() {
         .facet()
         .expect("facet data should be present");
     assert_eq!(facet.len(), 2);
-    assert_eq!(facet[0], (serde_json::json!("electronics"), 12));
+    assert_eq!(
+        facet[0],
+        (PlanFacetValue::Keyword("electronics".into()), 12)
+    );
 }
 
 #[tokio::test]
@@ -563,17 +597,31 @@ async fn get_points_bare_array_result_yields_hits() {
         info: Some(collection_with_vectors(&["dense"], &[])),
         ..Default::default()
     };
-    *client
-        .point_map
-        .lock()
-        .unwrap()
-        .entry("docs".to_string())
-        .or_default() = serde_json::json!({
-        "result": [
-            {"id": 1483, "payload": {"text": "first"}},
-            {"id": 1787, "payload": {"text": "second"}},
-        ]
-    });
+    client.point_map.lock().unwrap().insert(
+        "docs".to_string(),
+        ExecData::Hits(vec![
+            SearchHit {
+                id: PlanPointId::Number(1483),
+                score: 0.0,
+                payload: Some(std::collections::HashMap::from([(
+                    "text".to_string(),
+                    serde_json::json!("first"),
+                )])),
+                collection: None,
+                vector: None,
+            },
+            SearchHit {
+                id: PlanPointId::Number(1787),
+                score: 0.0,
+                payload: Some(std::collections::HashMap::from([(
+                    "text".to_string(),
+                    serde_json::json!("second"),
+                )])),
+                collection: None,
+                vector: None,
+            },
+        ]),
+    );
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let report = executor
         .execute("QUERY POINTS (1483, 1787) FROM docs", OnError::Stop)

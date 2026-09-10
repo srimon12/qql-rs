@@ -4,10 +4,11 @@
 //! matches the OpenAPI wire format. gRPC converts them directly to protobuf
 //! without reverse-engineering JSON shapes.
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 // ── Point ID ────────────────────────────────────────────────────
 
@@ -381,6 +382,123 @@ impl Serialize for PlanVectorValue {
     }
 }
 
+// ── Returned vectors ────────────────────────────────────────────
+
+/// Vector(s) attached to a returned point: one unnamed vector or a named set.
+///
+/// Serializes as the OpenAPI `VectorStructOutput` shape — the value itself for
+/// [`PlanVectorStruct::Single`], a name → value map for
+/// [`PlanVectorStruct::Named`]. Named entries use `BTreeMap` so serialization
+/// order is deterministic. Deserialization never produces parameter
+/// placeholders: responses always carry concrete vectors.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlanVectorStruct {
+    /// Unnamed single vector (dense, sparse, or multi-dense).
+    Single(PlanVectorValue),
+    /// Named vectors, keyed by vector name.
+    Named(BTreeMap<String, PlanVectorValue>),
+}
+
+impl Serialize for PlanVectorStruct {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            PlanVectorStruct::Single(value) => value.serialize(serializer),
+            PlanVectorStruct::Named(vectors) => {
+                let mut map = serializer.serialize_map(Some(vectors.len()))?;
+                for (name, value) in vectors {
+                    map.serialize_entry(name, value)?;
+                }
+                map.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PlanVectorStruct {
+    /// Parse the OpenAPI `VectorStructOutput` shapes: dense array, array of
+    /// dense rows, sparse `{indices, values}` object, or an object of named
+    /// `VectorOutput` entries. Anything else (including inference `Document` /
+    /// `Image` objects, which the output schema does not allow) fails.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// One unnamed `VectorOutput`.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ValueWire {
+            // Dense first: an empty array is an empty dense vector, not a
+            // zero-row multi-dense one. Nested rows only match `MultiDense`.
+            Dense(Vec<f32>),
+            MultiDense(Vec<Vec<f32>>),
+            Sparse { indices: Vec<u32>, values: Vec<f32> },
+        }
+
+        impl ValueWire {
+            fn into_value(self) -> PlanVectorValue {
+                match self {
+                    ValueWire::Dense(values) => PlanVectorValue::Dense(values),
+                    ValueWire::MultiDense(rows) => PlanVectorValue::MultiDense(rows),
+                    ValueWire::Sparse { indices, values } => {
+                        PlanVectorValue::Sparse { indices, values }
+                    }
+                }
+            }
+        }
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Dense(Vec<f32>),
+            MultiDense(Vec<Vec<f32>>),
+            Sparse { indices: Vec<u32>, values: Vec<f32> },
+            Named(BTreeMap<String, ValueWire>),
+        }
+
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Dense(values) => PlanVectorStruct::Single(PlanVectorValue::Dense(values)),
+            Wire::MultiDense(rows) => PlanVectorStruct::Single(PlanVectorValue::MultiDense(rows)),
+            Wire::Sparse { indices, values } => {
+                PlanVectorStruct::Single(PlanVectorValue::Sparse { indices, values })
+            }
+            Wire::Named(vectors) => PlanVectorStruct::Named(
+                vectors
+                    .into_iter()
+                    .map(|(name, value)| (name, value.into_value()))
+                    .collect(),
+            ),
+        })
+    }
+}
+
+// ── Facet / group values ────────────────────────────────────────
+
+/// One facet value as returned by Qdrant: keyword, integer, or bool
+/// (OpenAPI `FacetValue`). Serializes untagged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PlanFacetValue {
+    /// Keyword (string) facet value.
+    Keyword(String),
+    /// Signed integer facet value.
+    Integer(i64),
+    /// Boolean facet value.
+    Bool(bool),
+}
+
+/// Group key of a grouped query result (OpenAPI `GroupId`): keyword,
+/// unsigned integer, or signed integer. Serializes untagged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PlanGroupId {
+    /// Keyword (string) group key.
+    Keyword(String),
+    /// Unsigned integer group key.
+    Unsigned(u64),
+    /// Signed integer group key.
+    Signed(i64),
+}
+
 // ── Query / vector input ────────────────────────────────────────
 
 /// Semantic query input — preserves point / dense / sparse / multi / document /
@@ -661,5 +779,92 @@ mod tests {
                 values: vec![0.5, 0.8]
             })
         );
+    }
+
+    #[test]
+    fn vector_struct_round_trips_every_output_shape() {
+        for (json, typed) in [
+            (
+                serde_json::json!([0.5, 0.25]),
+                PlanVectorStruct::Single(PlanVectorValue::Dense(vec![0.5, 0.25])),
+            ),
+            (
+                serde_json::json!([[0.5, 0.25], [0.125, 0.0]]),
+                PlanVectorStruct::Single(PlanVectorValue::MultiDense(vec![
+                    vec![0.5, 0.25],
+                    vec![0.125, 0.0],
+                ])),
+            ),
+            (
+                serde_json::json!({"indices": [1, 5], "values": [0.5, 0.75]}),
+                PlanVectorStruct::Single(PlanVectorValue::Sparse {
+                    indices: vec![1, 5],
+                    values: vec![0.5, 0.75],
+                }),
+            ),
+            (
+                serde_json::json!({
+                    "dense": [0.5, 0.25],
+                    "sparse": {"indices": [2], "values": [0.5]},
+                }),
+                PlanVectorStruct::Named(BTreeMap::from([
+                    ("dense".to_string(), PlanVectorValue::Dense(vec![0.5, 0.25])),
+                    (
+                        "sparse".to_string(),
+                        PlanVectorValue::Sparse {
+                            indices: vec![2],
+                            values: vec![0.5],
+                        },
+                    ),
+                ])),
+            ),
+        ] {
+            let parsed: PlanVectorStruct = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(parsed, typed, "parse {json}");
+            assert_eq!(serde_json::to_value(&typed).unwrap(), json, "serialize");
+        }
+    }
+
+    #[test]
+    fn vector_struct_rejects_unmodelled_shapes() {
+        // Inference document/image objects are not part of `VectorStructOutput`.
+        assert!(
+            serde_json::from_value::<PlanVectorStruct>(
+                serde_json::json!({"text": "hello", "model": "m"})
+            )
+            .is_err()
+        );
+        assert!(serde_json::from_value::<PlanVectorStruct>(serde_json::json!(null)).is_err());
+        assert!(serde_json::from_value::<PlanVectorStruct>(serde_json::json!("dense")).is_err());
+    }
+
+    #[test]
+    fn facet_and_group_values_serialize_untagged() {
+        assert_eq!(
+            serde_json::to_value(PlanFacetValue::Keyword("books".into())).unwrap(),
+            serde_json::json!("books")
+        );
+        assert_eq!(
+            serde_json::to_value(PlanFacetValue::Integer(-3)).unwrap(),
+            serde_json::json!(-3)
+        );
+        assert_eq!(
+            serde_json::to_value(PlanFacetValue::Bool(true)).unwrap(),
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            serde_json::from_value::<PlanFacetValue>(serde_json::json!(7)).unwrap(),
+            PlanFacetValue::Integer(7)
+        );
+
+        for (json, typed) in [
+            (serde_json::json!("a"), PlanGroupId::Keyword("a".into())),
+            (serde_json::json!(7), PlanGroupId::Unsigned(7)),
+            (serde_json::json!(-3), PlanGroupId::Signed(-3)),
+        ] {
+            let parsed: PlanGroupId = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(parsed, typed);
+            assert_eq!(serde_json::to_value(&typed).unwrap(), json);
+        }
     }
 }

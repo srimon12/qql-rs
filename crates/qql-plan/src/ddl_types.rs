@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use qql_core::ast::MemoryPlacement;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// HNSW index configuration for collection creation/update.
 #[derive(Debug, Clone, Serialize)]
@@ -240,21 +240,34 @@ pub struct DropShardKeyRequest {
     pub shard_key: crate::semantic::PlanShardKey,
 }
 
-/// Cluster-wide resource quota configuration (`PUT /quotas`).
-#[derive(Debug, Clone, Serialize)]
-pub struct SetQuotaRequest {
+/// Cluster-wide resource quota configuration (`GET`/`PUT /quotas`).
+///
+/// An unset field means the corresponding resource is uncapped. Used both as
+/// the `PUT /quotas` request body and as the typed `GET /quotas` result
+/// (`QuotaStatus.config`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuotaConfig {
     /// Whether quota enforcement is active.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     /// Resident-memory cap as a percent of total (1-100).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_resident_memory_percent: Option<u64>,
     /// Disk-usage cap as a percent of total (1-100).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_disk_usage_percent: Option<u64>,
     /// Margin reclaimed when a cap trips, as a percent (0-100).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_margin_percent: Option<u64>,
+}
+
+/// Plan IR for `SET QUOTA`: the replacement [`QuotaConfig`] plus the REST-only
+/// `?wait=` query flag.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SetQuotaRequest {
+    /// Replacement configuration; omitted keys become uncapped defaults.
+    #[serde(flatten)]
+    pub config: QuotaConfig,
     /// REST query param (`?wait=`), not body.
     #[serde(skip)]
     pub wait: Option<bool>,

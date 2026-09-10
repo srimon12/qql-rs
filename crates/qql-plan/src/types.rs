@@ -1,5 +1,6 @@
 pub use crate::semantic::{
-    PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanShardKey, PlanVectorValue,
+    PlanFacetValue, PlanFormula, PlanGroupId, PlanPointId, PlanPointVectors, PlanQueryInput,
+    PlanShardKey, PlanVectorStruct, PlanVectorValue,
 };
 pub use qql_core::ast::{MemoryPlacement, VectorDatatype};
 

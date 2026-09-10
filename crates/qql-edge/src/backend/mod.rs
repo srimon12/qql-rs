@@ -994,13 +994,10 @@ impl QdrantOps for EdgeQdrant {
             CreateShardKey { .. } | DropShardKey { .. } | ListShardKeys { .. } => {
                 return Err(EdgeUnsupported::ShardKeyDdl.error());
             }
-            // Collection metadata has no typed `ExecData` variant: these two
-            // are the only `Raw` producers in this backend (schemaless
-            // metadata envelopes, the sanctioned `Raw` use), and the
-            // executor's SHOW normalization consumes them as such.
-            ListCollections => ExecData::Raw(self.list_collections_envelope().await?),
+            // Collection metadata maps straight onto the typed variants.
+            ListCollections => ExecData::Collections(self.list_collections().await?),
             GetCollection { collection } => {
-                ExecData::Raw(self.get_collection_envelope(collection).await?)
+                ExecData::Collection(self.get_collection_info(collection).await?)
             }
             CrossRerank { .. } => {
                 return Err(EdgeUnsupported::Route {
@@ -1085,105 +1082,14 @@ impl QdrantOps for EdgeQdrant {
     }
 }
 
-impl EdgeQdrant {
-    /// `SHOW COLLECTIONS` metadata envelope. `ExecData` has no collection-list
-    /// variant, so this stays a schemaless metadata `Raw` envelope — the one
-    /// sanctioned `Raw` use — which the executor's `ListCollections`
-    /// normalization reads.
-    async fn list_collections_envelope(&self) -> Result<Value, QqlError> {
-        let collections = self.list_collections().await?;
-        Ok(serde_json::json!({
-            "result": {
-                "collections": collections.into_iter().map(|c| serde_json::json!({"name": c})).collect::<Vec<_>>(),
-            },
-            "status": "ok",
-            "time": 0.0,
-        }))
-    }
-
-    /// `SHOW COLLECTION` metadata envelope (same `Raw` rationale as
-    /// [`Self::list_collections_envelope`]).
-    async fn get_collection_envelope(&self, collection: &str) -> Result<Value, QqlError> {
-        let info = self.get_collection_info(collection).await?;
-        Ok(serde_json::json!({
-            "result": {
-                "status": info.status,
-                "points_count": info.points_count,
-                "segments_count": info.segments_count,
-                "config": {
-                    "params": {
-                        "vectors": edge_vectors_json(&info.schema.vectors)?,
-                        "sparse_vectors": edge_sparse_vectors_json(&info.schema.sparse_vectors),
-                    }
-                },
-                "payload_schema": {},
-            },
-            "status": "ok",
-            "time": 0.0,
-        }))
-    }
-}
-
-fn edge_vectors_json(vectors: &[qql::backend::VectorSpec]) -> Result<Value, QqlError> {
-    if let [vector] = vectors
-        && vector.name.is_none()
-    {
-        return Ok(serde_json::json!({
-            "size": vector.size,
-            "distance": vector.distance,
-        }));
-    }
-    if vectors.iter().any(|vector| vector.name.is_none()) {
-        return Err(QqlError::execution(
-            "QQL-EDGE-MULTI-VECTOR-NAMES",
-            "multiple dense vectors must have explicit names in edge mode",
-            None,
-        ));
-    }
-    let entries = vectors
-        .iter()
-        .map(|vector| {
-            let name = vector.name.clone().ok_or_else(|| {
-                QqlError::execution(
-                    "QQL-EDGE-VECTOR-NAME-MISSING",
-                    "dense vector is missing a name in edge mode",
-                    None,
-                )
-            })?;
-            Ok((
-                name,
-                serde_json::json!({
-                    "size": vector.size,
-                    "distance": vector.distance,
-                }),
-            ))
-        })
-        .collect::<Result<serde_json::Map<String, Value>, QqlError>>()?;
-    Ok(Value::Object(entries))
-}
-
-fn edge_sparse_vectors_json(vectors: &[qql::backend::SparseVectorSpec]) -> Value {
-    Value::Object(
-        vectors
-            .iter()
-            .map(|vector| {
-                (
-                    vector.name.clone(),
-                    serde_json::json!({
-                        "modifier": vector.modifier,
-                    }),
-                )
-            })
-            .collect(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use qql::executor::{Executor, OnError};
     use qql_core::parser::Parser;
-    use qql_plan::{PlanPointId, PlannedOperation, plan};
+    use qql_plan::{
+        PlanFacetValue, PlanPointId, PlanVectorStruct, PlanVectorValue, PlannedOperation, plan,
+    };
     use serde_json::json;
 
     fn plan_one(qql: &str) -> PlannedOperation {
@@ -1253,8 +1159,14 @@ mod tests {
                 hits[0].payload.as_ref().and_then(|p| p.get("city")),
                 Some(&json!("NYC"))
             );
-            assert!(
-                hits[0].vector.is_some(),
+            assert_eq!(
+                hits[0].vector,
+                Some(PlanVectorStruct::Named(std::collections::BTreeMap::from(
+                    [(
+                        "dense".to_string(),
+                        PlanVectorValue::Dense(vec![1.0, 0.0, 0.0])
+                    )]
+                ))),
                 "WITH VECTOR true must map the vector"
             );
             assert!(hits[0].collection.is_none());
@@ -1301,11 +1213,11 @@ mod tests {
                 response.data,
                 ExecData::Facet(vec![
                     FacetHit {
-                        value: json!("NYC"),
+                        value: PlanFacetValue::Keyword("NYC".into()),
                         count: 2,
                     },
                     FacetHit {
-                        value: json!("SF"),
+                        value: PlanFacetValue::Keyword("SF".into()),
                         count: 1,
                     },
                 ])
@@ -1427,17 +1339,16 @@ mod tests {
         });
     }
 
-    /// `Raw` is reserved for the schemaless collection-metadata envelopes:
-    /// `ExecData` has no collection-list/info variant, so SHOW stays `Raw`,
-    /// while every operation with a typed mapping answers typed data.
+    /// `SHOW` metadata answers through the typed variants: collection lists
+    /// via `Collections`, collection metadata via `Collection`.
     #[test]
-    fn raw_is_reserved_for_collection_metadata_envelopes() {
+    fn show_metadata_returns_typed_variants() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("test runtime");
         runtime.block_on(async {
-            let dir = temp_dir("raw-metadata");
+            let dir = temp_dir("typed-metadata");
             let _ = std::fs::remove_dir_all(&dir);
             let backend = EdgeQdrant::new(&dir, false);
             backend
@@ -1447,20 +1358,22 @@ mod tests {
                 .await
                 .expect("create collection");
 
-            let typed = [
+            for qql in [
                 "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}}",
                 "QUERY POINTS (1) FROM docs",
                 "COUNT FROM docs",
                 "DELETE FROM docs WHERE id = 1",
-            ];
-            for qql in typed {
+            ] {
                 let response = backend
                     .execute_planned(&plan_one(qql))
                     .await
                     .unwrap_or_else(|error| panic!("{qql}: {error}"));
                 assert!(
-                    response.data.as_raw().is_none(),
-                    "{qql} must not produce a Raw envelope: {:?}",
+                    matches!(
+                        response.data,
+                        ExecData::Hits(_) | ExecData::Count(_) | ExecData::Mutation { .. }
+                    ),
+                    "{qql} must answer a typed variant: {:?}",
                     response.data
                 );
             }
@@ -1470,12 +1383,8 @@ mod tests {
                 .await
                 .expect("show collections");
             assert_eq!(
-                collections
-                    .data
-                    .as_raw()
-                    .and_then(|envelope| envelope["result"]["collections"].as_array())
-                    .map(Vec::len),
-                Some(1)
+                collections.data.collections(),
+                Some(["docs".to_string()].as_slice())
             );
 
             let collection = backend
@@ -1483,13 +1392,9 @@ mod tests {
                 .await
                 .expect("show collection");
             // The typed loop above deleted the only point.
-            assert_eq!(
-                collection
-                    .data
-                    .as_raw()
-                    .and_then(|envelope| envelope["result"]["points_count"].as_u64()),
-                Some(0)
-            );
+            let info = collection.data.collection().expect("typed collection info");
+            assert_eq!(info.points_count, 0);
+            assert_eq!(info.schema.vectors.len(), 1);
 
             backend.close().await.expect("close edge backend");
             let _ = std::fs::remove_dir_all(dir);
@@ -1642,8 +1547,8 @@ mod tests {
             );
             let entries = response.facet().expect("facet entries");
             assert_eq!(entries.len(), 2, "facet entries: {entries:?}");
-            assert!(entries.contains(&(json!("NYC"), 2)));
-            assert!(entries.contains(&(json!("SF"), 1)));
+            assert!(entries.contains(&(PlanFacetValue::Keyword("NYC".into()), 2)));
+            assert!(entries.contains(&(PlanFacetValue::Keyword("SF".into()), 1)));
 
             executor.close().await.expect("close edge executor");
             let _ = std::fs::remove_dir_all(dir);

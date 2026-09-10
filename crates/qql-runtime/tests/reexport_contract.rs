@@ -69,7 +69,7 @@ impl QdrantOps for StubBackend {
 
     async fn execute_planned(&self, _op: &PlannedOperation) -> Result<BackendResponse, QqlError> {
         Ok(BackendResponse {
-            data: ExecData::Raw(serde_json::json!({})),
+            data: ExecData::Mutation { affected: None },
             telemetry: None,
         })
     }

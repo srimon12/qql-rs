@@ -32,7 +32,11 @@ pub(crate) async fn execute_query(
         .query(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))?;
-    let hits = resp.result.into_iter().map(scored_point_to_hit).collect();
+    let hits = resp
+        .result
+        .into_iter()
+        .map(scored_point_to_hit)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(BackendResponse {
         data: ExecData::Hits(hits),
         telemetry: telemetry_from_proto(resp.time, resp.usage.as_ref()),
@@ -42,7 +46,7 @@ pub(crate) async fn execute_query(
 /// Run a grouped query via `Points.QueryGroups`.
 ///
 /// Grouped `lookup` points are not modelled by [`ExecData::Groups`] and are
-/// dropped (the REST envelope parser drops them too).
+/// dropped (the REST strict parser drops them too).
 pub(crate) async fn execute_query_groups(
     client: &GrpcQdrant,
     collection: &str,
@@ -62,7 +66,7 @@ pub(crate) async fn execute_query_groups(
                 .groups
                 .into_iter()
                 .map(point_group_to_typed)
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         telemetry: telemetry_from_proto(resp.time, resp.usage.as_ref()),
     })
@@ -83,7 +87,7 @@ pub(crate) async fn execute_get_points(
         .result
         .into_iter()
         .map(retrieved_point_to_hit)
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(BackendResponse {
         data: ExecData::Hits(hits),
         telemetry: telemetry_from_proto(resp.time, resp.usage.as_ref()),
@@ -109,7 +113,7 @@ pub(crate) async fn execute_scroll(
         .result
         .into_iter()
         .map(retrieved_point_to_hit)
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(BackendResponse {
         data: ExecData::Hits(hits),
         telemetry: telemetry_from_proto(resp.time, resp.usage.as_ref()),
@@ -127,7 +131,16 @@ pub(crate) async fn execute_count(
         .count_points(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))?;
-    let count = resp.result.unwrap_or_default().count;
+    let count = resp
+        .result
+        .ok_or_else(|| {
+            QqlError::backend(
+                "QQL-BACKEND-ENVELOPE",
+                "count response is missing its result",
+                None,
+            )
+        })?
+        .count;
     Ok(BackendResponse {
         data: ExecData::Count(count),
         telemetry: telemetry_from_proto(resp.time, resp.usage.as_ref()),
@@ -145,7 +158,11 @@ pub(crate) async fn execute_facet(
         .facet(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("facet: {e}"), None))?;
-    let hits = resp.hits.into_iter().map(facet_hit_to_typed).collect();
+    let hits = resp
+        .hits
+        .into_iter()
+        .map(facet_hit_to_typed)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(BackendResponse {
         data: ExecData::Facet(hits),
         telemetry: telemetry_from_proto(resp.time, resp.usage.as_ref()),
@@ -182,18 +199,19 @@ pub async fn execute_query_batch_grpc(
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_batch: {e}"), None))?;
 
-    Ok(resp
-        .result
+    resp.result
         .into_iter()
-        .map(|batch_result| BackendResponse {
-            data: ExecData::Hits(
-                batch_result
-                    .result
-                    .into_iter()
-                    .map(scored_point_to_hit)
-                    .collect(),
-            ),
-            telemetry: None,
+        .map(|batch_result| {
+            Ok(BackendResponse {
+                data: ExecData::Hits(
+                    batch_result
+                        .result
+                        .into_iter()
+                        .map(scored_point_to_hit)
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                telemetry: None,
+            })
         })
-        .collect())
+        .collect()
 }
