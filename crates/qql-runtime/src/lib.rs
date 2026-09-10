@@ -14,13 +14,12 @@
 //! Backends implement the [`client::QdrantOps`] contract (11 methods); the
 //! [`executor::Executor`] drives it. DDL flows through the same planner as
 //! DML. The gRPC path converts typed plan structs directly to protobuf —
-//! query vectors and point IDs never take a JSON detour. Two sanctioned
-//! exceptions keep JSON on that path by design (not drift): (a) the formula
-//! fallback `lower_formula_expr → to_formula_expression`, which covers future
-//! AST variants without duplicating the lowering table, and (b) DDL
-//! sub-configs (`hnsw_config`, `optimizers_config`, `quantization_config`,
-//! vector params), whose plan IR fields are intentionally schemaless
-//! `serde_json::Value` maps mirroring the REST projection input.
+//! query vectors, point IDs, and formula expressions never take a JSON
+//! detour. One sanctioned exception keeps JSON on that path by design (not
+//! drift): DDL sub-configs (`hnsw_config`, `optimizers_config`,
+//! `quantization_config`, vector params), whose plan IR fields are
+//! intentionally schemaless `serde_json::Value` maps mirroring the REST
+//! projection input.
 //!
 //! # Features
 //!

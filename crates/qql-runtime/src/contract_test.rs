@@ -603,6 +603,117 @@ mod tests {
     }
 
     #[test]
+    fn rest_grpc_formula_case_condition_parity() {
+        let stmt = Parser::parse(
+            "QUERY FORMULA CASE WHEN status = 'active' THEN $score * 2 ELSE $score END \
+             FROM docs LIMIT 5;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+
+        // REST: `cond * then + (1 - cond) * else`, condition as a bare 0/1 term.
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        let cond = &body["query"]["formula"]["sum"][0]["mult"][0];
+        assert_eq!(cond["key"], "status");
+        assert_eq!(cond["match"]["value"], "active");
+
+        // gRPC: the same weighting, with the condition as a typed Condition.
+        let grpc = test_api::to_query_points(request, collection).unwrap();
+        use qdrant::expression::Variant as Ev;
+        use qdrant::query::Variant as Qv;
+        let Some(Qv::Formula(formula)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref())
+        else {
+            panic!("expected Formula query");
+        };
+        let Some(expression) = formula.expression.as_ref() else {
+            panic!("formula missing expression");
+        };
+        let Some(Ev::Sum(sum)) = expression.variant.as_ref() else {
+            panic!("expected Sum expression, got {:?}", expression.variant);
+        };
+        let Some(Ev::Mult(mult)) = sum.sum[0].variant.as_ref() else {
+            panic!("expected Mult expression, got {:?}", sum.sum[0].variant);
+        };
+        let Some(Ev::Condition(condition)) = mult.mult[0].variant.as_ref() else {
+            panic!(
+                "expected Condition expression, got {:?}",
+                mult.mult[0].variant
+            );
+        };
+        let Some(qdrant::condition::ConditionOneOf::Field(field)) =
+            condition.condition_one_of.as_ref()
+        else {
+            panic!(
+                "expected Field condition, got {:?}",
+                condition.condition_one_of
+            );
+        };
+        assert_eq!(field.key, "status");
+    }
+
+    #[test]
+    fn rest_grpc_formula_match_condition_parity() {
+        let stmt = Parser::parse(
+            "QUERY FORMULA CASE WHEN a = 1 AND b = 2 THEN $score ELSE 0 END FROM docs LIMIT 5;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        let compound = &body["query"]["formula"]["sum"][0]["mult"][0];
+        assert_eq!(compound["must"][0]["key"], "a");
+        assert_eq!(compound["must"][1]["key"], "b");
+
+        // A compound condition maps to a Filter condition on the gRPC side.
+        let grpc = test_api::to_query_points(request, collection).unwrap();
+        use qdrant::expression::Variant as Ev;
+        use qdrant::query::Variant as Qv;
+        let Some(Qv::Formula(formula)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref())
+        else {
+            panic!("expected Formula query");
+        };
+        let Some(Ev::Sum(sum)) = formula
+            .expression
+            .as_ref()
+            .and_then(|expression| expression.variant.as_ref())
+        else {
+            panic!("expected Sum expression");
+        };
+        let Some(Ev::Mult(mult)) = sum.sum[0].variant.as_ref() else {
+            panic!("expected Mult expression, got {:?}", sum.sum[0].variant);
+        };
+        let Some(Ev::Condition(condition)) = mult.mult[0].variant.as_ref() else {
+            panic!(
+                "expected Condition expression, got {:?}",
+                mult.mult[0].variant
+            );
+        };
+        let Some(qdrant::condition::ConditionOneOf::Filter(filter)) =
+            condition.condition_one_of.as_ref()
+        else {
+            panic!(
+                "expected Filter condition, got {:?}",
+                condition.condition_one_of
+            );
+        };
+        assert_eq!(filter.must.len(), 2, "AND carries both clauses: {filter:?}");
+    }
+
+    #[test]
     fn multi_dense_plan_vector_matches_rest_and_grpc_shape() {
         let multi = PlanVectorValue::MultiDense(vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
         let rest = serde_json::to_value(&multi).unwrap();

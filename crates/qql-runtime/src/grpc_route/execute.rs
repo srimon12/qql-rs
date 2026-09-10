@@ -8,12 +8,11 @@
 //! fields and converts the protobuf response straight into the executor's
 //! typed IR.
 //!
-//! Two request-side JSON exceptions remain by design: (a) the formula fallback
-//! (`formula::ast_formula_to_grpc` falls back to
-//! `lower_formula_expr → to_formula_expression` for future AST variants), and
-//! (b) DDL sub-configs (`hnsw_config`, `optimizers_config`,
-//! `quantization_config`, vector params), whose plan IR fields are
-//! intentionally schemaless `serde_json::Value` maps.
+//! One request-side JSON exception remains by design: DDL sub-configs
+//! (`hnsw_config`, `optimizers_config`, `quantization_config`, vector
+//! params), whose plan IR fields are intentionally schemaless
+//! `serde_json::Value` maps. Formula expressions convert straight from the
+//! typed [`qql_plan::PlanFormula`] tree into proto expressions.
 
 use qql_core::error::QqlError;
 

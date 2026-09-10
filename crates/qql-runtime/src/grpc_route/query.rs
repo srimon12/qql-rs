@@ -12,8 +12,7 @@ use crate::qdrant_grpc::qdrant;
 
 use super::common::{shard_key_selector, to_point_id};
 use super::filter::{to_filter, to_filter_opt};
-use super::formula::ast_formula_to_grpc;
-use super::values::to_qdrant_value;
+use super::formula::{formula_default_to_grpc, plan_formula_to_grpc};
 
 pub(crate) fn to_query_points(
     req: &qql_plan::types::QueryRequest,
@@ -250,14 +249,17 @@ pub(crate) fn to_query_variant(
         }
         QueryVariant::Rrf(rrf) => Variant::Rrf(to_grpc_rrf(rrf)?),
         QueryVariant::Formula(fq) => Variant::Formula(qdrant::Formula {
-            expression: ast_formula_to_grpc(&fq.formula.0),
+            expression: Some(plan_formula_to_grpc(&fq.formula)?),
             defaults: fq
                 .defaults
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(k, v)| (k, to_qdrant_value(v)))
-                .collect(),
+                .as_ref()
+                .map(|defaults| {
+                    defaults
+                        .iter()
+                        .map(|(key, value)| (key.clone(), formula_default_to_grpc(value)))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
         QueryVariant::RelevanceFeedback { relevance_feedback } => {
             let feedback = relevance_feedback

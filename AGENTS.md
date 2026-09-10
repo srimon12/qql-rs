@@ -78,7 +78,7 @@ qql-plan: plan() → Result<PlannedOperation, PlanError>
     └── response normalization (ExecResponse from typed ExecData)
 ```
 
-Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path, query, body }` is the **REST projection** of a plan, not the source of truth. Semantic types (`PlanQueryInput`, `PlanPointId`, `PlanVectorValue`) remain typed until a transport boundary. gRPC converts typed plan structs directly to protobuf via `to_query_points`, `to_vector_input`, `plan_vector_to_proto`, etc. — no JSON intermediary for query vectors or point IDs. Formula lowering still emits `serde_json::Value` (lower_formula_expr → to_formula_expression round-trips through JSON).
+Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path, query, body }` is the **REST projection** of a plan, not the source of truth. Semantic types (`PlanQueryInput`, `PlanPointId`, `PlanVectorValue`, `PlanFormula`) remain typed until a transport boundary. gRPC converts typed plan structs directly to protobuf via `to_query_points`, `to_vector_input`, `plan_vector_to_proto`, `plan_formula_to_grpc`, etc. — no JSON intermediary for query vectors, point IDs, or formula expressions. Formula lowering emits the OpenAPI `Expression` JSON straight from the plan-owned `PlanFormula` tree (`qql-plan/src/formula_types.rs`).
 
 Canonical response is `BackendResponse { data: ExecData, telemetry }` where
 `ExecData = Hits | Groups | Count | Facet | Mutation | Collections | Collection | ShardKeys | Quotas`.
@@ -214,7 +214,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 - `qdrant-client` dropped entirely — replaced with `tonic` 0.14 + `tonic-prost` + `tonic-prost-build`
 - Proto files in `proto/`, compiled at build time via `tonic-prost-build`
 - `GrpcQdrant` wraps `tonic::Channel` with `connect_lazy`
-- `grpc_route.rs` converts typed qql-plan structs → generated protobuf types directly for query vectors, point IDs, and vector values. DDL sub-configs still read from `serde_json::Value` fields (hnsw_config, optimizers_config, quantization_config). Formula expressions still round-trip through JSON via `lower_formula_expr` → `to_formula_expression`.
+- `grpc_route.rs` converts typed qql-plan structs → generated protobuf types directly for query vectors, point IDs, vector values, and formula expressions (`PlanFormula` → `qdrant::Expression`, no JSON hop). DDL sub-configs still read from `serde_json::Value` fields (hnsw_config, optimizers_config, quantization_config).
 - `grpc.rs` is the thin Tonic client wrapper; heavy conversion lives in `grpc_route.rs`
 - Tonic features: `channel`, `codegen`, `tls-ring`, `tls-webpki-roots` (no server, no axum, no router)
 - API key support via `ApiKeyInterceptor` (RUN-009 fixed)

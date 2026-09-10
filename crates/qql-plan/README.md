@@ -85,9 +85,10 @@ Public crate surface. REST projection lives in `routing`; `plan` re-exports
 | `routing` | `Route`, `to_rest_route`, `try_route`, `compile_statement` |
 | `query` / `mutation` / `ddl` | Lowering (including quotas / IDF / memory) |
 | `filter` | `FilterExpression` only (no routing fields) |
+| `formula_types` | `PlanFormula` OpenAPI `Expression` tree, `FormulaDefault` bindings |
 | `types` | Request IR façade (`SetQuotaRequest`, `IdfSearchParams`, …) |
 | `batch` | `BatchGrouper`, `BatchKey`, query/update batch builders |
-| `semantic` | `PlanPointId`, `PlanVectorValue`, `PlanQueryInput`, `PlanFormula` |
+| `semantic` | `PlanPointId`, `PlanVectorValue`, `PlanQueryInput` |
 
 ## Docs
 

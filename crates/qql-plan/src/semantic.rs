@@ -637,21 +637,6 @@ impl Serialize for PlanPointVectors {
     }
 }
 
-// ── Formula (typed; REST Serialize via plan lowering) ───────────
-
-/// Plan-owned formula tree. Keeps AST semantics; REST wire uses snake_case
-/// OpenAPI keys via custom serialization in `crate::query::serialize_formula`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PlanFormula(pub qql_core::ast::FormulaExpr);
-
-impl Serialize for PlanFormula {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // Delegate to JSON intermediate that already matches OpenAPI Expression.
-        let value = crate::query::lower_formula_expr(&self.0).map_err(serde::ser::Error::custom)?;
-        value.serialize(serializer)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

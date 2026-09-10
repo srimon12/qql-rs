@@ -74,6 +74,23 @@ fn lower_expression(expression: &PlanFilterExpression) -> Result<Filter, QqlErro
     }
 }
 
+/// Lower a single condition term used by a formula `CASE` / `MATCH` expression.
+///
+/// Unlike [`convert_edge_filter`], the result stays a bare [`Condition`]:
+/// qdrant-edge's `Expression::Condition` carries one condition, not a filter
+/// envelope. Compound conditions (`AND` / `OR` / `NOT`) wrap in
+/// `Condition::Filter`.
+pub(crate) fn convert_formula_condition(
+    expression: &PlanFilterExpression,
+) -> Result<Condition, QqlError> {
+    match expression {
+        PlanFilterExpression::Single(clause) => lower_clause(clause),
+        PlanFilterExpression::Compound(compound) => {
+            Ok(Condition::Filter(lower_compound(compound)?))
+        }
+    }
+}
+
 fn lower_compound(compound: &PlanFilterCompound) -> Result<Filter, QqlError> {
     let should = lower_conditions(&compound.should)?;
     let (should, min_should) = match compound.min_should {

@@ -86,7 +86,7 @@ pub struct SliceParams {
 }
 
 /// Field-scoped condition on a payload `key`: match, range, geo, or count.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FieldCondition {
     /// Payload key the condition applies to.
     pub key: String,
