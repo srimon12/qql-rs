@@ -31,21 +31,21 @@ scores ≤ 2e-4) proves the same inputs reached both engines.
 
 ---
 
-## TL;DR (Qdrant Edge 0.8.0, localhost, 2026-09-10 — typed pipeline)
+## TL;DR (Qdrant Edge 0.8.0, localhost, 2026-09-10 — final typed pipeline, release rebuild)
 
 | | official `qdrant-edge-py` 0.8.0 | `pyqql-edge` 0.4.0 | qql / official |
 |---|---:|---:|---:|
-| **Engine reads, 1 thread (12 scenarios, precomputed vectors)** | — | **0 / 12** | best 0.94x (`dense_filtered`, `count_legal`); 0.89–0.90x ×5 |
-| **Engine reads, 8 Python threads (same shards)** | 997 q/s — flat | **4,196 q/s** | **4.21x faster — GIL released vs held** (3.0–4.2x across runs) |
-| **Text layer** | — | — | `text_sparse` **1.25x (qql wins)**; `text_dense` 0.73x |
-| **`FACET district`** | 0.020 ms | 0.026 ms | 0.76x — **works now** (was `QQL-EDGE-FACET`) |
-| **`optimize()`** | 449 ms | 429 ms | parity — **works now** (was not exposed) |
-| Ingest total (prep + submit), berlin 8k | 1.39 s | 1.21 s | **1.15x faster** |
-| Ingest total, legal 2k + ColBERT | 1.07 s | 0.71 s | **1.49x faster** |
-| Cold import | 12.1 ms | 18.5 ms | 0.65x |
+| **Engine reads, 1 thread (12 scenarios, precomputed vectors)** | — | **0 / 12** | best 0.93x (`count_legal`), 0.89–0.92x ×6; worst 0.48x (`retrieve_points`) |
+| **Engine reads, 8 Python threads (same shards)** | 1,071 q/s — flat | **4,517 q/s** | **4.22x faster — GIL released vs held** (3.0–4.2x across runs) |
+| **Text layer** | — | — | `text_sparse` 0.95x (0.95–1.25x across runs); `text_dense` 0.79x |
+| **`FACET district`** | 0.021 ms | 0.025 ms | 0.82x — **works now** (was `QQL-EDGE-FACET`) |
+| **`optimize()`** | 430.4 ms | 541.7 ms | 0.79x this run (429 vs 449 ms previous run) |
+| Ingest total (prep + submit), berlin 8k | 1.39 s | 1.22 s | **1.14x faster** |
+| Ingest total, legal 2k + ColBERT | 1.06 s | 0.71 s | **1.49x faster** |
+| Cold import | 12.5 ms | 18.8 ms | 0.66x |
 | Application LOC (17 scenarios) | 277 | **164** | **0.59x** |
 
-Single-thread reads sit at 0.50–0.94x. Sub-millisecond scenarios carry ±~0.1x
+Single-thread reads sit at 0.48–0.93x. Sub-millisecond scenarios carry ±~0.1x
 run-to-run variance (dense measured 0.81–1.01x across runs); the concurrency,
 write, facet/optimize and text-path results are stable directionally.
 
@@ -118,28 +118,29 @@ anymore.
 
 New capabilities from the same refactor: **`FACET` works on edge** (was a hard
 error) and **`optimize()` is exposed** (`Client.optimize(collection)`, edge
-only; 429 ms vs official 449 ms on the 8k shard, both merge segments).
+only; 542 ms vs official 430 ms this run — 429 vs 449 ms the previous run,
+both merge segments).
 
 Measured effect of the whole refactor (before/after, qql/official):
 
 | scenario | before | after (range over runs) |
 |---|---:|---:|
-| query_dense | 0.76x | **0.81x** (0.81–1.01) |
-| query_dense_filtered | 0.92x | **0.94x** (0.91–0.99) |
+| query_dense | 0.76x | **0.83x** (0.81–1.01) |
+| query_dense_filtered | 0.92x | **0.91x** (0.91–0.99) |
 | query_sparse | 0.44x | **0.71x** (0.65–0.71) |
-| query_hybrid | 0.76x | **0.83x** (0.83–0.87) |
-| count_berlin | 0.79x | **0.89x** (0.84–1.01) |
-| count_legal | 0.71x | **0.94x** (0.71–0.94) |
-| facet_district | `QQL-EDGE-FACET` error | **0.76x** |
-| scroll_pages | 0.37x | **0.89x** (0.89–0.94) |
-| retrieve_points | 0.20x | **0.50x** (0.31–0.50) |
-| prepared_rerun | 0.80x | **0.89x** (0.82–0.91) |
-| batch_reads | 0.82x | **0.89x** (0.81–0.89) |
-| query_colbert | 0.90x | 0.90x |
-| text_sparse | 0.54x | **1.25x** (0.98–1.25) |
-| text_dense | 0.78x | 0.73x (0.73–0.87) |
-| optimize | not exposed | parity (429 vs 449 ms) |
-| cold import | 31.9 ms | **18.5 ms** |
+| query_hybrid | 0.76x | **0.84x** (0.83–0.87) |
+| count_berlin | 0.79x | **0.90x** (0.84–1.01) |
+| count_legal | 0.71x | **0.93x** (0.71–0.94) |
+| facet_district | `QQL-EDGE-FACET` error | **0.82x** (0.76–0.82) |
+| scroll_pages | 0.37x | **0.90x** (0.89–0.94) |
+| retrieve_points | 0.20x | **0.48x** (0.31–0.50) |
+| prepared_rerun | 0.80x | **0.90x** (0.82–0.91) |
+| batch_reads | 0.82x | **0.92x** (0.81–0.92) |
+| query_colbert | 0.90x | 0.89x (0.89–0.90) |
+| text_sparse | 0.54x | **0.95x** (0.95–1.25) |
+| text_dense | 0.78x | 0.79x (0.73–0.87) |
+| optimize | not exposed | 0.79–1.0x (430–542 ms vs 430–449 official) |
+| cold import | 31.9 ms | **18.8 ms** |
 
 ### Remaining backlog
 
@@ -193,36 +194,36 @@ structural win for any Python server doing concurrent vector search.
 
 | scenario | official ops/s | qql ops/s | qql/official | p50 official | p50 qql | parity |
 |---|---:|---:|---:|---:|---:|---|
-| query_dense | 1,079 | 876 | 0.81x | 0.927 ms | 1.142 ms | ids exact, Δscore 0 |
-| query_dense_filtered | 115 | 108 | 0.94x | 8.692 ms | 9.241 ms | ids exact, Δscore 0 |
-| query_sparse | 9,686 | 6,867 | 0.71x | 0.103 ms | 0.146 ms | ids exact, Δscore 2e-6 |
-| query_hybrid (RRF) | 910 | 753 | 0.83x | 1.099 ms | 1.329 ms | ids exact, Δscore 0 |
-| count_berlin | 2,904 | 2,571 | 0.89x | 0.344 ms | 0.389 ms | exact |
-| count_legal | 12,484 | 11,788 | 0.94x | 0.080 ms | 0.085 ms | exact |
-| facet_district | 50,098 | 38,316 | 0.76x | 0.020 ms | 0.026 ms | exact |
-| scroll_pages (3×256) | 419 | 373 | 0.89x | 2.387 ms | 2.682 ms | exact 768 ids |
-| retrieve_points (10 ids) | 43,613 | 21,684 | 0.50x | 0.023 ms | 0.046 ms | exact ids + payloads |
-| prepared_rerun (4 vectors) | 258 | 230 | 0.89x | 3.877 ms | 4.353 ms | ids exact, Δscore 0 |
-| batch_reads (4 statements) | 267 | 237 | 0.89x | 3.744 ms | 4.221 ms | ids exact, Δscore 0 |
-| query_colbert | 68 | 61 | 0.90x | 14.796 ms | 16.389 ms | ids exact, Δscore 0 |
+| query_dense | 1,152.8 | 952.6 | 0.83x | 0.867 ms | 1.050 ms | ids exact, Δscore 0 |
+| query_dense_filtered | 115.7 | 105.8 | 0.91x | 8.642 ms | 9.449 ms | ids exact, Δscore 0 |
+| query_sparse | 9,798.8 | 6,965.3 | 0.71x | 0.102 ms | 0.144 ms | ids exact, Δscore 2e-6 |
+| query_hybrid (RRF) | 958.0 | 802.4 | 0.84x | 1.044 ms | 1.246 ms | ids exact, Δscore 0 |
+| count_berlin | 2,909.5 | 2,608.0 | 0.90x | 0.344 ms | 0.383 ms | exact |
+| count_legal | 13,441.6 | 12,508.0 | 0.93x | 0.074 ms | 0.080 ms | exact |
+| facet_district | 48,083.9 | 39,373.2 | 0.82x | 0.021 ms | 0.025 ms | exact |
+| scroll_pages (3×256) | 408.7 | 368.6 | 0.90x | 2.447 ms | 2.713 ms | exact 768 ids |
+| retrieve_points (10 ids) | 44,784.8 | 21,455.1 | 0.48x | 0.022 ms | 0.047 ms | exact ids + payloads |
+| prepared_rerun (4 vectors) | 274.3 | 246.4 | 0.90x | 3.646 ms | 4.058 ms | ids exact, Δscore 0 |
+| batch_reads (4 statements) | 265.1 | 242.7 | 0.92x | 3.772 ms | 4.120 ms | ids exact, Δscore 0 |
+| query_colbert | 71.2 | 63.4 | 0.89x | 14.050 ms | 15.782 ms | ids exact, Δscore 0 |
 
 ### Threaded throughput — same shard, 40 queries per thread
 
 | threads | official q/s | qql q/s | qql/official |
 |---:|---:|---:|---:|
-| 1 | 822 | 706 | 0.86x |
-| 2 | 838 | 1,229 | 1.47x |
-| 4 | 1,006 | 2,633 | 2.62x |
-| 8 | 997 | 4,196 | **4.21x** |
+| 1 | 973 | 824 | 0.85x |
+| 2 | 1,018 | 1,685 | 1.65x |
+| 4 | 1,032 | 2,809 | 2.72x |
+| 8 | 1,071 | 4,517 | **4.22x** |
 
 ### Text → vector layer (both sides embed in-path; not engine-only)
 
 | scenario | official ops/s | qql ops/s | qql/official | p50 official | p50 qql | parity |
 |---|---:|---:|---:|---:|---:|---|
-| text_dense | 146 | 106 | 0.73x | 6.873 ms | 9.413 ms | ids exact, Δscore 1.1e-4 |
-| text_sparse | 6,465 | 8,065 | **1.25x** | 0.155 ms | 0.124 ms | ids exact, Δscore 2e-6 |
+| text_dense | 153.9 | 121.1 | 0.79x | 6.496 ms | 8.258 ms | ids exact, Δscore 1.1e-4 |
+| text_sparse | 8,482.5 | 8,079.8 | 0.95x | 0.118 ms | 0.124 ms | ids exact, Δscore 2e-6 |
 
-`text_sparse` oscillates around parity-to-win (0.98–1.25x across runs): same
+`text_sparse` oscillates around parity (0.95–1.25x across runs): same
 engine, same BM25 semantics (parity proves identical sparse vectors), QQL's
 native-hit path removed the former 0.54x deficit.
 
@@ -230,15 +231,15 @@ native-hit path removed the former 0.54x deficit.
 
 | collection | official prep | official submit | qql prep | qql submit | end-to-end |
 |---|---:|---:|---:|---:|---:|
-| berlin 8,000 (dense + BM25) | 0.34 s | 1.05 s | 0.005 s | 1.20 s | **qql 1.15x faster** |
-| legal 2,000 (dense + BM25 + ColBERT) | 0.66 s | 0.41 s | 0.002 s | 0.71 s | **qql 1.49x faster** |
+| berlin 8,000 (dense + BM25) | 0.33 s | 1.06 s | 0.000 s | 1.22 s | **qql 1.14x faster** |
+| legal 2,000 (dense + BM25 + ColBERT) | 0.65 s | 0.41 s | 0.000 s | 0.71 s | **qql 1.49x faster** |
 
 ### Capabilities / startup / size
 
 | | official | qql |
 |---|---:|---:|
-| `optimize()` on the 8k shard | 449 ms (`changed=True`) | **429 ms** (`changed=True`) |
-| cold import (module) | 12.1 ms | 18.5 ms |
+| `optimize()` on the 8k shard | 430.4 ms (`changed=True`) | 541.7 ms (`changed=True`) — 0.79x this run |
+| cold import (module) | 12.5 ms | 18.8 ms |
 | executor / embedder construction, warm cache | 0.38 s (fastembed Python, when used) | 0.25 s (executor + FastEmbed-rs) |
 | scenario application LOC | 277 | 164 (0.59x) |
 
@@ -252,10 +253,11 @@ native-hit path removed the former 0.54x deficit.
    their shard through theirs differ by ~0.02 ms; all remaining deltas are
    application-layer.
 3. **The typed refactor moved every engine read from 0.20–0.92x to
-   0.50–0.94x**, with five scenarios at 0.89–0.94x. Sub-ms scenarios carry
+   0.48–0.93x**, with seven scenarios at 0.89–0.93x. Sub-ms scenarios carry
    ±~0.1x run variance.
 4. **`FACET` and `optimize()` now work on edge** — both were unavailable before
-   (hard error / not exposed), now at 0.76x and parity respectively.
+   (hard error / not exposed); facet now measures 0.82x and optimize ranges
+   0.79–1.0x across runs (segment merges are one-shot and noisy).
 5. **GIL release is the structural advantage** — 3.0–4.2x at 8 threads;
    official is flat at ~1,000 q/s regardless of thread count.
 6. **Typed bindings matter**: flat float lists ≥32 elements now bind as
@@ -297,6 +299,6 @@ make quick          # --no-ingest --reps 1 --iters 5 --skip-colbert
    graphs; QQL = SQL + numpy buffers + prepared/batched statements.
 5. Embedding models are warm-cached; first-use download excluded.
 6. Only within-folder ratios are meaningful (`vs-qdrant` is remote REST/gRPC).
-7. Timings were captured as the typed pipeline landed, before the final
-   close-out that removed `Raw`, typed the SHOW responses and the
-   formula/DDL request paths; those are shape changes on the same hot paths.
+7. Both contenders are release builds for this run (rebuilt `pyqql-edge` abi3
+   extension + vendored `qdrant-edge-py` 0.8.0); the benchmark runs one leg at
+   a time with no other load.
