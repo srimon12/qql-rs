@@ -544,6 +544,24 @@ mod tests {
     }
 
     #[test]
+    fn from_value_dense_float_list_and_f32array_lower_identically() {
+        // Python list-bound vectors (flat list[float] → Value::List) and
+        // buffer-bound vectors (numpy / array.array → Value::F32Array) must
+        // lower to the same PlanVectorValue: the host heuristic packs long
+        // flat float lists as F32Array, so both spellings have to meet here.
+        let floats: Vec<Value> = (0..384).map(|i| Value::Float(i as f64 * 0.001)).collect();
+        let packed: Vec<f32> = (0..384).map(|i| (i as f64 * 0.001) as f32).collect();
+        assert_eq!(
+            PlanVectorValue::from_value(&Value::List(floats)),
+            PlanVectorValue::from_value(&Value::F32Array(packed.clone()))
+        );
+        assert_eq!(
+            PlanVectorValue::from_value(&Value::F32Array(packed.clone())),
+            Some(PlanVectorValue::Dense(packed))
+        );
+    }
+
+    #[test]
     fn from_value_flat_multivector_chunks() {
         let v = dict(vec![
             (

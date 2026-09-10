@@ -18,7 +18,6 @@ from ._dbapi import (
     paramstyle,
     threadsafety,
 )
-from ._dx_report import ExecutionReport, ScoredPoint
 from ._errors import (
     QqlError,
     QqlSyntaxError,
@@ -29,7 +28,9 @@ from ._errors import (
 )
 from .pyqql import (
     Client as _Client,
+    ExecutionReport,
     HttpEmbedder,
+    ScoredPoint,
     Stmt,
     __version__,
     bind,
@@ -51,8 +52,14 @@ class Client(_Client):
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
     ) -> ExecutionReport:
-        raw = super().execute(query, params=params, on_error=on_error)
-        return ExecutionReport(raw)
+        """Execute QQL and return the native :class:`ExecutionReport`.
+
+        ``params`` convert like ``Stmt.bind``: flat ``list[float]`` values
+        with 32+ elements bind as f32 vectors (the same precision as numpy /
+        ``array.array`` buffers), while nested lists, int/bool lists, and
+        shorter float lists keep f64 precision.
+        """
+        return super().execute(query, params=params, on_error=on_error)
 
     async def execute_async(
         self,
@@ -61,8 +68,7 @@ class Client(_Client):
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
     ) -> ExecutionReport:
-        raw = await super().execute_async(query, params=params, on_error=on_error)
-        return ExecutionReport(raw)
+        return await super().execute_async(query, params=params, on_error=on_error)
 
     def execute_hits(
         self,
@@ -96,11 +102,15 @@ class Client(_Client):
         One `:rows` template is prepared once; each chunk splices through
         the point-splice path with no re-parse and no per-batch schema
         fetch. Prefer this over hand-rolled batch loops.
+
+        Row values convert like `bind` params: flat `list[float]` values with
+        32+ elements (e.g. dense vectors) bind as f32 vectors, matching numpy
+        / `array.array` buffer precision; nested lists, int/bool lists, and
+        shorter float lists keep f64 precision.
         """
-        raw = super().upsert_many(
+        return super().upsert_many(
             collection, rows, batch_size=batch_size, on_error=on_error
         )
-        return ExecutionReport(raw)
 
     def scroll_cursor(
         self,
@@ -220,15 +230,7 @@ def _build_scroll_statement(
 
 
 def _strip_payload(point: ScoredPoint) -> ScoredPoint:
-    return ScoredPoint(
-        id=point.id,
-        score=point.score,
-        payload=None,
-        text=point.text,
-        collection=point.collection,
-        vector=getattr(point, "vector", None),
-        shard_key=getattr(point, "shard_key", None),
-    )
+    return point.without_payload()
 
 
 def _scroll_cursor_impl(

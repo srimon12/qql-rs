@@ -69,7 +69,8 @@ Per-class parent choices:
   stay so old ``except RuntimeError`` clauses keep working.
 
 A CI check diffs the two copies of this file, so edit both or neither
-(they must stay in lockstep with ``_dx_report.py``'s sharing model).
+(the native report classes are shared Rust extension classes, not Python
+copies).
 """
 
 from typing import Dict, Optional, Tuple

@@ -34,8 +34,7 @@ from ._errors import (
     Warning,
 )
 from ._dbapi_rows import map_result
-from ._dx_report import ExecutionReport
-from .pyqql import parse as _parse_statements
+from .pyqql import ExecutionReport, parse as _parse_statements
 
 apilevel = "2.0"
 threadsafety = 1

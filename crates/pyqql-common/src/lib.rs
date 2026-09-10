@@ -14,18 +14,21 @@
 
 use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBool, PyDict, PyInt, PyList, PyString};
+use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
 pub mod dispatch;
+mod float_list;
+pub mod report;
 
 pub use dispatch::{
     Input, OnError, parse_on_error, prepare_input, run_analyze_async, run_analyze_input, run_async,
-    run_input, wrap_execution_report,
+    run_input,
 };
+pub use report::{PyExecutionReport, PyScoredPoint, register_report_classes};
 
 // ═══════════════════════════════════════════════════════════════════
 //  Error mapping
@@ -277,6 +280,13 @@ fn try_buffer_value(value: &Bound<'_, PyAny>) -> PyResult<Option<Value>> {
 /// while 1-D C-contiguous float buffers bind as [`Value::F32Array`] with a
 /// single copy. Error behavior (non-finite floats, `tolist()` fallback,
 /// unsupported types) matches [`py_to_json`] arm-for-arm.
+///
+/// Flat `list[float]` values with at least 32 elements also bind as
+/// [`Value::F32Array`], with `f32` precision — the same representation the
+/// buffer fast path produces — because dense vectors are `f32` end to end and
+/// a 384-d vector otherwise builds 384 `Value::Float` nodes first. Nested
+/// lists, int/bool lists, and shorter float lists keep the exact
+/// [`Value::List`] / `f64` contract.
 pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
@@ -299,6 +309,9 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
         return Ok(Value::Str(s));
     }
     if let Ok(list) = value.cast::<PyList>() {
+        if let Some(packed) = flat_float_list_to_value(list)? {
+            return Ok(packed);
+        }
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
@@ -324,6 +337,36 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     Err(PyValueError::new_err(
         "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
     ))
+}
+
+/// Pack a flat Python `float` list of at least
+/// [`float_list::FLOAT_LIST_F32_THRESHOLD`] elements as [`Value::F32Array`].
+///
+/// `Ok(None)` means the list is not a flat float list — it is nested, holds
+/// int/bool/opaque elements, or is shorter than the threshold — and the
+/// caller binds it element-wise as [`Value::List`]. The element walk stops at
+/// the first non-`float` element; a qualifying list is converted once with no
+/// per-element `Value` nodes.
+fn flat_float_list_to_value(list: &Bound<'_, PyList>) -> PyResult<Option<Value>> {
+    if list.len() < float_list::FLOAT_LIST_F32_THRESHOLD {
+        return Ok(None);
+    }
+    let mut values = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        // `bool` and `int` are not `float` instances in Python, so this
+        // rejects both (and any nested container or opaque element) in one
+        // check, preserving the exact `Value::List` contract for them.
+        if !item.is_instance_of::<PyFloat>() {
+            return Ok(None);
+        }
+        values.push(item.extract::<f64>()?);
+    }
+    match float_list::pack_f32(&values) {
+        Ok(value) => Ok(Some(value)),
+        Err(bad) => Err(PyValueError::new_err(format!(
+            "cannot bind non-finite float value '{bad}'"
+        ))),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

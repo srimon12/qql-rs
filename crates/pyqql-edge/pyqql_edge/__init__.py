@@ -1,8 +1,13 @@
-"""Python package surface for the native :mod:`pyqql_edge` extension."""
+"""Python package surface for the native :mod:`pyqql_edge` extension.
 
-from typing import Any, Dict, List, Optional, Union
+Client ``execute`` / ``upsert_many`` params convert like ``Stmt.bind``: flat
+``list[float]`` values with 32+ elements bind as f32 vectors (the same
+precision as numpy / ``array.array`` buffers); nested lists, int/bool lists,
+and shorter float lists keep f64 precision.
+"""
 
-from ._dx_report import ExecutionReport, ScoredPoint
+from typing import Any, List
+
 from ._errors import (
     QqlError,
     QqlSyntaxError,
@@ -13,6 +18,8 @@ from ._errors import (
 )
 from .pyqql_edge import (  # type: ignore[attr-defined]
     Client,
+    ExecutionReport,
+    ScoredPoint,
     Stmt,
     __version__,
     bind,

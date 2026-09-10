@@ -54,10 +54,8 @@ impl PyClient {
         }
         let oe = common::parse_on_error(on_error)?;
         let input = common::prepare_input(query, params)?;
-        let out = py.detach(|| common::run_input(&self.inner, &self.runtime, input, oe))?;
-        let dict =
-            pythonize::pythonize(py, &out).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        common::wrap_execution_report(py, dict, "pyqql_edge")
+        let report = py.detach(|| common::run_input(&self.inner, &self.runtime, input, oe))?;
+        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
     }
 
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
@@ -75,14 +73,13 @@ impl PyClient {
         let oe = common::parse_on_error(on_error)?;
         let input = common::prepare_input(&query, params)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = common::run_async(&inner, input, oe)
+            let report = common::run_async(&inner, input, oe)
                 .await
                 .map_err(common::qql_py_error)?;
             Python::attach(|py| {
-                let dict = pythonize::pythonize(py, &val)
-                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-                let report = common::wrap_execution_report(py, dict, "pyqql_edge")?;
-                Ok(report.unbind())
+                Ok(common::PyExecutionReport::wrap(py, report)?
+                    .into_any()
+                    .unbind())
             })
         })
     }
@@ -111,13 +108,11 @@ impl PyClient {
         let oe = common::parse_on_error(on_error)?;
         let input = common::prepare_input(&query, params)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = common::run_async(&inner, input, oe)
+            let report = common::run_async(&inner, input, oe)
                 .await
                 .map_err(common::qql_py_error)?;
             Python::attach(|py| {
-                let dict = pythonize::pythonize(py, &val)
-                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-                let report = common::wrap_execution_report(py, dict, "pyqql_edge")?;
+                let report = common::PyExecutionReport::wrap(py, report)?;
                 let hits = report.call_method1("hits", (0,))?;
                 Ok(hits.unbind())
             })
@@ -198,9 +193,7 @@ impl PyClient {
                     .block_on(self.inner.upsert_many(collection, values, batch_size, oe))
             })
             .map_err(common::qql_py_error)?;
-        let dict = pythonize::pythonize(py, &report)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        common::wrap_execution_report(py, dict, "pyqql_edge")
+        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
     }
 
     /// Flush and release edge storage. Idempotent.
@@ -210,6 +203,20 @@ impl PyClient {
         }
         Python::attach(|py| py.detach(|| self.runtime.block_on(self.inner.close())))
             .map_err(common::qql_py_error)
+    }
+
+    /// Run backend storage optimizers (segment merge / index build) and return
+    /// whether anything was optimized. Edge-only: remote backends answer
+    /// `QQL-BACKEND-OPTIMIZE`.
+    fn optimize(&self, py: Python<'_>, collection: &str) -> PyResult<bool> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(common::client_closed_error());
+        }
+        py.detach(|| {
+            self.runtime
+                .block_on(self.inner.client().optimize_collection(collection))
+        })
+        .map_err(common::qql_py_error)
     }
 
     /// Whether `close()` has been called on this client.
@@ -243,6 +250,7 @@ pub use models::*;
 #[pymodule]
 fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     common::register_error_module("pyqql_edge");
+    common::register_report_classes(m)?;
     m.add_class::<common::PyStmt>()?;
     m.add_class::<PyClient>()?;
     #[cfg(feature = "fastembed-local")]
