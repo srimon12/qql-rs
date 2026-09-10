@@ -182,12 +182,14 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
 | `QQL-BACKEND` | Generic backend or transport failure |
 | `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
+| `QQL-BACKEND-BATCH` | A batched query/update item reported an error in its status field |
 | `QQL-BACKEND-COLLECTION-NOT-FOUND` | The backend reports a missing collection (HTTP 404, gRPC `NotFound`) |
 | `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
 | `QQL-BACKEND-ENVELOPE` | A Qdrant response envelope missed its expected `result` shape |
 | `QQL-BACKEND-HTTP` | The backend rejected a REST request (for example HTTP 400 on batch) |
 | `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
 | `QQL-BACKEND-JSON` | A Qdrant response body failed JSON parsing |
+| `QQL-BACKEND-OPTIMIZE` | The backend has no in-process optimizer to run (only qdrant-edge does) |
 | `QQL-BACKEND-STRICT-MODE` | The request violates the collection's strict-mode / quota limits |
 | `QQL-TIMEOUT` | Batch execution exceeded its deadline |
 | `QQL-TRANSPORT` | HTTP client, request, or body failure (carries the request id) |
@@ -228,7 +230,6 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-CROSS-RERANK` | `CROSS RERANK` must run client-side, not via a Qdrant route |
 | `QQL-RERANK-CROSS` | `CROSS RERANK` has no pair-scorer configured, or it returned a wrong score count |
 | `QQL-RERANK-CROSS-FIELD` | `CROSS RERANK` candidates lack the scored payload field |
-| `QQL-RESPONSE-SERIALIZE` | Search hits failed JSON serialization while building the response |
 
 ## Embedding
 
@@ -290,8 +291,7 @@ problems: collection lifecycle (`QQL-EDGE-COLLECTION-EXISTS`,
 (`QQL-EDGE-CREATE-DIR`, `QQL-EDGE-READ-DIR`, `QQL-EDGE-DIR-ENTRY`, `QQL-EDGE-LIB`,
 `QQL-EDGE-SPAWN`, `QQL-EDGE-CONFIG`), vector handling (`QQL-EDGE-VECTOR`,
 `QQL-EDGE-VECTOR-NAME-MISSING`, `QQL-EDGE-MISSING-VECTOR`, `QQL-EDGE-MULTI-VECTOR-NAMES`,
-`QQL-EDGE-FIELD-NAME`), filters (`QQL-EDGE-FILTER-CONVERT`,
-`QQL-EDGE-FILTER-SERIALIZE`, `QQL-EDGE-FILTER-DESERIALIZE`), query conversion
+`QQL-EDGE-FIELD-NAME`), filters (`QQL-EDGE-FILTER-CONVERT`), query conversion
 (`QQL-EDGE-QUERY`), embedding (`QQL-EDGE-EMBED`), and mutations that require a
 target (`QQL-EDGE-DELETE-REQUIRES-TARGET`, `QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET`,
 `QQL-EDGE-DELETE-PAYLOAD-REQUIRES-TARGET`, `QQL-EDGE-DELETE-VECTORS-REQUIRES-TARGET`,
@@ -321,12 +321,14 @@ exceptions live in the script allowlist with reasons attached.
 ```text
 QQL-BACKEND
 QQL-BACKEND-AUTH
+QQL-BACKEND-BATCH
 QQL-BACKEND-COLLECTION-NOT-FOUND
 QQL-BACKEND-DIMENSION-MISMATCH
 QQL-BACKEND-ENVELOPE
 QQL-BACKEND-HTTP
 QQL-BACKEND-INDEX-NOT-READY
 QQL-BACKEND-JSON
+QQL-BACKEND-OPTIMIZE
 QQL-BACKEND-STRICT-MODE
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
@@ -360,8 +362,6 @@ QQL-EDGE-EMBED
 QQL-EDGE-FACET
 QQL-EDGE-FIELD-NAME
 QQL-EDGE-FILTER-CONVERT
-QQL-EDGE-FILTER-DESERIALIZE
-QQL-EDGE-FILTER-SERIALIZE
 QQL-EDGE-INVALID-POINT-ID
 QQL-EDGE-LIB
 QQL-EDGE-MISSING-VECTOR
@@ -484,7 +484,6 @@ QQL-PLAN-UNSUPPORTED-PREFETCH
 QQL-PLAN-VECTOR-KIND
 QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
-QQL-RESPONSE-SERIALIZE
 QQL-REST-CLIENT-SIDE
 QQL-TIMEOUT
 QQL-TRANSPORT
