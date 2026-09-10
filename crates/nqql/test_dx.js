@@ -334,4 +334,28 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(typeof sdk.Client.prototype.upsertMany, 'function');
 }
 
+// normalizeUpsertRows (offline): typed arrays convert like Python and WASM,
+// raw binary fails closed with wrap-first guidance.
+{
+  const dx = require('./dx-common.js');
+  assert.strictEqual(typeof dx.normalizeUpsertRows, 'function');
+  const converted = dx.normalizeUpsertRows([
+    { id: 1, vector: { dense: new Float32Array([0.1, 0.2]) } },
+    { id: 2, vector: { sparse: { indices: new Uint32Array([1, 5]), values: new Float64Array([0.5, 0.8]) } } },
+  ]);
+  assert.ok(Array.isArray(converted[0].vector.dense));
+  assert.deepStrictEqual(converted[1].vector.sparse.indices, [1, 5]);
+  assert.strictEqual(converted[1].vector.sparse.values.length, 2);
+  assert.throws(
+    () => dx.normalizeUpsertRows([{ id: 1, vector: Buffer.from([1, 2, 3]) }]),
+    /Float32Array or Float64Array/,
+  );
+  assert.throws(
+    () => dx.normalizeUpsertRows([{ id: 1, vector: new ArrayBuffer(8) }]),
+    /Float32Array or Float64Array/,
+  );
+  // Non-array top level passes through for the native QQL-BIND-TYPE-MISMATCH.
+  assert.strictEqual(dx.normalizeUpsertRows('nope'), 'nope');
+}
+
 console.log(`All ${LABEL} DX unit tests passed successfully!`);

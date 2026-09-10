@@ -31,7 +31,10 @@ if ([string]::IsNullOrEmpty($Version)) {
         $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
         $Version = $Release.tag_name
     } catch {
-        $Version = "v0.3.0"
+        Write-Error "❌ Could not determine the latest release version from GitHub. Set `$env:QQL_VERSION explicitly (e.g. `$env:QQL_VERSION='v0.4.0') and retry."
+    }
+    if ([string]::IsNullOrEmpty($Version)) {
+        Write-Error "❌ GitHub returned an empty release tag. Set `$env:QQL_VERSION explicitly and retry."
     }
 }
 
@@ -79,4 +82,4 @@ if ($UserPath -notlike "*$InstallDir*") {
     Write-Host "🎉 Added $InstallDir to your User PATH environment variable." -ForegroundColor Yellow
 }
 
-Write-Host "🚀 Try running: qql --version" -ForegroundColor Green
+Write-Host "🚀 Try running: qql version" -ForegroundColor Green

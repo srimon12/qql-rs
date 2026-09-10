@@ -97,3 +97,10 @@ const report = await client.executeStmt(stmt);
 Post-filtering leaks work across the tenant boundary and produces incorrect
 limits, groups, and scores. Enforce the predicate before planning.
 {% /aside %}
+
+## Per-stack recipes
+
+For copy-ready FastAPI and Express middleware wiring request tenants to
+`inject_filter` plus `SHARD` plus `is_tenant` DDL, with a cross-tenant check
+proving isolated reads return zero rows, see the
+[Multitenancy recipes guide](/docs/guides/multitenancy-recipes/).

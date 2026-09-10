@@ -113,6 +113,40 @@ Chunks move (never clone) through the point-splice path; the peak live-set
 is the caller's `rows` vector by construction — for million-row ingests,
 chunk the *calls*, since `upsert_many` chunks transport, not memory.
 
+## Scroll large collections manually
+
+Rust has no scroll helper type; loop `SCROLL ... AFTER` yourself with the same
+clause order the Python and Node helpers emit (`WHERE` then `AFTER` then
+`SHARD` then `WITH VECTOR` then `LIMIT`). Keep at most one page buffered and
+stop on the first empty page. Guard against a non-advancing cursor.
+
+```rust
+let mut cursor: Option<qql_plan::PlanPointId> = None;
+loop {
+    let page = match &cursor {
+        None => "SCROLL FROM products LIMIT 100".to_string(),
+        // Integer ids interpolate directly; quote string ids.
+        Some(id) => format!("SCROLL FROM products AFTER {id} LIMIT 100"),
+    };
+    let report = executor.execute(&page, OnError::Stop).await?;
+    let hits = report.first_hits().unwrap_or_default();
+    if hits.is_empty() {
+        break;
+    }
+    let next = hits.last().map(|h| h.id.clone());
+    if next == cursor {
+        break;
+    }
+    for hit in &hits {
+        println!("hit {}", hit.id);
+    }
+    cursor = next;
+}
+```
+
+For the managed equivalent, see Python `Client.scroll_cursor` and Node
+`scrollCursor` on their SDK pages.
+
 ## Profile before you optimize
 
 `Executor::explain_analyze` (plus `_with_named_params` / `_with_params`

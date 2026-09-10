@@ -311,10 +311,11 @@ impl JsClient {
     /// Bulk ingest: `rows` is an array of point objects
     /// (`{id, vector, …payload}`) spliced through the `:rows` point-splice
     /// path in `batchSize` chunks (default 100). Vectors accept plain arrays
-    /// and the flat `{data, dim}` multivector form. Like [`JsClient::execute`]
-    /// this is a serde boundary: `Float32Array`/`Float64Array` do not survive
-    /// it — bind those on the sync `Stmt.bind` surface instead, then execute
-    /// the bound statement. Returns a stable ExecutionReport JSON string.
+    /// and the flat `{data, dim}` multivector form. The JS wrapper normalizes
+    /// `Float32Array`/`Float64Array` and integer typed arrays to plain arrays
+    /// before this serde boundary, so direct native callers should pass plain
+    /// arrays (or bind typed arrays on the sync `Stmt.bind` surface instead,
+    /// then execute the bound statement). Returns a stable ExecutionReport JSON string.
     #[napi(
         catch_unwind,
         ts_args_type = "collection: string, rows: Record<string, any>[], options?: { onError?: 'stop' | 'continue', batchSize?: number }"

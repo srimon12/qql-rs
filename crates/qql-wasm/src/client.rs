@@ -31,6 +31,17 @@ pub struct Client {
     embed_api_key: Option<String>,
     embed_model: String,
     embed_dim: u32,
+    multi_endpoint: Option<String>,
+    multi_api_key: Option<String>,
+    multi_model: Option<String>,
+    multi_dim: u32,
+    image_endpoint: Option<String>,
+    image_api_key: Option<String>,
+    image_model: Option<String>,
+    image_dim: u32,
+    rerank_endpoint: Option<String>,
+    rerank_api_key: Option<String>,
+    rerank_model: Option<String>,
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -47,6 +58,17 @@ impl Client {
             embed_api_key: None,
             embed_model: String::new(),
             embed_dim: 0,
+            multi_endpoint: None,
+            multi_api_key: None,
+            multi_model: None,
+            multi_dim: 0,
+            image_endpoint: None,
+            image_api_key: None,
+            image_model: None,
+            image_dim: 0,
+            rerank_endpoint: None,
+            rerank_api_key: None,
+            rerank_model: None,
         }
     }
 
@@ -128,10 +150,108 @@ impl Client {
         self.set_http_embedder(endpoint, model, dimension, api_key)
     }
 
+    /// OpenAI-compatible multi/ColBERT endpoint (nested `[[...]]` bags).
+    /// Browser calls need a CORS-enabled endpoint.
+    #[wasm_bindgen(js_name = setHttpMultiEmbedder)]
+    pub fn set_http_multi_embedder(
+        &mut self,
+        endpoint: String,
+        model: String,
+        dimension: u32,
+        api_key: Option<String>,
+    ) -> Result<(), JsValue> {
+        if endpoint.trim().is_empty() {
+            return Err(JsValue::from_str(
+                "setHttpMultiEmbedder: endpoint is required (no default URL)",
+            ));
+        }
+        if model.trim().is_empty() {
+            return Err(JsValue::from_str("setHttpMultiEmbedder: model is required"));
+        }
+        if dimension == 0 {
+            return Err(JsValue::from_str(
+                "setHttpMultiEmbedder: dimension must be positive",
+            ));
+        }
+        self.multi_endpoint = Some(endpoint);
+        self.multi_api_key = api_key;
+        self.multi_model = Some(model);
+        self.multi_dim = dimension;
+        Ok(())
+    }
+
+    /// OpenAI-compatible image/CLIP vision endpoint (dense vectors).
+    /// Browser calls need a CORS-enabled endpoint.
+    #[wasm_bindgen(js_name = setHttpImageEmbedder)]
+    pub fn set_http_image_embedder(
+        &mut self,
+        endpoint: String,
+        model: String,
+        dimension: u32,
+        api_key: Option<String>,
+    ) -> Result<(), JsValue> {
+        if endpoint.trim().is_empty() {
+            return Err(JsValue::from_str(
+                "setHttpImageEmbedder: endpoint is required (no default URL)",
+            ));
+        }
+        if model.trim().is_empty() {
+            return Err(JsValue::from_str("setHttpImageEmbedder: model is required"));
+        }
+        if dimension == 0 {
+            return Err(JsValue::from_str(
+                "setHttpImageEmbedder: dimension must be positive",
+            ));
+        }
+        self.image_endpoint = Some(endpoint);
+        self.image_api_key = api_key;
+        self.image_model = Some(model);
+        self.image_dim = dimension;
+        Ok(())
+    }
+
+    /// Cohere-compatible cross-encoder rerank endpoint.
+    /// Browser calls need a CORS-enabled endpoint.
+    #[wasm_bindgen(js_name = setHttpReranker)]
+    pub fn set_http_reranker(
+        &mut self,
+        endpoint: String,
+        model: String,
+        api_key: Option<String>,
+    ) -> Result<(), JsValue> {
+        if endpoint.trim().is_empty() {
+            return Err(JsValue::from_str(
+                "setHttpReranker: endpoint is required (no default URL)",
+            ));
+        }
+        if model.trim().is_empty() {
+            return Err(JsValue::from_str("setHttpReranker: model is required"));
+        }
+        self.rerank_endpoint = Some(endpoint);
+        self.rerank_api_key = api_key;
+        self.rerank_model = Some(model);
+        Ok(())
+    }
+
     /// Check whether any embedder is configured.
     #[wasm_bindgen(js_name = hasEmbedder)]
     pub fn has_embedder(&self) -> bool {
         !matches!(self.embed_mode, EmbedMode::None)
+            || self.multi_enabled()
+            || self.image_enabled()
+            || self.rerank_enabled()
+    }
+
+    pub(crate) fn multi_enabled(&self) -> bool {
+        self.multi_endpoint.is_some() || self.multi_model.is_some() || self.multi_dim > 0
+    }
+
+    pub(crate) fn image_enabled(&self) -> bool {
+        self.image_endpoint.is_some() || self.image_model.is_some() || self.image_dim > 0
+    }
+
+    pub(crate) fn rerank_enabled(&self) -> bool {
+        self.rerank_endpoint.is_some() || self.rerank_model.is_some()
     }
 
     pub(crate) fn request(&self, method: &str, path: &str) -> gloo_net::http::RequestBuilder {
@@ -210,12 +330,23 @@ impl Client {
         url: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, JsValue> {
+        self.post_with_key(url, body, self.embed_api_key.as_deref())
+            .await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn post_with_key(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+        api_key: Option<&str>,
+    ) -> Result<serde_json::Value, JsValue> {
         let body_str =
             serde_json::to_string(body).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let mut rb = Request::post(url).header("Content-Type", "application/json");
-        if let Some(ref key) = self.embed_api_key {
-            rb = rb.header("Authorization", &format!("Bearer {}", key));
+        if let Some(key) = api_key.filter(|k| !k.is_empty()) {
+            rb = rb.header("Authorization", &format!("Bearer {key}"));
         }
 
         let resp = rb
@@ -239,6 +370,179 @@ impl Client {
         }
         serde_json::from_str(&text)
             .map_err(|e| JsValue::from_str(&format!("invalid embedding API response: {}", e)))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn multi_url(&self) -> &str {
+        self.multi_endpoint
+            .as_deref()
+            .unwrap_or(self.embed_endpoint.as_str())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn multi_key(&self) -> Option<&str> {
+        self.multi_api_key
+            .as_deref()
+            .or(self.embed_api_key.as_deref())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn resolve_multi_model<'a>(&'a self, model: &'a str) -> &'a str {
+        if !model.is_empty() && model != "default" {
+            model
+        } else {
+            self.multi_model
+                .as_deref()
+                .unwrap_or(self.embed_model.as_str())
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn image_url(&self) -> &str {
+        self.image_endpoint
+            .as_deref()
+            .unwrap_or(self.embed_endpoint.as_str())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn image_key(&self) -> Option<&str> {
+        self.image_api_key
+            .as_deref()
+            .or(self.embed_api_key.as_deref())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn resolve_image_model<'a>(&'a self, model: &'a str) -> &'a str {
+        if !model.is_empty() && model != "default" {
+            model
+        } else {
+            self.image_model
+                .as_deref()
+                .unwrap_or(self.embed_model.as_str())
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn image_dim(&self) -> u32 {
+        if self.image_dim > 0 {
+            self.image_dim
+        } else {
+            self.embed_dim
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn rerank_key(&self) -> Option<&str> {
+        self.rerank_api_key
+            .as_deref()
+            .or(self.embed_api_key.as_deref())
+    }
+
+    /// Embed multi/ColBERT texts via HTTP (nested `[[...]]` bags, flat rejected).
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) async fn embed_multi_texts(
+        &self,
+        texts: Vec<String>,
+        model: &str,
+    ) -> Result<Vec<Vec<Vec<f32>>>, JsValue> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.multi_enabled() {
+            return Err(JsValue::from_str(
+                "multi-vector embedding is not available (no model specified). Configure setHttpMultiEmbedder, pass precomputed VECTOR [[...], ...], or use UPSERT with explicit multivector bags.",
+            ));
+        }
+        let model_name = self.resolve_multi_model(model);
+        let body = json!({ "model": model_name, "input": texts });
+        let resp = self
+            .post_with_key(self.multi_url(), &body, self.multi_key())
+            .await?;
+        Self::parse_multi_batch_response(&resp, texts.len(), self.multi_dim)
+    }
+
+    /// Embed image paths/URLs via HTTP (dense vectors).
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) async fn embed_image_sources(
+        &self,
+        sources: Vec<String>,
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, JsValue> {
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.image_enabled() {
+            return Err(JsValue::from_str(
+                "image embedding is not available (no model specified). Configure setHttpImageEmbedder, pass a precomputed VECTOR [...], or use UPSERT USING IMAGE ON FIELD <path_field>.",
+            ));
+        }
+        let model_name = self.resolve_image_model(model);
+        let body = json!({ "model": model_name, "input": sources });
+        let resp = self
+            .post_with_key(self.image_url(), &body, self.image_key())
+            .await?;
+        Self::parse_openai_batch_response(&resp, sources.len(), self.image_dim())
+    }
+
+    /// Score (query, documents) pairs via Cohere-compatible rerank endpoint.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) async fn rerank_pair_scores(
+        &self,
+        query: &str,
+        documents: &[String],
+        model: &str,
+    ) -> Result<Vec<f32>, JsValue> {
+        if documents.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(endpoint) = self.rerank_endpoint.as_deref() else {
+            return Err(JsValue::from_str(
+                "cross-encoder pair scoring is not available (no model specified). Configure setHttpReranker.",
+            ));
+        };
+        let model_name = if !model.is_empty() && model != "default" {
+            model.to_string()
+        } else {
+            self.rerank_model
+                .clone()
+                .unwrap_or_else(|| "rerank".to_string())
+        };
+        let body = json!({ "model": model_name, "query": query, "documents": documents });
+        let resp = self
+            .post_with_key(endpoint, &body, self.rerank_key())
+            .await?;
+        let results = resp
+            .get("results")
+            .or_else(|| resp.get("data"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| JsValue::from_str("rerank response missing results array"))?;
+        let mut scores = vec![0.0f32; documents.len()];
+        let mut seen = vec![false; documents.len()];
+        for item in results {
+            let idx = item
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| JsValue::from_str("rerank result missing index"))?
+                as usize;
+            if idx >= documents.len() {
+                return Err(JsValue::from_str(&format!(
+                    "rerank result index {idx} out of range"
+                )));
+            }
+            let score = item
+                .get("relevance_score")
+                .or_else(|| item.get("score"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as f32;
+            scores[idx] = score;
+            seen[idx] = true;
+        }
+        if seen.iter().any(|s| !*s) {
+            return Err(JsValue::from_str(
+                "rerank response did not cover all documents",
+            ));
+        }
+        Ok(scores)
     }
 
     /// Parse OpenAI-compatible batch response:
@@ -283,6 +587,73 @@ impl Client {
             slots[idx] = Some(vec);
         }
 
+        slots
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| {
+                v.ok_or_else(|| JsValue::from_str(&format!("missing embedding at index {i}")))
+            })
+            .collect()
+    }
+
+    /// Parse multi/ColBERT batch response: `embedding` must be nested
+    /// `[[f32]]`; flat dense arrays are rejected like the Rust core.
+    #[cfg(target_arch = "wasm32")]
+    fn parse_multi_batch_response(
+        resp: &serde_json::Value,
+        expected: usize,
+        expected_dim: u32,
+    ) -> Result<Vec<Vec<Vec<f32>>>, JsValue> {
+        let data = resp["data"]
+            .as_array()
+            .ok_or_else(|| JsValue::from_str("embedding response missing 'data' array"))?;
+        let mut slots: Vec<Option<Vec<Vec<f32>>>> = vec![None; expected];
+        for (fallback_i, item) in data.iter().enumerate() {
+            let emb = item["embedding"]
+                .as_array()
+                .ok_or_else(|| JsValue::from_str("item missing 'embedding' array"))?;
+            if emb.is_empty() {
+                return Err(JsValue::from_str("multi embedding returned empty bag"));
+            }
+            // Flat dense `[...f32]` rejected: first element must be an array.
+            if emb.first().is_some_and(|v| !v.is_array()) {
+                return Err(JsValue::from_str(&format!(
+                    "multi embedding endpoint returned a flat dense vector (len={}) for index {}; expected nested array [[f32,…],…] (token-level multivector)",
+                    emb.len(),
+                    fallback_i
+                )));
+            }
+            let mut rows = Vec::with_capacity(emb.len());
+            for row in emb {
+                let arr = row.as_array().ok_or_else(|| {
+                    JsValue::from_str("multi embedding row must be an array of numbers")
+                })?;
+                if expected_dim > 0 && arr.len() != expected_dim as usize {
+                    return Err(JsValue::from_str(&format!(
+                        "multi embedding dimension mismatch: got {}, expected {}",
+                        arr.len(),
+                        expected_dim
+                    )));
+                }
+                rows.push(
+                    arr.iter()
+                        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                        .collect::<Vec<f32>>(),
+                );
+            }
+            let idx = item["index"].as_u64().unwrap_or(fallback_i as u64) as usize;
+            if idx >= expected {
+                return Err(JsValue::from_str(&format!(
+                    "embedding index {idx} out of range (batch size {expected})"
+                )));
+            }
+            if slots[idx].is_some() {
+                return Err(JsValue::from_str(&format!(
+                    "duplicate embedding index {idx}"
+                )));
+            }
+            slots[idx] = Some(rows);
+        }
         slots
             .into_iter()
             .enumerate()

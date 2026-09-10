@@ -34,7 +34,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["src/pages/index.astro"],
+			"includes": ["src/pages/index.astro", "src/pages/playground/index.astro"],
 			"linter": {
 				"rules": {
 					"complexity": {

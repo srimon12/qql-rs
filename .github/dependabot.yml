@@ -1,0 +1,191 @@
+# Dependabot configuration.
+#
+# Every ecosystem targets `dev` because `main` only ever receives the dev
+# branch (enforced by the "Branch policy" job in ci.yml). Security updates
+# follow the same rule: Dependabot opens them against the configured target
+# branch.
+#
+# Grouping: minor and patch bumps arrive as one PR per surface (cargo,
+# website, editor, bindings, pip, actions). Major bumps stay ungrouped so
+# each one gets its own reviewable PR. `cooldown` holds a release for a few
+# days so a broken upstream publish never lands the same day.
+
+version: 2
+
+updates:
+  # ── Rust workspace ──────────────────────────────────────────
+  - package-ecosystem: cargo
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      cargo:
+        applies-to: version-updates
+        update-types: [minor, patch]
+        patterns: ["*"]
+      cargo-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # ── npm: website (Astro app plus ui-docs package) ───────────
+  - package-ecosystem: npm
+    directory: "/website"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      website:
+        applies-to: version-updates
+        update-types: [minor, patch]
+        patterns: ["*"]
+      website-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # ── npm: VS Code extension ──────────────────────────────────
+  - package-ecosystem: npm
+    directory: "/editors/vscode"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      vscode-ext:
+        applies-to: version-updates
+        update-types: [minor, patch]
+        patterns: ["*"]
+      vscode-ext-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # ── npm: Node binding build tooling ─────────────────────────
+  # These manifests are not published directly; only their build tooling
+  # (napi CLI) and dev dependencies move.
+  - package-ecosystem: npm
+    directory: "/crates/nqql"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      nqql-tooling:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: "/crates/nqql-edge"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      nqql-edge-tooling:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # ── Python: pyqql and pyqql-edge wheels ─────────────────────
+  - package-ecosystem: pip
+    directory: "/crates/pyqql"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      pyqql:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: "/crates/pyqql-edge"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      pyqql-edge:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # ── GitHub Actions ──────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]

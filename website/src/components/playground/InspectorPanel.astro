@@ -14,14 +14,14 @@
 
   <div class="flex gap-0.5 overflow-x-auto border-b border-[var(--sl-color-gray-5)] px-2 pt-2" role="tablist" aria-label="Compiler output">
     {[
-      ["plan", "Plan"],
-      ["response", "Result"],
-      ["ast", "AST"],
-      ["wire", "Wire"],
-      ["explain", "Explain"],
-      ["tokens", "Tokens"],
-      ["metrics", "Metrics"],
-    ].map(([id, label], index) => (
+      ["plan", "Plan", "Offline. Compiled plan, no backend needed."],
+      ["response", "Result", "Connected. Needs a reachable Qdrant."],
+      ["ast", "AST", "Offline. Parsed tree, no backend needed."],
+      ["wire", "Wire", "Offline. REST payload, no backend needed."],
+      ["explain", "Explain", "Offline. Human readable plan, no backend needed."],
+      ["tokens", "Tokens", "Offline. Lexer output, no backend needed."],
+      ["metrics", "Metrics", "Offline. Local timings, no backend needed."],
+    ].map(([id, label, title], index) => (
       <button
         type="button"
         role="tab"
@@ -30,6 +30,7 @@
         aria-selected={index === 0 ? "true" : "false"}
         tabindex={index === 0 ? 0 : -1}
         data-inspector-tab={id}
+        title={title}
         class="shrink-0 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-3 py-2.5 font-mono text-[0.75rem] text-[var(--sl-color-gray-3)] hover:text-[var(--sl-color-gray-1)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sl-color-accent)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)]"
         >
         {label}
@@ -77,7 +78,7 @@
         data-inspector-panel={id}
         hidden
       >
-        <pre class="m-0 min-h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-[var(--sl-color-gray-2)]" data-output={id}>No {id} output yet.</pre>
+        <pre class="m-0 min-h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-[var(--sl-color-gray-2)]" data-output={id}>{id === "response" ? "No response yet. The Result tab needs a reachable Qdrant. Everything else works offline." : `No ${id} output yet.`}</pre>
       </section>
     ))}
   </div>

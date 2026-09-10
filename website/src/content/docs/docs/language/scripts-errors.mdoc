@@ -44,7 +44,7 @@ operations.
 ## Surface structured failures
 
 Errors carry a stable code, kind, message, and optional zero-based UTF-8 byte
-span. Message text is not normative — match on the code. The stable codes are
+span. Message text is not normative: match on the code. The stable codes are
 grouped by their prefix; see [Error codes](/docs/reference/error-codes/) for
 the full list with meanings.
 
@@ -76,3 +76,27 @@ planner or executor.
 
 The [Playground](/playground/) shows the same source, AST, compiled route, and
 explanation without connecting to Qdrant until you choose to run it.
+
+## Debug with qql check
+
+Run `qql check "<statement>"` before executing an unfamiliar statement. It
+runs five stages in order and prints one line per stage with the QQL-* code
+on failure:
+
+1. Format check of the input.
+2. Offline explain (no backend needed).
+3. Embed endpoint dim probe when the statement needs text embeddings
+   (skipped for literal-vector statements).
+4. USING and vector-name topology check against the live collection when
+   reachable.
+5. Backend doctor (Qdrant reachability, with unreachable and auth failures
+   reported distinctly).
+
+{% terminal title="Triage a statement" %}
+qql check "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+qql check "QUERY 'typed query language' FROM docs USING dense LIMIT 5"
+{% /terminal %}
+
+Fix the first failing stage and rerun. Literal-vector statements pass the
+embed stage as skipped, so they are the fastest way to confirm the backend
+path is healthy.

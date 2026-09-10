@@ -28,12 +28,7 @@ TARGET="${ARCH}-${OS}"
 echo "✨ Target platform: ${TARGET}"
 
 case "$TARGET" in
-  x86_64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin) ;;
-  aarch64-unknown-linux-gnu)
-    echo "❌ Pre-built binaries are not yet published for ${TARGET}."
-    echo "   You can build from source using: cargo install qql-cli --locked"
-    exit 1
-    ;;
+  x86_64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|aarch64-unknown-linux-gnu) ;;
   *)
     echo "❌ Unsupported target platform: ${TARGET}"
     exit 1
@@ -45,7 +40,9 @@ if [ -z "$VERSION" ]; then
   echo "📡 Fetching latest release version..."
   VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
   if [ -z "$VERSION" ]; then
-    VERSION="v0.3.0"
+    echo "❌ Could not determine the latest release version from GitHub."
+    echo "   Set QQL_VERSION explicitly (e.g. QQL_VERSION=v0.4.0 sh install.sh) and retry."
+    exit 1
   fi
 fi
 
@@ -95,4 +92,4 @@ if [ "$INSTALL_DIR" = "${HOME}/.qql/bin" ]; then
   esac
 fi
 
-echo "🚀 Try running: qql --version"
+echo "🚀 Try running: qql version"

@@ -59,6 +59,15 @@ class ExecutionReport(dict):
     def failed(self) -> int:
         return self.get("failed", 0)
 
+    @property
+    def telemetry(self) -> Optional[Dict[str, Any]]:
+        """Aggregated server telemetry (`time_s` plus hardware and inference `usage`).
+
+        Present when the backend reported timing or usage on any result;
+        `None` where the route reports nothing. Never raises.
+        """
+        return self.get("telemetry")
+
     def _result_at(self, stmt: int) -> Optional[Dict[str, Any]]:
         res = self.results
         if not res or stmt >= len(res) or stmt < -len(res):

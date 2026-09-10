@@ -35,7 +35,8 @@ the `grpc` feature. Otherwise the REST transport is used.
 | `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
 | `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; see Operations > [Dump and restore](/docs/operations/backup-restore/)) |
 | `qql migrate <collection>` | Copy schema + points to another cluster or collection (see below) |
-| `qql doctor` | Check backend, model hosts, and embedder health (`--json`) |
+| `qql doctor` | Check backend reachability, probe the embedder dim, and compare it against EMBED_DIM and collection vector sizes (`--json`) |
+| `qql check "<query>"` | Triage one statement in order: format, offline explain, embed dim probe, USING topology, backend doctor (one line per stage; `--json`) |
 | `qql config edge` | Configure persistent edge settings (see below) |
 | `qql version` | Print version as JSON |
 
@@ -52,6 +53,7 @@ qql explain "QUERY 'quantum' FROM papers USING dense LIMIT 5"
 qql exec "QUERY TEXT :q FROM docs LIMIT :lim" -p q=text-search -p lim=5
 qql exec "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
 qql doctor --json
+qql check "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
 qql version
 {% /terminal %}
 

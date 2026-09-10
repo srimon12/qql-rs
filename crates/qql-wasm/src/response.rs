@@ -1,6 +1,7 @@
 //! REST response shaping: topology names plus typed hit envelopes.
 
-use super::report::exec_response;
+use super::report::exec_response_with_telemetry;
+use super::telemetry::telemetry_from_envelope;
 
 /// Extract named dense/sparse/multivector names from a Qdrant collection `result` object.
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -103,6 +104,7 @@ pub(crate) fn wasm_success_response(
 ) -> serde_json::Value {
     use qql_plan::PlannedOperation;
 
+    let telemetry = telemetry_from_envelope(&result);
     let label = operation.operation_label();
     let (message, data) = match operation {
         PlannedOperation::Query { .. }
@@ -147,5 +149,5 @@ pub(crate) fn wasm_success_response(
         PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".to_string(), Some(result)),
         _ => (format!("{label} ok"), None),
     };
-    exec_response(true, label, &message, data)
+    exec_response_with_telemetry(true, label, &message, data, telemetry)
 }

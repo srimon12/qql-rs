@@ -33,8 +33,6 @@ impl Client {
             let arr = js_sys::Array::from(&query);
             let len = arr.length() as usize;
             let mut all_results: Vec<serde_json::Value> = Vec::new();
-            let mut succeeded = 0usize;
-            let mut failed = 0usize;
 
             let plan = match params.as_ref() {
                 Some(p) => Some(
@@ -54,15 +52,12 @@ impl Client {
                     let s = maybe_bind(&s, item_params)?;
                     match self.execute_script(&s, on_error).await {
                         Ok(report) => {
-                            succeeded += report.succeeded;
-                            failed += report.failed;
                             all_results.extend(report.results);
                         }
                         Err(e) => {
                             if on_error == WasmOnError::Stop {
                                 return Err(e);
                             }
-                            failed += 1;
                             all_results.push(exec_response(
                                 false,
                                 "ERROR",
@@ -77,14 +72,12 @@ impl Client {
                     }
                     match self.execute_stmt_inner(&stmt).await {
                         Ok(val) => {
-                            succeeded += 1;
                             all_results.push(val);
                         }
                         Err(e) => {
                             if on_error == WasmOnError::Stop {
                                 return Err(e);
                             }
-                            failed += 1;
                             all_results.push(exec_response(
                                 false,
                                 "ERROR",
@@ -101,12 +94,7 @@ impl Client {
                     )));
                 }
             }
-            let report = WasmReport {
-                ok: failed == 0,
-                results: all_results,
-                succeeded,
-                failed,
-            };
+            let report = WasmReport::from_results(all_results);
             return to_js_value(&report);
         }
 
@@ -146,19 +134,15 @@ impl Client {
                         bound_stmts.push(stmt);
                     }
                     let mut all_results: Vec<serde_json::Value> = Vec::new();
-                    let mut succeeded = 0usize;
-                    let mut failed = 0usize;
                     for stmt in bound_stmts {
                         match self.execute_stmt_inner(&stmt).await {
                             Ok(val) => {
-                                succeeded += 1;
                                 all_results.push(val);
                             }
                             Err(e) => {
                                 if on_error == WasmOnError::Stop {
                                     return Err(e);
                                 }
-                                failed += 1;
                                 all_results.push(exec_response(
                                     false,
                                     "ERROR",
@@ -168,12 +152,7 @@ impl Client {
                             }
                         }
                     }
-                    let report = WasmReport {
-                        ok: failed == 0,
-                        results: all_results,
-                        succeeded,
-                        failed,
-                    };
+                    let report = WasmReport::from_results(all_results);
                     return to_js_value(&report);
                 }
             }
