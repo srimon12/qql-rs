@@ -14,12 +14,14 @@ use super::schema::{
     apply_overrides, build_plan, parse_where_filter, quantize_json, restore_optimizers_statement,
     suppress_indexing,
 };
+use super::validate_endpoints;
 use crate::dump::generate_create_statement;
 
 fn sample_info() -> CollectionInfo {
     CollectionInfo {
         status: "green".into(),
         points_count: 10,
+        indexed_vectors_count: None,
         segments_count: 1,
         schema: CollectionSchema {
             dense_vectors: vec!["dense".into()],
@@ -406,4 +408,27 @@ fn facet_discovery_sql_parses() {
         "FACET tenant FROM docs WHERE city = 'berlin' LIMIT 10000 EXACT true;",
     )
     .expect("FACET discovery with WHERE");
+}
+
+/// Edge → edge migration is rejected before any executor is built; every
+/// remote/edge combination stays valid.
+#[test]
+fn edge_to_edge_migration_fails_closed() {
+    assert!(validate_endpoints(false, false).is_ok());
+    assert!(
+        validate_endpoints(true, false).is_ok(),
+        "edge → remote publish"
+    );
+    assert!(
+        validate_endpoints(false, true).is_ok(),
+        "remote → edge seed"
+    );
+
+    let error = validate_endpoints(true, true).expect_err("edge → edge must fail closed");
+    assert!(
+        error.contains("edge → edge migration is not supported"),
+        "{error}"
+    );
+    assert!(error.contains("qql edge bootstrap"), "{error}");
+    assert!(error.contains("--target-url"), "{error}");
 }

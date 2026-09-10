@@ -92,6 +92,7 @@ let mut executor = local_executor_with_options(
     "./qdrant_data",
     LocalExecutorOptions {
         on_disk_payload: true,
+        wal_segment_capacity: Some(4 * 1024 * 1024), // shrink the 32 MiB WAL segments
         model: Some("bge-small-en-v1.5".into()),      // dense, 384-d
         sparse_model: Some("splade".into()),          // real ONNX sparse
         multi_model: Some("bge-m3".into()),           // ColBERT multivector
@@ -169,9 +170,15 @@ let backend = EdgeQdrant::new("./qdrant_data", true); // base_path, on_disk_payl
 ```
 
 `EdgeQdrant::new(base_path, on_disk_payload)` opens shards lazily per
-collection and persists them under `base_path`. Combined with an embedder and
+collection and persists them under `base_path`. `with_wal_segment_capacity`
+shrinks the pre-allocated WAL segments (bytes). Combined with an embedder and
 a `QqlConfig`, wrap it in a runtime `Executor` via `Executor::with_embedder`.
 The `close()` method (also on `Executor`) drains and flushes all open shards.
+
+Snapshot seeding helpers live at the crate root: `qql_edge::unpack_snapshot`
+(unpack a downloaded snapshot archive into a directory) and
+`qql_edge::inspect_shard` (load it and return counts). These wrap the engine's
+snapshot API — never unpack or merge archives by hand.
 
 ## Response shapes
 

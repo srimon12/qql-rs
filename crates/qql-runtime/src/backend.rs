@@ -254,6 +254,13 @@ pub struct CollectionInfo {
     /// Number of points currently stored in the collection.
     #[serde(default)]
     pub points_count: u64,
+    /// Approximate number of vectors added to a vector index (HNSW/sparse).
+    ///
+    /// Not exact — Qdrant documents these counts as approximate and
+    /// `indexed_vectors_count < points_count` on edge means optimization (and
+    /// therefore indexing) is pending. `None` when the backend omits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_vectors_count: Option<u64>,
     /// Number of storage segments backing the collection.
     #[serde(default)]
     pub segments_count: u64,

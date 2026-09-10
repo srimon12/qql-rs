@@ -40,6 +40,10 @@ Qdrant" hint.
 | `UPSERT` with auto-embedding | yes | dense, sparse, multi, image |
 | `DELETE` / payload / vector operations | yes | by id or filter |
 | `CREATE/DROP COLLECTION` | yes | |
+| Create-time per-vector engine config | yes | `WITH VECTOR` (storage/datatype), `WITH HNSW`, `WITH QUANTIZATION`, `WITH SPARSE` all lower onto the engine config; `memory` tiers map to the engine's RAM/mmap switch |
+| Background optimization | no | `qql edge optimize` runs the blocking optimizer loop; `prevent_unoptimized` defers point visibility until it runs |
+| Remote → edge snapshot seed | yes | `qql edge bootstrap` streams a server shard snapshot (config + built HNSW + quantized data); snapshot *creation* is remote-side only |
+| WAL capacity tuning | partial | Rust/CLI only (`--wal-segment-mb`, `LocalExecutorOptions::wal_segment_capacity`); Python/Node cannot set it in qdrant-edge 0.8 |
 | `CREATE/DROP INDEX` | yes | keyword (incl. `prefix`), integer, float, bool, geo, text, datetime, uuid |
 | `SHOW COLLECTIONS` / `SHOW COLLECTION` | yes | |
 | Query/update batching | partial | fan-out, not a native batch RPC |
@@ -190,6 +194,22 @@ OFFSET 20;
 executed statement-by-statement against the edge backend. There is no native
 batch RPC — results are returned per operation with cardinality matching the
 input.
+
+### Optimization and snapshot seeding
+
+qdrant-edge indexes nothing in the background. `qql edge optimize <collection>`
+calls the engine's blocking optimizer loop (merge, index, vacuum,
+config-mismatch) and `qql --edge doctor` / `qql check --edge` surface the
+`indexed_vectors_count` vs `points_count` lag with the same nudge. A segment
+below the collection's `indexing_threshold` (10 MB by default offline, versus
+20 MB on a 1.19 server) stays brute-force by design.
+
+For the initial load, `qql edge bootstrap <collection> --from <url>` seeds the
+local directory from a remote Qdrant shard snapshot (`unpack_snapshot` +
+`load`), preserving the source collection's config, built HNSW indexes and
+quantized data. A single-shard collection is auto-discovered; multi-shard
+collections require `--shard-id` and fail closed otherwise
+(`QQL-SNAPSHOT-SHARD`).
 
 ## What fails — and how
 

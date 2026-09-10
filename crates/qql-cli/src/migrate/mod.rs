@@ -39,6 +39,28 @@ pub use options::{
     MigrateProgress, MigrateStats, MissingShardKey, QuantizeKind, QuantizeSpec,
 };
 
+/// Fail closed for an edge → edge migration before any executor is built.
+///
+/// A qql-edge "collection" is a local directory, not a server; `migrate` is a
+/// client-server copy pipeline. Publish edge data to a remote target
+/// (`--target-url`) and seed other devices from a remote shard snapshot
+/// (`qql edge bootstrap`) instead. Continuous sync is intentionally not
+/// provided — the documented pattern is dual-write plus partial snapshots
+/// (see the edge synchronization guide).
+pub fn validate_endpoints(source_edge: bool, target_edge: bool) -> Result<(), String> {
+    if source_edge && target_edge {
+        return Err(
+            "edge → edge migration is not supported: a qql-edge collection is a local \
+             directory, not a server. Publish to a remote Qdrant with `migrate \
+             --target-url <url>` (edge source), then seed the second device with \
+             `qql edge bootstrap --from <url>`. Continuous sync uses the documented \
+             dual-shard / dual-write pattern."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Run a collection migration from `source` to `target`.
 pub async fn migrate_collection(
     source: &Executor,

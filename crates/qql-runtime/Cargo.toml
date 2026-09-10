@@ -16,7 +16,7 @@ categories = ["database", "api-bindings"]
 [features]
 default = ["grpc", "rest"]
 grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/rt-multi-thread"]
-rest = ["dep:reqwest", "tokio/rt"]
+rest = ["dep:reqwest", "tokio/rt", "tokio/fs", "tokio/io-util"]
 
 [dependencies]
 qql-core = { workspace = true, features = ["serde", "std", "json"] }

@@ -30,10 +30,12 @@
 //! [qdrant-edge]: https://crates.io/crates/qdrant-edge
 
 mod backend;
+mod bootstrap;
 #[cfg(feature = "fastembed-local")]
 mod embedder;
 
 pub use backend::EdgeQdrant;
+pub use bootstrap::{ShardSummary, inspect_shard, unpack_snapshot};
 #[cfg(feature = "fastembed-local")]
 pub use embedder::{
     EmbeddingModelInfo, FastEmbedder, FastEmbedderOptions, list_embedding_models,
@@ -53,6 +55,13 @@ pub struct LocalExecutorOptions {
     /// this struct defaults to `false` for Rust ergonomics matching the
     /// historical `local_executor(path, false)` tests).
     pub on_disk_payload: bool,
+    /// Write-ahead-log segment capacity in bytes. qdrant-edge pre-allocates
+    /// each WAL segment to this size (default 32 MiB), which dominates the
+    /// on-disk footprint of small embedded shards. `None` keeps the engine
+    /// default (and, for existing shards, the capacity persisted in
+    /// `edge_config.json`). Python/Node bindings cannot set this in
+    /// qdrant-edge 0.8 — it is a Rust-only engine knob.
+    pub wal_segment_capacity: Option<usize>,
     /// Local ONNX dense model name. See [`resolve_embedding_model`] for accepted forms.
     /// `None` → default `BGESmallENV15` (384-d).
     #[cfg(feature = "fastembed-local")]
@@ -109,7 +118,10 @@ pub fn local_executor_with_options(
     data_dir: impl Into<PathBuf>,
     opts: LocalExecutorOptions,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, opts.on_disk_payload));
+    let client = Box::new(
+        EdgeQdrant::new(data_dir, opts.on_disk_payload)
+            .with_wal_segment_capacity(opts.wal_segment_capacity),
+    );
     let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
         model: opts.model,
         sparse_model: opts.sparse_model,
@@ -214,7 +226,23 @@ pub fn http_executor_with_options(
     on_disk_payload: bool,
     opts: qql::embedder::HttpEmbedderOptions,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
+    http_executor_with_options_and_wal(data_dir, on_disk_payload, None, opts)
+}
+
+/// Like [`http_executor_with_options`], with an explicit WAL segment capacity
+/// (bytes) applied to every shard the executor opens or creates; `None` keeps
+/// the engine default (32 MiB) for new shards and the persisted value for
+/// existing ones.
+#[cfg(feature = "http-embedding")]
+pub fn http_executor_with_options_and_wal(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    wal_segment_capacity: Option<usize>,
+    opts: qql::embedder::HttpEmbedderOptions,
+) -> Result<Executor, qql_core::error::QqlError> {
+    let client = Box::new(
+        EdgeQdrant::new(data_dir, on_disk_payload).with_wal_segment_capacity(wal_segment_capacity),
+    );
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: opts.dimension,
@@ -265,7 +293,22 @@ pub fn custom_executor_with_dimension(
     embedder: Arc<dyn Embedder>,
     dimension: Option<usize>,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
+    custom_executor_with_storage(data_dir, on_disk_payload, None, embedder, dimension)
+}
+
+/// Like [`custom_executor_with_dimension`], with an explicit WAL segment
+/// capacity (bytes) applied to every shard the executor opens or creates;
+/// `None` keeps the engine default.
+pub fn custom_executor_with_storage(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    wal_segment_capacity: Option<usize>,
+    embedder: Arc<dyn Embedder>,
+    dimension: Option<usize>,
+) -> Result<Executor, qql_core::error::QqlError> {
+    let client = Box::new(
+        EdgeQdrant::new(data_dir, on_disk_payload).with_wal_segment_capacity(wal_segment_capacity),
+    );
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: embedder.dimension().or(dimension).unwrap_or(0),

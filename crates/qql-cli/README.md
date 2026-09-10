@@ -30,6 +30,8 @@ Binary: `target/release/qql`.
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
 | `qql doctor` | Health + embed host snapshot |
 | `qql --edge …` | Use configured local edge backend |
+| `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
+| `qql edge bootstrap <coll> --from <url>` | Seed a local edge collection from a remote shard snapshot |
 | `qql version` | Version |
 
 ```bash
@@ -85,6 +87,7 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | — | Offline cross-encoder (also falls back to `RERANK_MODEL`) |
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | — | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true` | `true`/`false`/`1`/`0` — payloads on disk |
+| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; Rust/CLI only) |
 | `EMBED_URL` | `--embed-url` | — | HTTP embedding endpoint |
 | `EMBED_KEY` | `--embed-key` | — | HTTP Bearer token |
 | `EMBED_MODEL` | `--embed-model` | `nomic-embed-text` | HTTP embedding model ID |
@@ -106,11 +109,19 @@ qql config edge \
 
 qql --edge exec "QUERY TEXT 'search' FROM docs USING dense LIMIT 5"
 qql --edge doctor
+qql edge optimize docs
+qql edge bootstrap docs --from http://localhost:6333
 ```
 
-Config: `~/.qql/edge.json`. Edge does **not** support custom `SHARD` / `CREATE SHARD KEY`,
-`GROUP BY`, or **`SHOW QUOTAS` / `SET QUOTA`** — use remote Qdrant (REST) for those.
-Sparse `PARAMS (idf = …)` is available offline (qdrant-edge 0.8+).
+Config: `~/.qql/edge.json`. Edge does **not** support custom `SHARD` / `CREATE SHARD KEY` or
+**`SHOW QUOTAS` / `SET QUOTA`** — use remote Qdrant (REST) for those. `GROUP BY` (without
+`LOOKUP FROM`), sparse `PARAMS (idf = …)`, and ACORN are available offline (qdrant-edge 0.8+).
+
+Edge → edge `migrate` is rejected before any executor starts; publish edge data to a remote
+target with `qql --edge migrate <coll> --target-url <url>` (or `--source-edge`), and seed other
+devices with `qql edge bootstrap`. Continuous sync is not provided (dual-write + partial
+snapshots per the edge sync guide). Run `qql edge optimize` after bulk writes — the engine has
+no background optimizer.
 
 ## Multitenancy examples
 

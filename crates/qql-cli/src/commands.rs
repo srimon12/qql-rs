@@ -155,6 +155,7 @@ pub async fn handle_doctor(
     // Collection vector size compare against the probed dim.
     let mut dim_mismatches: Vec<String> = Vec::new();
     let mut collections_note = String::new();
+    let mut edge_indexing: Vec<IndexingState> = Vec::new();
     if qdrant_ok && !use_edge {
         match executor.client().list_collections().await {
             Ok(names) => {
@@ -186,6 +187,20 @@ pub async fn handle_doctor(
             }
             Err(e) => {
                 collections_note = format!("collections: list failed [{}]: {e}", e.code);
+            }
+        }
+    } else if use_edge && qdrant_ok {
+        match collect_indexing_states(executor.client()).await {
+            Ok(states) => {
+                collections_note = if states.is_empty() {
+                    "collections: edge backend (local, none yet)".to_string()
+                } else {
+                    format!("collections: edge backend (local, {})", states.len())
+                };
+                edge_indexing = states;
+            }
+            Err(e) => {
+                collections_note = format!("collections: edge list failed [{}]: {e}", e.code);
             }
         }
     } else if use_edge {
@@ -238,6 +253,7 @@ pub async fn handle_doctor(
                 "embed_error_code": embed_code,
                 "dim_mismatches": dim_mismatches,
                 "collections_note": collections_note,
+                "edge_indexing": edge_indexing,
             })
         );
     } else if !quiet {
@@ -261,6 +277,11 @@ pub async fn handle_doctor(
         }
         if !collections_note.is_empty() {
             println!("{collections_note}");
+        }
+        for state in &edge_indexing {
+            if let Some(nudge) = &state.nudge {
+                println!("{nudge}");
+            }
         }
         print_doctor_hosts(&hosts);
     }
@@ -733,6 +754,7 @@ pub(crate) fn executor_for(
 #[cfg(feature = "edge")]
 fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
     let config = crate::config::EdgeConfig::load()?.apply_environment();
+    let wal_segment_capacity = wal_segment_capacity_bytes(config.wal_segment_mb)?;
     match config.embedder.as_str() {
         "fastembed" => {
             let is_tty = std::io::stdout().is_terminal();
@@ -745,6 +767,7 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             }
             let options = qql_edge::LocalExecutorOptions {
                 on_disk_payload: config.on_disk_payload,
+                wal_segment_capacity,
                 model: config.model,
                 sparse_model: config.sparse_model,
                 multi_model: config.multi_model.or(config.multi_embed_model.clone()),
@@ -760,9 +783,10 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let endpoint = config.embed_url.ok_or(
                 "the edge HTTP embedder requires embed_url; run `qql config edge --embedder http --embed-url <URL>`",
             )?;
-            qql_edge::http_executor_with_options(
+            qql_edge::http_executor_with_options_and_wal(
                 config.data_dir,
                 config.on_disk_payload,
+                wal_segment_capacity,
                 qql::embedder::HttpEmbedderOptions {
                     endpoint,
                     api_key: config.embed_key,
@@ -877,12 +901,8 @@ pub async fn handle_migrate(
     opts: migrate::MigrateOptions,
     progress: Option<&(dyn Fn(migrate::MigrateProgress) + Sync)>,
 ) -> Result<migrate::MigrateStats, Box<dyn std::error::Error>> {
+    migrate::validate_endpoints(source_edge, target_edge)?;
     let source = executor_for(source_url, source_edge, None)?;
-    if source_edge && target_edge {
-        let result = migrate::migrate_collection(&source, &source, opts, progress).await;
-        source.close().await?;
-        return result;
-    }
     let target = executor_for(target_url, target_edge, target_api_key)?;
     let result = migrate::migrate_collection(&source, &target, opts, progress).await;
     let close_source = source.close().await;
@@ -905,10 +925,303 @@ pub fn handle_configure_edge(
     if config.embed_dimension == 0 {
         return Err("--embed-dim must be greater than zero".into());
     }
+    if config.wal_segment_mb == Some(0) {
+        return Err(
+            "--wal-segment-mb must be greater than zero; omit it for the qdrant-edge 32 MiB default"
+                .into(),
+        );
+    }
     let path = config.save()?;
     println!("Saved edge configuration to {}", path.display());
     println!("Use it with: qql --edge exec \"SHOW COLLECTIONS\"");
     Ok(())
+}
+
+/// Convert the CLI's MiB WAL knob to the byte capacity qdrant-edge expects.
+///
+/// `None` keeps the engine default; a zero or overflowing value fails closed
+/// instead of silently producing a nonsensical WAL capacity.
+#[cfg(feature = "edge")]
+pub(crate) fn wal_segment_capacity_bytes(
+    mb: Option<u64>,
+) -> Result<Option<usize>, Box<dyn std::error::Error>> {
+    match mb {
+        None => Ok(None),
+        Some(0) => Err(
+            "wal_segment_mb must be greater than zero; omit it for the qdrant-edge 32 MiB default"
+                .into(),
+        ),
+        Some(mb) => {
+            let bytes = usize::try_from(mb)
+                .ok()
+                .and_then(|mb| mb.checked_mul(1024 * 1024))
+                .ok_or("wal_segment_mb is too large for this platform")?;
+            Ok(Some(bytes))
+        }
+    }
+}
+
+/// Per-collection indexing counters for the doctor / check readout.
+#[derive(serde::Serialize)]
+struct IndexingState {
+    collection: String,
+    points_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indexed_vectors_count: Option<u64>,
+    segments_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nudge: Option<String>,
+}
+
+/// Read indexing counters for every collection and build the
+/// "run `qql edge optimize`" nudge when indexed vectors lag points.
+async fn collect_indexing_states(
+    client: &dyn qql::client::QdrantOps,
+) -> Result<Vec<IndexingState>, qql_core::error::QqlError> {
+    let names = client.list_collections().await?;
+    let mut states = Vec::new();
+    for name in names {
+        // A collection that disappears mid-scan is skipped, not fatal.
+        let Ok(info) = client.get_collection_info(&name).await else {
+            continue;
+        };
+        let nudge = match info.indexed_vectors_count {
+            Some(indexed) if indexed < info.points_count => Some(format!(
+                "collection '{name}': {} points, {} indexed — qdrant-edge only indexes during optimize; run `qql edge optimize {name}` after bulk writes (segments below indexing_threshold stay brute-force)",
+                info.points_count, indexed
+            )),
+            _ => None,
+        };
+        states.push(IndexingState {
+            collection: name,
+            points_count: info.points_count,
+            indexed_vectors_count: info.indexed_vectors_count,
+            segments_count: info.segments_count,
+            nudge,
+        });
+    }
+    Ok(states)
+}
+
+fn count_label(count: Option<u64>) -> String {
+    count.map_or_else(|| "?".to_string(), |value| value.to_string())
+}
+
+#[cfg(feature = "edge")]
+fn info_counts(info: &qql::client::CollectionInfo) -> serde_json::Value {
+    serde_json::json!({
+        "points": info.points_count,
+        "indexed": info.indexed_vectors_count,
+        "segments": info.segments_count,
+    })
+}
+
+/// Run the qdrant-edge optimizers on a local collection.
+///
+/// Builds `EdgeQdrant` directly instead of going through the embedding-aware
+/// executor, so no model is initialized or downloaded. qdrant-edge has no
+/// background optimizer: this is what merges segments and builds HNSW/sparse
+/// indexes.
+#[cfg(feature = "edge")]
+pub async fn handle_edge_optimize(
+    collection: &str,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use qql::client::QdrantOps;
+
+    let config = crate::config::EdgeConfig::load()?.apply_environment();
+    let wal_segment_capacity = wal_segment_capacity_bytes(config.wal_segment_mb)?;
+    let backend = qql_edge::EdgeQdrant::new(config.data_dir, config.on_disk_payload)
+        .with_wal_segment_capacity(wal_segment_capacity);
+
+    let outcome = async {
+        let before = backend.get_collection_info(collection).await?;
+        let optimized = backend.optimize_collection(collection).await?;
+        let after = backend.get_collection_info(collection).await?;
+        Ok::<_, qql_core::error::QqlError>((before, optimized, after))
+    }
+    .await;
+    let closed = backend.close().await;
+    let (before, optimized, after) = outcome?;
+    closed?;
+
+    let message = if optimized {
+        format!(
+            "Optimized '{collection}': {} → {} segments, {} points, indexed {} → {}",
+            before.segments_count,
+            after.segments_count,
+            after.points_count,
+            count_label(before.indexed_vectors_count),
+            count_label(after.indexed_vectors_count)
+        )
+    } else {
+        format!(
+            "'{collection}' is already optimal: {} segments, {} points, indexed {}",
+            after.segments_count,
+            after.points_count,
+            count_label(after.indexed_vectors_count)
+        )
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "operation": "edge-optimize",
+                "collection": collection,
+                "optimized": optimized,
+                "before": info_counts(&before),
+                "after": info_counts(&after),
+                "message": message,
+            })
+        );
+    } else if !quiet {
+        println!("{message}");
+    }
+    Ok(())
+}
+
+/// Seed a local edge collection from a remote Qdrant shard snapshot.
+///
+/// Streams `GET /collections/{c}/shards/{id}/snapshot`, unpacks it with the
+/// engine's snapshot API into a staging directory, verifies it by loading the
+/// shard, and only then swaps it into the edge data directory. An existing
+/// local collection is replaced only with `--force`; until the swap, it is
+/// untouched. The snapshot carries config, built HNSW indexes and quantized
+/// data — this is the documented "offload indexing" seed flow, not a
+/// statement-based copy.
+#[cfg(feature = "edge")]
+pub async fn handle_edge_bootstrap(
+    from: &str,
+    api_key: Option<String>,
+    collection: &str,
+    shard_id: Option<u32>,
+    force: bool,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = crate::config::EdgeConfig::load()?.apply_environment();
+    let target = config.data_dir.join(collection);
+    let replaced = target.exists();
+    if replaced && !force {
+        return Err(format!(
+            "local collection '{collection}' already exists at {}; pass --force to replace it \
+             (the remote snapshot is downloaded and verified before anything is moved)",
+            target.display()
+        )
+        .into());
+    }
+    std::fs::create_dir_all(&config.data_dir)?;
+
+    // Fresh staging workspace; a previous failed run is discarded.
+    let workspace = config.data_dir.join(".qql-bootstrap").join(collection);
+    if workspace.exists() {
+        std::fs::remove_dir_all(&workspace)?;
+    }
+    std::fs::create_dir_all(&workspace)?;
+    let snapshot_path = workspace.join("shard.snapshot");
+    let stage = workspace.join("stage");
+
+    let run = async {
+        let api_key = api_key.filter(|key| !key.is_empty()).or_else(|| {
+            std::env::var("QDRANT_API_KEY")
+                .ok()
+                .filter(|key| !key.is_empty())
+        });
+        let client = qql::snapshots::RemoteSnapshotClient::new(from, api_key)?;
+        let listing = client.list_shards(collection).await?;
+        let chosen = qql::snapshots::select_shard_id(&listing, shard_id)?;
+        let bytes = client
+            .download_shard_snapshot(collection, chosen, &snapshot_path)
+            .await?;
+        qql_edge::unpack_snapshot(&snapshot_path, &stage)?;
+        let verified = qql_edge::inspect_shard(&stage)?;
+        Ok::<_, qql_core::error::QqlError>((listing, chosen, bytes, verified))
+    }
+    .await;
+
+    // On any download/unpack/verify failure the existing collection is untouched.
+    let (listing, chosen, bytes, verified) = match run {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&workspace);
+            return Err(error.into());
+        }
+    };
+
+    // Commit. Only now is the existing collection touched.
+    let previous = workspace.join("previous");
+    if target.exists() {
+        std::fs::rename(&target, &previous)?;
+    }
+    if let Err(error) = std::fs::rename(&stage, &target) {
+        if previous.exists() {
+            let _ = std::fs::rename(&previous, &target);
+        }
+        let _ = std::fs::remove_dir_all(&workspace);
+        return Err(format!(
+            "failed to move the verified snapshot into {}: {error}",
+            target.display()
+        )
+        .into());
+    }
+
+    // Verify the shard loads from its final path before reporting success.
+    let summary = qql_edge::inspect_shard(&target)?;
+    if previous.exists() {
+        let _ = std::fs::remove_dir_all(&previous);
+    }
+    let _ = std::fs::remove_dir_all(&workspace);
+
+    let message = format!(
+        "Bootstrapped '{collection}' from {from} [shard {chosen}]: {} points, {} indexed, {} segments ({bytes} bytes) → {}",
+        summary.points_count,
+        summary.indexed_vectors_count,
+        summary.segments_count,
+        target.display()
+    );
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "operation": "edge-bootstrap",
+                "collection": collection,
+                "from": from,
+                "shard_id": chosen,
+                "shard_count": listing.shard_count,
+                "local_shard_ids": listing.local_shard_ids,
+                "remote_shards": listing.remote_shard_count,
+                "snapshot_bytes": bytes,
+                "points_count": summary.points_count,
+                "indexed_vectors_count": summary.indexed_vectors_count,
+                "segments_count": summary.segments_count,
+                "path": target.display().to_string(),
+                "replaced": replaced,
+                "staged": info_counts_from_summary(&verified),
+                "message": message,
+            })
+        );
+    } else if !quiet {
+        println!("{message}");
+        if summary.indexed_vectors_count < summary.points_count {
+            println!(
+                "hint: run `qql edge optimize {collection}` to merge segments and build indexes (segments below the collection's indexing_threshold stay brute-force)"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "edge")]
+fn info_counts_from_summary(summary: &qql_edge::ShardSummary) -> serde_json::Value {
+    serde_json::json!({
+        "points": summary.points_count,
+        "indexed": summary.indexed_vectors_count,
+        "segments": summary.segments_count,
+    })
 }
 
 /// Triage one statement through the documented debug loop:
@@ -1230,6 +1543,52 @@ pub async fn handle_check(
             None,
             "topology: skipped because the statement did not parse".to_string(),
         );
+    }
+
+    // Stage 4b: edge indexing state. qdrant-edge never indexes in the
+    // background, so lag here explains "writes are not searchable yet" and
+    // points at `qql edge optimize`.
+    if use_edge
+        && backend_reachable
+        && let Some(exec) = executor.as_ref()
+    {
+        match collect_indexing_states(exec.client()).await {
+            Ok(states) if states.is_empty() => push(
+                "edge-indexing",
+                "ok",
+                None,
+                "edge-indexing: no local collections yet".to_string(),
+            ),
+            Ok(states) => {
+                for state in states {
+                    match state.nudge {
+                        Some(nudge) => push(
+                            "edge-indexing",
+                            "warn",
+                            None,
+                            format!("edge-indexing: {nudge}"),
+                        ),
+                        None => push(
+                            "edge-indexing",
+                            "ok",
+                            None,
+                            format!(
+                                "edge-indexing: '{}' {} points, indexed {}",
+                                state.collection,
+                                state.points_count,
+                                count_label(state.indexed_vectors_count)
+                            ),
+                        ),
+                    }
+                }
+            }
+            Err(e) => push(
+                "edge-indexing",
+                "warn",
+                Some(e.code.to_string()),
+                format!("edge-indexing: readout failed: {e}"),
+            ),
+        }
     }
 
     // Stage 5: backend doctor.

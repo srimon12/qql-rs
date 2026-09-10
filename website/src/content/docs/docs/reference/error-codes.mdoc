@@ -23,6 +23,7 @@ emits. Codes are grouped by the failure family:
 | `QQL-JSON-*` | Value conversion to JSON |
 | `QQL-BIND-*` | Prepared-statement parameter binding |
 | `QQL-EMBEDDING-*` | UPSERT embedding inference |
+| `QQL-SNAPSHOT-*` | Remote shard-snapshot bootstrap (REST only) |
 | `QQL-EDGE-*` | In-process edge backend capability and runtime failures |
 
 ## Error shape per host
@@ -261,6 +262,23 @@ traced in the server log:
   queries), enable Qdrant request logging (`LOG_LEVEL=DEBUG` on the
   server) and correlate by endpoint + timestamp with the ids your client
   sent.
+
+## Snapshot bootstrap
+
+`qql edge bootstrap` seeds a local edge collection from a remote Qdrant shard
+snapshot (`GET /collections/{c}/shards/{id}/snapshot`). The archive is streamed
+to a staging directory and unpacked with the engine's snapshot API; these codes
+cover the REST-only discovery and staging steps.
+
+| Code | Meaning |
+|---|---|
+| `QQL-SNAPSHOT-URL` | The remote snapshot URL is empty (`--from` / `--url` not set) |
+| `QQL-SNAPSHOT-SHARD` | Shard selection failed: a multi-shard collection needs `--shard-id`, or the chosen shard is not hosted by the target node |
+| `QQL-SNAPSHOT-IO` | The snapshot staging file could not be created, written, or flushed locally |
+
+Transport and HTTP failures use `QQL-TRANSPORT` and the `QQL-BACKEND-*` codes
+respectively; engine-side unpack/load failures use the `QQL-EDGE-*` runtime
+codes with `operation = snapshot`.
 
 ## Edge backend
 
@@ -512,6 +530,9 @@ QQL-PLAN-VECTOR-KIND
 QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
 QQL-REST-CLIENT-SIDE
+QQL-SNAPSHOT-IO
+QQL-SNAPSHOT-SHARD
+QQL-SNAPSHOT-URL
 QQL-TIMEOUT
 QQL-TRANSPORT
 QQL-UNKNOWN-VECTOR

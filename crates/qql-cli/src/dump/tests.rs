@@ -14,6 +14,7 @@ fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> Collectio
     CollectionInfo {
         status: "green".into(),
         points_count: 0,
+        indexed_vectors_count: None,
         segments_count: 1,
         schema: CollectionSchema {
             dense_vectors: vectors.iter().filter_map(|v| v.name.clone()).collect(),
@@ -383,6 +384,7 @@ fn schema_from_rest_result_feeds_create() {
     let info = CollectionInfo {
         status: "green".into(),
         points_count: 0,
+        indexed_vectors_count: None,
         segments_count: 1,
         schema,
     };

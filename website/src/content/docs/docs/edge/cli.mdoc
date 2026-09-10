@@ -1,13 +1,14 @@
 ---
 title: "Edge CLI reference"
-description: "The global qql --edge flag, the qql config edge subcommand, environment variables, and edge doctor output."
+description: "The global qql --edge flag, the qql edge optimize/bootstrap subcommands, qql config edge, environment variables, and edge doctor output."
 sidebar:
   order: 2
 ---
 
 The CLI exposes the edge backend through a global `--edge` flag plus a
-dedicated `qql config edge` configuration subcommand. Edge must be compiled in
-first — see [getting started](/docs/edge/getting-started/).
+dedicated `qql edge` subcommand group and `qql config edge` configuration
+subcommand. Edge must be compiled in first — see
+[getting started](/docs/edge/getting-started/).
 
 ## Global `--edge` flag
 
@@ -21,6 +22,8 @@ command to route it to the in-process backend instead of `QDRANT_URL`:
 | Interactive REPL | `qql connect` | `qql --edge connect` |
 | Export a collection | `qql dump docs out.qql` | `qql --edge dump docs out.qql` |
 | Health check | `qql doctor` | `qql --edge doctor` |
+| Merge segments / build indexes | — | `qql edge optimize docs` |
+| Seed from a remote shard snapshot | — | `qql edge bootstrap docs --from http://host:6333` |
 
 {% terminal title="Edge examples" %}
 qql --edge exec "SHOW COLLECTIONS"
@@ -28,10 +31,81 @@ qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"
 qql --edge execute first-local.qql
 qql --edge dump docs backup.qql
 qql --edge connect
+qql edge optimize docs
+qql edge bootstrap docs --from http://localhost:6333
 {% /terminal %}
 
 `qql explain` needs no backend and therefore no `--edge` flag — planning is
 identical for remote and edge backends.
+
+## `qql edge optimize`
+
+qdrant-edge has **no background optimizer**. Segments are merged and HNSW /
+sparse indexes are built only when optimization is explicitly requested, so a
+bulk-loaded collection can serve search from unindexed (brute-force) segments
+indefinitely. `qql edge optimize <collection>` runs the engine's blocking
+optimizer loop until no plan remains and prints the counts before and after:
+
+```text
+Optimized 'docs': 5 → 2 segments, 300 points, indexed 0 → 300
+```
+
+or, when nothing needed rebuilding:
+
+```text
+'collection' is already optimal: 2 segments, 300 points, indexed 300
+```
+
+The command builds the edge backend directly (no embedding model is loaded or
+downloaded). `--json` emits `operation: "edge-optimize"`, `optimized`, and
+`before`/`after` `{points, indexed, segments}` objects.
+
+Run it after bulk writes, or when `qql --edge doctor` / `qql check --edge`
+reports indexing lag (see below). Small collections can legitimately stay
+unindexed: the indexing optimizer only builds HNSW for segments above the
+collection's `indexing_threshold` (10 MB by default offline, configurable with
+`WITH OPTIMIZERS (indexing_threshold = …)`).
+
+## `qql edge bootstrap`
+
+`qql edge bootstrap <collection> --from <remote-url>` seeds a local edge
+collection from a remote Qdrant **shard snapshot** — the documented
+"offload indexing" flow. The snapshot is streamed from
+`GET /collections/{c}/shards/{id}/snapshot`, unpacked with the engine's
+snapshot API into a staging directory, verified by loading it, and only then
+moved into the data directory. It carries the source collection's
+configuration, built HNSW indexes and quantized data, so the device does not
+re-index anything.
+
+Flags:
+
+| Flag | Purpose |
+|---|---|
+| `--from <url>` | Remote Qdrant base URL (defaults to `--url` / `QDRANT_URL`) |
+| `--api-key <key>` | Remote API key (defaults to `QDRANT_API_KEY`) |
+| `--shard-id <n>` | Remote shard to stream; required for multi-shard collections |
+| `--force` | Replace an existing local collection (verified before the swap) |
+| `--json` | Machine-readable result |
+
+Shard discovery: for a single-shard collection the shard id is found
+automatically via `GET /collections/{c}/cluster`. A collection with more than
+one shard fails closed with `QQL-SNAPSHOT-SHARD` unless `--shard-id` is given —
+a qdrant-edge collection is exactly one shard, so you seed one shard per device
+(this pairs with the per-device shard pattern for multi-tenant sources).
+
+An existing local collection is never overwritten without `--force`, and the
+replacement only happens after the snapshot downloads and verifies. Failures
+leave the previous collection untouched. The same command is exposed as an
+`#[ignore]` integration test:
+`cargo test -p qql-cli --features edge --test edge_bootstrap -- --ignored`.
+
+{% aside type="note" title="Snapshot creation is remote-side only" %}
+The engine cannot *create* snapshots (qdrant-edge 0.8 exposes unpack/apply
+only). For the opposite direction — edge → remote — use
+`qql --edge migrate <collection> --target-url <url>`, which streams points over
+REST. Continuous bidirectional sync is not provided; the documented pattern is
+dual-write plus partial snapshots against a server collection.
+{% /aside %}
 
 ## `qql config edge`
 
@@ -49,6 +123,7 @@ Use it with: qql --edge exec "SHOW COLLECTIONS"
 |---|---|---|
 | `--data-dir <dir>` | `~/.qql/edge-data` | Directory for persistent qdrant-edge data |
 | `--in-memory` | off | Keep payloads in memory instead of persisting them to disk (sets `on_disk_payload=false`) |
+| `--wal-segment-mb <n>` | qdrant-edge 32 MiB | WAL segment capacity in MiB. qdrant-edge pre-allocates each segment to this size, which otherwise dominates the on-disk footprint of small embedded shards. Must be greater than zero; Rust/CLI only (the Python/Node bindings cannot set it in qdrant-edge 0.8) |
 
 ### Embedding model flags (fastembed)
 
@@ -78,7 +153,8 @@ local; only embeddings go over the network.
 | `--image-embed-url / --image-embed-key / --image-embed-model / --image-embed-dim` | none | Optional image/CLIP endpoint (dim 0 uses the dense dimension) |
 
 Validation rules: `--embedder` must be `fastembed` or `http`; `http` requires
-`--embed-url`; and `--embed-dim` must be greater than zero.
+`--embed-url`; `--embed-dim` must be greater than zero; and `--wal-segment-mb`
+must be greater than zero when set.
 
 ## Environment variables
 
@@ -97,6 +173,7 @@ embedder reuses the same variables as remote execution.
 | `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | Also falls back to `RERANK_MODEL` |
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true`/`false`/`1`/`0` — payloads on disk |
+| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | WAL segment capacity in MiB (integer > 0) |
 | `EMBED_URL` | `--embed-url` | HTTP embedding endpoint |
 | `EMBED_KEY` | `--embed-key` | Bearer token |
 | `EMBED_MODEL` | `--embed-model` | Model name |
@@ -117,6 +194,8 @@ of which embedding slots are configured and actionable hints:
 
 ```text
 Connected to the local edge backend (healthy)
+collections: edge backend (local, 2)
+collection 'docs': 300 points, 0 indexed — qdrant-edge only indexes during optimize; run `qql edge optimize docs` after bulk writes (segments below indexing_threshold stay brute-force)
 Hosts: dense=true multi=false image=false cross_rerank=false
   dense_model: BGESmallENV15
   hint: ColBERT / AS MULTI / multivector RERANK needs multi_model or multi_embedding_* config
@@ -125,11 +204,16 @@ Hosts: dense=true multi=false image=false cross_rerank=false
   hint: edge has no SHARD routing or shard-key DDL; ALTER COLLECTION covers HNSW/optimizers only
 ```
 
+`qql check --edge "<statement>"` adds the same per-collection readout as an
+`edge-indexing` stage (`ok` when indexed ≥ points, `warn` with the optimize
+nudge when it lags; warnings never fail the check).
+
 The hints are guidance, not failures — the backend is healthy. If a configured
 model cannot be loaded (for example an unknown name), doctor reports the init
 error instead. The JSON form is available via `qql --edge doctor --json`, which
 emits `backend`, `dense`/`multi`/`image`/`cross_rerank` booleans, the resolved
-model names, and the `hints` array.
+model names, the `hints` array, and an `edge_indexing` array of per-collection
+`{collection, points_count, indexed_vectors_count, segments_count, nudge}`.
 
 ## Config file location and permissions
 

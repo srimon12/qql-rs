@@ -28,9 +28,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use qdrant_edge::{
-    CreateIndex, EdgeConfigBuilder, EdgeShard, EdgeShardRead, FieldIndexOperations,
+    CreateIndex, EdgeConfig, EdgeConfigBuilder, EdgeShard, EdgeShardRead, FieldIndexOperations,
     PayloadFieldSchema, PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation,
-    VectorOperations, VectorStructPersisted, WithPayloadInterface, WithVector,
+    VectorOperations, VectorStructPersisted, WalOptions, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
@@ -66,6 +66,10 @@ use qql_plan::{
 pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
+    /// Optional WAL segment capacity (bytes) applied to every shard this
+    /// backend opens or creates; `None` keeps each shard's persisted/default
+    /// value (32 MiB for new shards).
+    wal_segment_capacity: Option<usize>,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
     opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
@@ -81,6 +85,7 @@ impl std::fmt::Debug for EdgeQdrant {
         f.debug_struct("EdgeQdrant")
             .field("base_path", &self.base_path)
             .field("on_disk_payload", &self.on_disk_payload)
+            .field("wal_segment_capacity", &self.wal_segment_capacity)
             .finish()
     }
 }
@@ -92,9 +97,20 @@ impl EdgeQdrant {
         Self {
             base_path: base_path.into(),
             on_disk_payload,
+            wal_segment_capacity: None,
             shards: RwLock::new(HashMap::new()),
             opening: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Override the write-ahead-log segment capacity (bytes) for every shard
+    /// this backend creates or opens. qdrant-edge pre-allocates each WAL
+    /// segment to this size, so embedded targets with small disks set it lower
+    /// than the 32 MiB default. `None` (the default) keeps each shard's
+    /// persisted value, or the engine default when creating a new shard.
+    pub fn with_wal_segment_capacity(mut self, capacity: Option<usize>) -> Self {
+        self.wal_segment_capacity = capacity;
+        self
     }
 
     /// Release all open shards. Call before deleting `base_path` so qdrant-edge
@@ -167,11 +183,21 @@ impl EdgeQdrant {
 
         let path = self.collection_path(name);
         let on_disk = self.on_disk_payload;
+        let wal_segment_capacity = self.wal_segment_capacity;
         let collection = name.to_string();
         let config_res = req.map(|r| build_edge_config(r, on_disk));
         let shard = tokio::task::spawn_blocking(move || -> Result<EdgeShard, QqlError> {
             if path.join("segments").exists() {
-                EdgeShard::load(&path, None)
+                // Override only the WAL capacity; every other unspecified
+                // parameter resolves to the shard's persisted config.
+                let load_config = wal_segment_capacity.map(|capacity| EdgeConfig {
+                    wal_options: Some(WalOptions {
+                        segment_capacity: capacity,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                });
+                EdgeShard::load(&path, load_config)
                     .map_err(|e| edge_err(EdgeOp::Load, Some(&collection), e))
             } else if create {
                 std::fs::create_dir_all(&path).map_err(|e| {
@@ -182,10 +208,16 @@ impl EdgeQdrant {
                     )
                 })?;
 
-                let config = match config_res {
+                let mut config = match config_res {
                     Some(c) => c?,
                     None => EdgeConfigBuilder::new().on_disk_payload(on_disk).build(),
                 };
+                if let Some(capacity) = wal_segment_capacity {
+                    config.wal_options = Some(WalOptions {
+                        segment_capacity: capacity,
+                        ..Default::default()
+                    });
+                }
 
                 EdgeShard::new(&path, config)
                     .map_err(|e| edge_err(EdgeOp::Create, Some(&collection), e))
@@ -786,6 +818,7 @@ impl QdrantOps for EdgeQdrant {
         Ok(CollectionInfo {
             status: "green".to_string(),
             points_count: info.points_count as u64,
+            indexed_vectors_count: Some(info.indexed_vectors_count as u64),
             segments_count: info.segments_count as u64,
             schema: CollectionSchema {
                 dense_vectors,
@@ -1567,6 +1600,68 @@ mod tests {
         });
     }
 
+    /// `indexed_vectors_count` reaches the typed `CollectionInfo` and lags
+    /// `points_count` until `optimize()` builds the index — the contract the
+    /// CLI doctor/check readout and optimize command rely on.
+    #[test]
+    fn info_reports_indexed_vectors_until_optimized() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("indexed-count");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            // 1 KB threshold so 300 four-dimensional points force indexing.
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(4, COSINE)) \
+                     WITH OPTIMIZERS (indexing_threshold = 1)",
+                ))
+                .await
+                .expect("create collection");
+
+            let points = (1..=300)
+                .map(|id| format!("{{id: {id}, vector: {{dense: [{id}.0, 0.0, 0.0, 0.0]}}}}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            backend
+                .execute_planned(&plan_one(&format!("UPSERT INTO docs VALUES {points}")))
+                .await
+                .expect("bulk upsert");
+
+            let before = backend
+                .get_collection_info("docs")
+                .await
+                .expect("collection info");
+            assert_eq!(before.points_count, 300);
+            assert_eq!(
+                before.indexed_vectors_count,
+                Some(0),
+                "an unoptimized appendable segment has no vector index yet"
+            );
+
+            assert!(
+                backend.optimize_collection("docs").await.expect("optimize"),
+                "the indexing optimizer must fire above the threshold"
+            );
+
+            let after = backend
+                .get_collection_info("docs")
+                .await
+                .expect("collection info after optimize");
+            assert_eq!(after.points_count, 300);
+            assert!(
+                after.indexed_vectors_count.unwrap_or(0) > 0,
+                "optimize must index vectors: {after:?}"
+            );
+
+            backend.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
     /// Filter lowering is shared: a filtered COUNT answers through the typed
     /// path with the direct (non-serde) lowering, proving the typed filter
     /// converter is wired into query execution.
@@ -2066,6 +2161,163 @@ mod tests {
             assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS");
 
             backend.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// Per-vector storage / datatype / quantization / HNSW and sparse index
+    /// options from `CREATE COLLECTION` land in the engine config instead of
+    /// being dropped silently.
+    #[test]
+    fn create_collection_passes_per_vector_engine_config() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("create-per-vector");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs ( \
+                       dense VECTOR(4, COSINE) \
+                         WITH HNSW (m = 24) \
+                         WITH QUANTIZATION (type = 'scalar', quantile = 0.99) \
+                         WITH VECTOR (memory = 'cold', datatype = 'float16'), \
+                       sparse SPARSE \
+                         WITH SPARSE (full_scan_threshold = 5000, memory = 'pinned', \
+                                      datatype = 'float16', modifier = 'idf') \
+                     )",
+                ))
+                .await
+                .expect("create collection with per-vector engine config");
+
+            {
+                let shard = backend.open_shard("docs").await.expect("open shard");
+                let config = shard.config();
+
+                let dense = config.vectors.get("dense").expect("dense vector");
+                assert_eq!(
+                    dense.on_disk,
+                    Some(true),
+                    "memory = 'cold' maps to the engine's on-disk flag"
+                );
+                assert_eq!(
+                    dense.datatype,
+                    Some(qdrant_edge::VectorStorageDatatype::Float16)
+                );
+                assert!(
+                    dense.quantization_config.is_some(),
+                    "per-vector quantization must reach the engine"
+                );
+                assert_eq!(
+                    dense.hnsw_config.expect("per-vector HNSW").m,
+                    24,
+                    "per-vector HNSW must reach the engine"
+                );
+
+                let sparse = config.sparse_vectors.get("sparse").expect("sparse vector");
+                assert_eq!(sparse.full_scan_threshold, Some(5_000));
+                assert_eq!(
+                    sparse.on_disk,
+                    Some(false),
+                    "memory = 'pinned' keeps the sparse index in RAM"
+                );
+                assert_eq!(
+                    sparse.datatype,
+                    Some(qdrant_edge::VectorStorageDatatype::Float16)
+                );
+                assert_eq!(sparse.modifier, Some(qdrant_edge::Modifier::Idf));
+            }
+
+            // Config persists and reloads with the same values.
+            backend.close().await.expect("close edge backend");
+            let reopened = EdgeQdrant::new(&dir, false);
+            {
+                let shard = reopened.open_shard("docs").await.expect("reopen shard");
+                let config = shard.config();
+                assert_eq!(
+                    config
+                        .vectors
+                        .get("dense")
+                        .and_then(|v| v.hnsw_config)
+                        .map(|h| h.m),
+                    Some(24)
+                );
+            }
+
+            reopened.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// The WAL segment capacity knob is applied on create and on load, persists
+    /// in the shard config, and does not revert when a later backend opens the
+    /// shard without the knob.
+    #[test]
+    fn wal_segment_capacity_applies_on_create_and_load() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("wal-capacity");
+            let _ = std::fs::remove_dir_all(&dir);
+            let capacity = 4 * 1024 * 1024;
+
+            let backend = EdgeQdrant::new(&dir, false).with_wal_segment_capacity(Some(capacity));
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(1, COSINE))",
+                ))
+                .await
+                .expect("create collection");
+
+            {
+                let shard = backend.open_shard("docs").await.expect("open shard");
+                let config = shard.config();
+                assert_eq!(
+                    config.wal_options.as_ref().map(|w| w.segment_capacity),
+                    Some(capacity),
+                    "create must persist the configured WAL capacity"
+                );
+            }
+            backend.close().await.expect("close edge backend");
+
+            // A backend that overrides the capacity again keeps it.
+            let reopened = EdgeQdrant::new(&dir, false).with_wal_segment_capacity(Some(capacity));
+            {
+                let shard = reopened.open_shard("docs").await.expect("reopen shard");
+                assert_eq!(
+                    shard
+                        .config()
+                        .wal_options
+                        .as_ref()
+                        .map(|w| w.segment_capacity),
+                    Some(capacity)
+                );
+            }
+            reopened.close().await.expect("close edge backend");
+
+            // No knob: the persisted value wins over the 32 MiB engine default.
+            let default_backend = EdgeQdrant::new(&dir, false);
+            {
+                let shard = default_backend
+                    .open_shard("docs")
+                    .await
+                    .expect("default reopen");
+                assert_eq!(
+                    shard
+                        .config()
+                        .wal_options
+                        .as_ref()
+                        .map(|w| w.segment_capacity),
+                    Some(capacity),
+                    "unset knob must not silently reset the persisted capacity"
+                );
+            }
+            default_backend.close().await.expect("close edge backend");
             let _ = std::fs::remove_dir_all(dir);
         });
     }

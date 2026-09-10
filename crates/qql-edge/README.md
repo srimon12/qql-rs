@@ -84,6 +84,23 @@ executor.close().await?; // flush before deleting the data directory
 using `qdrant-edge`'s in-memory HNSW index. Collection data persists to disk at the
 configured `base_path`.
 
+### Storage options
+
+- **WAL segment capacity**: qdrant-edge pre-allocates each WAL segment to 32 MiB by
+  default, which dominates the on-disk footprint of small shards. Set
+  `LocalExecutorOptions::wal_segment_capacity` (bytes) or
+  `EdgeQdrant::with_wal_segment_capacity(Some(bytes))` to shrink it; the resolved
+  value persists in `edge_config.json`, so later loads without the knob keep it.
+  This is a Rust-only engine surface — Python/Node bindings cannot set it in
+  qdrant-edge 0.8.
+- **Snapshot seeding**: `qql_edge::{unpack_snapshot, inspect_shard}` wrap the
+  engine's snapshot API (unpack into a directory, then load and count) so callers
+  never unpack or merge archives by hand.
+- **Per-vector config**: `CREATE COLLECTION` passes through per-vector `on_disk` /
+  `datatype` / quantization / HNSW and sparse index options; the 1.19 `memory`
+  tiers map onto the engine's RAM/mmap switch (`pinned` → RAM, `cached`/`cold` →
+  mmap).
+
 ### Supported operations
 
 The supported point, mutation, collection, index, query, and batch operations
@@ -140,8 +157,11 @@ Intel Mac users should disable default features and use `http-embedding` or
 | `QUERY … GROUP BY field [SIZE n] [LIMIT/OFFSET]` | **Supported** (qdrant-edge grouping driver; hits hydrated per output selector) |
 | `ALTER COLLECTION … WITH HNSW / WITH OPTIMIZERS` | **Supported** (persisted via `set_hnsw_config` / `set_optimizers_config`) |
 | `CREATE COLLECTION … WITH PARAMS (on_disk_payload = …)` | **Supported** (persisted on the shard config) |
+| Per-vector `WITH VECTOR` / `WITH HNSW` / `WITH QUANTIZATION` / `WITH SPARSE` | **Supported** — lowered onto `EdgeVectorParams` / `EdgeSparseVectorParams`; sparse storage is always mmap, its `on_disk` selects the index placement |
+| `memory = 'pinned'\|'cached'\|'cold'` on vectors/sparse | **Mapped** to the engine's RAM/mmap switch (`pinned` → RAM, `cached`/`cold` → mmap; qdrant-edge 0.8 has no memory tiers) |
+| `datatype` on dense/sparse | **Supported** (`float32`/`float16`/`uint8`; `turbo4` is dense-only and fails closed on sparse) |
+| Background optimization | **None** — call `optimize_collection` / `qql edge optimize`; `prevent_unoptimized` hides deferred points until then |
 | `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
-| `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
 | `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
 | `SHARD` / `GROUP BY … LOOKUP FROM` / timeout / consistency | Still unsupported (table below) |
 

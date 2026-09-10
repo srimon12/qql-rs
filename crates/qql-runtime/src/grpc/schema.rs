@@ -19,6 +19,7 @@ pub(crate) fn collection_info_from_grpc(info: &qdrant::CollectionInfo) -> Collec
     CollectionInfo {
         status: info.status.to_string(),
         points_count: info.points_count.unwrap_or(0),
+        indexed_vectors_count: info.indexed_vectors_count,
         segments_count: info.segments_count,
         schema: schema_from_grpc_collection(info),
     }

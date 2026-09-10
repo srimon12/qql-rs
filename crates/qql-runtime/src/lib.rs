@@ -70,6 +70,10 @@ pub mod rest;
 /// fallbacks). Used exclusively by the REST transport.
 #[cfg(feature = "rest")]
 mod rest_response;
+/// Remote shard-snapshot client for edge bootstrap (REST only, not part of
+/// the `QdrantOps` contract).
+#[cfg(feature = "rest")]
+pub mod snapshots;
 /// Sparse vector helpers re-exported from `qql-embed` (wire-compatible BM25).
 pub mod sparse;
 

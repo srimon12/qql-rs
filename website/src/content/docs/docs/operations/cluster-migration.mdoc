@@ -32,11 +32,23 @@ elsewhere, with `--target-api-key` (or `QDRANT_TARGET_API_KEY`) for a
 protected target. `--to` renames the target collection; without it the
 target keeps the source name. A URL containing `:6334` selects the gRPC
 transport, which is the recommended ingest path. `--target-edge` uses the
-local edge backend as the target.
+local edge backend as the target, and `--source-edge` (or the global
+`--edge`) uses it as the source.
 
-{% terminal title="Same-cluster copy and cross-cluster copy" %}
+**Edge → remote publish is supported; edge → edge is rejected.** Publishing
+local edge data to a server is `qql --edge migrate <collection> --target-url
+<url>` (or `--source-edge`). An edge → edge copy is refused with a precise
+error before any executor starts: a qql-edge "collection" is a local
+directory, not a node with a network endpoint. To move data between devices,
+seed each one from a server shard snapshot with
+`qql edge bootstrap --from <url>`; continuous bidirectional sync is not
+provided (the documented pattern is dual-write plus partial snapshots against
+a server collection).
+
+{% terminal title="Same-cluster copy, cross-cluster copy, and edge publish" %}
 qql --url grpc://localhost:6334 migrate docs --to docs_copy --recreate
 qql --url grpc://old-host:6334 migrate docs --target-url grpc://new-host:6334 --to docs --target-api-key "$QDRANT_TARGET_API_KEY"
+qql --edge migrate local_docs --target-url http://server:6333 --to docs
 {% /terminal %}
 
 Migrating onto the same endpoint with the same collection name is
@@ -283,6 +295,7 @@ for scripting.
 | `--to <name>` | Target collection name (defaults to the source name) |
 | `--target-url <URL>` | Target endpoint (defaults to `--url`) |
 | `--target-edge` | Use the local edge backend as the target |
+| `--source-edge` | Use the local edge backend as the source (also implied by the global `--edge`) |
 | `--target-api-key <key>` | API key for the target cluster (`QDRANT_TARGET_API_KEY` also works) |
 | `--batch-size N` | Scroll and upsert batch size (default `128`) |
 | `--workers N` | Concurrent upsert streams (default `2`) |

@@ -54,6 +54,9 @@ pub(crate) enum EdgeOp {
     Optimize,
     /// `EdgeShard::info`.
     Info,
+    /// `EdgeShard::unpack_snapshot` / `EdgeShard::load` during snapshot seeding
+    /// (`qql edge bootstrap`).
+    Snapshot,
     /// `EdgeShard::set_hnsw_config` / `set_vector_hnsw_config` /
     /// `set_optimizers_config` (`ALTER COLLECTION`).
     AlterCollection,
@@ -83,6 +86,7 @@ impl EdgeOp {
             Self::DropIndex => "drop_index",
             Self::Optimize => "optimize",
             Self::Info => "info",
+            Self::Snapshot => "snapshot",
             Self::AlterCollection => "alter_collection",
             Self::Formula => "formula",
         }

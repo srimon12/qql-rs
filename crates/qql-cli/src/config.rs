@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 pub struct EdgeConfig {
     pub data_dir: PathBuf,
     pub on_disk_payload: bool,
+    /// WAL segment capacity in MiB for local edge shards. `None` keeps the
+    /// qdrant-edge default (32 MiB pre-allocated per segment). Rust-only: the
+    /// Python/Node bindings cannot set it in qdrant-edge 0.8.
+    pub wal_segment_mb: Option<u64>,
     pub embedder: String,
     pub model: Option<String>,
     /// Offline sparse model for fastembed (e.g. `"splade"`, `"bge-m3"`).
@@ -41,6 +45,7 @@ impl Default for EdgeConfig {
         Self {
             data_dir,
             on_disk_payload: true,
+            wal_segment_mb: None,
             embedder: "fastembed".to_string(),
             model: None,
             sparse_model: None,
@@ -155,6 +160,9 @@ impl EdgeConfig {
         }
         if let Some(value) = env_bool("QQL_EDGE_ON_DISK") {
             self.on_disk_payload = value;
+        }
+        if let Some(value) = env_usize("QQL_EDGE_WAL_SEGMENT_MB") {
+            self.wal_segment_mb = Some(value as u64);
         }
         if let Some(value) = env_string("EMBED_URL") {
             self.embed_url = Some(value);
