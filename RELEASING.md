@@ -22,6 +22,7 @@ The native Node.js packages use platform packages. The first supported targets
 are:
 
 - Linux x86-64 with glibc;
+- Linux ARM64 with glibc;
 - macOS x86-64;
 - macOS Apple Silicon;
 - Windows x86-64.
@@ -58,11 +59,13 @@ Packages that must each have a Trusted Publisher:
 ```text
 @veristamp/nqql
 @veristamp/nqql-linux-x64-gnu
+@veristamp/nqql-linux-arm64-gnu
 @veristamp/nqql-darwin-x64
 @veristamp/nqql-darwin-arm64
 @veristamp/nqql-win32-x64-msvc
 @veristamp/nqql-edge
 @veristamp/nqql-edge-linux-x64-gnu
+@veristamp/nqql-edge-linux-arm64-gnu
 @veristamp/nqql-edge-darwin-arm64
 @veristamp/nqql-edge-win32-x64-msvc
 qql-wasm
@@ -129,17 +132,23 @@ server-side branch rules are therefore mandatory.
 ## Prepare a release
 
 1. Work on a topic branch created from `dev`.
-2. Update the single workspace version in `Cargo.toml`.
-3. Update the matching versions in:
-   - `crates/pyqql/pyproject.toml`;
-   - `crates/pyqql-edge/pyproject.toml`;
-   - `crates/nqql/package.json`;
-   - `crates/nqql-edge/package.json`;
-   - Node optional platform dependencies.
-4. Refresh the bundled editor WASM so it matches `crates/qql-wasm`:
+2. Synchronize every version site from the single source of truth (`VERSION`):
 
    ```bash
-   wasm-pack build crates/qql-wasm --target nodejs --out-dir ../../editors/vscode/wasm
+   python3 scripts/check_release.py set 0.4.0
+   ```
+
+   This rewrites the root `Cargo.toml` (`[workspace.package]` and the internal
+   `[workspace.dependencies]` pins), the crate manifests with literal internal
+   path dependencies, both Python `pyproject.toml` files, both npm
+   `package.json` files (including platform `optionalDependencies`), and every
+   release-version mention in this document, then refreshes `Cargo.lock` and
+   re-validates the metadata. `bump major|minor|patch` derives the target from
+   `VERSION`; add `--dry-run` to list the files first.
+3. Rebuild the bundled editor WASM so it ships the new parser:
+
+   ```bash
+   wasm-pack build crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm
    ```
 
    The extension loads the bundle with plain `require()` in a CommonJS
@@ -152,6 +161,9 @@ server-side branch rules are therefore mandatory.
    formatting reject syntax that the grammar, snippets, and completions
    advertise. Verify the exports (e.g. `formatQuery`) exist in
    `editors/vscode/wasm/qql_wasm.d.ts` before continuing.
+4. Move the `[Unreleased]` notes in `CHANGELOG.md` into a `[0.4.0]` section
+   dated today. The script never edits the changelog; check mode fails until
+   the section exists.
 5. If the Qdrant protocol pin moves, re-sync the vendored API surfaces:
 
    ```bash
@@ -166,15 +178,18 @@ server-side branch rules are therefore mandatory.
    (its version is independent of the workspace version), run
    `npm run check` and `npm test` inside `editors/vscode/`, and publish with
    `npx vsce publish` — VSIX binaries are never committed.
-6. Update release notes and user-facing installation documentation.
-7. Validate synchronized metadata:
+7. Update user-facing installation documentation and the remaining prose
+   version mentions: `editors/vscode/README.md` (extension packaging version),
+   `bench/README.md` (historical results only), and the website installation
+   snippets / landing copy.
+8. Validate synchronized metadata:
 
    ```bash
    python3 scripts/check_release.py --version 0.4.0
    ```
 
-8. Open a pull request into `dev` and let CI pass.
-9. Run the `Release` workflow manually from `dev`.
+9. Open a pull request into `dev` and let CI pass.
+10. Run the `Release` workflow manually from `dev`.
 
 A manual Release run builds and packages every artifact but has no publishing
 jobs. Download and inspect:
