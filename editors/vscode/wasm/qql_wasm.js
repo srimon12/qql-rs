@@ -116,6 +116,20 @@ class Client {
         }
     }
     /**
+     * Analyze a single query string or `Stmt`: static plan plus measured
+     * execution (per-phase client timings, server time, hardware and
+     * inference usage). Returns an `AnalyzeReport` object:
+     * `{ ok, plan, phases, server_time_s, usage, results }`.
+     * Batches fail closed. `options.params` binds before analysis.
+     * @param {string | Stmt} query
+     * @param {ExecuteOptions} [options]
+     * @returns {AnalyzeReport}
+     */
+    explainAnalyze(query, options) {
+        const ret = wasm.client_explainAnalyze(this.__wbg_ptr, addHeapObject(query), isLikeNone(options) ? 0 : addHeapObject(options));
+        return takeObject(ret);
+    }
+    /**
      * Check whether any embedder is configured.
      * @returns {boolean}
      */
@@ -190,6 +204,86 @@ class Client {
             var ptr2 = isLikeNone(api_key) ? 0 : passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             var len2 = WASM_VECTOR_LEN;
             wasm.client_setHttpEmbedder(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, dimension, ptr2, len2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * OpenAI-compatible image/CLIP vision endpoint (dense vectors).
+     * Browser calls need a CORS-enabled endpoint.
+     * @param {string} endpoint
+     * @param {string} model
+     * @param {number} dimension
+     * @param {string | null} [api_key]
+     */
+    setHttpImageEmbedder(endpoint, model, dimension, api_key) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(endpoint, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            var ptr2 = isLikeNone(api_key) ? 0 : passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len2 = WASM_VECTOR_LEN;
+            wasm.client_setHttpImageEmbedder(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, dimension, ptr2, len2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * OpenAI-compatible multi/ColBERT endpoint (nested `[[...]]` bags).
+     * Browser calls need a CORS-enabled endpoint.
+     * @param {string} endpoint
+     * @param {string} model
+     * @param {number} dimension
+     * @param {string | null} [api_key]
+     */
+    setHttpMultiEmbedder(endpoint, model, dimension, api_key) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(endpoint, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            var ptr2 = isLikeNone(api_key) ? 0 : passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len2 = WASM_VECTOR_LEN;
+            wasm.client_setHttpMultiEmbedder(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, dimension, ptr2, len2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Cohere-compatible cross-encoder rerank endpoint.
+     * Browser calls need a CORS-enabled endpoint.
+     * @param {string} endpoint
+     * @param {string} model
+     * @param {string | null} [api_key]
+     */
+    setHttpReranker(endpoint, model, api_key) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(endpoint, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            var ptr2 = isLikeNone(api_key) ? 0 : passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len2 = WASM_VECTOR_LEN;
+            wasm.client_setHttpReranker(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1212,7 +1306,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_266(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_267(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1238,6 +1332,10 @@ function __wbg_get_imports() {
         __wbg_next_8f26b64fa5e9f64b: function(arg0) {
             const ret = getObject(arg0).next;
             return addHeapObject(ret);
+        },
+        __wbg_now_8b265300afd5f2b9: function() {
+            const ret = Date.now();
+            return ret;
         },
         __wbg_prototypesetcall_10722f4fde830f07: function(arg0, arg1, arg2) {
             Float32Array.prototype.set.call(getArrayF32FromWasm0(arg0, arg1), getObject(arg2));
@@ -1358,7 +1456,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 37, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_262);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_263);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1395,10 +1493,10 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_262(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_263(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_262(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_263(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1409,8 +1507,8 @@ function __wasm_bindgen_func_elem_262(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_266(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_266(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_267(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_267(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const ClientFinalization = (typeof FinalizationRegistry === 'undefined')

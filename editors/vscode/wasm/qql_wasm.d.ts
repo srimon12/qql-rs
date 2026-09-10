@@ -6,11 +6,44 @@ export interface ExecuteOptions {
     params?: Record<string, unknown> | unknown[];
 }
 
+export interface ServerTelemetry {
+    time_s?: number | null;
+    usage?: ServerUsage | null;
+}
+
+export interface ServerUsage {
+    hardware?: HardwareUsage | null;
+    inference?: InferenceUsage | null;
+}
+
+export interface HardwareUsage {
+    cpu: number;
+    payload_io_read: number;
+    payload_io_write: number;
+    payload_index_io_read: number;
+    payload_index_io_write: number;
+    vector_io_read: number;
+    vector_io_write: number;
+}
+
+export interface InferenceUsage {
+    models: Record<string, { tokens: number }>;
+}
+
+export interface PhaseTimings {
+    parse_ms: number;
+    prepare_plan_ms: number;
+    dispatch_ms: number;
+    decode_ms: number;
+    total_ms: number;
+}
+
 export interface ExecResponse {
     ok: boolean;
     operation: string;
     message: string;
     data: unknown | null;
+    telemetry?: ServerTelemetry | null;
 }
 
 export interface ExecutionReport {
@@ -18,12 +51,22 @@ export interface ExecutionReport {
     results: ExecResponse[];
     succeeded: number;
     failed: number;
+    telemetry?: ServerTelemetry | null;
     hits(stmt?: number): Array<Record<string, unknown>>;
     points(stmt?: number): Array<Record<string, unknown>>;
     ids(stmt?: number): Array<string | number>;
     facet(stmt?: number): Array<{ value: unknown; count: number }>;
     count(stmt?: number): number;
-    groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;
+    groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
+}
+
+export interface AnalyzeReport {
+    ok: boolean;
+    plan: string;
+    phases: PhaseTimings;
+    server_time_s: number | null;
+    usage: ServerUsage | null;
+    results: ExecResponse[];
 }
 
 export interface Token {
@@ -91,6 +134,14 @@ export class Client {
      */
     explain(query: string): string;
     /**
+     * Analyze a single query string or `Stmt`: static plan plus measured
+     * execution (per-phase client timings, server time, hardware and
+     * inference usage). Returns an `AnalyzeReport` object:
+     * `{ ok, plan, phases, server_time_s, usage, results }`.
+     * Batches fail closed. `options.params` binds before analysis.
+     */
+    explainAnalyze(query: string | Stmt, options?: ExecuteOptions): Promise<AnalyzeReport>;
+    /**
      * Check whether any embedder is configured.
      */
     hasEmbedder(): boolean;
@@ -112,6 +163,21 @@ export class Client {
      * Always sends the whole text batch in one request (`input` as array).
      */
     setHttpEmbedder(endpoint: string, model: string, dimension: number, api_key?: string | null): void;
+    /**
+     * OpenAI-compatible image/CLIP vision endpoint (dense vectors).
+     * Browser calls need a CORS-enabled endpoint.
+     */
+    setHttpImageEmbedder(endpoint: string, model: string, dimension: number, api_key?: string | null): void;
+    /**
+     * OpenAI-compatible multi/ColBERT endpoint (nested `[[...]]` bags).
+     * Browser calls need a CORS-enabled endpoint.
+     */
+    setHttpMultiEmbedder(endpoint: string, model: string, dimension: number, api_key?: string | null): void;
+    /**
+     * Cohere-compatible cross-encoder rerank endpoint.
+     * Browser calls need a CORS-enabled endpoint.
+     */
+    setHttpReranker(endpoint: string, model: string, api_key?: string | null): void;
     /**
      * Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
      */
