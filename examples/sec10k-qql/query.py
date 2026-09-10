@@ -275,9 +275,9 @@ print("\n═══ 13. COUNT WITH (exact = true) ═══")
 for t in config.TENANTS:
     try:
         s = secure(f"COUNT FROM {C} WITH (exact = true)", tenant=t)
-        all_ = client().execute(s)["results"][0]["data"]["result"]["count"]
+        all_ = client().execute(s)["results"][0]["data"]["count"]
         s2 = secure(f"COUNT FROM {C} WHERE has_figures = true WITH (exact = true)", tenant=t)
-        fig_ = client().execute(s2)["results"][0]["data"]["result"]["count"]
+        fig_ = client().execute(s2)["results"][0]["data"]["count"]
         print(f"  {t:12s}: {all_:>5} total | {fig_:>5} with financial figures")
     except Exception as e:
         print(f"  {t}: ERROR {e}")

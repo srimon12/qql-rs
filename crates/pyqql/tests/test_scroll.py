@@ -17,13 +17,8 @@ def rows(ids):
 
 
 def scroll_report(data):
-    return ExecutionReport(
-        {
-            "ok": True,
-            "succeeded": 1,
-            "failed": 0,
-            "results": [{"ok": True, "operation": "SCROLL", "message": "ok", "data": data}],
-        }
+    return ExecutionReport.from_results(
+        [{"operation": "SCROLL", "message": "ok", "hits": data}]
     )
 
 

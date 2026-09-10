@@ -278,8 +278,7 @@ console.log("  ✓ Client.compile");
   console.log(`  ✓ QUERY returned ${qResults.length} result(s) (top id: ${qResults[0]?.id})`);
 
   r = await exec.execute("COUNT FROM nqql_test");
-  const countVal = r.results[0].data?.result?.count ?? r.results[0].data;
-  assert.strictEqual(countVal, 2);
+  assert.strictEqual(r.results[0].data.count, 2);
   console.log("  ✓ COUNT = 2");
 
   r = await exec.execute([
@@ -295,8 +294,7 @@ console.log("  ✓ Client.compile");
   console.log("  ✓ DELETE doc-2");
 
   r = await exec.execute("COUNT FROM nqql_test");
-  const countAfterDel = r.results[0].data?.result?.count ?? r.results[0].data;
-  assert.strictEqual(countAfterDel, 1);
+  assert.strictEqual(r.results[0].data.count, 1);
   console.log("  ✓ COUNT after delete = 1");
 
   // Numeric point IDs must work (qdrant-edge NumId)

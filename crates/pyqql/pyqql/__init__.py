@@ -258,8 +258,6 @@ def _scroll_cursor_impl(
             _coll, _batch, _where, None if first else cursor, _params, _with_vector, _shard
         )
         report = client.execute(sql, params=page_params) if page_params is not None else client.execute(sql)
-        if not isinstance(report, ExecutionReport):
-            report = ExecutionReport(report)
         hits = report.hits()
         if not hits:
             return
@@ -298,8 +296,6 @@ async def _scroll_cursor_async_impl(
             report = await client.execute_async(sql, params=page_params)
         else:
             report = await client.execute_async(sql)
-        if not isinstance(report, ExecutionReport):
-            report = ExecutionReport(report)
         hits = report.hits()
         if not hits:
             return

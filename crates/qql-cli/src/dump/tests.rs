@@ -262,34 +262,43 @@ fn format_upsert_batch_with_shard_key_parses() {
 }
 
 #[test]
-fn parse_shard_key_list_accepts_rest_and_grpc_shapes() {
+fn parse_shard_key_list_sorts_and_dedupes_typed_keys() {
+    use qql::PlanShardKey;
     use qql_core::ast::ShardKey;
-    // REST wraps each key: {"key": …}.
-    let rest = json!({ "result": { "shard_keys": [{"key": "Mitte"}, {"key": 101}] } });
+    let typed = vec![
+        PlanShardKey::Number(101),
+        PlanShardKey::Keyword("Mitte".into()),
+        // Duplicate keyword: the typed payload dedupes.
+        PlanShardKey::Keyword("Mitte".into()),
+    ];
     assert_eq!(
-        parse_shard_key_list(&rest),
+        parse_shard_key_list(&typed),
         vec![ShardKey::Keyword("Mitte".into()), ShardKey::Number(101),]
     );
-    // gRPC returns bare values.
-    let grpc = json!({ "result": { "shard_keys": ["Mitte", 101] } });
-    assert_eq!(
-        parse_shard_key_list(&grpc),
-        vec![ShardKey::Keyword("Mitte".into()), ShardKey::Number(101),]
-    );
-    // Empty / missing means an auto-sharded collection (single stream).
-    assert!(parse_shard_key_list(&json!({ "result": { "shard_keys": [] } })).is_empty());
-    assert!(parse_shard_key_list(&json!({ "result": {} })).is_empty());
+    // Empty means an auto-sharded collection (single stream).
+    assert!(parse_shard_key_list(&[]).is_empty());
 }
 
 #[test]
 fn extract_scroll_page_returns_typed_hits_and_falls_back_cursor() {
-    let data: ExecData = serde_json::from_value(json!([
-        { "id": 1, "vector": [0.1], "payload": {} },
-        { "id": "a", "vector": [0.2], "payload": { "x": 1 } }
-    ]))
-    .expect("hits shape");
+    let hits = vec![
+        qql::executor::SearchHit {
+            id: PlanPointId::Number(1),
+            score: 0.0,
+            payload: Some(std::collections::HashMap::new()),
+            collection: None,
+            vector: None,
+        },
+        qql::executor::SearchHit {
+            id: PlanPointId::String("a".into()),
+            score: 0.0,
+            payload: None,
+            collection: None,
+            vector: None,
+        },
+    ];
     let response = BackendResponse {
-        data,
+        data: ExecData::Hits(hits),
         telemetry: None,
     };
     let (points, next) = extract_scroll_page(&response);

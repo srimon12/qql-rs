@@ -1,14 +1,29 @@
 //! Statement-specific table formatters for queries, facets, groups, counts, and metadata.
+//!
+//! Every formatter consumes typed `ExecData` payloads directly — there is no
+//! JSON round-trip between the executor and the terminal.
 
-use super::cell::{Cell, stringify_value};
-use super::columns::{detect_query_columns, extract_hits, query_cell};
+use qql::backend::CollectionInfo;
+use qql::executor::{FacetHit, GroupedSearchResult, SearchHit};
+use qql::{PlanFacetValue, PlanGroupId, PlanShardKey, QuotaConfig};
+
+use super::cell::{Alignment, Cell};
+use super::columns::{detect_query_columns, query_cell};
 use super::renderer::Table;
 
 /// Print search hits for QUERY, SCROLL, CROSS_RERANK, and GET_POINTS operations.
+///
+/// `scored` adds the score column for operations whose backend returns
+/// similarity scores (QUERY, CROSS_RERANK); SCROLL / GET_POINTS carry the
+/// default 0.0 and omit it.
 pub fn print_query_table(
-    data: &Option<serde_json::Value>,
+    hits: Option<&[SearchHit]>,
+    scored: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let hits = extract_hits(data);
+    let Some(hits) = hits else {
+        println!("(no results)");
+        return Ok(());
+    };
     if hits.is_empty() {
         println!("(no results)");
         return Ok(());
@@ -19,11 +34,11 @@ pub fn print_query_table(
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(80);
 
-    let columns = detect_query_columns(&hits);
+    let columns = detect_query_columns(hits, scored);
     let mut table = Table::new(columns.iter().map(|column| column.label.clone()).collect())
         .with_max_col_width(max_col_width);
 
-    for hit in &hits {
+    for hit in hits {
         let mut row = Vec::with_capacity(columns.len());
         for col in &columns {
             row.push(query_cell(hit, col));
@@ -36,36 +51,25 @@ pub fn print_query_table(
 }
 
 /// Print categorical facet aggregation results for FACET operations.
-pub fn print_facet_table(
-    data: &Option<serde_json::Value>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let hits = data.as_ref().and_then(|d| {
-        d.as_array()
-            .or_else(|| {
-                d.get("result")
-                    .and_then(|r| r.get("hits"))
-                    .and_then(|h| h.as_array())
-            })
-            .or_else(|| d.get("hits").and_then(|h| h.as_array()))
-    });
-
-    let Some(hits) = hits else {
-        if let Some(d) = data {
-            println!("{}", serde_json::to_string_pretty(d)?);
-        }
+pub fn print_facet_table(entries: Option<&[FacetHit]>) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(entries) = entries else {
+        println!("(no facet hits)");
         return Ok(());
     };
-
-    if hits.is_empty() {
+    if entries.is_empty() {
         println!("(no facet hits)");
         return Ok(());
     }
 
     let mut table = Table::new(vec!["Value".into(), "Count".into()]);
-    for hit in hits {
-        let val = hit.get("value");
-        let count = hit.get("count");
-        table.add_cells(vec![Cell::from_json(val), Cell::from_json(count)]);
+    for entry in entries {
+        table.add_cells(vec![
+            facet_value_cell(&entry.value),
+            Cell {
+                value: entry.count.to_string(),
+                alignment: Alignment::Right,
+            },
+        ]);
     }
 
     table.print()?;
@@ -74,24 +78,12 @@ pub fn print_facet_table(
 
 /// Print grouped query results for QUERY ... GROUP BY operations.
 pub fn print_groups_table(
-    data: &Option<serde_json::Value>,
+    groups: Option<&[GroupedSearchResult]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let groups = data
-        .as_ref()
-        .and_then(|d| d.get("result"))
-        .and_then(|r| r.get("groups"))
-        .and_then(|g| g.as_array())
-        .or_else(|| {
-            data.as_ref()
-                .and_then(|d| d.get("groups"))
-                .and_then(|g| g.as_array())
-        });
-
     let Some(groups) = groups else {
-        println!("{}", serde_json::to_string_pretty(data)?);
+        println!("(no groups)");
         return Ok(());
     };
-
     if groups.is_empty() {
         println!("(no groups)");
         return Ok(());
@@ -99,14 +91,14 @@ pub fn print_groups_table(
 
     let mut table = Table::new(vec!["group_id".into(), "count".into()]);
 
-    for g in groups {
-        let id = stringify_value(&g.get("id").cloned().unwrap_or_default());
-        let hits = g
-            .get("hits")
-            .and_then(|h| h.as_array())
-            .map(|a| a.len().to_string())
-            .unwrap_or_else(|| "0".into());
-        table.add_row(vec![id, hits]);
+    for group in groups {
+        table.add_cells(vec![
+            group_id_cell(&group.group_id),
+            Cell {
+                value: group.hits.len().to_string(),
+                alignment: Alignment::Right,
+            },
+        ]);
     }
 
     table.print()?;
@@ -114,24 +106,24 @@ pub fn print_groups_table(
 }
 
 /// Print count integer for COUNT operations.
-pub fn print_count(data: &Option<serde_json::Value>) {
-    println!("  count: {}", count_value(data));
+pub fn print_count(count: Option<u64>) {
+    println!("  count: {}", count.unwrap_or(0));
 }
 
 /// Print a table of collection names for SHOW COLLECTIONS operations.
-pub fn print_collections_list(
-    data: &Option<serde_json::Value>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let cols = collection_names(data);
-
-    if cols.is_empty() {
+pub fn print_collections_list(names: Option<&[String]>) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(names) = names else {
+        println!("(no collections)");
+        return Ok(());
+    };
+    if names.is_empty() {
         println!("(no collections)");
         return Ok(());
     }
 
     let mut table = Table::new(vec!["Collection".into()]);
-    for name in cols {
-        table.add_row(vec![name]);
+    for name in names {
+        table.add_row(vec![name.clone()]);
     }
     table.print()?;
     Ok(())
@@ -139,42 +131,87 @@ pub fn print_collections_list(
 
 /// Print collection metadata properties for SHOW COLLECTION operations.
 pub fn print_collection_info(
-    data: &Option<serde_json::Value>,
+    info: Option<&CollectionInfo>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(obj) = result_value(data).and_then(serde_json::Value::as_object) else {
-        if let Some(d) = data {
-            println!("{}", serde_json::to_string_pretty(d)?);
-        }
+    let Some(info) = info else {
+        println!("(no collection info)");
         return Ok(());
     };
 
     let mut table = Table::new(vec!["Property".into(), "Value".into()]);
-    for (key, val) in obj {
-        table.add_row(vec![key.clone(), stringify_value(val)]);
+    table.add_row(vec!["status".into(), info.status.clone()]);
+    table.add_row(vec!["points_count".into(), info.points_count.to_string()]);
+    table.add_row(vec![
+        "segments_count".into(),
+        info.segments_count.to_string(),
+    ]);
+
+    let vectors = info
+        .schema
+        .vectors
+        .iter()
+        .map(|spec| {
+            let name = spec.name.as_deref().unwrap_or("default");
+            format!(
+                "{name} ({}, {})",
+                spec.size,
+                spec.distance.to_ascii_uppercase()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !vectors.is_empty() {
+        table.add_row(vec!["vectors".into(), vectors]);
     }
+
+    let sparse = info
+        .schema
+        .sparse_vectors
+        .iter()
+        .map(|spec| spec.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !sparse.is_empty() {
+        table.add_row(vec!["sparse_vectors".into(), sparse]);
+    }
+
+    let indexes = info
+        .schema
+        .payload_indexes
+        .iter()
+        .map(|spec| format!("{} ({})", spec.field, spec.data_type))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !indexes.is_empty() {
+        table.add_row(vec!["payload_indexes".into(), indexes]);
+    }
+
+    let params = &info.schema.params;
+    if let Some(shard_number) = params.shard_number {
+        table.add_row(vec!["shard_number".into(), shard_number.to_string()]);
+    }
+    if let Some(method) = &params.sharding_method {
+        table.add_row(vec!["sharding_method".into(), method.clone()]);
+    }
+    if let Some(on_disk) = params.on_disk_payload {
+        table.add_row(vec!["on_disk_payload".into(), on_disk.to_string()]);
+    }
+    if let Some(replication) = params.replication_factor {
+        table.add_row(vec!["replication_factor".into(), replication.to_string()]);
+    }
+
     table.print()?;
     Ok(())
 }
 
 /// Print custom shard keys for SHOW SHARD KEYS operations.
 pub fn print_shard_keys_table(
-    data: &Option<serde_json::Value>,
+    keys: Option<&[PlanShardKey]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let shard_keys = data.as_ref().and_then(|d| {
-        d.get("result")
-            .and_then(|r| r.get("shard_keys"))
-            .or_else(|| d.get("shard_keys"))
-            .and_then(|s| s.as_array())
-            .or_else(|| d.as_array())
-    });
-
-    let Some(keys) = shard_keys else {
-        if let Some(d) = data {
-            println!("{}", serde_json::to_string_pretty(d)?);
-        }
+    let Some(keys) = keys else {
+        println!("(no shard keys)");
         return Ok(());
     };
-
     if keys.is_empty() {
         println!("(no shard keys)");
         return Ok(());
@@ -182,31 +219,41 @@ pub fn print_shard_keys_table(
 
     let mut table = Table::new(vec!["Shard Key".into()]);
     for key in keys {
-        table.add_row(vec![stringify_value(key)]);
+        table.add_row(vec![key.to_string()]);
     }
     table.print()?;
     Ok(())
 }
 
 /// Print quota limits and metrics for SHOW QUOTAS operations.
-pub fn print_quotas_table(
-    data: &Option<serde_json::Value>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(obj) = result_value(data).and_then(serde_json::Value::as_object) else {
-        if let Some(d) = data {
-            println!("{}", serde_json::to_string_pretty(d)?);
-        }
+pub fn print_quotas_table(config: Option<&QuotaConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(config) = config else {
+        println!("(no quotas configured)");
         return Ok(());
     };
 
-    if obj.is_empty() {
+    let mut rows: Vec<(&str, String)> = Vec::new();
+    if let Some(enabled) = config.enabled {
+        rows.push(("enabled", enabled.to_string()));
+    }
+    if let Some(percent) = config.max_resident_memory_percent {
+        rows.push(("max_resident_memory_percent", percent.to_string()));
+    }
+    if let Some(percent) = config.max_disk_usage_percent {
+        rows.push(("max_disk_usage_percent", percent.to_string()));
+    }
+    if let Some(percent) = config.release_margin_percent {
+        rows.push(("release_margin_percent", percent.to_string()));
+    }
+
+    if rows.is_empty() {
         println!("(no quotas configured)");
         return Ok(());
     }
 
     let mut table = Table::new(vec!["Quota".into(), "Limit".into()]);
-    for (key, val) in obj {
-        table.add_row(vec![key.clone(), stringify_value(val)]);
+    for (key, value) in rows {
+        table.add_row(vec![key.into(), value]);
     }
     table.print()?;
     Ok(())
@@ -214,33 +261,29 @@ pub fn print_quotas_table(
 
 // ── helpers ──────────────────────────────────────────────────────
 
-/// Returns Qdrant's `result` object when present, otherwise the response.
-pub fn result_value(data: &Option<serde_json::Value>) -> Option<&serde_json::Value> {
-    data.as_ref()
-        .map(|value| value.get("result").unwrap_or(value))
+/// Render a typed facet value with the alignment its JSON shape would get.
+fn facet_value_cell(value: &PlanFacetValue) -> Cell {
+    match value {
+        PlanFacetValue::Keyword(text) => Cell::text(text.clone()),
+        PlanFacetValue::Integer(number) => Cell {
+            value: number.to_string(),
+            alignment: Alignment::Right,
+        },
+        PlanFacetValue::Bool(flag) => Cell::text(flag.to_string()),
+    }
 }
 
-pub fn count_value(data: &Option<serde_json::Value>) -> u64 {
-    result_value(data)
-        .and_then(|value| value.get("count"))
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0)
-}
-
-pub fn collection_names(data: &Option<serde_json::Value>) -> Vec<String> {
-    result_value(data)
-        .and_then(|value| value.get("collections"))
-        .and_then(serde_json::Value::as_array)
-        .map(|collections| {
-            collections
-                .iter()
-                .filter_map(|collection| {
-                    collection
-                        .as_str()
-                        .or_else(|| collection.get("name").and_then(serde_json::Value::as_str))
-                })
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
+/// Render a typed group id with the alignment its JSON shape would get.
+fn group_id_cell(id: &PlanGroupId) -> Cell {
+    match id {
+        PlanGroupId::Keyword(text) => Cell::text(text.clone()),
+        PlanGroupId::Unsigned(number) => Cell {
+            value: number.to_string(),
+            alignment: Alignment::Right,
+        },
+        PlanGroupId::Signed(number) => Cell {
+            value: number.to_string(),
+            alignment: Alignment::Right,
+        },
+    }
 }

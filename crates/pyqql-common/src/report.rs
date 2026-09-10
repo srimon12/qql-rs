@@ -7,11 +7,13 @@
 //! `pythonize`. Both SDKs register the classes via
 //! [`register_report_classes`].
 
-use pyo3::exceptions::PyKeyError;
+use std::collections::HashMap;
+
+use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
-use qql::executor::{ExecData, ExecutionReport, SearchHit};
-use qql_plan::PlanPointId;
+use pyo3::types::{PyAny, PyDict, PyList, PyType};
+use qql::executor::{ExecData, ExecutionReport, FacetHit, GroupedSearchResult, SearchHit};
+use qql_plan::{PlanFacetValue, PlanGroupId, PlanPointId, PlanVectorStruct};
 
 /// Convert a typed point id to its Python form (`int` or `str`).
 fn point_id_object<'py>(py: Python<'py>, id: &PlanPointId) -> PyResult<Bound<'py, PyAny>> {
@@ -26,6 +28,12 @@ fn point_id_object<'py>(py: Python<'py>, id: &PlanPointId) -> PyResult<Bound<'py
 /// (`0.95f32` becomes `0.95`, not `0.949999988079071`).
 fn score_to_f64(score: f32) -> f64 {
     score.to_string().parse().unwrap_or(score as f64)
+}
+
+/// Extracted text is the payload's `text` field (the typed hit has no
+/// dedicated field). Non-string payload `text` values yield `None`.
+fn payload_text(payload: &Option<HashMap<String, serde_json::Value>>) -> Option<&str> {
+    payload.as_ref()?.get("text")?.as_str()
 }
 
 /// A scored hit returned from a search or retrieval query.
@@ -65,11 +73,12 @@ impl PyScoredPoint {
         }
     }
 
-    /// Extracted payload text, or `None`.
+    /// Extracted payload text (`payload["text"]` when it is a string), or
+    /// `None`.
     #[getter]
     fn text<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        match &self.inner.text {
-            Some(text) => Ok(text.as_str().into_pyobject(py)?.into_any()),
+        match payload_text(&self.inner.payload) {
+            Some(text) => Ok(text.into_pyobject(py)?.into_any()),
             None => Ok(py.None().into_bound(py)),
         }
     }
@@ -144,7 +153,7 @@ impl PyScoredPoint {
             "ScoredPoint(id={}, score={}, text={:?}, collection={:?})",
             self.inner.id,
             score_to_f64(self.inner.score),
-            self.inner.text,
+            payload_text(&self.inner.payload),
             self.inner.collection
         )
     }
@@ -200,17 +209,38 @@ impl PyExecutionReport {
 
 #[pymethods]
 impl PyExecutionReport {
-    /// Hydrate a report from the serialized dict shape (`{ok, results,
-    /// succeeded, failed, telemetry?}`) for mocks, tests, and replay. Live
-    /// results come from a client's `execute()`.
-    #[new]
-    #[pyo3(signature = (data=None))]
-    fn new(data: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
-        let inner = match data {
-            Some(value) if !value.is_none() => pythonize::depythonize(value)?,
-            _ => ExecutionReport::from_results(Vec::new()),
-        };
-        Ok(Self { inner })
+    /// Build an in-memory report from typed statement specs (tests, mocks,
+    /// offline replay). Each spec is a dict with an `operation` string,
+    /// an optional `ok` (default `True`) and `message`, and at most one typed
+    /// payload key:
+    ///
+    /// - `hits`: list of `{id, score?, payload?, collection?, vector?}`
+    /// - `groups`: list of `{id, hits}`
+    /// - `count`: int — a COUNT result, or a mutation's affected count on any
+    ///   other operation
+    /// - `facet`: list of `{value, count}`
+    /// - `collections`: list of collection names
+    /// - `collection`: collection-info dict (`status`, `points_count`, …)
+    /// - `shard_keys`: list of strings or non-negative ints
+    /// - `quotas`: quota-config dict (`enabled`, `max_disk_usage_percent`, …)
+    ///
+    /// Live reports always come from a client's `execute()`; this constructor
+    /// exists so offline tests can exercise the typed accessors without a
+    /// serialized-envelope round trip.
+    #[classmethod]
+    #[pyo3(signature = (results))]
+    fn from_results(_cls: &Bound<'_, PyType>, results: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let mut responses = Vec::new();
+        for spec in results.try_iter()? {
+            let spec = spec?;
+            let spec = spec
+                .cast::<PyDict>()
+                .map_err(|_| PyTypeError::new_err("each result spec must be a dict"))?;
+            responses.push(response_from_spec(spec)?);
+        }
+        Ok(Self {
+            inner: ExecutionReport::from_results(responses),
+        })
     }
 
     /// Whether every statement succeeded (`failed == 0`).
@@ -312,27 +342,77 @@ impl PyExecutionReport {
             .unwrap_or(0)
     }
 
-    /// `GROUP BY` groups for statement `stmt` as raw backend group objects
-    /// (`{id, hits}`), normalized across the `{"result": {"groups": […]}}`
-    /// and bare `{"groups": […]}` envelopes.
+    /// `GROUP BY` groups for statement `stmt`: `[{id, hits: [ScoredPoint, …]}]`.
     #[pyo3(signature = (stmt=0))]
     fn groups<'py>(&self, py: Python<'py>, stmt: isize) -> PyResult<Bound<'py, PyList>> {
         let out = PyList::empty(py);
         if let Some(result) = self.result_at(stmt)
-            && let Some(data) = result.data.as_ref()
+            && let Some(groups) = result.data.as_ref().and_then(ExecData::groups)
         {
-            let value = serde_json::to_value(data).unwrap_or(serde_json::Value::Null);
-            let groups = value
-                .get("result")
-                .and_then(|result| result.get("groups"))
-                .or_else(|| value.get("groups"));
-            if let Some(groups) = groups.and_then(serde_json::Value::as_array) {
-                for group in groups {
-                    out.append(pythonize::pythonize(py, group)?)?;
+            for group in groups {
+                let item = PyDict::new(py);
+                item.set_item("id", pythonize::pythonize(py, &group.group_id)?)?;
+                let hits = PyList::empty(py);
+                for hit in &group.hits {
+                    hits.append(Bound::new(py, PyScoredPoint::new(hit.clone()))?)?;
                 }
+                item.set_item("hits", hits)?;
+                out.append(item)?;
             }
         }
         Ok(out)
+    }
+
+    /// `SHOW COLLECTIONS` names for statement `stmt`.
+    #[pyo3(signature = (stmt=0))]
+    fn collections<'py>(&self, py: Python<'py>, stmt: isize) -> PyResult<Bound<'py, PyList>> {
+        let out = PyList::empty(py);
+        if let Some(result) = self.result_at(stmt)
+            && let Some(collections) = result.data.as_ref().and_then(ExecData::collections)
+        {
+            for name in collections {
+                out.append(name)?;
+            }
+        }
+        Ok(out)
+    }
+
+    /// `SHOW COLLECTION` metadata as a dict, or `None`.
+    #[pyo3(signature = (stmt=0))]
+    fn collection<'py>(&self, py: Python<'py>, stmt: isize) -> PyResult<Bound<'py, PyAny>> {
+        match self
+            .result_at(stmt)
+            .and_then(|result| result.data.as_ref().and_then(ExecData::collection))
+        {
+            Some(info) => Ok(pythonize::pythonize(py, info)?),
+            None => Ok(py.None().into_bound(py)),
+        }
+    }
+
+    /// `SHOW SHARD KEYS` keys (`str` or `int`) for statement `stmt`.
+    #[pyo3(signature = (stmt=0))]
+    fn shard_keys<'py>(&self, py: Python<'py>, stmt: isize) -> PyResult<Bound<'py, PyList>> {
+        let out = PyList::empty(py);
+        if let Some(result) = self.result_at(stmt)
+            && let Some(keys) = result.data.as_ref().and_then(ExecData::shard_keys)
+        {
+            for key in keys {
+                out.append(pythonize::pythonize(py, key)?)?;
+            }
+        }
+        Ok(out)
+    }
+
+    /// `SHOW QUOTAS` configuration as a dict, or `None`.
+    #[pyo3(signature = (stmt=0))]
+    fn quotas<'py>(&self, py: Python<'py>, stmt: isize) -> PyResult<Bound<'py, PyAny>> {
+        match self
+            .result_at(stmt)
+            .and_then(|result| result.data.as_ref().and_then(ExecData::quotas))
+        {
+            Some(config) => Ok(pythonize::pythonize(py, config)?),
+            None => Ok(py.None().into_bound(py)),
+        }
     }
 
     /// Dict-style field access for `ok` / `results` / `succeeded` / `failed`
@@ -386,4 +466,177 @@ pub fn register_report_classes(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyScoredPoint>()?;
     module.add_class::<PyExecutionReport>()?;
     Ok(())
+}
+
+// ── typed report construction from Python specs ──────────────────
+
+/// Required spec field, failing with `KeyError` when absent.
+fn required<'py>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<Bound<'py, PyAny>> {
+    dict.get_item(key)?
+        .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+}
+
+/// Optional non-`None` spec field.
+fn optional<'py>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
+    match dict.get_item(key)? {
+        Some(value) if !value.is_none() => Ok(Some(value)),
+        _ => Ok(None),
+    }
+}
+
+/// Deserialize a typed field through the pythonize boundary (payload values,
+/// vector/group/facet primitives, quotas, collection info).
+fn typed_field<T: serde::de::DeserializeOwned>(
+    value: &Bound<'_, PyAny>,
+    what: &str,
+) -> PyResult<T> {
+    pythonize::depythonize(value)
+        .map_err(|error| PyTypeError::new_err(format!("invalid {what}: {error}")))
+}
+
+/// One typed [`SearchHit`] from `{id, score?, payload?, collection?, vector?}`.
+fn hit_from_python(value: &Bound<'_, PyAny>) -> PyResult<SearchHit> {
+    let hit = value
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("each hit must be a dict"))?;
+    let id: PlanPointId = typed_field(&required(hit, "id")?, "hit id")?;
+    let score: f64 = optional(hit, "score")?
+        .map(|value| value.extract())
+        .transpose()?
+        .unwrap_or(0.0);
+    let payload: Option<HashMap<String, serde_json::Value>> = optional(hit, "payload")?
+        .map(|value| typed_field(&value, "hit payload"))
+        .transpose()?;
+    let collection: Option<String> = optional(hit, "collection")?
+        .map(|value| value.extract())
+        .transpose()?;
+    let vector: Option<PlanVectorStruct> = optional(hit, "vector")?
+        .map(|value| typed_field(&value, "hit vector"))
+        .transpose()?;
+    Ok(SearchHit {
+        id,
+        score: score as f32,
+        payload,
+        collection,
+        vector,
+    })
+}
+
+/// Typed hits from a Python iterable of hit dicts.
+fn hits_from_python(value: &Bound<'_, PyAny>) -> PyResult<Vec<SearchHit>> {
+    value
+        .try_iter()?
+        .map(|item| item.and_then(|item| hit_from_python(&item)))
+        .collect()
+}
+
+/// Typed groups from a Python iterable of `{id, hits}` dicts.
+fn groups_from_python(value: &Bound<'_, PyAny>) -> PyResult<Vec<GroupedSearchResult>> {
+    let mut groups = Vec::new();
+    for item in value.try_iter()? {
+        let item = item?;
+        let group = item
+            .cast::<PyDict>()
+            .map_err(|_| PyTypeError::new_err("each group must be a dict"))?;
+        let group_id: PlanGroupId = typed_field(&required(group, "id")?, "group id")?;
+        let hits = match optional(group, "hits")? {
+            Some(hits) => hits_from_python(&hits)?,
+            None => Vec::new(),
+        };
+        groups.push(GroupedSearchResult { group_id, hits });
+    }
+    Ok(groups)
+}
+
+/// Typed facet entries from a Python iterable of `{value, count}` dicts.
+fn facet_from_python(value: &Bound<'_, PyAny>) -> PyResult<Vec<FacetHit>> {
+    let mut entries = Vec::new();
+    for item in value.try_iter()? {
+        let item = item?;
+        let entry = item
+            .cast::<PyDict>()
+            .map_err(|_| PyTypeError::new_err("each facet entry must be a dict"))?;
+        let facet_value: PlanFacetValue = typed_field(&required(entry, "value")?, "facet value")?;
+        let count: u64 = required(entry, "count")?.extract()?;
+        entries.push(FacetHit {
+            value: facet_value,
+            count,
+        });
+    }
+    Ok(entries)
+}
+
+/// Typed payload from the spec's single variant key.
+fn data_from_spec(spec: &Bound<'_, PyDict>, operation: &str) -> PyResult<Option<ExecData>> {
+    if let Some(value) = optional(spec, "hits")? {
+        return Ok(Some(ExecData::Hits(hits_from_python(&value)?)));
+    }
+    if let Some(value) = optional(spec, "groups")? {
+        return Ok(Some(ExecData::Groups(groups_from_python(&value)?)));
+    }
+    if let Some(value) = optional(spec, "count")? {
+        let count: u64 = value.extract()?;
+        // `COUNT` produces a count result; every other operation reporting a
+        // count is a mutation (UPSERT affected-points).
+        return Ok(Some(if operation == "COUNT" {
+            ExecData::Count(count)
+        } else {
+            ExecData::Mutation {
+                affected: Some(count),
+            }
+        }));
+    }
+    if let Some(value) = optional(spec, "facet")? {
+        return Ok(Some(ExecData::Facet(facet_from_python(&value)?)));
+    }
+    if let Some(value) = optional(spec, "collections")? {
+        return Ok(Some(ExecData::Collections(value.extract()?)));
+    }
+    if let Some(value) = optional(spec, "collection")? {
+        return Ok(Some(ExecData::Collection(typed_field(
+            &value,
+            "collection info",
+        )?)));
+    }
+    if let Some(value) = optional(spec, "shard_keys")? {
+        return Ok(Some(ExecData::ShardKeys(typed_field(
+            &value,
+            "shard keys",
+        )?)));
+    }
+    if let Some(value) = optional(spec, "quotas")? {
+        return Ok(Some(ExecData::Quotas(typed_field(&value, "quotas")?)));
+    }
+    Ok(None)
+}
+
+/// One typed [`ExecResponse`](qql::executor::ExecResponse) from a spec dict.
+fn response_from_spec(spec: &Bound<'_, PyDict>) -> PyResult<qql::executor::ExecResponse> {
+    let operation: String = required(spec, "operation")?.extract()?;
+    let ok: bool = optional(spec, "ok")?
+        .map(|value| value.extract())
+        .transpose()?
+        .unwrap_or(true);
+    let message: String = optional(spec, "message")?
+        .map(|value| value.extract())
+        .transpose()?
+        .unwrap_or_else(|| {
+            if ok {
+                format!("{operation} ok")
+            } else {
+                format!("{operation} failed")
+            }
+        });
+    let data = if ok {
+        data_from_spec(spec, &operation)?
+    } else {
+        None
+    };
+    Ok(qql::executor::ExecResponse {
+        ok,
+        operation,
+        message,
+        data,
+        telemetry: None,
+    })
 }

@@ -111,7 +111,7 @@ async fn facet_keys(
     let truncated = hits.len() as u64 >= FACET_LIMIT;
     let mut keys = Vec::new();
     for (value, _) in hits {
-        if let Some(key) = json_to_shard_key(&value) {
+        if let Some(key) = facet_value_to_shard_key(&value) {
             keys.push(key);
         }
     }
@@ -159,6 +159,19 @@ pub(crate) fn json_to_shard_key(value: &Value) -> Option<ShardKey> {
                     .filter(|i| *i >= 0)
                     .map(|i| ShardKey::Number(i as u64))
             }
+        }
+        _ => None,
+    }
+}
+
+/// Typed FACET value → shard key. Bool facet values are not shard keys.
+fn facet_value_to_shard_key(value: &qql::PlanFacetValue) -> Option<ShardKey> {
+    match value {
+        qql::PlanFacetValue::Keyword(text) if !text.is_empty() => {
+            Some(ShardKey::Keyword(text.clone()))
+        }
+        qql::PlanFacetValue::Integer(number) if *number >= 0 => {
+            Some(ShardKey::Number(*number as u64))
         }
         _ => None,
     }

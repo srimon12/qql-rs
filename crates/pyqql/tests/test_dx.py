@@ -66,53 +66,43 @@ class TestDxImprovements(unittest.TestCase):
         )
 
     def test_execution_report_and_scored_point(self):
-        # 4, 5, 8. ScoredPoint, ExecutionReport backward compatibility and typed accessors
-        rep_dict = {
-            "ok": True,
-            "results": [
+        # 4, 5, 8. ScoredPoint, ExecutionReport typed accessors (no JSON
+        # envelope hydration: the report is built from typed specs).
+        rep = sdk.ExecutionReport.from_results(
+            [
                 {
-                    "ok": True,
                     "operation": "QUERY",
                     "message": "Found 2 hits",
-                    "data": [
+                    "hits": [
                         {
                             "id": 936746218411023069,
                             "score": 0.95,
-                            "payload": {"title": "Doc 1"},
-                            "text": "Doc 1",
+                            "payload": {"title": "Doc 1", "text": "Doc 1"},
                             "collection": "coll_a",
                         },
                         {
                             "id": "c87bb3c1-a201-447a-8f5f-1555df27d14d",
                             "score": 0.82,
-                            "payload": {"title": "Doc 2"},
-                            "text": "Doc 2",
+                            "payload": {"title": "Doc 2", "text": "Doc 2"},
                             "collection": "coll_a",
                         },
                     ],
                 },
                 {
-                    "ok": True,
                     "operation": "FACET",
                     "message": "Found 2 facet hit(s)",
-                    "data": [
+                    "facet": [
                         {"value": "tech", "count": 10},
                         {"value": "news", "count": 4},
                     ],
                 },
                 {
-                    "ok": True,
                     "operation": "COUNT",
                     "message": "Count: 42",
-                    "data": {"count": 42},
+                    "count": 42,
                 },
-            ],
-            "succeeded": 3,
-            "failed": 0,
-        }
-
-        rep = sdk.ExecutionReport(rep_dict)
-        # Backward compatibility
+            ]
+        )
         self.assertTrue(rep.ok)
         self.assertTrue(rep["ok"])
         self.assertEqual(rep.succeeded, 3)
@@ -131,6 +121,8 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(hits[0]["title"], "Doc 1")
         self.assertEqual(hits[0].get("title"), "Doc 1")
         self.assertEqual(hits[0].collection, "coll_a")
+        # `text` is derived from the typed payload's `text` field.
+        self.assertEqual(hits[0].text, "Doc 1")
 
         # Point IDs accessor
         self.assertEqual(
@@ -155,52 +147,61 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(rep.groups(-10), [])
 
     def test_execution_report_groups_accessor(self):
-        # GROUP BY results normalize through report.groups() (pyqql parity
-        # with nqql's ExecutionReport.groups()).
+        # GROUP BY results come back as typed `{id, hits}` dicts whose hits
+        # are native ScoredPoint objects (pyqql parity with nqql's
+        # ExecutionReport.groups()).
         ExecutionReport = sdk.ExecutionReport
 
-        nested = ExecutionReport(
-            {
-                "ok": True,
-                "succeeded": 1,
-                "failed": 0,
-                "results": [
-                    {
-                        "ok": True,
-                        "operation": "QUERY_GROUPS",
-                        "message": "Found 2 group(s)",
-                        "data": {
-                            "result": {
-                                "groups": [
-                                    {"id": "a", "hits": [{"id": 1, "score": 0.9}]},
-                                    {"id": "b", "hits": [{"id": 2, "score": 0.8}]},
-                                ]
-                            },
-                            "status": "ok",
-                        },
-                    }
-                ],
-            }
+        grouped = ExecutionReport.from_results(
+            [
+                {
+                    "operation": "QUERY_GROUPS",
+                    "message": "Found 2 group(s)",
+                    "groups": [
+                        {"id": "a", "hits": [{"id": 1, "score": 0.9}]},
+                        {"id": "b", "hits": [{"id": 2, "score": 0.8}]},
+                    ],
+                }
+            ]
         )
-        self.assertEqual(len(nested.groups()), 2)
-        self.assertEqual(nested.groups()[0]["id"], "a")
-        bare = ExecutionReport(
-            {
-                "ok": True,
-                "succeeded": 1,
-                "failed": 0,
-                "results": [
-                    {
-                        "ok": True,
-                        "operation": "QUERY_GROUPS",
-                        "message": "Found 1 group(s)",
-                        "data": {"groups": [{"id": "x", "hits": []}]},
-                    }
-                ],
-            }
+        self.assertEqual(len(grouped.groups()), 2)
+        self.assertEqual(grouped.groups()[0]["id"], "a")
+        self.assertEqual(grouped.groups()[0]["hits"][0].id, 1)
+        self.assertEqual(ExecutionReport.from_results([]).groups(), [])
+
+    def test_execution_report_typed_metadata_accessors(self):
+        # New typed per-statement getters for the metadata ExecData variants.
+        ExecutionReport = sdk.ExecutionReport
+        rep = ExecutionReport.from_results(
+            [
+                {"operation": "SHOW_COLLECTIONS", "collections": ["docs", "images"]},
+                {
+                    "operation": "SHOW_COLLECTION",
+                    "collection": {
+                        "status": "green",
+                        "points_count": 12,
+                        "segments_count": 2,
+                    },
+                },
+                {"operation": "SHOW_SHARD_KEYS", "shard_keys": ["tenant_a", 7]},
+                {
+                    "operation": "SHOW_QUOTAS",
+                    "quotas": {"enabled": True, "max_disk_usage_percent": 80},
+                },
+            ]
         )
-        self.assertEqual(bare.groups()[0]["id"], "x")
-        self.assertEqual(ExecutionReport().groups(), [])
+        self.assertEqual(rep.collections(0), ["docs", "images"])
+        self.assertEqual(rep.collections(1), [])
+        info = rep.collection(1)
+        self.assertEqual(info["status"], "green")
+        self.assertEqual(info["points_count"], 12)
+        self.assertEqual(info["segments_count"], 2)
+        self.assertIsNone(rep.collection(0))
+        self.assertEqual(rep.shard_keys(2), ["tenant_a", 7])
+        self.assertEqual(rep.quotas(3)["max_disk_usage_percent"], 80)
+        self.assertIsNone(rep.quotas(0))
+        self.assertEqual(rep.collections(-10), [])
+        self.assertEqual(rep.shard_keys(-10), [])
 
     def test_typed_buffer_vector_params(self):
         # Buffer-protocol vectors bind identically to plain lists (no server).

@@ -7,9 +7,8 @@ use serde_json::Value;
 /// Extract JSON points and the next-page cursor from a typed scroll response.
 ///
 /// [`ExecData::Hits`](qql::executor::ExecData::Hits) does not carry Qdrant's
-/// `next_page_offset`, so the cursor always comes from the last point id via
-/// [`next_scroll_cursor`]; [`ScrollPages`](super::ScrollPages) then removes the
-/// inclusive-offset repeat with [`drop_resumed_point`].
+/// `next_page_offset`, so the cursor always comes from the last point id;
+/// [`ScrollPages`](super::ScrollPages) then removes the inclusive-offset repeat.
 pub fn extract_scroll_page(response: &BackendResponse) -> (Vec<Value>, Option<PlanPointId>) {
     let points = response
         .data

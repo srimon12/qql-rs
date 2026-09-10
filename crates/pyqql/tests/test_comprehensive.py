@@ -580,8 +580,7 @@ class TestE2EPipeline(unittest.TestCase):
         result = self.client.execute("SHOW COLLECTIONS")
         self.assertTrue(result["ok"])
         r0 = result["results"][0]
-        collections = r0["data"]["result"]["collections"]
-        names = [c["name"] for c in collections]
+        names = r0["data"]["collections"]
         self.assertIsInstance(names, list)
 
     def test_g2_count_collection(self):
@@ -623,10 +622,7 @@ class TestE2EPipeline(unittest.TestCase):
 
         # Verify it appears
         r2 = self.client.execute("SHOW COLLECTIONS")
-        names = [
-            c["name"]
-            for c in r2["results"][0]["data"]["result"]["collections"]
-        ]
+        names = r2["results"][0]["data"]["collections"]
         self.assertIn(tmp_coll, names)
 
         # Drop
@@ -635,10 +631,7 @@ class TestE2EPipeline(unittest.TestCase):
 
         # Verify gone
         r4 = self.client.execute("SHOW COLLECTIONS")
-        names2 = [
-            c["name"]
-            for c in r4["results"][0]["data"]["result"]["collections"]
-        ]
+        names2 = r4["results"][0]["data"]["collections"]
         self.assertNotIn(tmp_coll, names2)
 
     def test_g6_upsert_compiles_correct_route(self):

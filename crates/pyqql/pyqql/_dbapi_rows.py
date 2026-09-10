@@ -67,10 +67,8 @@ def map_result(report: Any, idx: int) -> Tuple[List[Tuple], Optional[List[Tuple]
     if op == "COUNT" and isinstance(data, dict):
         return [(report.count(idx),)], list(_COUNT_COLS)
     if op == "SHOW_COLLECTIONS" and isinstance(data, dict):
-        result = data.get("result", data)
-        collections = result.get("collections", []) if isinstance(result, dict) else []
-        rows = [(c.get("name"),) for c in collections
-                if isinstance(c, dict) and "name" in c]
+        collections = data.get("collections", [])
+        rows = [(name,) for name in collections if isinstance(name, str)]
         return rows, list(_NAME_COLS)
     if isinstance(data, list) and data and all(
         isinstance(h, dict) and "id" in h for h in data
