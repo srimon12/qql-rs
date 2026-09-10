@@ -32,6 +32,9 @@ barrier still waits for `points_count` **plus green collection status**
 | Application LOC | 0.79x | 0.83x | **0.71x** |
 | Result parity | exact / ANN-equivalent | exact / ANN-equivalent | exact / ANN-equivalent |
 
+The Python leg is also run **gRPC-vs-gRPC** (`--transport grpc`): qql wins
+all 10 reads (1.07–5.72x) and ingest 1.94x — see §"Python over gRPC".
+
 The headline pattern: **QQL wins the read path on the dynamic-language
 transports** (parse→plan→route plus native result classes beat the official
 SDKs' pydantic/typed-object response layer), while the **official Rust gRPC
@@ -184,6 +187,47 @@ No timing is reported until results are compared:
 | node | 152 | 126 | 0.83x |
 | rust | 387 | 274 | 0.71x |
 
+
+### Python over gRPC (same harness, `--transport grpc`)
+
+Both contenders switched to gRPC (`QdrantClient(prefer_grpc=True)` vs
+`pyqql.Client(use_grpc=True)`); everything else — data, batches, parity
+gates — identical. Parity clean on all 10 read scenarios:
+
+| scenario | REST official | REST qql | gRPC official | gRPC qql | gRPC qql/official | REST qql/official |
+|---|---:|---:|---:|---:|---:|---:|
+| query_dense | 417 | 805 | 402 | 925 | **2.30x** | 1.93x |
+| query_dense_filtered | 227 | 305 | 206 | 262 | 1.27x | 1.34x |
+| query_sparse | 728 | 2,345 | 646 | 2,174 | **3.37x** | 3.22x |
+| query_hybrid | 266 | 526 | 251 | 475 | 1.89x | 1.98x |
+| scroll_pages | 88 | 145 | 25 | 143 | **5.72x** | 1.65x |
+| count_berlin | 616 | 1,546 | 1,260 | 1,437 | 1.14x | 2.51x |
+| facet_district | 736 | 2,028 | 1,397 | 2,151 | 1.54x | 2.76x |
+| query_colbert | 121 | 135 | 131 | 140 | 1.07x | 1.12x |
+| count_legal | 794 | 3,257 | 2,321 | 3,545 | 1.53x | 4.10x |
+| prepared_rerun | 102 | 210 | 115 | 228 | 1.98x | 2.06x |
+| ingest (10k pts, wait=false) | 6.663 s | 4.315 s | 3.548 s | 1.827 s | **1.94x faster** | 1.54x faster |
+| cold import / require | 1149.0 ms | 17.1 ms | 1157.0 ms | 18.1 ms | 64x | 67x |
+
+Read it as: both sides gain from gRPC, and the picture is transport-dependent.
+
+- **Counts / facet:** the official client gains the most (protobuf scalar
+  responses): count_berlin 616 → 1,260, facet 736 → 1,397, count_legal
+  794 → 2,321. qql is roughly flat-to-better there (1,546 → 1,437, 2,028 →
+  2,151, 3,257 → 3,545), so the REST-era 2.5–4.1x count margins compress to
+  1.1–1.5x on gRPC — **qql still wins all 10 reads**.
+- **Dense / sparse / hybrid:** qql improves (dense 805 → 925, hybrid 526 →
+  475 where official drops) and holds sparse at 3.37x.
+- **`scroll_pages`:** the official gRPC client collapses to 25 ops/s vs its
+  own REST 88 (three pages per call, same server) while qql holds 143 — that
+  looks like a slow path in the official client's gRPC scroll, flagged not
+  explained.
+- **Ingest:** qql 1.827 s vs official 3.548 s (1.94x faster), both ~2x faster
+  than their REST legs (4.315 / 6.663 s).
+
+Raw artifacts: `results/python_grpc.json` (REST numbers stay in
+`results/python.json`). Caveat: one run per transport with median-of-reps
+inside; the ingest and scroll gaps are far outside sub-ms jitter.
 
 Rust gRPC context: the official client remains slightly ahead on raw reads
 (protobuf-in / protobuf-out, no intermediate AST) but the gap is now
@@ -364,6 +408,9 @@ cd rust && cargo build --release && cd ..                    # qql deps via path
 node node/bench.js                          --reps 5 --iters 25
 ./rust/target/release/vs-qdrant-bench       --reps 5 --iters 25
 
+# optional: Python leg over gRPC on both contenders
+.venv/bin/python python/bench.py --transport grpc --out python_grpc.json
+
 # 4. report tables + LOC (count first: the renderer reads loc.json)
 .venv/bin/python common/count_loc.py
 .venv/bin/python common/render_results.py > results/tables.md
@@ -412,7 +459,7 @@ vs-qdrant/
 ├── python/            bench.py + {official,qql}_scenarios.py
 ├── node/              bench.js + {official,qql}_scenarios.js + vendored nqql/
 ├── rust/              src/{main,official,qql_side,parity}.rs (cargo project)
-├── results/           python.json, node.json, rust.json, loc.json, tables.md
-│                      + run1/ (pre-fix API baseline)
+├── results/           python.json, node.json, rust.json, python_grpc.json,
+│                      loc.json, tables.md + run1/ (pre-fix API baseline)
 └── vendor/wheels/     pyqql 0.4.0 abi3 wheel
 ```

@@ -26,8 +26,8 @@ from config import BATCH_BERLIN, BATCH_LEGAL, LIMIT, SCROLL_BATCH
 class QqlScenarios:
     """pyqql 0.4.0 — the QQL Python SDK."""
 
-    def __init__(self, url: str):
-        self.client = pyqql.Client(url)
+    def __init__(self, url: str, *, use_grpc: bool = False):
+        self.client = pyqql.Client(url, use_grpc=use_grpc)
         self.parse = pyqql.parse
 
     def close(self) -> None:

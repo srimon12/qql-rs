@@ -7,6 +7,8 @@ from pathlib import Path
 _cfg = json.loads((Path(__file__).resolve().parent.parent / "common" / "bench.json").read_text())
 
 URL = _cfg["url"]
+# gRPC endpoint of the same server (Qdrant serves :6334 next to REST :6333).
+URL_GRPC = "http://localhost:6334"
 LIMIT = _cfg["limit"]
 SCROLL_PAGES = _cfg["scroll_pages"]
 SCROLL_BATCH = _cfg["scroll_batch"]
