@@ -122,7 +122,7 @@ Hosts: dense=true multi=false image=false cross_rerank=false
   hint: ColBERT / AS MULTI / multivector RERANK needs multi_model or multi_embedding_* config
   hint: IMAGE / CLIP vision needs image_model or image_embedding_* config
   hint: CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model
-  hint: edge has no GROUP BY, SHARD keys, or ALTER COLLECTION
+  hint: edge has no SHARD routing or shard-key DDL; ALTER COLLECTION covers HNSW/optimizers only
 ```
 
 The hints are guidance, not failures — the backend is healthy. If a configured

@@ -43,11 +43,13 @@ Qdrant" hint.
 | `CREATE/DROP INDEX` | yes | keyword (incl. `prefix`), integer, float, bool, geo, text, datetime, uuid |
 | `SHOW COLLECTIONS` / `SHOW COLLECTION` | yes | |
 | Query/update batching | partial | fan-out, not a native batch RPC |
-| `GROUP BY` | no | `QQL-EDGE-UNSUPPORTED-GROUP-BY` |
+| `GROUP BY` | yes | qdrant-edge grouping driver; `LIMIT`/`OFFSET` map to groups/`group_offset` |
+| `GROUP BY … LOOKUP FROM` | no | `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` (no lookup collection) |
 | `SHARD` routing / custom sharding | no | `QQL-EDGE-UNSUPPORTED-SHARD` |
 | `CREATE/DROP SHARD KEY` | no | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` |
-| `ALTER COLLECTION` | no | `QQL-EDGE-UNSUPPORTED-ALTER` |
-| Collection `WITH PARAMS` | no | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
+| `ALTER COLLECTION` | partial | HNSW + optimizer config apply; `WITH PARAMS` / `QUANTIZATION` reject per field |
+| Collection `WITH PARAMS` | partial | only `on_disk_payload`; other keys → `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
+| `OPTIMIZERS (memmap_threshold, flush_interval_sec, max_optimization_threads)` | no | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` (engine excludes them) |
 | `SHOW QUOTAS` / `SET QUOTA` | no | `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST only) |
 | `RECOMMEND STRATEGY average_vector` | no | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` |
 | Point-id query inputs | no | `QQL-EDGE-UNSUPPORTED-POINT-REF` |
@@ -153,6 +155,18 @@ QUERY ORDER BY year DESC FROM docs LIMIT 10;
 ```
 {% /qqlExample %}
 
+{% qqlExample title="Grouped search" %}
+```sql
+QUERY 'x' FROM docs USING dense GROUP BY category LIMIT 5;
+
+QUERY 'x' FROM docs USING dense GROUP BY category SIZE 3 LIMIT 10 OFFSET 5;
+```
+{% /qqlExample %}
+
+Group ids come back typed (keyword / unsigned / signed) with fully hydrated
+hits; `SIZE` maps to the per-group hit count and `OFFSET` trims groups
+client-side via `group_offset`.
+
 Cross-encoder reranking runs client-side: candidate stages execute against
 local storage and the host cross-encoder model scores the pairs.
 
@@ -184,11 +198,13 @@ the feature, the reason, and a remediation hint.
 
 | Code | Feature |
 |---|---|
-| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
-| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, shard count, …) |
+| `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` (no lookup collection) |
+| `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` |
+| `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | create-time `WITH PARAMS` other than `on_disk_payload` |
+| `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the engine excludes |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id-only inputs (need materialized vectors) |
@@ -198,9 +214,9 @@ the feature, the reason, and a remediation hint.
 Example rejection:
 
 ```text
-GROUP BY / query groups is not supported offline: qql-edge does not yet expose
-grouped queries (qdrant-edge's query_groups is not wired into the executor).
-Use remote Qdrant (REST or gRPC) for this feature.
+GROUP BY … LOOKUP FROM is not supported offline: qdrant-edge groups the queried
+shard only and has no lookup collection to hydrate hits from. Use remote Qdrant
+(REST or gRPC) for this feature.
 ```
 
 {% aside type="caution" title="Point IDs: integers or UUIDs only" %}
@@ -210,13 +226,14 @@ mapped — deleting "half a batch" because some IDs could not be represented is
 exactly what edge refuses to do.
 {% /aside %}
 
-{% aside type="note" title="Group by, shards, quotas, and clusters need remote Qdrant" %}
-`GROUP BY`, custom `SHARD` routing, shard-key administration, `ALTER
-COLLECTION`, collection `WITH PARAMS`, and `SHOW QUOTAS` /
-`SET QUOTA` are cluster or REST-only features. Edge keeps the whole language
-surface and rejects at execution — switch to REST (or gRPC where supported)
-for those workloads. Per-query sparse `idf` and ACORN params **are** supported
-offline.
+{% aside type="note" title="Shards, quotas, and cluster admin need remote Qdrant" %}
+Custom `SHARD` routing, shard-key administration, `GROUP BY … LOOKUP FROM`,
+`ALTER COLLECTION … WITH PARAMS` / `QUANTIZATION`, create-time `WITH PARAMS`
+beyond `on_disk_payload`, and `SHOW QUOTAS` / `SET QUOTA` are cluster or
+REST-only features. Edge keeps the whole language surface and rejects at
+execution — switch to REST (or gRPC where supported) for those workloads.
+`GROUP BY`, `ALTER COLLECTION … WITH HNSW` / `WITH OPTIMIZERS`, per-query
+sparse `idf`, and ACORN params **are** supported offline.
 {% /aside %}
 
 ## Code catalog

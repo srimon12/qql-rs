@@ -137,10 +137,13 @@ Intel Mac users should disable default features and use `http-embedding` or
 |---------|------|
 | `PARAMS (idf = 'global' \| WHERE <filter>)` | **Supported** (qdrant-edge 0.8) |
 | `PARAMS (acorn = …, max_selectivity = …)` | **Supported** (qdrant-edge 0.8 wires ACORN into HNSW search) |
+| `QUERY … GROUP BY field [SIZE n] [LIMIT/OFFSET]` | **Supported** (qdrant-edge grouping driver; hits hydrated per output selector) |
+| `ALTER COLLECTION … WITH HNSW / WITH OPTIMIZERS` | **Supported** (persisted via `set_hnsw_config` / `set_optimizers_config`) |
+| `CREATE COLLECTION … WITH PARAMS (on_disk_payload = …)` | **Supported** (persisted on the shard config) |
 | `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
 | `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
 | `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
-| `SHARD` / `GROUP BY` / timeout / consistency | Still unsupported (table below) |
+| `SHARD` / `GROUP BY … LOOKUP FROM` / timeout / consistency | Still unsupported (table below) |
 
 ```sql
 -- Sparse IDF corpus works offline (edge 0.8+)
@@ -148,10 +151,14 @@ QUERY TEXT 'search' FROM docs USING sparse
   PARAMS (idf = 'global')
   LIMIT 10;
 
-QUERY TEXT 'search' FROM docs USING sparse
-  WHERE tenant_id = 'acme'
-  PARAMS (idf = WHERE tenant_id = 'acme')
-  LIMIT 10;
+-- Grouped search with per-group size and client-side group offset
+QUERY TEXT 'search' FROM docs USING dense
+  GROUP BY district SIZE 3
+  LIMIT 10 OFFSET 5;
+
+-- Collection tuning the engine persists
+ALTER COLLECTION docs WITH HNSW (m = 32)
+  WITH OPTIMIZERS (indexing_threshold = 500);
 
 -- Quotas always fail-loud offline
 SHOW QUOTAS;  -- QQL-EDGE-UNSUPPORTED-QUOTA
@@ -168,15 +175,18 @@ Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
 
 | Code | Feature |
 |---|---|
-| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups |
+| `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` (no lookup collection) |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE`/`DROP SHARD KEY` |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
-| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, …) |
+| `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` |
+| `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | create-time `WITH PARAMS` other than `on_disk_payload` |
+| `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the engine excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = …)` |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = …)` |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` (use `best_score` / `sum_scores`) |
+| `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formulas (no engine `Expression` variants) |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id query inputs without embedded vectors |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | unmapped REST projection |
 

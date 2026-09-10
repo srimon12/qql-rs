@@ -30,11 +30,11 @@ in-process engine and does not depend on a server version.
 | Query/update batching | yes | yes | fan-out |
 | `SHOW QUOTAS` / `SET QUOTA` | yes | no | no |
 | Route affinity (`X-Qdrant-Route-Affinity`) | yes | yes | n/a |
-| Grouped search | yes | yes | no |
+| Grouped search | yes | yes | yes (no `LOOKUP FROM`) |
 | Custom `SHARD` routing | yes | yes | no |
 | Shard-key administration | yes | yes | no |
-| `ALTER COLLECTION` | yes | yes | no |
-| Collection `PARAMS` (replication, sharding) | yes | yes | no |
+| `ALTER COLLECTION` | yes | yes | partial (HNSW/optimizers) |
+| Collection `PARAMS` (replication, sharding) | yes | yes | partial (`on_disk_payload` only) |
 | Point-ID query inputs | yes | yes | no |
 | ACORN search parameter | yes | yes | yes (qdrant-edge 0.8+) |
 | Cluster consistency/timeout fields | yes | yes | no |
@@ -43,6 +43,12 @@ Notes:
 
 - **Batching on edge** fans out into one operation per request; there is no
   native batch endpoint.
+- **Grouped search on edge** runs qdrant-edge's grouping driver with typed
+  group keys and hydrated hits; cross-collection `GROUP BY … LOOKUP FROM` is
+  rejected with `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP`.
+- **`ALTER COLLECTION` on edge** applies HNSW and optimizer config through the
+  engine's persisted setters; `WITH PARAMS`, `QUANTIZATION`, and the optimizer
+  keys the engine excludes fail per field.
 - **Cross-rerank** is always executed client-side: the runtime fetches the
   prefetched candidates, scores `(query, document text)` pairs with a
   pair-scoring embedder, and reorders. It is not a Qdrant search variant on

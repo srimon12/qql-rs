@@ -193,7 +193,7 @@ report = pyqql_edge.execute(
 
 Errors are raised as `RuntimeError` (execution) or `SyntaxError` (parsing)
 with structured attributes attached: `err.code` (e.g.
-`QQL-EDGE-UNSUPPORTED-GROUP-BY`), `err.kind`, and `err.span` (a
+`QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP`), `err.kind`, and `err.span` (a
 `{"start", "end"}` dict when the parser has a span). Offline-unsupported
 features always raise — never a silent no-op.
 

@@ -200,8 +200,9 @@ DROP SHARD KEY 'acme' ON COLLECTION research;
 
 {% aside type="note" title="Remote-backend capability" %}
 Shard-key DDL and cluster quotas are Qdrant remote capabilities. The in-process
-edge backend does not support shard keys, `ALTER COLLECTION`, grouped queries,
-or `SHOW QUOTAS` / `SET QUOTA`. Quotas are also unavailable over gRPC.
+edge backend supports grouped queries and HNSW/optimizer `ALTER COLLECTION`,
+but not shard keys, `ALTER COLLECTION … WITH PARAMS` / `QUANTIZATION`, or
+`SHOW QUOTAS` / `SET QUOTA`. Quotas are also unavailable over gRPC.
 {% /aside %}
 
 Next: [Data operations](/docs/language/data-operations/) and

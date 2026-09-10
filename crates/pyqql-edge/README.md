@@ -6,9 +6,10 @@ Local QQL for Python: **qdrant-edge + FastEmbed**, zero remote Qdrant.
 
 Same QQL language as `pyqql`, but storage and (optionally) embeddings run
 **in-process** (qdrant-edge **0.8**). Ideal for demos, CI, air-gapped tools.
-Cluster-only features (`GROUP BY`, custom `SHARD`, **`SHOW QUOTAS` /
-`SET QUOTA`**, …) fail with stable `QQL-EDGE-UNSUPPORTED-*` codes. Sparse
-`PARAMS (idf = …)` and ACORN search params are supported offline.
+Cluster-only features (custom `SHARD`, `GROUP BY … LOOKUP FROM`, **`SHOW
+QUOTAS` / `SET QUOTA`**, …) fail with stable `QQL-EDGE-UNSUPPORTED-*` codes.
+Sparse `PARAMS (idf = …)`, ACORN search params, `GROUP BY`, and
+HNSW/optimizer `ALTER COLLECTION` are supported offline.
 
 ## Install
 
@@ -62,7 +63,7 @@ client.close()
 |-------|---------|
 | Point IDs | Integers or UUIDs only |
 | HYBRID queries | Specify `USING dense` / `USING sparse` / hybrid forms |
-| `GROUP BY`, `SHARD`, quotas | Unsupported offline — use remote Qdrant (`QQL-EDGE-UNSUPPORTED-*`) |
+| `SHARD`, quotas | Unsupported offline — use remote Qdrant (`QQL-EDGE-UNSUPPORTED-*`) |
 | Sparse `idf` | Supported (qdrant-edge 0.8) |
 | Models | Locked at executor construction |
 | Lifetime | Call `close()` before deleting `data_dir` |

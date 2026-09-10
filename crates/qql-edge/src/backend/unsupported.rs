@@ -2,7 +2,7 @@
 //!
 //! Every entry has:
 //! - a fixed error code `QQL-EDGE-UNSUPPORTED-*` (or a dedicated stable code)
-//! - a short "why"
+//! - a short "why" naming exactly what the engine lacks
 //! - a remediation line pointing users at remote Qdrant when applicable
 //!
 //! Operational/runtime errors (spawn, path extract, filter convert) stay
@@ -13,18 +13,22 @@ use qql_core::error::QqlError;
 /// Offline-unsupported product surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeUnsupported {
-    /// `GROUP BY` / `/points/query/groups`.
-    GroupBy,
+    /// `GROUP BY … LOOKUP FROM <collection>` (group-hit hydration lookup).
+    GroupLookup,
     /// `SHARD '…'` on query/mutation.
     ShardRouting,
     /// Collection create/custom sharding options.
     CollectionSharding,
     /// `CREATE`/`DROP SHARD KEY`.
     ShardKeyDdl,
-    /// `ALTER COLLECTION` / update collection.
-    AlterCollection,
+    /// `ALTER COLLECTION … WITH PARAMS` (no edge params setter).
+    AlterCollectionParams,
+    /// `ALTER COLLECTION … QUANTIZATION` (no edge quantization setter).
+    AlterCollectionQuantization,
     /// Collection `WITH PARAMS` (replication, etc.) at create time.
     CollectionParams,
+    /// Optimizer keys qdrant-edge deliberately excludes.
+    OptimizerKey,
     /// `PARAMS (timeout = …)`.
     Timeout,
     /// `PARAMS (consistency = …)`.
@@ -44,11 +48,13 @@ pub enum EdgeUnsupported {
 impl EdgeUnsupported {
     pub fn code(self) -> &'static str {
         match self {
-            Self::GroupBy => "QQL-EDGE-UNSUPPORTED-GROUP-BY",
+            Self::GroupLookup => "QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP",
             Self::ShardRouting | Self::CollectionSharding => "QQL-EDGE-UNSUPPORTED-SHARD",
             Self::ShardKeyDdl => "QQL-EDGE-UNSUPPORTED-SHARD-KEY",
-            Self::AlterCollection => "QQL-EDGE-UNSUPPORTED-ALTER",
+            Self::AlterCollectionParams => "QQL-EDGE-UNSUPPORTED-ALTER-PARAMS",
+            Self::AlterCollectionQuantization => "QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION",
             Self::CollectionParams => "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS",
+            Self::OptimizerKey => "QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY",
             Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
             Self::Consistency => "QQL-EDGE-UNSUPPORTED-CONSISTENCY",
             Self::Quota => "QQL-EDGE-UNSUPPORTED-QUOTA",
@@ -61,14 +67,18 @@ impl EdgeUnsupported {
 
     pub fn feature(self) -> &'static str {
         match self {
-            Self::GroupBy => "GROUP BY / query groups",
+            Self::GroupLookup => "GROUP BY … LOOKUP FROM",
             Self::ShardRouting => "SHARD routing",
             Self::CollectionSharding => {
                 "collection sharding (shard_number / sharding_method / shard_keys)"
             }
             Self::ShardKeyDdl => "CREATE/DROP SHARD KEY",
-            Self::AlterCollection => "ALTER COLLECTION",
+            Self::AlterCollectionParams => "ALTER COLLECTION … WITH PARAMS",
+            Self::AlterCollectionQuantization => "ALTER COLLECTION … QUANTIZATION",
             Self::CollectionParams => "collection WITH PARAMS (replication, etc.)",
+            Self::OptimizerKey => {
+                "OPTIMIZERS (memmap_threshold / flush_interval_sec / max_optimization_threads)"
+            }
             Self::Timeout => "PARAMS (timeout = …)",
             Self::Consistency => "PARAMS (consistency = …)",
             Self::Quota => "SHOW QUOTAS / SET QUOTA",
@@ -81,33 +91,47 @@ impl EdgeUnsupported {
 
     pub fn why(self) -> &'static str {
         match self {
-            Self::GroupBy => {
-                "qql-edge does not yet expose grouped queries (qdrant-edge's query_groups is not wired into the executor)"
+            Self::GroupLookup => {
+                "qdrant-edge groups the queried shard only and has no lookup collection to hydrate hits from"
             }
-            Self::ShardRouting | Self::CollectionSharding | Self::ShardKeyDdl => {
-                "qql-edge is a single-node process with no custom shard keys"
+            Self::ShardRouting => {
+                "a qql-edge collection is a single qdrant-edge shard, so there is no shard to route to"
             }
-            Self::AlterCollection => {
-                "qql-edge does not yet expose collection mutation after create (qdrant-edge persists HNSW/optimizer config only)"
+            Self::CollectionSharding => {
+                "qdrant-edge creates exactly one shard per collection; it has no shard_number / sharding_method / shard_keys API"
+            }
+            Self::ShardKeyDdl => {
+                "qdrant-edge has no custom shard keys; a collection is a single shard"
+            }
+            Self::AlterCollectionParams => {
+                "qdrant-edge persists HNSW and optimizer config after create; it exposes no collection-params setter"
+            }
+            Self::AlterCollectionQuantization => {
+                "qdrant-edge exposes no quantization setter after create"
             }
             Self::CollectionParams => {
-                "replication / write-consistency / payload-placement collection params have no offline equivalent; payload placement is configured via LocalExecutorOptions"
+                "qdrant-edge persists only on_disk_payload; replication, write-consistency, fan-out, and payload-memory params have no offline equivalent"
             }
-            Self::Timeout => "qdrant-edge query requests carry no timeout field",
+            Self::OptimizerKey => {
+                "qdrant-edge has no memmap threshold, no timer flush, and runs optimizations manually"
+            }
+            Self::Timeout => {
+                "qdrant-edge QueryRequest has no timeout field; qql-edge executes in-process with no RPC deadline"
+            }
             Self::Consistency => {
-                "qql-edge is a single-node in-process engine without replica consistency levels"
+                "qdrant-edge is a single-node engine with no replica consistency levels"
             }
             Self::Quota => {
-                "global resource quotas are cluster-wide and require Qdrant's REST /quotas API"
+                "qdrant-edge has no quotas API; Qdrant serves quotas only from the cluster REST /quotas endpoint"
             }
             Self::RecommendAverageVector => {
-                "qdrant-edge recommend supports best_score and sum_scores only"
+                "qdrant-edge QueryEnum has RecommendBestScore and RecommendSumScores only"
             }
             Self::PointReferenceQuery => {
-                "offline path must materialize vectors (TEXT/VECTOR) before search"
+                "qdrant-edge has no lookup_from / point-vector resolution; inputs must carry a materialized TEXT or VECTOR"
             }
-            Self::FormulaNary => "qdrant-edge 0.8 has no ACOSH / MAX / MIN Expression variants",
-            Self::Route { .. } => "this route is not implemented by the edge backend",
+            Self::FormulaNary => "qdrant-edge 0.8 Expression has no ACOSH / MAX / MIN variants",
+            Self::Route { .. } => "this route has no qql-edge implementation",
         }
     }
 
@@ -162,6 +186,26 @@ pub fn reject_collection_sharding(
     }
 }
 
+/// Convenience: reject the create-time `WITH PARAMS` keys qdrant-edge cannot
+/// persist. `on_disk_payload` **is** honored (it maps onto `EdgeConfig`), so a
+/// params block carrying only that key is accepted.
+pub fn reject_collection_params(
+    params: Option<&qql_plan::CollectionParams>,
+) -> Result<(), QqlError> {
+    let unsupported = params.is_some_and(|params| {
+        params.replication_factor.is_some()
+            || params.write_consistency_factor.is_some()
+            || params.read_fan_out_factor.is_some()
+            || params.read_fan_out_delay_ms.is_some()
+            || params.payload.is_some()
+    });
+    if unsupported {
+        Err(EdgeUnsupported::CollectionParams.error())
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,12 +213,14 @@ mod tests {
     #[test]
     fn catalog_codes_are_stable_and_unique_for_primary_features() {
         let features = [
-            EdgeUnsupported::GroupBy,
+            EdgeUnsupported::GroupLookup,
             EdgeUnsupported::ShardRouting,
             EdgeUnsupported::CollectionSharding,
             EdgeUnsupported::ShardKeyDdl,
-            EdgeUnsupported::AlterCollection,
+            EdgeUnsupported::AlterCollectionParams,
+            EdgeUnsupported::AlterCollectionQuantization,
             EdgeUnsupported::CollectionParams,
+            EdgeUnsupported::OptimizerKey,
             EdgeUnsupported::RecommendAverageVector,
             EdgeUnsupported::Quota,
             EdgeUnsupported::PointReferenceQuery,
@@ -209,10 +255,40 @@ mod tests {
     }
 
     #[test]
-    fn group_by_message_mentions_query_groups_and_remote() {
-        let e = EdgeUnsupported::GroupBy.error();
-        assert_eq!(e.code, "QQL-EDGE-UNSUPPORTED-GROUP-BY");
-        assert!(e.message.contains("query groups"));
-        assert!(e.message.contains("remote Qdrant"));
+    fn group_lookup_message_names_the_engine_gap() {
+        let e = EdgeUnsupported::GroupLookup.error();
+        assert_eq!(e.code, "QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP");
+        assert!(e.message.contains("LOOKUP FROM"));
+        assert!(e.message.contains("no lookup collection"));
+    }
+
+    #[test]
+    fn alter_field_rejections_are_precise() {
+        let params = EdgeUnsupported::AlterCollectionParams.error();
+        assert_eq!(params.code, "QQL-EDGE-UNSUPPORTED-ALTER-PARAMS");
+        assert!(params.message.contains("no collection-params setter"));
+
+        let quantization = EdgeUnsupported::AlterCollectionQuantization.error();
+        assert_eq!(quantization.code, "QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION");
+        assert!(quantization.message.contains("no quantization setter"));
+    }
+
+    #[test]
+    fn create_params_accept_only_on_disk_payload() {
+        assert!(reject_collection_params(None).is_ok());
+
+        let on_disk_only = qql_plan::CollectionParams {
+            on_disk_payload: Some(false),
+            ..Default::default()
+        };
+        assert!(reject_collection_params(Some(&on_disk_only)).is_ok());
+
+        let replicated = qql_plan::CollectionParams {
+            replication_factor: Some(3),
+            ..Default::default()
+        };
+        let error = reject_collection_params(Some(&replicated)).unwrap_err();
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS");
+        assert!(error.message.contains("only on_disk_payload"));
     }
 }

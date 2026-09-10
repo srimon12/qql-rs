@@ -140,8 +140,8 @@ qql --edge dump listings out.qql
 
 The file format is identical, so an edge dump replays against a server
 collection and a server dump replays against edge wherever the statements
-are in the edge capability surface (no `GROUP BY`, `SHARD` keys, or
-`ALTER COLLECTION`).
+are in the edge capability surface (no custom `SHARD` routing or shard-key
+DDL).
 
 ## Batch-size sizing
 

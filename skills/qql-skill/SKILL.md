@@ -198,7 +198,7 @@ FROM <collection>
 - `max_selectivity` requires `acorn = true`; ACORN is supported on remote Qdrant and on edge (qdrant-edge 0.8+).
 - `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
 - `idf` is a search param for sparse IDF corpus scoping (remote + edge 0.8+).
-- Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
+- Edge supports `GROUP BY` offline (qdrant-edge grouping driver); `LOOKUP FROM` stays remote-only.
 - Edge / gRPC have **no** quotas (`SHOW QUOTAS` / `SET QUOTA` are REST-only).
 - Dynamic shard: write `SHARD 'tenant'` in QQL, or set `stmt.shard_key = tenant` after parse (no `$bind` syntax).
 - Route affinity is **not** QQL syntax — a client transport option: Rust `with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity` (see [rust-sdk.md](references/rust-sdk.md)).
@@ -291,7 +291,7 @@ routing inside the filter object.
 |---------|--------|
 | REST | Full matrix including `SHOW QUOTAS` / `SET QUOTA` |
 | gRPC | Typed plan → proto; **no** public quota service (`QQL-GRPC-QUOTA`) |
-| Edge | No quotas; no custom shard-key admin; no `GROUP BY`; **ACORN** + **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
+| Edge | No quotas; no custom shard-key admin; no `GROUP BY … LOOKUP FROM`; **GROUP BY**, **ACORN** + **IDF** on search params (edge 0.8+); HNSW/optimizer `ALTER COLLECTION`; optional multi/image/rerank hosts |
 | Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
 
 ## Parameter Binding & Prepared Queries

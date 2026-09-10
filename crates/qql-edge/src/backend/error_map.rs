@@ -54,6 +54,9 @@ pub(crate) enum EdgeOp {
     Optimize,
     /// `EdgeShard::info`.
     Info,
+    /// `EdgeShard::set_hnsw_config` / `set_vector_hnsw_config` /
+    /// `set_optimizers_config` (`ALTER COLLECTION`).
+    AlterCollection,
     /// Formula lowering (`FormulaInternal` → parsed formula).
     Formula,
 }
@@ -80,6 +83,7 @@ impl EdgeOp {
             Self::DropIndex => "drop_index",
             Self::Optimize => "optimize",
             Self::Info => "info",
+            Self::AlterCollection => "alter_collection",
             Self::Formula => "formula",
         }
     }
@@ -334,6 +338,7 @@ mod tests {
             EdgeOp::DropIndex,
             EdgeOp::Optimize,
             EdgeOp::Info,
+            EdgeOp::AlterCollection,
             EdgeOp::Formula,
         ];
         let mut labels = std::collections::BTreeSet::new();

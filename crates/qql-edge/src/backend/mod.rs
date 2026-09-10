@@ -28,30 +28,32 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use qdrant_edge::{
-    CreateIndex, EdgeConfigBuilder, EdgeShard, FieldIndexOperations, PayloadFieldSchema,
-    PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation, VectorOperations,
-    VectorStructPersisted, WithPayloadInterface, WithVector,
+    CreateIndex, EdgeConfigBuilder, EdgeShard, EdgeShardRead, FieldIndexOperations,
+    PayloadFieldSchema, PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation,
+    VectorOperations, VectorStructPersisted, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
-use config_builder::build_edge_config;
+use config_builder::{build_edge_config, edge_hnsw_config, edge_optimizers_config};
 use conversions::{
-    from_edge_facet_hit, from_edge_record_to_hit, from_edge_scored_point_to_hit, to_edge_id,
-    to_edge_ids,
+    from_edge_facet_hit, from_edge_group_to_typed, from_edge_record_to_hit,
+    from_edge_scored_point_to_hit, hydrate_edge_groups, to_edge_id, to_edge_ids,
 };
 use error_map::{EdgeOp, edge_err, edge_input_err};
 use filter_converter::convert_edge_filter;
 use query_converter::{
-    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
-    parse_json_path,
+    convert_group_output, convert_order_by_interface, convert_query_groups_request,
+    convert_query_request, convert_with_payload, convert_with_vector, parse_json_path,
 };
-use unsupported::{EdgeUnsupported, reject_collection_sharding, reject_shard_key};
+use unsupported::{
+    EdgeUnsupported, reject_collection_params, reject_collection_sharding, reject_shard_key,
+};
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
 use qql::client::QdrantOps;
-use qql::executor::{BackendResponse, ExecData, FacetHit, SearchHit};
+use qql::executor::{BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit};
 use qql_core::error::QqlError;
 use qql_plan::UpdateOperation as PlanUpdateOperation;
 use qql_plan::{
@@ -229,6 +231,47 @@ impl EdgeQdrant {
             .into_iter()
             .map(from_edge_scored_point_to_hit)
             .collect())
+    }
+
+    /// Run a planned grouped query through qdrant-edge's grouping driver.
+    ///
+    /// The driver only requested the `group_by` field for its candidates, so
+    /// the distilled hits are hydrated from a `retrieve` carrying the plan's
+    /// output selectors — the same payload/vector a remote Qdrant returns.
+    /// `group_offset` trimming stays with the executor (`normalize_planned`).
+    async fn execute_edge_query_groups(
+        &self,
+        collection: &str,
+        req: &qql_plan::types::QueryGroupsRequest,
+    ) -> Result<Vec<GroupedSearchResult>, QqlError> {
+        reject_shard_key(req.shard_key.as_ref())?;
+        let shard = self.open_shard(collection).await?;
+        let edge_req = convert_query_groups_request(req)?;
+        let (with_payload, with_vector) = convert_group_output(req)?;
+
+        let mut groups = shard
+            .query_groups(edge_req)
+            .map_err(|e| edge_err(EdgeOp::Query, Some(collection), e))?;
+
+        let ids: Vec<qdrant_edge::PointId> = groups
+            .iter()
+            .flat_map(|group| group.hits.iter().map(|hit| hit.id))
+            .collect();
+        if !ids.is_empty() {
+            let records = shard
+                .retrieve(qdrant_edge::RetrieveRequest {
+                    point_ids: ids,
+                    with_payload: Some(with_payload),
+                    with_vector: Some(with_vector),
+                })
+                .map_err(|e| edge_err(EdgeOp::Retrieve, Some(collection), e))?;
+            hydrate_edge_groups(&mut groups, records);
+        }
+
+        groups
+            .into_iter()
+            .map(from_edge_group_to_typed)
+            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Run a planned points-by-id retrieve: records map straight to
@@ -770,12 +813,37 @@ impl QdrantOps for EdgeQdrant {
         Ok(())
     }
 
+    /// Apply the `ALTER COLLECTION` fields qdrant-edge can persist.
+    ///
+    /// qdrant-edge exposes `set_hnsw_config` and `set_optimizers_config` (both
+    /// persist to `edge_config.json`); collection params and a quantization
+    /// diff have no setter, so they are rejected per field — only when the
+    /// request actually carries them.
     async fn update_collection(
         &self,
-        _collection_name: &str,
-        _req: &UpdateCollectionRequest,
+        collection_name: &str,
+        req: &UpdateCollectionRequest,
     ) -> Result<(), QqlError> {
-        Err(EdgeUnsupported::AlterCollection.error())
+        if req.params.is_some() {
+            return Err(EdgeUnsupported::AlterCollectionParams.error());
+        }
+        if req.quantization_config.is_some() {
+            return Err(EdgeUnsupported::AlterCollectionQuantization.error());
+        }
+        let shard = self.open_shard(collection_name).await?;
+        if let Some(hnsw) = req.hnsw_config.as_ref() {
+            let hnsw = edge_hnsw_config(hnsw)?;
+            shard
+                .set_hnsw_config(hnsw)
+                .map_err(|e| edge_err(EdgeOp::AlterCollection, Some(collection_name), e))?;
+        }
+        if let Some(optimizers) = req.optimizers_config.as_ref() {
+            let optimizers = edge_optimizers_config(optimizers)?;
+            shard
+                .set_optimizers_config(optimizers)
+                .map_err(|e| edge_err(EdgeOp::AlterCollection, Some(collection_name), e))?;
+        }
+        Ok(())
     }
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
@@ -900,7 +968,10 @@ impl QdrantOps for EdgeQdrant {
                 collection,
                 request,
             } => ExecData::Hits(self.execute_edge_query(collection, request).await?),
-            QueryGroups { .. } => return Err(EdgeUnsupported::GroupBy.error()),
+            QueryGroups {
+                collection,
+                request,
+            } => ExecData::Groups(self.execute_edge_query_groups(collection, request).await?),
             GetPoints {
                 collection,
                 request,
@@ -978,7 +1049,8 @@ impl QdrantOps for EdgeQdrant {
                     .await?;
                 ExecData::Mutation { affected: None }
             }
-            // DDL: status-only. Collection params/sharding stay fail-closed.
+            // DDL: status-only. Sharding stays fail-closed; create-time params
+            // are narrowed to the keys the engine can persist.
             CreateCollection {
                 collection,
                 request,
@@ -988,13 +1060,17 @@ impl QdrantOps for EdgeQdrant {
                     request.sharding_method,
                     request.shard_keys.as_deref(),
                 )?;
-                if request.params.is_some() {
-                    return Err(EdgeUnsupported::CollectionParams.error());
-                }
+                reject_collection_params(request.params.as_ref())?;
                 self.create_collection(collection, request).await?;
                 ExecData::Mutation { affected: None }
             }
-            UpdateCollection { .. } => return Err(EdgeUnsupported::AlterCollection.error()),
+            UpdateCollection {
+                collection,
+                request,
+            } => {
+                self.update_collection(collection, request).await?;
+                ExecData::Mutation { affected: None }
+            }
             DropCollection { collection } => {
                 self.delete_collection(collection).await?;
                 ExecData::Mutation { affected: None }
@@ -1109,7 +1185,8 @@ mod tests {
     use qql::executor::{Executor, OnError};
     use qql_core::parser::Parser;
     use qql_plan::{
-        PlanFacetValue, PlanPointId, PlanVectorStruct, PlanVectorValue, PlannedOperation, plan,
+        PlanFacetValue, PlanGroupId, PlanPointId, PlanVectorStruct, PlanVectorValue,
+        PlannedOperation, plan,
     };
     use serde_json::json;
 
@@ -1741,34 +1818,107 @@ mod tests {
         });
     }
 
-    /// `GROUP BY` is still rejected by qql-edge, but the message must say it is
-    /// not exposed yet — qdrant-edge's `query_groups` does exist.
+    /// `QUERY … GROUP BY` runs through qdrant-edge's grouping driver: typed
+    /// group ids, hydrated payloads, and the executor's client-side
+    /// `group_offset` trimming.
     #[test]
-    fn group_by_rejection_names_the_edge_gap() {
+    fn executor_group_by_returns_typed_groups() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("test runtime");
         runtime.block_on(async {
-            let dir = temp_dir("group-by-gap");
+            let dir = temp_dir("group-by");
             let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            seed_docs(&backend).await;
+            let executor = Executor::new(Box::new(EdgeQdrant::new(&dir, false)), None);
 
-            let error = backend
-                .execute_planned(&plan_one(
-                    "QUERY [1.0, 0.0, 0.0] FROM docs USING dense GROUP BY city LIMIT 10",
-                ))
+            let report = executor
+                .execute(
+                    "CREATE COLLECTION docs (dense VECTOR(3, DOT))",
+                    OnError::Stop,
+                )
                 .await
-                .expect_err("GROUP BY must stay rejected");
-            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-GROUP-BY");
+                .expect("create collection");
+            assert!(report.ok, "create failed: {report:?}");
+            let report = executor
+                .execute(
+                    "CREATE INDEX ON COLLECTION docs FOR district TYPE keyword",
+                    OnError::Stop,
+                )
+                .await
+                .expect("create index");
+            assert!(report.ok, "index failed: {report:?}");
+            for qql in [
+                "UPSERT INTO docs VALUES {id: 1, vector: {dense: [3.0, 0.0, 0.0]}, district: 'NYC', price: 10}",
+                "UPSERT INTO docs VALUES {id: 2, vector: {dense: [2.0, 0.0, 0.0]}, district: 'SF', price: 20}",
+                "UPSERT INTO docs VALUES {id: 3, vector: {dense: [1.0, 0.0, 0.0]}, district: 'LA', price: 30}",
+                "UPSERT INTO docs VALUES {id: 4, vector: {dense: [0.5, 0.0, 0.0]}, district: 'NYC', price: 40}",
+            ] {
+                let report = executor.execute(qql, OnError::Stop).await.expect("upsert");
+                assert!(report.ok, "{qql} failed: {report:?}");
+            }
+
+            let report = executor
+                .execute(
+                    "QUERY [3.0, 0.0, 0.0] FROM docs USING dense GROUP BY district LIMIT 10",
+                    OnError::Stop,
+                )
+                .await
+                .expect("group run");
+            assert!(report.ok, "GROUP BY must succeed offline: {report:?}");
+            let response = report.first().expect("group response");
+            let Some(ExecData::Groups(groups)) = response.data.as_ref() else {
+                panic!("expected typed groups, got {:?}", response.data);
+            };
+            assert_eq!(groups.len(), 3, "groups: {groups:?}");
+            assert_eq!(groups[0].group_id, PlanGroupId::Keyword("NYC".into()));
+            assert_eq!(groups[1].group_id, PlanGroupId::Keyword("SF".into()));
+            assert_eq!(groups[2].group_id, PlanGroupId::Keyword("LA".into()));
+            assert_eq!(groups[0].hits.len(), 2, "NYC has two points");
+            assert_eq!(groups[1].hits.len(), 1);
+            // Hydration: the grouping driver only fetched the `district` field.
+            let payload = groups[0].hits[0]
+                .payload
+                .as_ref()
+                .expect("hydrated payload");
+            assert_eq!(payload.get("price"), Some(&json!(10)));
+
+            // `group_offset` has no wire field: the backend returns
+            // LIMIT+OFFSET groups and the executor trims OFFSET client-side.
+            let report = executor
+                .execute(
+                    "QUERY [3.0, 0.0, 0.0] FROM docs USING dense GROUP BY district LIMIT 1 OFFSET 1",
+                    OnError::Stop,
+                )
+                .await
+                .expect("group offset run");
+            assert!(report.ok, "group offset failed: {report:?}");
+            let response = report.first().expect("group response");
+            let Some(ExecData::Groups(groups)) = response.data.as_ref() else {
+                panic!("expected typed groups, got {:?}", response.data);
+            };
+            assert_eq!(groups.len(), 1, "offset must trim one group: {groups:?}");
+            assert_eq!(groups[0].group_id, PlanGroupId::Keyword("SF".into()));
+
+            // `LOOKUP FROM` has no edge equivalent; only that sub-feature fails.
+            let report = executor
+                .execute(
+                    "QUERY [3.0, 0.0, 0.0] FROM docs USING dense \
+                     GROUP BY district LOOKUP FROM districts LIMIT 5",
+                    OnError::Continue,
+                )
+                .await
+                .expect("lookup run");
+            assert!(!report.ok, "LOOKUP FROM must fail");
             assert!(
-                error.message.contains("does not yet expose"),
-                "stale capability claim: {}",
-                error.message
+                report.results[0]
+                    .message
+                    .contains("QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP"),
+                "expected GROUP-LOOKUP code, got {:?}",
+                report.results[0].message
             );
 
-            backend.close().await.expect("close edge backend");
+            executor.close().await.expect("close edge executor");
             let _ = std::fs::remove_dir_all(dir);
         });
     }
@@ -1799,6 +1949,121 @@ mod tests {
                 panic!("expected typed hits, got {:?}", response.data);
             };
             assert_eq!(hits.len(), 2);
+
+            backend.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// `ALTER COLLECTION` applies the qdrant-edge config setters and persists
+    /// them; params / quantization / excluded optimizer keys stay fail-closed
+    /// per field.
+    #[test]
+    fn alter_collection_applies_engine_config() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("alter-collection");
+            let _ = std::fs::remove_dir_all(&dir);
+            let backend = EdgeQdrant::new(&dir, false);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
+                ))
+                .await
+                .expect("create collection");
+
+            let response = backend
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH HNSW (m = 32) \
+                     WITH OPTIMIZERS (indexing_threshold = 500)",
+                ))
+                .await
+                .expect("ALTER must apply");
+            assert_eq!(response.data, ExecData::Mutation { affected: None });
+
+            {
+                let shard = backend.open_shard("docs").await.expect("open shard");
+                let config = shard.config();
+                assert_eq!(config.hnsw_config().m, 32);
+                assert_eq!(config.optimizers().indexing_threshold, Some(500));
+            }
+
+            // Persisted: a fresh backend sees the updated engine config.
+            backend.close().await.expect("close edge backend");
+            let reopened = EdgeQdrant::new(&dir, false);
+            {
+                let shard = reopened.open_shard("docs").await.expect("reopen shard");
+                let config = shard.config();
+                assert_eq!(config.hnsw_config().m, 32);
+                assert_eq!(config.optimizers().indexing_threshold, Some(500));
+            }
+
+            let error = reopened
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH PARAMS (replication_factor = 3)",
+                ))
+                .await
+                .expect_err("params have no edge setter");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-ALTER-PARAMS");
+
+            let error = reopened
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH QUANTIZATION (disabled = true)",
+                ))
+                .await
+                .expect_err("quantization has no edge setter");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION");
+
+            let error = reopened
+                .execute_planned(&plan_one(
+                    "ALTER COLLECTION docs WITH OPTIMIZERS (flush_interval_sec = 5)",
+                ))
+                .await
+                .expect_err("excluded optimizer key");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY");
+
+            reopened.close().await.expect("close edge backend");
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    /// Create-time `WITH PARAMS (on_disk_payload = …)` maps onto the engine
+    /// config; other param keys still fail closed.
+    #[test]
+    fn create_collection_params_honor_on_disk_payload() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = temp_dir("create-params");
+            let _ = std::fs::remove_dir_all(&dir);
+            // Executor-level default is on-disk; the statement overrides it.
+            let backend = EdgeQdrant::new(&dir, true);
+            backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION docs (dense VECTOR(1, COSINE)) \
+                     WITH PARAMS (on_disk_payload = false)",
+                ))
+                .await
+                .expect("on_disk_payload must be accepted");
+
+            let raw = std::fs::read(dir.join("docs").join("edge_config.json"))
+                .expect("read persisted config");
+            let config: serde_json::Value = serde_json::from_slice(&raw).expect("parse config");
+            assert_eq!(config["on_disk_payload"], json!(false));
+
+            let error = backend
+                .execute_planned(&plan_one(
+                    "CREATE COLLECTION other (dense VECTOR(1, COSINE)) \
+                     WITH PARAMS (replication_factor = 3)",
+                ))
+                .await
+                .expect_err("replication params have no edge equivalent");
+            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS");
 
             backend.close().await.expect("close edge backend");
             let _ = std::fs::remove_dir_all(dir);

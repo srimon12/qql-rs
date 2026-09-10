@@ -10,52 +10,152 @@ use qdrant_edge::{
 
 use qql_core::error::QqlError;
 use qql_plan::types::{
-    FormulaDefault, PayloadSelectorReq, PlanDecayKind, PlanFormula, PrefetchRequest,
-    QueryRequest as PlanQueryRequest, QueryVariant, SearchParamsRequest, VectorSelectorReq,
+    FilterExpression, FormulaDefault, PayloadSelectorReq, PlanDecayKind, PlanFormula,
+    PrefetchRequest, QueryRequest as PlanQueryRequest, QueryVariant, SearchParamsRequest,
+    VectorSelectorReq,
 };
 use qql_plan::{PlanQueryInput, PlanVectorValue};
 
 use super::error_map::{EdgeOp, edge_err};
 use super::filter_converter::convert_formula_condition;
 
-pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryRequest, QqlError> {
-    if request.shard_key.is_some() {
+/// Fields shared by the single-query and grouped-query request bodies, so the
+/// two converters cannot drift.
+struct SharedQueryFields<'a> {
+    query: &'a QueryVariant,
+    using: Option<&'a str>,
+    prefetch: &'a [PrefetchRequest],
+    filter: Option<&'a FilterExpression>,
+    params: Option<&'a SearchParamsRequest>,
+    score_threshold: Option<f64>,
+    with_payload: Option<&'a PayloadSelectorReq>,
+    with_vector: Option<&'a VectorSelectorReq>,
+    limit: u64,
+    offset: u64,
+}
+
+/// Reject the request-level fields qdrant-edge has no slot for.
+fn reject_request_level(
+    shard_key: Option<&qql_plan::semantic::PlanShardKey>,
+    timeout: Option<u64>,
+    consistency: Option<&qql_plan::types::ReadConsistencyParam>,
+) -> Result<(), QqlError> {
+    if shard_key.is_some() {
         return Err(unsupported_shard());
     }
-    if request.timeout.is_some() {
+    if timeout.is_some() {
         return Err(crate::backend::unsupported::EdgeUnsupported::Timeout.error());
     }
-    if request.consistency.is_some() {
+    if consistency.is_some() {
         return Err(crate::backend::unsupported::EdgeUnsupported::Consistency.error());
     }
+    Ok(())
+}
+
+fn convert_shared_query(fields: SharedQueryFields<'_>) -> Result<QueryRequest, QqlError> {
     Ok(QueryRequest {
-        prefetches: request
+        prefetches: fields
             .prefetch
             .iter()
             .map(convert_prefetch)
             .collect::<Result<_, _>>()?,
-        query: Some(convert_query(&request.query, request.using.as_deref())?),
-        filter: super::convert_edge_filter(request.filter.as_ref())?,
-        score_threshold: request.score_threshold.map(|score| score as f32),
-        limit: usize::try_from(request.limit.unwrap_or(10)).map_err(limit_error)?,
-        offset: usize::try_from(request.offset.unwrap_or(0)).map_err(limit_error)?,
-        params: request
-            .params
-            .as_ref()
-            .map(convert_search_params)
-            .transpose()?,
-        with_vector: request
+        query: Some(convert_query(fields.query, fields.using)?),
+        filter: super::convert_edge_filter(fields.filter)?,
+        score_threshold: fields.score_threshold.map(|score| score as f32),
+        limit: usize::try_from(fields.limit).map_err(limit_error)?,
+        offset: usize::try_from(fields.offset).map_err(limit_error)?,
+        params: fields.params.map(convert_search_params).transpose()?,
+        with_vector: fields
             .with_vector
-            .as_ref()
             .map(convert_with_vector)
             .unwrap_or(WithVector::Bool(false)),
-        with_payload: request
+        with_payload: fields
+            .with_payload
+            .map(convert_with_payload)
+            .transpose()?
+            .unwrap_or(WithPayloadInterface::Bool(true)),
+    })
+}
+
+pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryRequest, QqlError> {
+    reject_request_level(
+        request.shard_key.as_ref(),
+        request.timeout,
+        request.consistency.as_ref(),
+    )?;
+    convert_shared_query(SharedQueryFields {
+        query: &request.query,
+        using: request.using.as_deref(),
+        prefetch: &request.prefetch,
+        filter: request.filter.as_ref(),
+        params: request.params.as_ref(),
+        score_threshold: request.score_threshold,
+        with_payload: request.with_payload.as_ref(),
+        with_vector: request.with_vector.as_ref(),
+        limit: request.limit.unwrap_or(10),
+        offset: request.offset.unwrap_or(0),
+    })
+}
+
+/// Lower a grouped query request into a `qdrant-edge` [`GroupRequest`].
+///
+/// `groups` is the plan's `limit` (the executor trims `group_offset`
+/// client-side, exactly as for REST/gRPC) and `group_size` is the points per
+/// group. The base query keeps the caller's output selectors; the edge backend
+/// hydrates the distilled hits from a `retrieve` because qdrant-edge's
+/// grouping driver only requests the `group_by` field for candidates.
+pub(crate) fn convert_query_groups_request(
+    request: &qql_plan::types::QueryGroupsRequest,
+) -> Result<qdrant_edge::GroupRequest, QqlError> {
+    if request.with_lookup.is_some() || request.lookup_from.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::GroupLookup.error());
+    }
+    reject_request_level(
+        request.shard_key.as_ref(),
+        request.timeout,
+        request.consistency.as_ref(),
+    )?;
+    let query = convert_shared_query(SharedQueryFields {
+        query: &request.query,
+        using: request.using.as_deref(),
+        prefetch: &request.prefetch,
+        filter: request.filter.as_ref(),
+        params: request.params.as_ref(),
+        score_threshold: request.score_threshold,
+        with_payload: request.with_payload.as_ref(),
+        with_vector: request.with_vector.as_ref(),
+        // The grouping driver shapes its own candidate limit/offset
+        // (`shape_candidates_query` overwrites both on every request).
+        limit: request.limit,
+        offset: 0,
+    })?;
+    Ok(qdrant_edge::GroupRequest::new(
+        query,
+        parse_json_path(&request.group_by)?,
+        usize::try_from(request.limit).map_err(limit_error)?,
+        usize::try_from(request.group_size).map_err(limit_error)?,
+    ))
+}
+
+/// Output selectors for a grouped request, with the same defaults the plain
+/// query path applies (payloads on, vectors off). Used to hydrate the final
+/// group hits after qdrant-edge's candidate fetch.
+pub(crate) fn convert_group_output(
+    request: &qql_plan::types::QueryGroupsRequest,
+) -> Result<(WithPayloadInterface, WithVector), QqlError> {
+    Ok((
+        request
             .with_payload
             .as_ref()
             .map(convert_with_payload)
             .transpose()?
             .unwrap_or(WithPayloadInterface::Bool(true)),
-    })
+        request
+            .with_vector
+            .as_ref()
+            .map(convert_with_vector)
+            .unwrap_or(WithVector::Bool(false)),
+    ))
 }
 
 fn convert_prefetch(request: &PrefetchRequest) -> Result<Prefetch, QqlError> {
@@ -527,6 +627,36 @@ mod tests {
     };
     use qql_plan::{PlanPointId, PlanQueryInput, PlanVectorValue};
 
+    /// Minimal grouped request over a dense nearest query on `docs`.
+    fn groups_request(
+        field: &str,
+        limit: u64,
+        group_size: u64,
+    ) -> qql_plan::types::QueryGroupsRequest {
+        qql_plan::types::QueryGroupsRequest {
+            query: QueryVariant::Nearest(NearestQuery {
+                nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(vec![1.0, 0.0, 0.0])),
+                mmr: None,
+            }),
+            using: Some("dense".to_string()),
+            prefetch: Vec::new(),
+            filter: None,
+            params: None,
+            score_threshold: None,
+            with_payload: None,
+            with_vector: None,
+            group_by: field.to_string(),
+            group_size,
+            limit,
+            with_lookup: None,
+            lookup_from: None,
+            shard_key: None,
+            timeout: None,
+            consistency: None,
+            group_offset: None,
+        }
+    }
+
     #[test]
     fn test_nearest_dense_conversion() {
         let query = QueryVariant::Nearest(NearestQuery {
@@ -752,6 +882,58 @@ mod tests {
         );
     }
 
+    /// A grouped request lowers onto `GroupRequest` with the plan `limit` as
+    /// the group count and `group_size` as the hits per group.
+    #[test]
+    fn test_group_request_conversion() {
+        let request = groups_request("district", 5, 3);
+        let converted = convert_query_groups_request(&request).expect("group conversion");
+        assert_eq!(converted.group_by.to_string(), "district");
+        assert_eq!(converted.groups, 5);
+        assert_eq!(converted.group_size, 3);
+        assert_eq!(converted.query.limit, 5);
+        assert_eq!(converted.query.offset, 0);
+        assert_eq!(
+            converted.query.with_payload,
+            WithPayloadInterface::Bool(true),
+            "payloads default on"
+        );
+        assert_eq!(converted.query.with_vector, WithVector::Bool(false));
+        assert!(matches!(
+            converted.query.query,
+            Some(ScoringQuery::Vector(QueryEnum::Nearest(_)))
+        ));
+    }
+
+    /// `GROUP BY … LOOKUP FROM <collection>` is the only grouped sub-feature
+    /// qdrant-edge cannot represent; it must fail on its own code.
+    #[test]
+    fn test_group_lookup_rejected() {
+        let mut request = groups_request("district", 5, 3);
+        request.with_lookup = Some(qql_plan::types::WithLookupValue::Collection(
+            "districts".to_string(),
+        ));
+        let error = convert_query_groups_request(&request).expect_err("lookup must fail");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP");
+
+        let mut request = groups_request("district", 5, 3);
+        request.lookup_from = Some(qql_plan::types::LookupRequest {
+            collection: "other".to_string(),
+            vector: None,
+        });
+        let error = convert_query_groups_request(&request).expect_err("lookup_from must fail");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP");
+    }
+
+    /// Hydration selectors mirror the plain query defaults.
+    #[test]
+    fn test_group_output_defaults() {
+        let request = groups_request("district", 5, 3);
+        let (with_payload, with_vector) = convert_group_output(&request).expect("output selectors");
+        assert_eq!(with_payload, WithPayloadInterface::Bool(true));
+        assert_eq!(with_vector, WithVector::Bool(false));
+    }
+
     #[test]
     fn test_sample_random_conversion() {
         let query = QueryVariant::Sample {
@@ -766,7 +948,6 @@ mod tests {
             other => panic!("expected Sample, got {other:?}"),
         }
     }
-
     #[test]
     fn test_unsupported_sample_rejected() {
         let query = QueryVariant::Sample {

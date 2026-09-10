@@ -270,17 +270,19 @@ usually carry a remediation hint pointing at remote Qdrant.
 
 | Code | Meaning |
 |---|---|
-| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not yet exposed by qql-edge |
-| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM`; qdrant-edge has no lookup collection |
+| `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS`; qdrant-edge has no params setter |
+| `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION`; qdrant-edge has no quantization setter |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` (replication, fan-out, payload memory) |
+| `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys qdrant-edge excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
-| `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formula functions; the pinned qdrant-edge predates those `Expression` variants |
+| `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formula functions; qdrant-edge 0.8 has no such `Expression` variants |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
 
@@ -393,11 +395,13 @@ QQL-EDGE-SPAWN
 QQL-EDGE-STORAGE
 QQL-EDGE-TIMEOUT
 QQL-EDGE-TYPE
-QQL-EDGE-UNSUPPORTED-ALTER
+QQL-EDGE-UNSUPPORTED-ALTER-PARAMS
+QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION
 QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS
 QQL-EDGE-UNSUPPORTED-CONSISTENCY
 QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION
-QQL-EDGE-UNSUPPORTED-GROUP-BY
+QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP
+QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY
 QQL-EDGE-UNSUPPORTED-POINT-REF
 QQL-EDGE-UNSUPPORTED-QUOTA
 QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY

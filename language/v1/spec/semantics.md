@@ -560,11 +560,13 @@ invalid fixtures are normative for those cases.
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
 | `QQL-EMBEDDING-MULTI` | Multi-vector embedding returned an empty or mis-sized bag for the requested text batch |
 | `QQL-EMBEDDING-IMAGE` | Image embedding returned an empty or mis-sized batch for the requested image sources |
-| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not available offline |
-| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` has no offline lookup collection |
+| `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` has no offline setter |
+| `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` has no offline setter |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` are not available offline |
+| `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the offline engine excludes |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |

@@ -13,8 +13,10 @@ missing** features that already ship.
 | Multivector / ColBERT (`AS MULTI`, MaxSim `RERANK`) | **Opt-in** `multi_model` / multi HTTP |
 | CLIP `IMAGE` + CLIP text dense | **Opt-in** `image_model` (local **paths** only) |
 | Cross-encoder `CROSS RERANK` | **Opt-in** `reranker_model` / `rerank_endpoint` |
-| `GROUP BY` / query groups | **No** — `QQL-EDGE-UNSUPPORTED-GROUP-BY`; use remote Qdrant |
-| `SHARD`, `ALTER COLLECTION` | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
+| `GROUP BY` / query groups | **Yes** on qdrant-edge **0.8+** (`SIZE`, `LIMIT`, `OFFSET`); `LOOKUP FROM` → `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` |
+| `SHARD`, shard-key DDL | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
+| `ALTER COLLECTION` | **Partial** — `WITH HNSW` / `WITH OPTIMIZERS` persist; `WITH PARAMS` / `QUANTIZATION` reject per field |
+| Create-time `WITH PARAMS` | **Partial** — `on_disk_payload` only; other keys → `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
 | `SHOW QUOTAS` / `SET QUOTA` | **No** — `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST `/quotas` only) |
 | `PARAMS (idf = …)` | **Yes** on qdrant-edge **0.8+** (per-query sparse IDF corpus) |
 | `PARAMS (acorn = …, max_selectivity = …)` | **Yes** on qdrant-edge **0.8+** |
@@ -42,7 +44,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 | Area | Reality | Agent rule |
 |---|---|---|
-| Edge `GROUP BY` | Rejected offline (`QQL-EDGE-UNSUPPORTED-GROUP-BY`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
+| Edge `GROUP BY` | Supported offline (`QQL-EDGE-*` free) except `LOOKUP FROM`. | Same QQL works on remote Qdrant; offline `SIZE`/`LIMIT`/`OFFSET` are honored. |
 | Host SDK route affinity | Exposed: `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `client.setRouteAffinity(…)`. | Route affinity is **N/A on edge** (single node). Do not add it to `localExecutor`/`httpExecutor`. |
 | Edge quotas | Always unsupported. | Use remote Qdrant REST for quota admin. |
 
@@ -93,7 +95,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Multi-tenant shard | `SHARD 'tenant'` / `stmt.shard_key` + `inject_filter(…, tenant_id, …)` |
 | Tenant-local sparse IDF | `PARAMS (idf = WHERE tenant_id = 'acme')` + `WHERE tenant_id = 'acme'` |
 | Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |
-| Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
+| Edge group lookup | `GROUP BY district` works offline; `LOOKUP FROM` needs remote Qdrant |
 | Quota admin offline | Use remote Qdrant REST; never invent edge quota ops |
 
 ---

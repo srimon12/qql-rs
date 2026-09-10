@@ -44,8 +44,8 @@ qql --edge exec "UPSERT INTO docs VALUES {id: 1, text: 'hello'}"
 qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"   # still there
 {% /terminal %}
 
-The vector schema is fixed at creation (`edge_config.json`); edge has no
-`ALTER COLLECTION`.
+The vector schema is fixed at creation (`edge_config.json`); `ALTER COLLECTION`
+can update HNSW and optimizer config, but not vector definitions.
 
 ## `close()` — flushing the WAL and segments
 
