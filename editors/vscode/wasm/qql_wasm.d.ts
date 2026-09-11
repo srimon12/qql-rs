@@ -108,14 +108,19 @@ export class Client {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Parse and compile one statement without executing it. Alias for `compile`.
+     */
+    compileQuery(query: string, params?: any | null): CompiledRoute;
+    /**
      * Parse and compile one statement without executing it. Optional
      * `params` bind before parsing (same shape as the module-level `bind`).
      */
     compile(query: string, params?: any | null): CompiledRoute;
     /**
-     * Parse and compile one statement without executing it. Alias for `compile`.
+     * Execute a pre-parsed Stmt object. Injects embeddings for UPSERT
+     * if an embedder is configured. Optionally binds parameters.
      */
-    compileQuery(query: string, params?: any | null): CompiledRoute;
+    executeStmt(stmt: Stmt, options?: ExecuteOptions): Promise<ExecutionReport>;
     /**
      * Parse, compile, embed if needed, and POST to Qdrant's REST API.
      *
@@ -125,15 +130,6 @@ export class Client {
      */
     execute(query: string | Stmt | (string | Stmt)[], options?: ExecuteOptions): Promise<ExecutionReport>;
     /**
-     * Execute a pre-parsed Stmt object. Injects embeddings for UPSERT
-     * if an embedder is configured. Optionally binds parameters.
-     */
-    executeStmt(stmt: Stmt, options?: ExecuteOptions): Promise<ExecutionReport>;
-    /**
-     * Parse and explain the query — no server needed.
-     */
-    explain(query: string): string;
-    /**
      * Analyze a single query string or `Stmt`: static plan plus measured
      * execution (per-phase client timings, server time, hardware and
      * inference usage). Returns an `AnalyzeReport` object:
@@ -142,10 +138,23 @@ export class Client {
      */
     explainAnalyze(query: string | Stmt, options?: ExecuteOptions): Promise<AnalyzeReport>;
     /**
+     * Parse and explain the query — no server needed.
+     */
+    explain(query: string): string;
+    /**
      * Check whether any embedder is configured.
      */
     hasEmbedder(): boolean;
     constructor(url?: string | null, api_key?: string | null);
+    /**
+     * Set client-side BM25 document parameters for the built-in local sparse
+     * encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
+     * documents upserted after the call are encoded; query weights stay unit
+     * and server-side inference is untouched. Invalid values throw
+     * (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+     * all finite.
+     */
+    setBm25Params(k1: number, b: number, avg_len: number): void;
     /**
      * Set a JS embedder: `async (texts: string[]) => number[][]`.
      * Called with the full batch — do not loop one-by-one inside the callback
@@ -210,14 +219,14 @@ export class Stmt {
      */
     bind(params?: any | null): Stmt;
     /**
+     * Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+     */
+    compileRouteBytes(): Uint8Array;
+    /**
      * Compile this Stmt AST directly into a Qdrant REST route object.
      * Optionally accepts `params` to bind before compiling.
      */
     compileRoute(params?: any | null): CompiledRoute;
-    /**
-     * Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
-     */
-    compileRouteBytes(): Uint8Array;
     /**
      * Explain this statement's execution plan (mirrors the free `explain`).
      */
