@@ -11,7 +11,7 @@ This guide details the core rules, architecture, design philosophy, contract tes
 1. **Verify Before Declaring Done**:
    - `cargo check --workspace --all-targets`
    - `cargo clippy --workspace --all-targets -- -D warnings`
-   - `cargo test -p qql-core -p qql-plan -p qql-embed`
+   - `cargo test -p qql-core -p qql-plan -p qql-embed -p qql-convert`
    - `cargo fmt --check`
 
 2. **Memory Safety & Unsafe Code**:

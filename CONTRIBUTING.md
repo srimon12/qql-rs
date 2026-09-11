@@ -53,9 +53,11 @@ cargo run --locked -p qql-conformance -- check language/v1
 cargo fmt --all -- --check
 cargo clippy --locked --all-features \
   -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli \
+  -p qql-convert \
   --all-targets -- -D warnings
 cargo test --locked --all-features \
-  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli \
+  -p qql-convert
 ```
 
 Optional gates that CI also runs (slower):
@@ -73,7 +75,8 @@ cargo check --locked -p qql-core --all-features
 # Docs (deny rustdoc warnings on all published crates)
 RUSTDOCFLAGS='-D warnings' \
   cargo doc --locked --no-deps --all-features \
-  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge \
+  -p qql-convert
 # Separate target-dir: CLI binary is also named `qql`
 RUSTDOCFLAGS='-D warnings' \
   cargo doc --locked --no-deps --all-features -p qql-cli --target-dir target/doc-cli

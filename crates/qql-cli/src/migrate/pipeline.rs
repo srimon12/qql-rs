@@ -14,6 +14,7 @@ use qql_plan::types::FilterExpression;
 
 use super::checkpoint::{self, Checkpoint, Phase};
 use super::options::{MigrateOptions, MigrateProgress, MissingShardKey};
+use super::retry::{self, Circuit};
 use super::schema::ensure_shard_key;
 use crate::dump::{ScrollPages, format_ident, point_to_upsert_object};
 
@@ -70,9 +71,17 @@ pub async fn stream_points(
     };
 
     let consume = async {
+        let mut circuit = Circuit::default();
         while let Some(window) = rx.recv().await {
-            let missing =
-                upsert_window(target, opts, &window, &mut prepared, &mut created_keys).await?;
+            let missing = upsert_window(
+                target,
+                opts,
+                &window,
+                &mut prepared,
+                &mut created_keys,
+                &mut circuit,
+            )
+            .await?;
             let (next_after, written, skipped, batches) = window_totals(&window);
             checkpoint.written += written.saturating_sub(missing);
             checkpoint.skipped += skipped + missing;
@@ -143,6 +152,7 @@ async fn upsert_window(
     window: &[WindowPage],
     prepared: &mut HashMap<String, qql::executor::PreparedStatement>,
     created_keys: &mut HashSet<String>,
+    circuit: &mut Circuit,
 ) -> Result<usize, Box<dyn Error>> {
     let mut groups: Vec<IngestBatch> = Vec::new();
     let mut missing = 0usize;
@@ -169,15 +179,18 @@ async fn upsert_window(
                 "CREATE SHARD KEY {key} ON COLLECTION {}",
                 format_ident(&opts.target_collection)
             );
-            ensure_shard_key(target, &stmt).await?;
+            retry::retry(circuit, || ensure_shard_key(target, &stmt)).await?;
         }
         if !prepared.contains_key(&cache) {
             let sql = upsert_template(&opts.target_collection, group.shard_key.as_ref(), opts.wait);
-            let stmt = target.prepare(&sql).await?;
+            let stmt = retry::retry(circuit, || async {
+                target.prepare(&sql).await.map_err(|e| e.into())
+            })
+            .await?;
             prepared.insert(cache, stmt);
         }
     }
-    upsert_groups(target, prepared, groups, opts.wait, opts.workers).await?;
+    upsert_groups(target, prepared, groups, opts.wait, opts.workers, circuit).await?;
     Ok(missing)
 }
 
@@ -291,6 +304,7 @@ async fn upsert_groups(
     mut groups: Vec<IngestBatch>,
     wait: bool,
     workers: usize,
+    circuit: &Circuit,
 ) -> Result<(), Box<dyn Error>> {
     let concurrency = workers.max(1);
     while !groups.is_empty() {
@@ -299,7 +313,7 @@ async fn upsert_groups(
         let futs: Vec<UpsertFut<'_>> = chunk
             .into_iter()
             .map(|group| {
-                let fut = upsert_one(target, prepared, group, wait);
+                let fut = upsert_one(target, prepared, group, wait, circuit);
                 Box::pin(fut) as UpsertFut<'_>
             })
             .collect();
@@ -329,6 +343,7 @@ async fn upsert_one(
     prepared: &HashMap<String, qql::executor::PreparedStatement>,
     group: IngestBatch,
     wait: bool,
+    circuit: &Circuit,
 ) -> Result<(), Box<dyn Error>> {
     let key = shard_cache_key(group.shard_key.as_ref(), wait);
     let stmt = prepared
@@ -336,12 +351,18 @@ async fn upsert_one(
         .ok_or_else(|| format!("missing prepared upsert template for shard key '{key}'"))?;
     let mut params = HashMap::with_capacity(1);
     params.insert("rows".to_string(), Value::List(group.rows));
-    let resp = target.execute_prepared(stmt, &params).await?;
-    if resp.ok {
-        Ok(())
-    } else {
-        Err(resp.message.into())
-    }
+    retry::retry(circuit, || async {
+        let resp = target
+            .execute_prepared(stmt, &params)
+            .await
+            .map_err(|e| -> Box<dyn Error> { e.into() })?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(resp.message.into())
+        }
+    })
+    .await
 }
 
 #[cfg(test)]

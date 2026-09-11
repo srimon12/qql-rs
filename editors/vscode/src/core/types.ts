@@ -31,6 +31,8 @@ export interface WasmAnalyzeResult {
   routes: CompiledRoute[];
   explain: string | null;
   error: AnalysisError | null;
+  /** Present on current WASM builds; older bundles only set `error`. */
+  errors?: AnalysisError[];
 }
 
 /** A top-level statement span derived from tokens / analysis. */

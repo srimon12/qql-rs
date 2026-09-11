@@ -7,6 +7,7 @@ pub(crate) mod formula;
 pub(crate) mod helpers;
 pub(crate) mod point_ops;
 pub(crate) mod query;
+mod recover;
 pub(crate) mod r#update;
 pub(crate) mod upsert;
 pub(crate) mod with_clause;
@@ -23,6 +24,7 @@ pub use config_validation::{
     merge_collection_config, validate_hnsw_value, validate_index_options,
     validate_optimizers_value, validate_params_value, validate_vectors_value,
 };
+pub use recover::RecoveredScript;
 
 /// Canonical QQL parser facade.
 ///
@@ -74,6 +76,16 @@ impl Parser {
     /// Parses a script, returning each statement paired with its source span.
     pub fn parse_all_with_spans(input: &str) -> Result<Vec<(Stmt, Span)>, QqlError> {
         AstLowerer::lower_script_with_spans(input)
+    }
+
+    /// Parse a script in panic-mode recovery: sync on `;` or the next
+    /// statement keyword and collect every recoverable error.
+    ///
+    /// [`Self::parse`] / [`Self::parse_all`] stay fail-fast — execution must
+    /// not run a partial script. This entry point is for IDEs, `analyze`, and
+    /// other diagnostic surfaces that want every span in one pass.
+    pub fn parse_all_recovering(input: &str) -> RecoveredScript {
+        AstLowerer::lower_script_recovering(input)
     }
 
     /// Parse a standalone literal value (string, number, boolean, null, list, or dict).

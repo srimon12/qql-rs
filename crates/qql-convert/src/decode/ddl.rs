@@ -422,6 +422,9 @@ pub(crate) fn set_quota(body: &Value, ctx: DecodeCtx<'_>) -> Result<SetQuotaStmt
             }
         }
     }
+    // Same feature-unification trap as CREATE INDEX options: sort so the
+    // formatter does not inherit `serde_json` map iteration order.
+    config.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(SetQuotaStmt {
         config,
         wait: ctx.opts.wait,

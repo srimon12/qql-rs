@@ -208,6 +208,24 @@ fn index_and_shard_key_shapes() {
             "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (lowercase = true, min_token_len = 2, stemmer = 'english', stopwords = ['the'], tokenizer = 'word')"
         ]
     );
+    // Insertion order (tokenizer first) must still format alphabetically —
+    // `serde_json/preserve_order` must not leak into canonical QQL.
+    let mut schema = serde_json::Map::new();
+    schema.insert("tokenizer".into(), serde_json::json!("word"));
+    schema.insert("lowercase".into(), serde_json::json!(true));
+    schema.insert("min_token_len".into(), serde_json::json!(2));
+    schema.insert("type".into(), serde_json::json!("text"));
+    let inserted = wrapped(
+        "PUT",
+        "/collections/docs/index",
+        serde_json::json!({"field_name": "body", "field_schema": schema}),
+    );
+    assert_eq!(
+        convert_json(&inserted, None).expect("insertion-order index schema"),
+        [
+            "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (lowercase = true, min_token_len = 2, tokenizer = 'word')"
+        ]
+    );
     assert_eq!(
         convert(r#"{"shard_key": "acme", "shards_number": 3, "replication_factor": 2}"#),
         [

@@ -53,52 +53,60 @@ export function updateDiagnostics(
   result: WasmAnalyzeResult
 ): void {
   const diagnostics: vscode.Diagnostic[] = [];
+  const analysisErrors =
+    result.errors && result.errors.length > 0
+      ? result.errors
+      : result.error
+        ? [result.error]
+        : [];
 
-  if (!result.valid && result.error) {
-    const err = result.error;
-    let range: vscode.Range;
+  if (!result.valid) {
+    for (const err of analysisErrors) {
+      let range: vscode.Range;
 
-    if (err.start != null && err.end != null && err.end > err.start) {
-      range = new vscode.Range(
-        byteOffsetToPosition(document, err.start),
-        byteOffsetToPosition(document, err.end)
-      );
-    } else if (err.start != null) {
-      const pos = byteOffsetToPosition(document, err.start);
-      const line = document.lineAt(pos.line);
-      range = new vscode.Range(pos.line, pos.character, pos.line, line.text.length);
-    } else {
-      // Unspanned errors (notably QQL-BIND-*) default to the first line —
-      // narrow unbound placeholders to the exact `:name` / `?` token instead.
-      const refined =
-        err.start == null && err.code === "QQL-BIND-MISSING-PARAM"
-          ? refineBindRange(document, err.message)
-          : undefined;
-      if (refined) {
-        range = refined;
+      if (err.start != null && err.end != null && err.end > err.start) {
+        range = new vscode.Range(
+          byteOffsetToPosition(document, err.start),
+          byteOffsetToPosition(document, err.end)
+        );
+      } else if (err.start != null) {
+        const pos = byteOffsetToPosition(document, err.start);
+        const line = document.lineAt(pos.line);
+        range = new vscode.Range(pos.line, pos.character, pos.line, line.text.length);
       } else {
-        const firstLine = document.lineAt(0);
-        range = new vscode.Range(0, 0, 0, firstLine.text.length);
+        // Unspanned errors (notably QQL-BIND-*) default to the first line —
+        // narrow unbound placeholders to the exact `:name` / `?` token instead.
+        const refined =
+          err.start == null && err.code === "QQL-BIND-MISSING-PARAM"
+            ? refineBindRange(document, err.message)
+            : undefined;
+        if (refined) {
+          range = refined;
+        } else {
+          const firstLine = document.lineAt(0);
+          range = new vscode.Range(0, 0, 0, firstLine.text.length);
+        }
       }
+
+      const hint = hintFor(err.code);
+      const diagnostic = new vscode.Diagnostic(
+        range,
+        hint ? `${err.code}: ${err.message}\n${hint}` : `${err.code}: ${err.message}`,
+        vscode.DiagnosticSeverity.Error
+      );
+      diagnostic.source = "qql";
+      diagnostic.code = {
+        value: err.code,
+        target: vscode.Uri.parse(`${ERROR_CODES_URL}/#${err.code}`),
+      };
+      diagnostics.push(diagnostic);
     }
 
-    const hint = hintFor(err.code);
-    const diagnostic = new vscode.Diagnostic(
-      range,
-      hint ? `${err.code}: ${err.message}\n${hint}` : `${err.code}: ${err.message}`,
-      vscode.DiagnosticSeverity.Error
-    );
-    diagnostic.source = "qql";
-    diagnostic.code = {
-      value: err.code,
-      target: vscode.Uri.parse(`${ERROR_CODES_URL}/#${err.code}`),
-    };
-    diagnostics.push(diagnostic);
-
-    if (result.statements_count > 0) {
+    if (result.statements_count > 0 && analysisErrors.length > 0) {
+      const first = diagnostics[0]?.range ?? new vscode.Range(0, 0, 0, 0);
       const info = new vscode.Diagnostic(
-        range,
-        `Parsed ${result.statements_count} statement(s) before the error`,
+        first,
+        `Parsed ${result.statements_count} statement(s); ${analysisErrors.length} error(s) remain`,
         vscode.DiagnosticSeverity.Information
       );
       info.source = "qql";

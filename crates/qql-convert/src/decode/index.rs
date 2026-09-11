@@ -111,6 +111,10 @@ fn index_options(schema: &json::Obj, path: &str) -> Result<Vec<(String, AstValue
             }
         }
     }
+    // Canonical QQL is alphabetical. `serde_json::Map` iterates BTreeMap order
+    // unless another crate in the cargo unit enables `preserve_order` (IndexMap
+    // insertion order). Sort here so `qql convert` does not depend on that.
+    options.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(options)
 }
 

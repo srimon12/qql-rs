@@ -20,6 +20,7 @@ mod cutover;
 pub(crate) mod discover;
 mod options;
 mod pipeline;
+mod retry;
 mod schema;
 mod verify;
 
