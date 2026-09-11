@@ -19,7 +19,9 @@ dropped field.
 1. **Wrapped request** — `{"method": ..., "path": ..., "body": ...}`; the
    collection is derived from the path. The `(method, path)` pair is resolved
    against the "Statement → Endpoint Matrix" in the workspace `AGENTS.md`
-   (26 routes); everything else is `UnsupportedEndpoint`.
+   (25 statement routes, plus the `POST /collections/aliases` helper which is
+   asserted to be `UnsupportedEndpoint`); everything else is
+   `UnsupportedEndpoint`.
 2. **Bare body** — raw Qdrant REST JSON without path context; the caller
    supplies the collection via `json_to_qql_with_collection`
    (`json_to_qql` falls back to `"unknown"`). Bare detection is a documented,

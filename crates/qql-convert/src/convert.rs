@@ -47,6 +47,46 @@ pub fn json_to_qql_with_collection(
     Ok(statements.iter().map(format_stmt).collect())
 }
 
+/// Convert a JSONL capture (one wrapped request or bare body per line).
+///
+/// This is the capture shape written by `qql record --out`. Empty lines are
+/// skipped; the first failing line reports its 1-based number in
+/// [`ConvertError::InvalidLine`].
+pub fn jsonl_to_qql(input: &str) -> Result<Vec<String>, ConvertError> {
+    jsonl_to_qql_with_collection(input, "unknown")
+}
+
+/// Convert a JSONL capture with a fallback collection for bare bodies.
+///
+/// `collection` applies to lines that carry no path (bare bodies); wrapped
+/// lines always derive their collection from the path. An empty collection
+/// falls back to `"unknown"`.
+pub fn jsonl_to_qql_with_collection(
+    input: &str,
+    collection: &str,
+) -> Result<Vec<String>, ConvertError> {
+    let mut statements = Vec::new();
+    let mut entries = 0usize;
+    for (index, raw) in input.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        entries += 1;
+        let converted = json_to_qql_with_collection(line, collection).map_err(|source| {
+            ConvertError::InvalidLine {
+                line: index + 1,
+                source: Box::new(source),
+            }
+        })?;
+        statements.extend(converted);
+    }
+    if entries == 0 {
+        return Err(ConvertError::undecodable("no JSON lines in capture"));
+    }
+    Ok(statements)
+}
+
 /// Split a wrapped `{method, path, body}` object, if this is one.
 fn wrapped_parts(raw: &Value) -> Option<(&str, &str, Option<&Value>)> {
     let obj = raw.as_object()?;

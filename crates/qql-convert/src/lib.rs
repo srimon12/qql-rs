@@ -1,6 +1,6 @@
 //! Qdrant REST JSON to QQL statement converter.
 //!
-//! Two input shapes are accepted:
+//! Three input shapes are accepted:
 //!
 //! 1. **Wrapped request** — `{"method": ..., "path": ..., "body": ...}`; the
 //!    collection is derived from the path and any caller-supplied collection
@@ -8,6 +8,10 @@
 //! 2. **Bare body** — raw Qdrant REST JSON without path context; the caller
 //!    supplies the collection via [`json_to_qql_with_collection`]
 //!    ([`json_to_qql`] falls back to `"unknown"`).
+//! 3. **JSONL capture** — one wrapped request or bare body per line, as
+//!    written by `qql record`; use [`jsonl_to_qql`] /
+//!    [`jsonl_to_qql_with_collection`]. A failing line reports its 1-based
+//!    number via [`ConvertError::InvalidLine`].
 //!
 //! Conversion is contract-driven and AST-based:
 //!
@@ -27,12 +31,15 @@ mod decode;
 mod endpoint;
 mod json;
 
-pub use convert::{json_to_qql, json_to_qql_with_collection};
+pub use convert::{
+    json_to_qql, json_to_qql_with_collection, jsonl_to_qql, jsonl_to_qql_with_collection,
+};
 use std::fmt;
 
 /// Typed conversion failure.
 ///
-/// Returned by [`json_to_qql`] and [`json_to_qql_with_collection`].
+/// Returned by [`json_to_qql`], [`json_to_qql_with_collection`],
+/// [`jsonl_to_qql`], and [`jsonl_to_qql_with_collection`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConvertError {
     /// The input is not valid JSON. Holds the underlying parse message.
@@ -53,6 +60,14 @@ pub enum ConvertError {
         path: String,
         /// Why the field is invalid or cannot be represented in QQL.
         detail: String,
+    },
+    /// A JSONL capture line failed to convert. Holds the 1-based line number
+    /// and the underlying error.
+    InvalidLine {
+        /// 1-based line number of the failing capture entry.
+        line: usize,
+        /// The conversion error raised for that line.
+        source: Box<ConvertError>,
     },
 }
 
@@ -78,8 +93,16 @@ impl fmt::Display for ConvertError {
             Self::UnsupportedEndpoint(ep) => write!(f, "unsupported endpoint: {ep}"),
             Self::UndecodableBody { detail } => write!(f, "cannot decode request body: {detail}"),
             Self::InvalidField { path, detail } => write!(f, "invalid field '{path}': {detail}"),
+            Self::InvalidLine { line, source } => write!(f, "line {line}: {source}"),
         }
     }
 }
 
-impl std::error::Error for ConvertError {}
+impl std::error::Error for ConvertError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidLine { source, .. } => Some(source.as_ref()),
+            _ => None,
+        }
+    }
+}
