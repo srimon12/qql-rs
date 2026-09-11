@@ -18,7 +18,7 @@ use common::{
     Row, apply_filter, load_queries, median, parse_args, print_header, print_json, print_row,
 };
 use qql::client::*;
-use qql::executor::{Executor, OnError};
+use qql::executor::{BackendResponse, ExecData, Executor, OnError};
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 use std::hint::black_box;
@@ -81,22 +81,38 @@ impl QdrantOps for MockQdrant {
     }
     async fn execute_planned(
         &self,
-        _op: &qql_plan::PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError> {
-        Ok(serde_json::json!({"result": [], "status": "ok", "time": 0.0}))
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<BackendResponse, QqlError> {
+        // Typed mock: mirror the variant the executor normalization expects
+        // per operation (empty payloads — throughput, not data, is measured).
+        use qql_plan::PlannedOperation as Op;
+        let data = match op {
+            Op::Query { .. } | Op::Scroll { .. } | Op::GetPoints { .. } => {
+                ExecData::Hits(Vec::new())
+            }
+            Op::QueryGroups { .. } => ExecData::Groups(Vec::new()),
+            Op::Count { .. } => ExecData::Count(0),
+            Op::Facet { .. } => ExecData::Facet(Vec::new()),
+            Op::ListCollections => ExecData::Collections(Vec::new()),
+            _ => ExecData::Mutation { affected: None },
+        };
+        Ok(BackendResponse {
+            data,
+            telemetry: None,
+        })
     }
     async fn execute_query_batch(
         &self,
         _collection: &str,
         _batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         Ok(vec![])
     }
     async fn execute_update_batch(
         &self,
         _collection: &str,
         _batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
+    ) -> Result<Vec<BackendResponse>, QqlError> {
         Ok(vec![])
     }
 }
