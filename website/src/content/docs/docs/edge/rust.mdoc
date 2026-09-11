@@ -171,9 +171,11 @@ let backend = EdgeQdrant::new("./qdrant_data", true); // base_path, on_disk_payl
 
 `EdgeQdrant::new(base_path, on_disk_payload)` opens shards lazily per
 collection and persists them under `base_path`. `with_wal_segment_capacity`
-shrinks the pre-allocated WAL segments (bytes). Combined with an embedder and
-a `QqlConfig`, wrap it in a runtime `Executor` via `Executor::with_embedder`.
-The `close()` method (also on `Executor`) drains and flushes all open shards.
+shrinks the pre-allocated WAL segments (bytes): it seeds shards without a
+persisted capacity, then the persisted value wins. Combined with an embedder
+and a `QqlConfig`, wrap it in a runtime `Executor` via
+`Executor::with_embedder`. The `close()` method (also on `Executor`) drains and
+flushes all open shards.
 
 Snapshot seeding helpers live at the crate root: `qql_edge::unpack_snapshot`
 (unpack a downloaded snapshot archive into a directory) and

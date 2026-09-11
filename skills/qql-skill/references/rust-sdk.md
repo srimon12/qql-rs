@@ -95,6 +95,9 @@ let exec = Executor::new(Box::new(client), None);
 ```
 
 `RestQdrant::with_timeout(url, api_key, timeout)` constructs with an explicit duration.
+`RestQdrant::with_read_timeout(url, api_key, read_timeout)` drops the total
+request cap and bounds each read operation instead — the streaming profile used
+for shard snapshots (`qql::snapshots`).
 
 **Request-level params (QQL 1.2+):** `PARAMS (timeout = 30, consistency = majority)`
 lower to REST query string / gRPC fields on the request (not body `SearchParams`).

@@ -93,7 +93,7 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | — | Offline cross-encoder (also falls back to `RERANK_MODEL`) |
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | — | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true` | `true`/`false`/`1`/`0` — payloads on disk |
-| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; also exposed by the Python/Node edge SDKs) |
+| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; seeds shards without a persisted capacity, a persisted value wins; also exposed by the Python/Node edge SDKs) |
 | `QQL_EDGE_BM25_K1` | `--bm25-k1` | `1.2` | Client-side BM25 `k1` for the local sparse document encoder (write-path only; malformed values fail closed) |
 | `QQL_EDGE_BM25_B` | `--bm25-b` | `0.75` | Client-side BM25 `b` length normalization in `[0, 1]` |
 | `QQL_EDGE_BM25_AVG_LEN` | `--bm25-avg-len` | `256` | Client-side BM25 expected average document length in tokens |

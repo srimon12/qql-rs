@@ -17,11 +17,28 @@ use super::memory::memory_to_str;
 /// counts, and the vector/index schema (no JSON round-trip).
 pub(crate) fn collection_info_from_grpc(info: &qdrant::CollectionInfo) -> CollectionInfo {
     CollectionInfo {
-        status: info.status.to_string(),
+        status: collection_status_to_str(info.status).to_string(),
         points_count: info.points_count.unwrap_or(0),
         indexed_vectors_count: info.indexed_vectors_count,
         segments_count: info.segments_count,
         schema: schema_from_grpc_collection(info),
+    }
+}
+
+/// Canonical lowercase status names shared by REST, gRPC, and edge.
+///
+/// REST/OpenAPI emits `green` / `yellow` / `grey` / `red`; the proto carries
+/// the same states as `CollectionStatus` enum numbers. Mapping here keeps
+/// `SHOW COLLECTION` transport-independent instead of leaking the raw i32
+/// (`status.to_string()` yielded `"1"`). Unknown/unknown-variant numbers map to
+/// `unknown`, never to a numeric string.
+fn collection_status_to_str(status: i32) -> &'static str {
+    match qdrant::CollectionStatus::try_from(status) {
+        Ok(qdrant::CollectionStatus::Green) => "green",
+        Ok(qdrant::CollectionStatus::Yellow) => "yellow",
+        Ok(qdrant::CollectionStatus::Grey) => "grey",
+        Ok(qdrant::CollectionStatus::Red) => "red",
+        Ok(qdrant::CollectionStatus::UnknownCollectionStatus) | Err(_) => "unknown",
     }
 }
 
@@ -449,4 +466,30 @@ fn payload_index_params_from_proto(
         None => {}
     }
     (map, is_tenant)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collection_status_maps_to_canonical_names() {
+        // Same lowercase names the REST parser reads and edge hardcodes.
+        assert_eq!(collection_status_to_str(1), "green");
+        assert_eq!(collection_status_to_str(2), "yellow");
+        assert_eq!(collection_status_to_str(3), "red");
+        assert_eq!(collection_status_to_str(4), "grey");
+        // Proto default and out-of-range numbers never leak as digits.
+        assert_eq!(collection_status_to_str(0), "unknown");
+        assert_eq!(collection_status_to_str(99), "unknown");
+    }
+
+    #[test]
+    fn grpc_collection_info_reports_canonical_status() {
+        let info = qdrant::CollectionInfo {
+            status: qdrant::CollectionStatus::Yellow as i32,
+            ..Default::default()
+        };
+        assert_eq!(collection_info_from_grpc(&info).status, "yellow");
+    }
 }

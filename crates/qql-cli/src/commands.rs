@@ -923,8 +923,12 @@ pub async fn handle_migrate(
 }
 
 pub fn handle_configure_edge(
-    config: crate::config::EdgeConfig,
+    patch: crate::config::EdgeConfigPatch,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate the final merged state, not just the patch: a persisted
+    // `embedder = http` keeps its persisted `embed_url` when a later update
+    // only touches `wal_segment_mb`.
+    let (config, merged) = crate::config::EdgeConfig::merged_with(&patch)?;
     if config.embedder != "fastembed" && config.embedder != "http" {
         return Err("edge embedder must be 'fastembed' or 'http'".into());
     }
@@ -942,7 +946,7 @@ pub fn handle_configure_edge(
     }
     // Fail closed at save time: k1 > 0, b in [0, 1], avg_len > 0, all finite.
     qql::embedder::Bm25Params::resolve(config.bm25_k1, config.bm25_b, config.bm25_avg_len)?;
-    let path = config.save()?;
+    let path = crate::config::EdgeConfig::write_object(&merged)?;
     println!("Saved edge configuration to {}", path.display());
     println!("Use it with: qql --edge exec \"SHOW COLLECTIONS\"");
     Ok(())
@@ -1039,6 +1043,23 @@ pub async fn handle_edge_optimize(
     json: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    match edge_optimize_inner(collection, json, quiet).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if json {
+                print_edge_json_error("edge-optimize", collection, error.as_ref());
+            }
+            Err(error)
+        }
+    }
+}
+
+#[cfg(feature = "edge")]
+async fn edge_optimize_inner(
+    collection: &str,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     use qql::client::QdrantOps;
 
     let config = crate::config::EdgeConfig::load()?.apply_environment();
@@ -1057,9 +1078,15 @@ pub async fn handle_edge_optimize(
     let (before, optimized, after) = outcome?;
     closed?;
 
-    let message = if optimized {
+    // The optimizer loop can return having merged segments without building
+    // HNSW: the indexing optimizer skips segments below the collection's
+    // `indexing_threshold`. Report that lag instead of claiming success.
+    let indexing_lag = after
+        .indexed_vectors_count
+        .is_some_and(|indexed| indexed < after.points_count);
+    let progress = if optimized {
         format!(
-            "Optimized '{collection}': {} → {} segments, {} points, indexed {} → {}",
+            "{} → {} segments, {} points, indexed {} → {}",
             before.segments_count,
             after.segments_count,
             after.points_count,
@@ -1068,11 +1095,28 @@ pub async fn handle_edge_optimize(
         )
     } else {
         format!(
-            "'{collection}' is already optimal: {} segments, {} points, indexed {}",
+            "{} segments, {} points, indexed {}",
             after.segments_count,
             after.points_count,
             count_label(after.indexed_vectors_count)
         )
+    };
+    let summary = if optimized {
+        format!("Optimized '{collection}': {progress}")
+    } else {
+        format!("'{collection}' is already optimal: {progress}")
+    };
+    let message = if indexing_lag {
+        format!(
+            "{summary}; indexing still lags: {} of {} vectors indexed — segments below the \
+             collection's indexing_threshold stay brute-force; lower it with \
+             `ALTER COLLECTION {collection} WITH OPTIMIZERS (indexing_threshold = …)` \
+             and re-run `qql edge optimize {collection}`",
+            count_label(after.indexed_vectors_count),
+            after.points_count
+        )
+    } else {
+        summary
     };
 
     if json {
@@ -1083,6 +1127,8 @@ pub async fn handle_edge_optimize(
                 "operation": "edge-optimize",
                 "collection": collection,
                 "optimized": optimized,
+                "status": if indexing_lag { "warn" } else { "ok" },
+                "indexing_lag": indexing_lag,
                 "before": info_counts(&before),
                 "after": info_counts(&after),
                 "message": message,
@@ -1092,6 +1138,29 @@ pub async fn handle_edge_optimize(
         println!("{message}");
     }
     Ok(())
+}
+
+/// Emit a structured `--json` failure for a one-shot edge command.
+///
+/// Mirrors the `ok` / `operation` / `message` triple of the `ExecResponse`
+/// results every `qql exec --json` run reports (and the `check` / `doctor`
+/// JSON shapes), plus the command's `collection`. The caller still returns
+/// `Err`, so the exit code is unchanged and stdout stays machine-parseable.
+#[cfg(feature = "edge")]
+fn print_edge_json_error(
+    operation: &str,
+    collection: &str,
+    error: &(dyn std::error::Error + 'static),
+) {
+    println!(
+        "{}",
+        serde_json::json!({
+            "ok": false,
+            "operation": operation,
+            "collection": collection,
+            "message": error.to_string(),
+        })
+    );
 }
 
 /// Seed a local edge collection from a remote Qdrant shard snapshot.
@@ -1105,6 +1174,27 @@ pub async fn handle_edge_optimize(
 /// statement-based copy.
 #[cfg(feature = "edge")]
 pub async fn handle_edge_bootstrap(
+    from: &str,
+    api_key: Option<String>,
+    collection: &str,
+    shard_id: Option<u32>,
+    force: bool,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match edge_bootstrap_inner(from, api_key, collection, shard_id, force, json, quiet).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if json {
+                print_edge_json_error("edge-bootstrap", collection, error.as_ref());
+            }
+            Err(error)
+        }
+    }
+}
+
+#[cfg(feature = "edge")]
+async fn edge_bootstrap_inner(
     from: &str,
     api_key: Option<String>,
     collection: &str,

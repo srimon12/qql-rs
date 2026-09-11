@@ -57,12 +57,14 @@ pub struct LocalExecutorOptions {
     pub on_disk_payload: bool,
     /// Write-ahead-log segment capacity in bytes. qdrant-edge pre-allocates
     /// each WAL segment to this size (default 32 MiB), which dominates the
-    /// on-disk footprint of small embedded shards. `None` keeps the engine
-    /// default (and, for existing shards, the capacity persisted in
-    /// `edge_config.json`). Hosts configure it in MiB —
-    /// [`wal_segment_capacity_bytes`] performs the conversion: the CLI via
-    /// `--wal-segment-mb`, Python via `wal_segment_mb`, and Node via
-    /// `walSegmentMb`.
+    /// on-disk footprint of small embedded shards.
+    ///
+    /// Seeds the value when a shard is created or when it exists without a
+    /// persisted WAL capacity; a capacity already persisted in
+    /// `edge_config.json` wins, so later opens cannot ratchet the shard's
+    /// config. Hosts configure it in MiB — [`wal_segment_capacity_bytes`]
+    /// performs the conversion: the CLI via `--wal-segment-mb`, Python via
+    /// `wal_segment_mb`, and Node via `walSegmentMb`.
     pub wal_segment_capacity: Option<usize>,
     /// Local ONNX dense model name. See [`resolve_embedding_model`] for accepted forms.
     /// `None` → default `BGESmallENV15` (384-d).

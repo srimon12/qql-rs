@@ -77,8 +77,8 @@ different model fails loudly instead of switching silently — see
 
 qdrant-edge pre-allocates each WAL segment (default 32 MiB), which dominates
 the on-disk footprint of small embedded shards. Set `walSegmentMb` (whole MiB
-`>= 1`) to shrink it; the resolved capacity persists in the collection's
-`edge_config.json`, and invalid values fail closed with
+`>= 1`) to shrink it; it seeds the collection's `edge_config.json`, a persisted
+capacity wins on later constructions, and invalid values fail closed with
 `QQL-VALIDATION-CONFIG`.
 
 ### `httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload?)`

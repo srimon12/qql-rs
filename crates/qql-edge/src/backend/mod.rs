@@ -24,7 +24,7 @@ pub mod unsupported;
 pub mod vector_parser;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -69,8 +69,9 @@ use qql_plan::{
 pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
-    /// Optional WAL segment capacity (bytes) applied to every shard this
-    /// backend opens or creates; `None` keeps each shard's persisted/default
+    /// Optional WAL segment capacity (bytes) seeding every shard this backend
+    /// opens or creates; a value already persisted in the shard's
+    /// `edge_config.json` wins. `None` keeps each shard's persisted/default
     /// value (32 MiB for new shards).
     wal_segment_capacity: Option<usize>,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
@@ -90,6 +91,19 @@ enum OpenMode {
 fn spawn_error(operation: &str, error: impl std::fmt::Display) -> QqlError {
     QqlError::execution("QQL-EDGE-SPAWN", format!("{operation}: {error}"), None)
         .with_field("operation", operation.to_string())
+}
+
+/// Persisted WAL segment capacity (bytes) from the shard's `edge_config.json`.
+///
+/// `None` covers both "no config file" and "config without WAL options": the
+/// shard has never recorded a capacity, so an env/CLI value may seed one. A
+/// config that exists but cannot be parsed is also `None` here — `EdgeShard::load`
+/// surfaces that error with full context.
+fn persisted_wal_segment_capacity(collection_path: &Path) -> Option<usize> {
+    match EdgeConfig::load(collection_path) {
+        Some(Ok(config)) => config.wal_options.map(|wal| wal.segment_capacity),
+        Some(Err(_)) | None => None,
+    }
 }
 
 impl std::fmt::Debug for EdgeQdrant {
@@ -118,8 +132,13 @@ impl EdgeQdrant {
     /// Override the write-ahead-log segment capacity (bytes) for every shard
     /// this backend creates or opens. qdrant-edge pre-allocates each WAL
     /// segment to this size, so embedded targets with small disks set it lower
-    /// than the 32 MiB default. `None` (the default) keeps each shard's
-    /// persisted value, or the engine default when creating a new shard.
+    /// than the 32 MiB default.
+    ///
+    /// Seed-once: the value is applied when creating a shard or when an
+    /// existing shard has no persisted capacity; a capacity already recorded
+    /// in `edge_config.json` wins, so later opens never ratchet the shard's
+    /// config. `None` (the default) keeps each shard's persisted value, or the
+    /// engine default when creating a new shard.
     pub fn with_wal_segment_capacity(mut self, capacity: Option<usize>) -> Self {
         self.wal_segment_capacity = capacity;
         self
@@ -200,15 +219,20 @@ impl EdgeQdrant {
                     )
                     .with_collection(collection));
                 }
-                // Override only the WAL capacity; every other unspecified
-                // parameter resolves to the shard's persisted config.
-                let load_config = wal_segment_capacity.map(|capacity| EdgeConfig {
-                    wal_options: Some(WalOptions {
-                        segment_capacity: capacity,
+                // Persisted value wins: the env/CLI capacity only seeds a
+                // shard that never recorded one. Passing an override equal to
+                // the persisted value would still be rewritten by the engine
+                // on every open, and a different value would ratchet the
+                // shard away from its persisted config.
+                let load_config = wal_segment_capacity
+                    .filter(|_| persisted_wal_segment_capacity(&path).is_none())
+                    .map(|capacity| EdgeConfig {
+                        wal_options: Some(WalOptions {
+                            segment_capacity: capacity,
+                            ..Default::default()
+                        }),
                         ..Default::default()
-                    }),
-                    ..Default::default()
-                });
+                    });
                 EdgeShard::load(&path, load_config)
                     .map_err(|e| edge_err(EdgeOp::Load, Some(&collection), e))
             } else if matches!(mode, OpenMode::CreateExclusive) {
@@ -1736,6 +1760,11 @@ mod tests {
                 after.indexed_vectors_count.unwrap_or(0) > 0,
                 "optimize must index vectors: {after:?}"
             );
+            assert_eq!(
+                after.indexed_vectors_count,
+                Some(300),
+                "a 1 KB threshold must index every vector of the segment: {after:?}"
+            );
 
             backend.close().await.expect("close edge backend");
             let _ = std::fs::remove_dir_all(dir);
@@ -2483,11 +2512,11 @@ mod tests {
         });
     }
 
-    /// The WAL segment capacity knob is applied on create and on load, persists
-    /// in the shard config, and does not revert when a later backend opens the
-    /// shard without the knob.
+    /// The WAL segment capacity is seeded once: a persisted value wins over
+    /// later env/CLI values, and reopening with the knob still set (or unset)
+    /// does not rewrite the persisted config when the value is unchanged.
     #[test]
-    fn wal_segment_capacity_applies_on_create_and_load() {
+    fn wal_segment_capacity_seeds_once_then_persisted_wins() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -2495,8 +2524,11 @@ mod tests {
         runtime.block_on(async {
             let dir = temp_dir("wal-capacity");
             let _ = std::fs::remove_dir_all(&dir);
+            let config_path = dir.join("docs").join("edge_config.json");
             let capacity = 4 * 1024 * 1024;
+            let larger = 8 * 1024 * 1024;
 
+            // Seed: the knob applies while the shard has no persisted value.
             let backend = EdgeQdrant::new(&dir, false).with_wal_segment_capacity(Some(capacity));
             backend
                 .execute_planned(&plan_one(
@@ -2504,20 +2536,24 @@ mod tests {
                 ))
                 .await
                 .expect("create collection");
-
             {
                 let shard = backend.open_shard("docs").await.expect("open shard");
-                let config = shard.config();
                 assert_eq!(
-                    config.wal_options.as_ref().map(|w| w.segment_capacity),
+                    shard
+                        .config()
+                        .wal_options
+                        .as_ref()
+                        .map(|w| w.segment_capacity),
                     Some(capacity),
                     "create must persist the configured WAL capacity"
                 );
             }
             backend.close().await.expect("close edge backend");
+            let seeded_bytes = std::fs::read(&config_path).expect("read seeded config");
 
-            // A backend that overrides the capacity again keeps it.
-            let reopened = EdgeQdrant::new(&dir, false).with_wal_segment_capacity(Some(capacity));
+            // Persisted wins: a different knob value must not ratchet the
+            // shard config on load.
+            let reopened = EdgeQdrant::new(&dir, false).with_wal_segment_capacity(Some(larger));
             {
                 let shard = reopened.open_shard("docs").await.expect("reopen shard");
                 assert_eq!(
@@ -2526,29 +2562,48 @@ mod tests {
                         .wal_options
                         .as_ref()
                         .map(|w| w.segment_capacity),
-                    Some(capacity)
+                    Some(capacity),
+                    "persisted capacity must win over a later env/CLI value"
                 );
             }
             reopened.close().await.expect("close edge backend");
+            assert_eq!(
+                std::fs::read(&config_path).expect("read after override"),
+                seeded_bytes,
+                "persisted config must not change when a different knob value is supplied"
+            );
 
-            // No knob: the persisted value wins over the 32 MiB engine default.
-            let default_backend = EdgeQdrant::new(&dir, false);
-            {
-                let shard = default_backend
-                    .open_shard("docs")
-                    .await
-                    .expect("default reopen");
+            // Env still set at the seeded value, then unset: the file must stay
+            // byte-identical. (qdrant-edge 0.8 rewrites edge_config.json on
+            // every load via `SaveOnDisk::new`, so mtime is not a stable
+            // signal; content equality is the observable invariant.)
+            for knob in [Some(capacity), None] {
+                let backend = EdgeQdrant::new(&dir, false).with_wal_segment_capacity(knob);
+                {
+                    let shard = backend.open_shard("docs").await.expect("reopen shard");
+                    assert_eq!(
+                        shard
+                            .config()
+                            .wal_options
+                            .as_ref()
+                            .map(|w| w.segment_capacity),
+                        Some(capacity),
+                        "unset/equal knob must keep the persisted capacity"
+                    );
+                }
+                backend.close().await.expect("close edge backend");
                 assert_eq!(
-                    shard
-                        .config()
-                        .wal_options
-                        .as_ref()
-                        .map(|w| w.segment_capacity),
-                    Some(capacity),
-                    "unset knob must not silently reset the persisted capacity"
+                    std::fs::read(&config_path).expect("read after reopen"),
+                    seeded_bytes,
+                    "edge_config.json must stay identical across reopens ({knob:?})"
                 );
             }
-            default_backend.close().await.expect("close edge backend");
+
+            // qdrant-edge 0.8's load path calls `SaveOnDisk::new`, which
+            // rewrites `edge_config.json` unconditionally (verified: mtime
+            // bumps while the content is identical). Content byte-equality —
+            // asserted above — is the observable no-ratchet invariant without
+            // patching the dependency.
             let _ = std::fs::remove_dir_all(dir);
         });
     }

@@ -18,11 +18,18 @@ use std::path::Path;
 use std::time::Duration;
 
 use qql_core::error::QqlError;
-use reqwest::Client;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 
-use crate::rest::classify_backend_error_code;
+use crate::rest::RestQdrant;
+
+/// Per-read stall timeout for snapshot streams.
+///
+/// A shard snapshot is streamed with **no total request cap** — multi-GB
+/// archives on slow links may legitimately take many minutes. The transfer
+/// only fails once no bytes arrive for this long, which catches dead peers and
+/// half-open connections without capping the total download time.
+pub const SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Summary of a remote collection's shard distribution.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,11 +40,6 @@ pub struct RemoteShardListing {
     pub remote_shard_ids: Vec<u32>,
     /// Total shard count reported by the cluster info endpoint.
     pub shard_count: u64,
-}
-
-#[derive(Deserialize)]
-struct ClusterInfoEnvelope {
-    result: ClusterInfoBody,
 }
 
 #[derive(Deserialize)]
@@ -62,13 +64,14 @@ struct RemoteShard {
 
 /// REST client for the snapshot endpoints of a remote Qdrant node.
 ///
-/// One instance targets one node. Timeouts are generous: a shard snapshot is
-/// streamed in chunks and can be large.
+/// One instance targets one node. The HTTP transport is the shared
+/// [`RestQdrant`] adapter — headers, request ids, and backend error
+/// classification are identical to every other REST route — configured for
+/// streaming: no total request cap, only the
+/// [`SNAPSHOT_READ_TIMEOUT`] stall timeout.
 #[derive(Debug, Clone)]
 pub struct RemoteSnapshotClient {
-    client: Client,
-    base_url: String,
-    api_key: Option<String>,
+    rest: RestQdrant,
 }
 
 impl RemoteSnapshotClient {
@@ -85,75 +88,36 @@ impl RemoteSnapshotClient {
                 None,
             ));
         }
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(600))
-            .build()
-            .map_err(|error| {
-                QqlError::transport(
-                    "QQL-TRANSPORT",
-                    format!("failed to build snapshot HTTP client: {error}"),
-                    None,
-                )
-            })?;
-        Ok(Self {
-            client,
-            base_url,
-            api_key,
-        })
-    }
-
-    fn get(&self, url: &str) -> reqwest::RequestBuilder {
-        let mut request = self.client.get(url);
-        if let Some(key) = self.api_key.as_deref()
-            && !key.is_empty()
-        {
-            request = request.header("api-key", key);
-        }
-        request
+        let rest = RestQdrant::with_read_timeout(base_url, api_key, SNAPSHOT_READ_TIMEOUT)?;
+        Ok(Self { rest })
     }
 
     /// Fetch the collection's shard distribution (`GET /collections/{c}/cluster`).
     pub async fn list_shards(&self, collection: &str) -> Result<RemoteShardListing, QqlError> {
-        let url = format!("{}/collections/{collection}/cluster", self.base_url);
-        let response = self.get(&url).send().await.map_err(|error| {
-            QqlError::transport(
-                "QQL-TRANSPORT",
-                format!("shard discovery request failed: {error}"),
-                None,
-            )
-            .with_url(url.clone())
+        let value = self
+            .rest
+            .get_value(&format!("/collections/{collection}/cluster"))
+            .await
+            .map_err(|error| error.with_collection(collection.to_string()))?;
+        let body: ClusterInfoBody = serde_json::from_value(
+            value
+                .get("result")
+                .cloned()
+                .ok_or_else(|| envelope_error("shard discovery response is missing result"))?,
+        )
+        .map_err(|error| {
+            envelope_error(format!(
+                "shard discovery response is not a valid cluster info body: {error}"
+            ))
         })?;
-        let status = response.status();
-        let body = response.text().await.map_err(|error| {
-            QqlError::backend(
-                "QQL-BACKEND",
-                format!("failed to read shard discovery response: {error}"),
-                None,
-            )
-            .with_url(url.clone())
-        })?;
-        if !status.is_success() {
-            return Err(http_error(status.as_u16(), &body, collection, &url));
-        }
-        let envelope: ClusterInfoEnvelope = serde_json::from_str(&body).map_err(|error| {
-            QqlError::execution(
-                "QQL-BACKEND-JSON",
-                format!("shard discovery response is not valid JSON: {error}"),
-                None,
-            )
-            .with_url(url.clone())
-        })?;
-        let local_shard_ids: Vec<u32> = envelope
-            .result
+        let local_shard_ids: Vec<u32> = body
             .local_shards
             .iter()
             .map(|shard| shard.shard_id)
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        let remote_shard_ids: Vec<u32> = envelope
-            .result
+        let remote_shard_ids: Vec<u32> = body
             .remote_shards
             .iter()
             .map(|shard| shard.shard_id)
@@ -163,7 +127,7 @@ impl RemoteSnapshotClient {
         Ok(RemoteShardListing {
             local_shard_ids,
             remote_shard_ids,
-            shard_count: envelope.result.shard_count,
+            shard_count: body.shard_count,
         })
     }
 
@@ -171,29 +135,24 @@ impl RemoteSnapshotClient {
     ///
     /// The file is written chunk by chunk; the returned count is the number of
     /// bytes written. `dest`'s parent directory must exist.
+    ///
+    /// When the server sends `Content-Length`, the written byte count is
+    /// verified against it and a short stream fails closed with
+    /// `QQL-SNAPSHOT-IO` (the partial file is removed). The body is never
+    /// parsed: a snapshot is an opaque archive.
     pub async fn download_shard_snapshot(
         &self,
         collection: &str,
         shard_id: u32,
         dest: &Path,
     ) -> Result<u64, QqlError> {
-        let url = format!(
-            "{}/collections/{collection}/shards/{shard_id}/snapshot",
-            self.base_url
-        );
-        let mut response = self.get(&url).send().await.map_err(|error| {
-            QqlError::transport(
-                "QQL-TRANSPORT",
-                format!("snapshot download failed: {error}"),
-                None,
-            )
-            .with_url(url.clone())
-        })?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(http_error(status.as_u16(), &body, collection, &url));
-        }
+        let path = format!("/collections/{collection}/shards/{shard_id}/snapshot");
+        let mut response = self
+            .rest
+            .get_stream(&path)
+            .await
+            .map_err(|error| error.with_collection(collection.to_string()))?;
+        let expected = response.content_length();
 
         let mut file = tokio::fs::File::create(dest).await.map_err(|error| {
             QqlError::execution(
@@ -203,14 +162,29 @@ impl RemoteSnapshotClient {
             )
         })?;
         let mut written: u64 = 0;
-        while let Some(chunk) = response.chunk().await.map_err(|error| {
-            QqlError::transport(
-                "QQL-TRANSPORT",
-                format!("snapshot download interrupted: {error}"),
-                None,
-            )
-            .with_url(url.clone())
-        })? {
+        loop {
+            let chunk = match response.chunk().await {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    // A truncated body can surface as a decode error rather
+                    // than a clean EOF; prefer the declared-length verdict so
+                    // incomplete snapshots always fail as QQL-SNAPSHOT-IO.
+                    if let Some(expected) = expected
+                        && written != expected
+                    {
+                        let _ = tokio::fs::remove_file(dest).await;
+                        return Err(truncated_error(dest, expected, written, &error.to_string()));
+                    }
+                    return Err(QqlError::transport(
+                        "QQL-TRANSPORT",
+                        format!("snapshot download interrupted: {error}"),
+                        None,
+                    ));
+                }
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
             file.write_all(&chunk).await.map_err(|error| {
                 QqlError::execution(
                     "QQL-SNAPSHOT-IO",
@@ -227,8 +201,35 @@ impl RemoteSnapshotClient {
                 None,
             )
         })?;
+        if let Some(expected) = expected
+            && written != expected
+        {
+            let _ = tokio::fs::remove_file(dest).await;
+            return Err(truncated_error(
+                dest,
+                expected,
+                written,
+                "stream ended early",
+            ));
+        }
         Ok(written)
     }
+}
+
+fn truncated_error(dest: &Path, expected: u64, written: u64, detail: &str) -> QqlError {
+    QqlError::execution(
+        "QQL-SNAPSHOT-IO",
+        format!(
+            "snapshot download truncated: received {written} of {expected} declared bytes \
+             ({detail}); removed the partial file at {}",
+            dest.display()
+        ),
+        None,
+    )
+}
+
+fn envelope_error(message: impl Into<String>) -> QqlError {
+    QqlError::backend("QQL-BACKEND-ENVELOPE", message.into(), None)
 }
 
 /// Choose the remote shard to stream.
@@ -274,22 +275,39 @@ pub fn select_shard_id(
     ))
 }
 
-fn http_error(status: u16, body: &str, collection: &str, url: &str) -> QqlError {
-    let limit = body.floor_char_boundary(4096);
-    let detail = &body[..limit];
-    let code = classify_backend_error_code(status, detail);
-    QqlError::execution(
-        code,
-        format!("remote Qdrant returned {status}: {detail}"),
-        None,
-    )
-    .with_url(url.to_string())
-    .with_collection(collection.to_string())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::path::PathBuf;
+    use std::thread;
+
     use super::*;
+
+    /// Serve exactly one HTTP/1.1 response, then close the connection.
+    fn serve_once(reply: impl FnOnce() -> Vec<u8> + Send + 'static) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().expect("listener addr");
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test connection");
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(&reply());
+            let _ = stream.flush();
+        });
+        format!("http://{addr}")
+    }
+
+    fn raw_http(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut out =
+            format!("HTTP/1.1 {status}\r\n{headers}Connection: close\r\n\r\n").into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn temp_snapshot_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("qql-snapshot-test-{}-{name}", std::process::id()))
+    }
 
     fn listing(local: &[u32], remote: &[u32], total: u64) -> RemoteShardListing {
         RemoteShardListing {
@@ -335,5 +353,94 @@ mod tests {
     fn empty_url_fails_closed() {
         let error = RemoteSnapshotClient::new("  ", None).expect_err("empty url");
         assert_eq!(error.code, "QQL-SNAPSHOT-URL");
+    }
+
+    #[tokio::test]
+    async fn downloads_snapshot_and_returns_byte_count() {
+        let body = b"snapshot archive bytes".to_vec();
+        let expected = body.clone();
+        let url = serve_once(move || {
+            raw_http(
+                "200 OK",
+                &format!("Content-Length: {}\r\n", body.len()),
+                &body,
+            )
+        });
+        let client = RemoteSnapshotClient::new(url, None).expect("client");
+        let dest = temp_snapshot_path("download.snapshot");
+        let written = client
+            .download_shard_snapshot("docs", 0, &dest)
+            .await
+            .expect("download");
+        assert_eq!(written, expected.len() as u64);
+        assert_eq!(std::fs::read(&dest).expect("read file"), expected);
+        let _ = std::fs::remove_file(&dest);
+    }
+
+    #[tokio::test]
+    async fn declared_length_mismatch_fails_closed() {
+        // Content-Length promises 64 bytes but only 7 arrive before the
+        // connection closes: the partial file must not survive.
+        let url = serve_once(|| raw_http("200 OK", "Content-Length: 64\r\n", b"partial"));
+        let client = RemoteSnapshotClient::new(url, None).expect("client");
+        let dest = temp_snapshot_path("truncated.snapshot");
+        let error = client
+            .download_shard_snapshot("docs", 0, &dest)
+            .await
+            .expect_err("truncated download must fail");
+        assert_eq!(error.code, "QQL-SNAPSHOT-IO", "{error}");
+        assert!(error.message.contains("truncated"), "{}", error.message);
+        assert!(!dest.exists(), "partial snapshot file must be removed");
+    }
+
+    #[tokio::test]
+    async fn list_shards_parses_cluster_envelope() {
+        let url = serve_once(|| {
+            let body = br#"{"result":{"local_shards":[{"shard_id":1},{"shard_id":0}],"remote_shards":[{"shard_id":2}],"shard_count":3},"status":"ok","time":0.001}"#;
+            raw_http(
+                "200 OK",
+                &format!("Content-Length: {}\r\n", body.len()),
+                body,
+            )
+        });
+        let client = RemoteSnapshotClient::new(url, None).expect("client");
+        let listing = client.list_shards("docs").await.expect("list shards");
+        assert_eq!(listing.local_shard_ids, vec![0, 1]);
+        assert_eq!(listing.remote_shard_ids, vec![2]);
+        assert_eq!(listing.shard_count, 3);
+    }
+
+    #[tokio::test]
+    async fn http_errors_reuse_backend_classification() {
+        let client = RemoteSnapshotClient::new(
+            serve_once(|| {
+                raw_http(
+                    "404 Not Found",
+                    "Content-Type: application/json\r\n",
+                    br#"{"status":{"error":"Not found: Collection docs not found"}}"#,
+                )
+            }),
+            None,
+        )
+        .expect("client");
+        let error = client.list_shards("docs").await.expect_err("404");
+        assert_eq!(error.code, "QQL-BACKEND-COLLECTION-NOT-FOUND");
+
+        let client = RemoteSnapshotClient::new(
+            serve_once(|| {
+                raw_http(
+                    "404 Not Found",
+                    "Content-Type: application/json\r\n",
+                    br#"{"status":{"error":"Not found: Collection docs not found"}}"#,
+                )
+            }),
+            None,
+        )
+        .expect("client");
+        let error = client
+            .download_shard_snapshot("docs", 0, &temp_snapshot_path("404.snapshot"))
+            .await
+            .expect_err("404");
+        assert_eq!(error.code, "QQL-BACKEND-COLLECTION-NOT-FOUND");
     }
 }

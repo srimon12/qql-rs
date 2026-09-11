@@ -274,19 +274,26 @@ impl From<CliQuantize> for migrate::QuantizeKind {
 #[derive(clap::Subcommand)]
 enum ConfigCommand {
     /// Configure the local qdrant-edge backend used by --edge.
+    ///
+    /// Only the flags you pass are written; every other key in `edge.json`
+    /// (including unknown/future ones) is preserved.
     Edge {
         /// Directory for persistent qdrant-edge data.
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Keep payloads in memory instead of persisting them to disk.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "on_disk")]
         in_memory: bool,
+        /// Persist payloads to disk (the default; flips an existing
+        /// `--in-memory` config back).
+        #[arg(long, conflicts_with = "in_memory")]
+        on_disk: bool,
         /// WAL segment capacity in MiB for local edge shards (default: qdrant-edge 32 MiB).
         #[arg(long)]
         wal_segment_mb: Option<u64>,
-        /// Embedding backend: fastembed or an OpenAI-compatible HTTP endpoint.
-        #[arg(long, default_value = "fastembed")]
-        embedder: String,
+        /// Embedding backend: fastembed (default) or an OpenAI-compatible HTTP endpoint.
+        #[arg(long)]
+        embedder: Option<String>,
         /// Local FastEmbed dense model name or alias.
         #[arg(long)]
         model: Option<String>,
@@ -315,20 +322,24 @@ enum ConfigCommand {
         #[arg(long)]
         cache_dir: Option<PathBuf>,
         /// Show model download progress.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "no_show_download_progress")]
         show_download_progress: bool,
+        /// Hide model download progress (flips an existing
+        /// `--show-download-progress` config back).
+        #[arg(long, conflicts_with = "show_download_progress")]
+        no_show_download_progress: bool,
         /// OpenAI-compatible embedding endpoint used by the HTTP backend.
         #[arg(long)]
         embed_url: Option<String>,
         /// API key used by the HTTP embedding backend.
-        #[arg(long, default_value = "")]
-        embed_key: String,
-        /// Model name sent to the HTTP embedding backend.
-        #[arg(long, default_value = "nomic-embed-text")]
-        embed_model: String,
-        /// Expected HTTP embedding dimension.
-        #[arg(long, default_value_t = 768)]
-        embed_dim: usize,
+        #[arg(long)]
+        embed_key: Option<String>,
+        /// Model name sent to the HTTP embedding backend (default: nomic-embed-text).
+        #[arg(long)]
+        embed_model: Option<String>,
+        /// Expected HTTP embedding dimension (default: 768).
+        #[arg(long)]
+        embed_dim: Option<usize>,
         /// Optional multi/ColBERT HTTP embedding endpoint.
         #[arg(long)]
         multi_embed_url: Option<String>,
@@ -339,8 +350,8 @@ enum ConfigCommand {
         #[arg(long)]
         multi_embed_model: Option<String>,
         /// Per-token dimension for multi embeds (0 = skip check).
-        #[arg(long, default_value_t = 0)]
-        multi_embed_dim: usize,
+        #[arg(long)]
+        multi_embed_dim: Option<usize>,
         /// Optional image/CLIP vision HTTP embedding endpoint.
         #[arg(long)]
         image_embed_url: Option<String>,
@@ -351,8 +362,8 @@ enum ConfigCommand {
         #[arg(long)]
         image_embed_model: Option<String>,
         /// Dense dimension for image embeds (CLIP = 512; 0 = use dense dim).
-        #[arg(long, default_value_t = 0)]
-        image_embed_dim: usize,
+        #[arg(long)]
+        image_embed_dim: Option<usize>,
     },
 }
 
@@ -748,6 +759,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ConfigCommand::Edge {
                 data_dir,
                 in_memory,
+                on_disk,
                 wal_segment_mb,
                 embedder,
                 model,
@@ -760,6 +772,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 reranker_model,
                 cache_dir,
                 show_download_progress,
+                no_show_download_progress,
                 embed_url,
                 embed_key,
                 embed_model,
@@ -772,9 +785,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image_embed_key,
                 image_embed_model,
                 image_embed_dim,
-            } => commands::handle_configure_edge(config::EdgeConfig {
-                data_dir: data_dir.unwrap_or_else(|| config::EdgeConfig::default().data_dir),
-                on_disk_payload: !in_memory,
+            } => commands::handle_configure_edge(config::EdgeConfigPatch {
+                data_dir,
+                on_disk_payload: if in_memory {
+                    Some(false)
+                } else if on_disk {
+                    Some(true)
+                } else {
+                    None
+                },
                 wal_segment_mb,
                 embedder,
                 model,
@@ -786,7 +805,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image_model,
                 reranker_model,
                 cache_dir,
-                show_download_progress,
+                show_download_progress: if show_download_progress {
+                    Some(true)
+                } else if no_show_download_progress {
+                    Some(false)
+                } else {
+                    None
+                },
                 embed_url,
                 embed_key,
                 embed_model,

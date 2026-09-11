@@ -58,7 +58,10 @@ or, when nothing needed rebuilding:
 
 The command builds the edge backend directly (no embedding model is loaded or
 downloaded). `--json` emits `operation: "edge-optimize"`, `optimized`, and
-`before`/`after` `{points, indexed, segments}` objects.
+`before`/`after` `{points, indexed, segments}` objects. When
+`indexed_vectors_count < points_count` after optimizing, the result carries
+`status: "warn"` / `indexing_lag: true` and the message reports the exact lag
+instead of claiming success — the command still exits zero.
 
 Run it after bulk writes, or when `qql --edge doctor` / `qql check --edge`
 reports indexing lag (see below). Small collections can legitimately stay
@@ -95,7 +98,9 @@ a qdrant-edge collection is exactly one shard, so you seed one shard per device
 
 An existing local collection is never overwritten without `--force`, and the
 replacement only happens after the snapshot downloads and verifies. Failures
-leave the previous collection untouched. The same command is exposed as an
+leave the previous collection untouched, and with `--json` they emit a
+structured `{ok: false, operation: "edge-bootstrap", collection, message}` on
+stdout before exiting non-zero. The same command is exposed as an
 `#[ignore]` integration test:
 `cargo test -p qql-cli --features edge --test edge_bootstrap -- --ignored`.
 
@@ -110,7 +115,11 @@ dual-write plus partial snapshots against a server collection.
 ## `qql config edge`
 
 `qql config edge` writes `<config-dir>/edge.json` (default config directory is
-`~/.qql`, file written with `0600` permissions). After saving it prints:
+`~/.qql`, file written with `0600` permissions). It is a **patch** update: only
+the flags you pass are written, and every key you did not set — including keys
+written by a newer version — is preserved. Against an existing file the merged
+configuration is validated as a whole, so a persisted `--embedder http` keeps
+its persisted `--embed-url`. After saving it prints:
 
 ```text
 Saved edge configuration to /home/you/.qql/edge.json
@@ -123,7 +132,8 @@ Use it with: qql --edge exec "SHOW COLLECTIONS"
 |---|---|---|
 | `--data-dir <dir>` | `~/.qql/edge-data` | Directory for persistent qdrant-edge data |
 | `--in-memory` | off | Keep payloads in memory instead of persisting them to disk (sets `on_disk_payload=false`) |
-| `--wal-segment-mb <n>` | qdrant-edge 32 MiB | WAL segment capacity in MiB. qdrant-edge pre-allocates each segment to this size, which otherwise dominates the on-disk footprint of small embedded shards. Must be greater than zero; also exposed by the Python/Node edge SDKs (qdrant-edge 0.8's own Python binding cannot set it) |
+| `--on-disk` | on | Persist payloads to disk (flips a persisted `--in-memory` config back) |
+| `--wal-segment-mb <n>` | qdrant-edge 32 MiB | WAL segment capacity in MiB. qdrant-edge pre-allocates each segment to this size, which otherwise dominates the on-disk footprint of small embedded shards. Seeds new shards (and shards without a persisted capacity); an already-persisted value wins on reopen. Must be greater than zero; also exposed by the Python/Node edge SDKs (qdrant-edge 0.8's own Python binding cannot set it) |
 
 ### Embedding model flags (fastembed)
 
@@ -136,7 +146,7 @@ Use it with: qql --edge exec "SHOW COLLECTIONS"
 | `--image-model <name>` | none | Offline CLIP vision model (`clip-vision`) |
 | `--reranker-model <name>` | none | Offline cross-encoder (`bge-reranker-base`) |
 | `--cache-dir <dir>` | fastembed default | Directory for downloaded models |
-| `--show-download-progress` | off | Show Hugging Face download progress bars |
+| `--show-download-progress` | off | Show Hugging Face download progress bars (`--no-show-download-progress` flips a persisted config back) |
 
 ### HTTP embedder flags
 
@@ -173,7 +183,7 @@ embedder reuses the same variables as remote execution.
 | `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | Also falls back to `RERANK_MODEL` |
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true`/`false`/`1`/`0` — payloads on disk |
-| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | WAL segment capacity in MiB (integer > 0) |
+| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | WAL segment capacity in MiB (integer > 0); seeds shards without a persisted capacity |
 | `EMBED_URL` | `--embed-url` | HTTP embedding endpoint |
 | `EMBED_KEY` | `--embed-key` | Bearer token |
 | `EMBED_MODEL` | `--embed-model` | Model name |
