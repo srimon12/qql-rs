@@ -131,18 +131,18 @@ enum Command {
     },
     /// Record Qdrant REST traffic while proxying it unchanged (needs `--features record`)
     ///
-    /// Zero-code-change capture: move Qdrant to `--target`, point the app at
-    /// `--listen`, and every request is forwarded byte-identically while
-    /// bodied `/collections/` requests are appended as wrapped
-    /// `{"method","path","body"}` JSONL for later `qql convert` use.
+    /// Zero-code-change capture: point the app at `--listen` while Qdrant
+    /// keeps serving on `--target`, and every request is forwarded
+    /// byte-identically while bodied `/collections/` requests are appended as
+    /// wrapped `{"method","path","body"}` JSONL for later `qql convert` use.
     /// Bodies are buffered in RAM (dev tool, not a production proxy).
     #[cfg(feature = "record")]
     Record {
-        /// Address to listen on (the app keeps pointing here)
-        #[arg(long, default_value = "127.0.0.1:6333")]
+        /// Address to listen on (the app points here instead of Qdrant)
+        #[arg(long, default_value = "127.0.0.1:6334")]
         listen: std::net::SocketAddr,
-        /// Upstream Qdrant base URL to forward to
-        #[arg(long, default_value = "http://127.0.0.1:6334")]
+        /// Upstream Qdrant REST base URL to forward to
+        #[arg(long, default_value = "http://127.0.0.1:6333")]
         target: String,
         /// JSONL capture file (created/appended, fsynced per line)
         #[arg(long, default_value = "capture.jsonl")]
@@ -554,7 +554,16 @@ fn print_migrate_result(
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(error) = run().await {
+        // Display, not Debug: CLI failures are user-facing messages
+        // (`Error: line 2: unsupported endpoint: …`), never struct dumps.
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let use_edge = cli.edge;
     let url = cli
