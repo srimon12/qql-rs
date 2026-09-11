@@ -30,11 +30,11 @@ preserved in `results/run1/`; §"What moved" quantifies every leg of the journey
 | Application LOC | 0.78x | 0.83x | **0.71x** |
 | Result parity | exact / ANN-equivalent | exact / ANN-equivalent | exact / ANN-equivalent |
 
-The Python leg is also run **gRPC-vs-gRPC** (`--transport grpc`): qql wins
+The Python leg is also run **gRPC-vs-gRPC** (`--transport grpc`): qql leads on
 all 10 reads (1.12–5.80x) and ingest 1.86x — see §"Python over gRPC".
 
-The headline pattern: **QQL wins the read path on the dynamic-language
-transports** (parse→plan→route plus native result classes beat the official
+The headline pattern: **QQL leads the read path on the dynamic-language
+transports** (parse→plan→route plus native result classes, vs the official
 SDKs' pydantic/typed-object response layer), while the **official Rust gRPC
 client is at near-parity on raw reads** (0.91–1.05x; it returns protobuf-
 decoded results with no intermediate AST). Python ingest is **1.56x
@@ -212,12 +212,12 @@ Read it as: both sides gain from gRPC, and the picture is transport-dependent.
   responses): count_berlin 651 → 1,219, facet 782 → 1,628, count_legal
   853 → 2,429. qql is roughly flat-to-better there (1,578 → 1,629, 2,262 →
   2,334, 3,257 → 3,727), so the REST-era 2.4–3.8x count margins compress to
-  1.3–1.5x on gRPC — **qql still wins all 10 reads**.
+  1.3–1.5x on gRPC — **qql still leads on all 10 reads**.
 - **Dense / sparse / hybrid:** qql improves (dense 964 → 1,066,
   hybrid 581 → 619, sparse 2,502 → 2,522) and holds; the sparse ratio
   compresses 3.51x → 2.71x on an official-side absolute jump (713 → 931),
   per-collection segment variance rather than a qql move.
-- **`scroll_pages`:** the official gRPC client collapses to 25 ops/s vs its
+- **`scroll_pages`:** the official gRPC client drops to 25 ops/s vs its
   own REST 94 (three pages per call, same server) while qql holds 145 — that
   looks like a slow path in the official client's gRPC scroll, flagged not
   explained.
@@ -332,11 +332,11 @@ builders deleted — python ingest 9.9 s → 4.1 s).
    QQL's `sparse SPARSE` column defaults to idf. With fastembed `Qdrant/bm25`
    vectors and no modifier, scores are not BM25 (Δ on this corpus: ~10.5 vs
    ~21–24) and rankings differ. Qdrant's own docs recommend idf for bm25 —
-   but the client default silently produces the wrong ranking.
+   but the client default quietly produces a non-BM25 ranking.
 8. **RRF tie-breaking is nondeterministic at equal scores even within one
    client** (positions 5/6 swap between two identical calls). Benchmarks of
    hybrid fusion need the self-consistency baseline this harness records;
-   single-shot fusion comparisons will flake.
+   single-shot fusion comparisons are unreliable without it.
 9. **Python client cold import is ~1.1 s** (pydantic model graph) vs 16.6 ms
    for pyqql (67x) — matters for serverless/CLI usage.
 

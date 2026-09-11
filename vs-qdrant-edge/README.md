@@ -244,7 +244,7 @@ vectors), QQL's native-hit path removed the former 0.54x deficit.
 6. **Typed bindings matter**: flat float lists ≥32 elements now bind as
    `F32Array` with one copy; numpy remains the explicit fast path; native
    `ScoredPoint`/`ExecutionReport` removed the dict + dataclass hop.
-7. **Stale builds lie**: the checked-in `.so` predated the Sep-9 runtime fix
+7. **Stale builds mislead**: the checked-in `.so` predated the Sep-9 runtime fix
    (32.8 ms → 1.4 ms dense); always rebuild the release extension first.
 
 ---
