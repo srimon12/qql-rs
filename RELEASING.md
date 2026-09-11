@@ -8,7 +8,7 @@ the corresponding Git tag is `v0.4.0`. The QQL language specification version
 
 | Registry | Packages |
 |---|---|
-| crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
+| crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql-convert`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
 | VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.4.0`) |
@@ -234,6 +234,7 @@ crates.io publication follows dependency order:
 ```text
 qql-core
 ├── qql-plan
+├── qql-convert
 └── qql-embed
     └── qql
         └── qql-edge
@@ -250,6 +251,7 @@ After the workflow succeeds:
 
 ```bash
 cargo info --registry crates-io qql-core@0.4.0
+cargo info --registry crates-io qql-convert@0.4.0
 cargo info --registry crates-io qql@0.4.0
 cargo info --registry crates-io qql-edge@0.4.0
 cargo install qql-cli@0.4.0 --locked --features edge

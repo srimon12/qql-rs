@@ -79,6 +79,7 @@ jobs:
           # dependencies have propagated through the registry.
           cargo package --locked --no-verify --exclude-lockfile -p qql-plan
           cargo package --locked --no-verify --exclude-lockfile -p qql-embed
+          cargo package --locked --no-verify --exclude-lockfile -p qql-convert
           cargo package --locked --no-verify --exclude-lockfile -p qql
           cargo package --locked --no-verify --exclude-lockfile -p qql-edge
           cargo package --locked --no-verify --exclude-lockfile -p qql-cli

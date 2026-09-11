@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { byteOffsetToPosition } from "../core/positions";
-import type { QqlToken, WasmAnalyzeResult } from "../core/types";
+import type { AnalysisError, QqlToken, WasmAnalyzeResult } from "../core/types";
 import { tokenizeQql } from "../core/wasm";
 
 export type { AnalysisError, WasmAnalyzeResult } from "../core/types";
@@ -44,6 +44,14 @@ export function createDiagnosticCollection(): vscode.DiagnosticCollection {
   return vscode.languages.createDiagnosticCollection("qql");
 }
 
+/** Prefer `errors[]` from current WASM; older bundles only set `error`. */
+function collectAnalysisErrors(result: WasmAnalyzeResult): AnalysisError[] {
+  if (result.errors && result.errors.length > 0) {
+    return result.errors;
+  }
+  return result.error ? [result.error] : [];
+}
+
 /**
  * Convert WASM analysis result to VS Code diagnostics and apply to the document.
  */
@@ -53,12 +61,7 @@ export function updateDiagnostics(
   result: WasmAnalyzeResult
 ): void {
   const diagnostics: vscode.Diagnostic[] = [];
-  const analysisErrors =
-    result.errors && result.errors.length > 0
-      ? result.errors
-      : result.error
-        ? [result.error]
-        : [];
+  const analysisErrors = collectAnalysisErrors(result);
 
   if (!result.valid) {
     for (const err of analysisErrors) {

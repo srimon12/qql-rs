@@ -84,6 +84,7 @@ the path:
 }
 ```
 
+{% qqlExample title="Converted nearest query" %}
 ```sql
 QUERY [0.1, 0.2]
 FROM docs
@@ -91,6 +92,7 @@ USING dense
 WHERE status = 'active'
 LIMIT 5;
 ```
+{% /qqlExample %}
 
 A bare body has no path to derive the collection from. Pass it explicitly
 with `--collection`:
