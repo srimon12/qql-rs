@@ -221,7 +221,10 @@ const report = await client.upsertMany("docs", rows, { batchSize: 100 });
 Row vectors accept plain arrays, `Float32Array` / `Float64Array` (packed,
 one copy — unlike the Node async boundary, WASM converts `JsValue`
 directly), integer typed arrays (sparse `indices`), and the flat
-`{ data: [...], dim: N }` multivector form. Raw `ArrayBuffer` without a
+`{ data: [...], dim: N }` multivector form. A plain `number[]` of 32+
+elements also binds as a packed `F32Array` with one copy; shorter lists and
+nested shapes keep exact list semantics, and payload values are never
+repacked. Raw `ArrayBuffer` without a
 float view fails closed — wrap it first (`new Float64Array(buffer)`).
 
 ---
@@ -425,7 +428,7 @@ const raw = await client.execute("QUERY 'health' FROM docs LIMIT 5");
 const report = new ExecutionReport(raw);
 
 if (report.ok) {
-    const hits = report.hits(0); // ScoredPoint[]
+    const hits = report.hits(0); // ScoredPoint[] (id, score, payload, text derived from payload.text, collection, vector; shard_key is a legacy passthrough, always null on the typed path)
     for (const hit of hits) {
         console.log(hit.id, hit.score, hit.payload);
     }

@@ -149,6 +149,8 @@ pub(crate) struct ServerTelemetry {
 impl ServerTelemetry {
     /// Extract from a backend response envelope. Lenient by contract: absent
     /// or misshapen `time`/`usage` becomes `None`, never an error.
+    /// Telemetry only — the response data path stays strict
+    /// (`parse_*` fail `QQL-BACKEND-ENVELOPE`).
     pub(crate) fn from_envelope(value: &serde_json::Value) -> Self {
         Self {
             time_s: value.get("time").and_then(|t| t.as_f64()),

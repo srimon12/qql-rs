@@ -168,7 +168,10 @@ print(report["succeeded"], report["failed"])
 Row vectors accept plain lists, 1-D float buffers (numpy, `array.array`,
 memoryviews: one copy, no per-element walk), integer lists for sparse
 `indices`, and the flat
-`{"data": [...], "dim": N}` multivector form. Each dict has the same shape
+`{"data": [...], "dim": N}` multivector form. A plain `list[float]` of 32+
+elements also binds as a packed `F32Array` with one copy instead of a
+per-element walk; shorter lists and nested shapes keep exact list semantics,
+and payload values are never repacked. Each dict has the same shape
 as an inline `VALUES {…}` row, so a misshapen row fails closed with
 `QQL-BIND-TYPE-MISMATCH` (missing `id` → `QQL-VALIDATION-UPSERT-ID`)
 instead of landing partial data. The full typed-array contract lives once in
@@ -178,18 +181,22 @@ same `QQL-VALIDATION-UPSERT-BATCH` for `batch_size < 1`.
 
 ## Typed results
 
-`Client.execute_hits` and `execute_async_hits` return `ScoredPoint` objects
-directly, and `ExecutionReport` adds typed accessors to the report
-dictionary:
+`Client.execute_hits` and `execute_async_hits` return native `ScoredPoint` objects
+directly, and the native `ExecutionReport` adds typed accessors
+(dict-style `[]` / `.get()`, plus `ok` / `results` / `succeeded` / `failed`):
 
 ```python
-from pyqql import Client
+from pyqql import Client, ExecutionReport
 
 client = Client("http://localhost:6333")
 
-# 1. Hits as typed ScoredPoint objects (id, score, payload, text, collection)
+# 1. Hits as native ScoredPoint objects (id, score, payload, text, collection, vector)
 for hit in client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5"):
     print(hit.id, hit.score, hit["title"])  # payload access via hit["key"]
+    print(hit.text)        # derived from payload["text"], None when absent/non-string
+    print(hit.collection)  # cross-collection source, else None
+    print(hit.vector)      # WITH VECTOR only, else None
+    print(hit.without_payload())  # copy with payload stripped
 
 # 2. Facet, count, point, and group accessors per statement index
 # Negative indexes count from the end (-1 is the last statement).
@@ -200,7 +207,16 @@ report = client.execute("COUNT FROM docs WHERE category = 'tech'")
 print(report.count())
 report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
 print(report.points())
-print(report.groups(-1))     # [{"id": <group key>, "hits": [...]}, ...]
+print(report.groups(-1))     # [{"id": <group key>, "hits": [ScoredPoint, ...]}, ...]
+print(report.ids())          # [hit.id, ...] for point operations
+print(report.collections())  # SHOW COLLECTIONS -> [name, ...]
+print(report.collection())   # SHOW COLLECTION -> CollectionInfo dict
+print(report.shard_keys())   # SHOW SHARD KEYS -> [str | int, ...]
+print(report.quotas())       # quota config dict or None
+
+# 3. Offline reports for tests/mocks: ExecutionReport.from_results([...])
+# with typed spec keys (hits / groups / count / facet / collections /
+# collection / shard_keys / quotas); dict hydration is removed.
 
 # 3. Per-result server telemetry (Qdrant time plus hardware and inference usage
 # when reported; None where the route reports nothing)
@@ -321,12 +337,14 @@ print(tokenize(query))
 | `Client(url, api_key, use_grpc, embedder, route_affinity)` | client | Configure remote execution once |
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
 | `Client.execute_hits` / `execute_async_hits` | `list[ScoredPoint]` | Skip the report when you only need typed hits |
-| `report.hits(stmt)` / `points` / `facet` / `count` / `groups` | typed accessors | Read results per statement index without digging into `results` (negative index counts from the end; see the API surface reference) |
+| `report.hits(stmt)` / `points` / `ids` / `facet` / `count` / `groups` / `collections` / `collection` / `shard_keys` / `quotas` | typed accessors | Read results per statement index without digging into `results` (negative index counts from the end; `groups` returns `[{id, hits: [ScoredPoint]}]`; see the API surface reference) |
+| `ExecutionReport.from_results([...])` | offline report | Build reports from typed `{operation, hits?, groups?, count?, facet?, collections?, collection?, shard_keys?, quotas?}` specs for tests/mocks |
 | `report.telemetry` | per-result server telemetry | Qdrant `time_s` plus hardware and inference `usage` when reported |
 | `Client.scroll_cursor` / `Client.scroll_cursor_async` | sync and async generators of `ScoredPoint` | Lazily page a collection with `SCROLL ... AFTER :cursor` (at most one page buffered) |
 | `Client.explain_analyze` | plan + measured timings | Static plan, client phases, and server telemetry for one statement |
 | `pyqql.connect` + cursor | PEP 249-style driver | `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/`nextset`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
-| `ScoredPoint` | typed hit | `id`, `score`, `payload`, `text`, `collection`, and `hit["key"]` payload access |
+| `ScoredPoint.without_payload()` | payload-stripped copy | `scroll_cursor(with_payload=False)` path; `text` stays derived from the stripped payload |
+| `ScoredPoint` | native typed hit | `id`, `score` (f32 shortest round-trip), `payload`, `text` (derived from `payload["text"]`), `collection`, `vector`, and `hit["key"]` payload access |
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
 | `parse_json(source)` | JSON string of the AST array | Forward a parse over HTTP/IPC without Python object overhead |

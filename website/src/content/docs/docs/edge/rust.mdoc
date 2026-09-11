@@ -184,15 +184,28 @@ snapshot API — never unpack or merge archives by hand.
 
 ## Response shapes
 
-Queries return hit arrays with `id`, `payload`, and `vector` keys inside
-`result.points`; mutations return the standard envelope:
+Response shaping matches the native SDKs' typed `ExecData` report: each
+operation reads exactly its Qdrant OpenAPI response field and emits the same
+shapes (`[{id, score, payload, vector?}]` with no separate `text`,
+`{"groups": [...]}`, `{"count": n}`, `{"collections": [...]}`, typed
+`CollectionInfo`, `{"shard_keys": [...]}` , quota config). Hits carry
+`id`, `score` (shortest f32 round-trip), `payload`, `collection` (cross-collection
+only), and `vector` (only with `WITH VECTOR`) — there is no separate `text`
+field; derive it from `payload["text"]`. A missing or mistyped backend field
+fails the statement with `QQL-BACKEND-ENVELOPE` instead of silently returning
+an empty or synthesized result. Server telemetry (`time`, `usage`) stays
+optional and lenient.
 
 | Operation | `data` shape |
 |---|---|
-| Query / scroll / points | `{"result": {"points": [{"id", "score", "payload", "vector"}]}}` |
-| Mutation | `{"result": {"status": "completed"}, "status": "ok", "time": 0.0}` |
-| Count | `{"result": {"count": N}}` |
-| `SHOW COLLECTIONS` | `{"result": {"collections": [{"name"}]}}` |
+| Query / scroll / points | `[{id, score, payload, collection?, vector?}]` (points carry no separate `text`) |
+| Grouped query | `{"groups": [{id, hits: [...]}]}` |
+| Facet | `[{value, count}]` |
+| Count / mutation count | `{"count": N}` (status-only mutations serialize `null`) |
+| `SHOW COLLECTIONS` | `{"collections": [<name>, ...]}` (list of names) |
+| `SHOW COLLECTION` | typed `CollectionInfo` (`status`, `points_count`, `indexed_vectors_count`, …) |
+| `SHOW SHARD KEYS` | `{"shard_keys": [...]}` |
+| Quotas | quota config object |
 
 ## Errors
 

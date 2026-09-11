@@ -869,10 +869,11 @@ mod tests {
     #[cfg(feature = "edge")]
     #[test]
     fn wal_segment_capacity_scales_mib_and_rejects_zero() {
-        assert_eq!(commands::wal_segment_capacity_bytes(None).unwrap(), None);
-        assert!(commands::wal_segment_capacity_bytes(Some(0)).is_err());
+        // Single source of truth lives in `qql-edge`; the CLI calls it directly.
+        assert_eq!(qql_edge::wal_segment_capacity_bytes(None).unwrap(), None);
+        assert!(qql_edge::wal_segment_capacity_bytes(Some(0)).is_err());
         assert_eq!(
-            commands::wal_segment_capacity_bytes(Some(4)).unwrap(),
+            qql_edge::wal_segment_capacity_bytes(Some(4)).unwrap(),
             Some(4 * 1024 * 1024)
         );
     }

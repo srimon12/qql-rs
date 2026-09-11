@@ -212,7 +212,10 @@ Wrap it with the [`dx.js` helpers](#typed-dx-layer-dxjs) for typed `hits()` /
 `executeHits(client, query, options)` one-shot instead of hand-rolling either.
 Row vectors accept plain arrays, `Float32Array` / `Float64Array`
 (packed, one copy), integer typed arrays, and the flat `{ data, dim }`
-multivector form everywhere params enter. Statement indexes in the typed
+multivector form everywhere params enter. A plain `number[]` of 32+ elements
+also binds as a packed `F32Array` with one copy instead of a per-element walk;
+shorter lists and nested shapes keep exact list semantics, and payload values
+are never repacked. Statement indexes in the typed
 accessors use Python list semantics on all hosts (`-1` is the last statement;
 out-of-range returns `[]` or `0`).
 
@@ -349,7 +352,7 @@ for (const hit of report.hits(0)) {
 
 The module exports:
 - **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)` returning `[{ id, hits }]`). Negative indexes count from the end. `report.telemetry` reads aggregated server time and usage (`{ time_s, usage }` or `null`) so browser code never hand-rolls the sum.
-- **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text`, `.collection`, `.vector`, `.shard_key`, plus `.get(key, default)`.
+- **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text` (derived from `payload.text`), `.collection`, `.vector` (dense / sparse / multi-dense / named when `WITH VECTOR`), plus `.get(key, default)`. `.shard_key` is a legacy passthrough, always null on the typed path.
 - **`buildError`**: Unpacks JSON error strings into `Error` objects carrying `.code`, `.kind`, `.span`, plus `.fields` and `.request_id` when present.
 - **`wrapReport`**: Returns the input if already an `ExecutionReport`, else wraps the plain object.
 - **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly. Prefer this over manual `execute` plus `hits(0)` when only hits are needed.

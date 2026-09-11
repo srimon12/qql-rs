@@ -17,6 +17,10 @@
 
 **Pipeline:** parse (`qql-core`) → prepare/embed (`qql-runtime` + `qql-embed`) → plan (`qql-plan` → `PlannedOperation`) → dispatch (REST / gRPC / edge).
 
+### Typed pipeline (0.4.0+)
+
+Every backend answer is one typed `ExecData` variant (`Hits | Groups | Count | Facet | Mutation | Collections | Collection | ShardKeys | Quotas`) — no raw-JSON passthrough (`ExecData::Raw` / `as_raw()` and the legacy `*_json` accessors are removed). gRPC and edge build typed data straight from protobuf / `qdrant_edge`; REST parses its HTTP JSON once per operation against the OpenAPI shape and fails closed with `QQL-BACKEND-ENVELOPE` on a missing or mistyped field instead of defaulting. Formula trees are plan-owned (`PlanFormula`) and collection/index configs are typed plan structs on every transport. Bindings consume the typed report natively (PyO3 `ScoredPoint` / `ExecutionReport`, `ExecutionReport.from_results([...])` for offline tests) — see the [backend compatibility](/docs/reference/backend-compatibility/) matrix, the [error codes](/docs/reference/error-codes/) reference, and the [Python](/docs/sdks/python/) / [Node](/docs/sdks/node/) / [WASM](/docs/sdks/wasm/) SDK pages.
+
 ### Qdrant 1.19 language highlights
 
 | Feature | Notes |

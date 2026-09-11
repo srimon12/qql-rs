@@ -166,6 +166,8 @@ pub struct ServerTelemetry {
 impl ServerTelemetry {
     /// Extract from a backend response envelope. Lenient by contract: absent
     /// or misshapen `time`/`usage` becomes `None`, never an error.
+    /// Telemetry only — the response data path stays strict
+    /// (`rest_response::parse_*` fail `QQL-BACKEND-ENVELOPE`).
     pub fn from_envelope(value: &serde_json::Value) -> Self {
         Self {
             time_s: value.get("time").and_then(|t| t.as_f64()),
@@ -176,6 +178,7 @@ impl ServerTelemetry {
     /// `None` when the envelope carried neither half (keeps
     /// `ExecResponse.telemetry` exactly `None` where the backend sent
     /// nothing); `Some` otherwise, even if only one half is present.
+    /// Telemetry only, never a data-path fallback.
     pub fn from_envelope_opt(value: &serde_json::Value) -> Option<Self> {
         let tel = Self::from_envelope(value);
         if tel.time_s.is_none() && tel.usage.is_none() {

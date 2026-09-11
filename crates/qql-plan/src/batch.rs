@@ -44,24 +44,40 @@ pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
     }
 }
 
+/// Typed view of one Qdrant batch response item.
+///
+/// Batch envelopes stay JSON at the REST boundary (per-item results have no
+/// OpenAPI struct in this transport-neutral crate), so this borrows the
+/// `status` / `error` strings instead of taking ownership.
+#[derive(Debug, Clone, Copy)]
+struct BatchItem<'item> {
+    status: Option<&'item str>,
+    error: Option<&'item str>,
+}
+
+impl<'item> BatchItem<'item> {
+    fn parse(item: &'item serde_json::Value) -> Self {
+        Self {
+            status: item.get("status").and_then(serde_json::Value::as_str),
+            error: item.get("error").and_then(serde_json::Value::as_str),
+        }
+    }
+
+    fn error_message(self) -> Option<String> {
+        if self.status == Some("error") {
+            Some(self.error.unwrap_or("batch item failed").to_string())
+        } else {
+            None
+        }
+    }
+}
+
 /// Detect per-item errors in Qdrant batch endpoint responses.
 ///
 /// Qdrant batch endpoints answer per item; a 200 response can still carry
 /// per-item failures (`status: "error"`).
 pub fn batch_item_error(item: &serde_json::Value) -> Option<String> {
-    if item.get("status").and_then(serde_json::Value::as_str) == Some("error") {
-        return Some(
-            item.get("error")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| {
-                    item.pointer("/status/error")
-                        .and_then(serde_json::Value::as_str)
-                })
-                .unwrap_or("batch item failed")
-                .to_string(),
-        );
-    }
-    None
+    BatchItem::parse(item).error_message()
 }
 
 /// Verify that a batch response has the expected cardinality.

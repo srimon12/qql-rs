@@ -31,7 +31,7 @@ CI, air-gapped tools, and single-node products.
 {% /glassCard %}
 
 {% glassCard title="Same language, same plans" %}
-Statements compile to the same IR and use the same response envelope as the
+Statements compile to the same IR and produce the same typed `ExecData` report as the
 REST and gRPC backends. What you write in the playground is what edge executes.
 {% /glassCard %}
 
@@ -101,7 +101,7 @@ codes — see [capabilities](/docs/edge/capabilities/).
 | Storage | Qdrant server | `qdrant-edge` on-disk HNSW |
 | Embeddings | remote endpoint or explicit vectors | ONNX local, HTTP endpoint, or explicit vectors |
 | Cluster features (`SHARD`, `LOOKUP FROM`, quotas) | yes | rejected with stable codes |
-| Response envelope | `{result, status, time}` | identical |
+| Typed response (`ExecData`) | strict per-operation parse, `QQL-BACKEND-ENVELOPE` on a missing/mistyped field | identical |
 
 Both backends implement the same `QdrantOps` trait, so a Rust application can
 switch between them without changing query code. See

@@ -115,7 +115,10 @@ console.log(report.succeeded, report.failed);
 
 Row vectors accept plain arrays, packed `Float32Array` / `Float64Array`,
 integer typed arrays for sparse `indices`, and the flat `{ data: [...], dim: N }`
-multivector form (same contract as Python and WASM). Raw binary without a float
+multivector form (same contract as Python and WASM). A plain `number[]` of 32+
+elements also binds as a packed `F32Array` with one copy instead of a
+per-element walk; shorter lists and nested shapes keep exact list semantics,
+and payload values are never repacked. Raw binary without a float
 view fails closed with a wrap-first `TypeError`. Each object has the same shape
 as an inline `VALUES {…}` row, so a
 misshapen row fails closed with `QQL-BIND-TYPE-MISMATCH` (missing `id` →
@@ -132,10 +135,14 @@ const { Client, executeHits } = require("@veristamp/nqql");
 
 const client = new Client({ url: "http://localhost:6333" });
 
-// 1. Hits as typed ScoredPoint objects (id, score, payload, text, collection)
+// 1. Hits as typed ScoredPoint objects (id, score, payload, text, collection, vector)
 for (const hit of await client.executeHits("QUERY TEXT 'incident' FROM runbooks LIMIT 5")) {
   console.log(hit.id, hit.score, hit.get("severity")); // payload access via hit.get(key)
 }
+// hit.text is derived from payload.text (null when absent/non-string); the
+// typed hit has no separate text field. hit.vector holds dense / sparse /
+// multi-dense / named vectors when WITH VECTOR, else null. hit.shard_key is a
+// legacy passthrough, always null on the typed path.
 
 // 2. Facet, count, point, and group accessors per statement index
 // Negative indexes count from the end (-1 is the last statement).
@@ -247,11 +254,11 @@ const report = await client.execute([
 | `new Client({ url, apiKey, useGrpc, routeAffinity, embedder })` | Configure a reusable native client |
 | `Client.execute`, `executeStmt` | Source, statement, script, or array execution |
 | `Client.executeHits`, module `executeHits` | Typed `ScoredPoint[]` hits without the report |
-| `report.hits(stmt)` / `points` / `facet` / `count` / `groups` | Typed accessors per statement index (negative index counts from the end; `groups` returns `[{ id, hits }]`; see the API surface reference) |
+| `report.hits(stmt)` / `points` / `ids` / `facet` / `count` / `groups` | Typed accessors per statement index (negative index counts from the end; `groups` returns `[{ id, hits }]` with `ScoredPoint` hits; see the API surface reference) |
 | `report.telemetry` | Per-result server telemetry (`time_s` plus hardware and inference `usage`) when reported |
 | `Client.explainAnalyze` | Static plan plus measured client and server timings for one statement |
 | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration and pull-driven WHATWG stream |
-| `ScoredPoint` | Typed hit with `id`, `score`, `payload`, `text`, `collection` |
+| `ScoredPoint` | Typed hit with `id`, `score` (f32 shortest round-trip), `payload`, `text` (derived from `payload.text`), `collection`, `vector` (`shard_key` is a legacy passthrough, always null on the typed path) |
 | `Client.explain`, `explainStmt`, `compile` | Plan and route inspection (`compile` accepts `params`) |
 | `parse(source)` | Native `Stmt` handles for AST mutation |
 | `Stmt.bind(params?)` | Bound `Stmt` from `:name` / `?` placeholders |
