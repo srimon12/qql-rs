@@ -4,6 +4,9 @@
 //! `PayloadSchemaParams` for that type; a key that type does not accept
 //! fails closed instead of being dropped.
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
 use qdrant_edge::{
     BoolIndexParams, DatetimeIndexParams, FloatIndexParams, GeoIndexParams, IntegerIndexParams,
     KeywordIndexParams, PayloadFieldSchema, PayloadSchemaParams, PayloadSchemaType,
@@ -95,40 +98,67 @@ fn index_params(
             enable_hnsw: options.enable_hnsw,
             ..Default::default()
         }),
-        IndexFieldType::Text => {
-            if options.stemmer.is_some() || options.stopwords.is_some() {
-                return Err(index_option_error(
-                    "text index stemmer/stopwords are not exposed by qdrant-edge's public TextIndexParams constructors in this lowering",
-                ));
-            }
-            PayloadSchemaParams::Text(TextIndexParams {
-                tokenizer: options
-                    .tokenizer
-                    .map(edge_tokenizer)
-                    .unwrap_or(TokenizerType::Word),
-                min_token_len: options
-                    .min_token_len
-                    .map(usize::try_from)
-                    .transpose()
-                    .map_err(|error| {
-                        index_option_error(format!("min_token_len is too large: {error}"))
-                    })?,
-                max_token_len: options
-                    .max_token_len
-                    .map(usize::try_from)
-                    .transpose()
-                    .map_err(|error| {
-                        index_option_error(format!("max_token_len is too large: {error}"))
-                    })?,
-                lowercase: options.lowercase,
-                ascii_folding: options.ascii_folding,
-                phrase_matching: options.phrase_matching,
-                on_disk: options.on_disk,
-                memory,
-                enable_hnsw: options.enable_hnsw,
-                ..Default::default()
-            })
-        }
+        IndexFieldType::Text => PayloadSchemaParams::Text(TextIndexParams {
+            tokenizer: options
+                .tokenizer
+                .map(edge_tokenizer)
+                .unwrap_or(TokenizerType::Word),
+            min_token_len: options
+                .min_token_len
+                .map(usize::try_from)
+                .transpose()
+                .map_err(|error| {
+                    index_option_error(format!("min_token_len is too large: {error}"))
+                })?,
+            max_token_len: options
+                .max_token_len
+                .map(usize::try_from)
+                .transpose()
+                .map_err(|error| {
+                    index_option_error(format!("max_token_len is too large: {error}"))
+                })?,
+            lowercase: options.lowercase,
+            ascii_folding: options.ascii_folding,
+            phrase_matching: options.phrase_matching,
+            stopwords: options
+                .stopwords
+                .as_ref()
+                .map(|set| engine_fragment("stopwords", set))
+                .transpose()?,
+            stemmer: options
+                .stemmer
+                .as_ref()
+                .map(|algorithm| engine_fragment("stemmer", algorithm))
+                .transpose()?,
+            on_disk: options.on_disk,
+            memory,
+            enable_hnsw: options.enable_hnsw,
+            ..Default::default()
+        }),
+    })
+}
+
+/// Lower one qql-plan config fragment into the engine field type.
+///
+/// qdrant-edge 0.8 re-exports `SnowballLanguage` / `SnowballParams` /
+/// `StopwordsSet` / `Language`, but not the wrapper enums that the
+/// `TextIndexParams` fields require: `StemmingAlgorithm` and
+/// `StopwordsInterface`. Neither wrapper has a public constructor or a
+/// `From`/`Into` bridge, so a serde hop over the single fragment is the only
+/// way to build the typed field (the plan side stays typed; no untyped body
+/// is forwarded to the engine).
+fn engine_fragment<T, S>(field: &str, source: &S) -> Result<T, QqlError>
+where
+    T: DeserializeOwned,
+    S: Serialize,
+{
+    let value = serde_json::to_value(source).map_err(|error| {
+        index_option_error(format!(
+            "text index {field} could not be serialized: {error}"
+        ))
+    })?;
+    serde_json::from_value(value).map_err(|error| {
+        index_option_error(format!("text index {field} is not supported: {error}"))
     })
 }
 
@@ -251,5 +281,69 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    /// `StemmingAlgorithm`/`StopwordsInterface` are not re-exported, but the
+    /// plan fragments reach the typed `TextIndexParams` fields through serde.
+    #[test]
+    fn text_stemmer_and_stopwords_are_lowered() {
+        let schema = edge_payload_field_schema(&request(
+            IndexFieldType::Text,
+            IndexOptions {
+                stemmer: Some(qql_plan::StemmingAlgorithm::parse("English")),
+                stopwords: Some(qql_plan::StopwordsSet {
+                    custom: vec!["the".into(), "a".into()],
+                }),
+                ..Default::default()
+            },
+        ))
+        .expect("serde-reachable stemmer/stopwords");
+        match schema {
+            PayloadFieldSchema::FieldParams(PayloadSchemaParams::Text(params)) => {
+                let value = serde_json::to_value(&params).expect("text params serialize");
+                assert_eq!(value["stemmer"]["type"], "snowball");
+                assert_eq!(value["stemmer"]["language"], "english");
+                assert_eq!(
+                    value["stopwords"]["custom"],
+                    serde_json::json!(["a", "the"])
+                );
+            }
+            other => panic!("expected text params, got {other:?}"),
+        }
+    }
+
+    /// `stemmer = 'none'` maps to the engine's explicit opt-out shape.
+    #[test]
+    fn text_stemmer_disabled_is_lowered() {
+        let schema = edge_payload_field_schema(&request(
+            IndexFieldType::Text,
+            IndexOptions {
+                stemmer: Some(qql_plan::StemmingAlgorithm::parse("none")),
+                ..Default::default()
+            },
+        ))
+        .expect("disabled stemmer");
+        match schema {
+            PayloadFieldSchema::FieldParams(PayloadSchemaParams::Text(params)) => {
+                let value = serde_json::to_value(&params).expect("text params serialize");
+                assert_eq!(value["stemmer"]["type"], "none");
+            }
+            other => panic!("expected text params, got {other:?}"),
+        }
+    }
+
+    /// A language the engine does not know still fails closed.
+    #[test]
+    fn unknown_stemmer_language_fails_closed() {
+        let error = edge_payload_field_schema(&request(
+            IndexFieldType::Text,
+            IndexOptions {
+                stemmer: Some(qql_plan::StemmingAlgorithm::Snowball("klingon".into())),
+                ..Default::default()
+            },
+        ))
+        .expect_err("unknown snowball language");
+        assert_eq!(error.code, "QQL-EDGE-CONFIG");
+        assert!(error.message.contains("stemmer"), "{}", error.message);
     }
 }

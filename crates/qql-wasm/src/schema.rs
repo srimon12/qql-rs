@@ -11,6 +11,7 @@
 use serde_json::{Map, Value};
 
 use qql_core::error::QqlError;
+use qql_plan::{HnswConfig, OptimizersConfig, QuantizationConfig};
 
 use super::response::envelope_err;
 
@@ -226,62 +227,36 @@ fn collection_schema_from_result(result: &Value) -> Value {
     schema.insert("params".into(), Value::Object(collection_params));
     if let Some(hnsw) = config
         .and_then(|c| c.get("hnsw_config"))
-        .and_then(Value::as_object)
+        .and_then(parse_typed::<HnswConfig>)
     {
-        schema.insert("hnsw".into(), Value::Object(filter_keys(hnsw, HNSW_KEYS)));
+        schema.insert("hnsw".into(), typed_value(hnsw));
     }
     if let Some(optimizers) = config
         .and_then(|c| {
             c.get("optimizer_config")
                 .or_else(|| c.get("optimizers_config"))
         })
-        .and_then(Value::as_object)
+        .and_then(parse_typed::<OptimizersConfig>)
     {
-        schema.insert(
-            "optimizers".into(),
-            Value::Object(filter_keys(optimizers, OPTIMIZER_KEYS)),
-        );
+        schema.insert("optimizers".into(), typed_value(optimizers));
     }
-    if let Some(quantization) = config.and_then(|c| c.get("quantization_config")) {
-        schema.insert("quantization".into(), quantization.clone());
+    if let Some(quantization) = config
+        .and_then(|c| c.get("quantization_config"))
+        .and_then(parse_typed::<QuantizationConfig>)
+    {
+        schema.insert("quantization".into(), typed_value(quantization));
     }
     Value::Object(schema)
 }
 
-const HNSW_KEYS: &[&str] = &[
-    "m",
-    "ef_construct",
-    "full_scan_threshold",
-    "max_indexing_threads",
-    "on_disk",
-    "payload_m",
-    "inline_storage",
-    "memory",
-];
+/// Parse one config fragment with the same typed plan config the runtime uses,
+/// so REST-backed `SHOW COLLECTION` JSON stays in lockstep.
+fn parse_typed<T: serde::de::DeserializeOwned>(value: &Value) -> Option<T> {
+    serde_json::from_value(value.clone()).ok()
+}
 
-const OPTIMIZER_KEYS: &[&str] = &[
-    "deleted_threshold",
-    "vacuum_min_vector_number",
-    "default_segment_number",
-    "max_segment_size",
-    "memmap_threshold",
-    "indexing_threshold",
-    "flush_interval_sec",
-    "max_optimization_threads",
-    "prevent_unoptimized",
-];
-
-/// Keep only the keys the runtime's DDL re-parsing understands.
-fn filter_keys(map: &Map<String, Value>, keys: &[&str]) -> Map<String, Value> {
-    let mut out = Map::new();
-    for key in keys {
-        if let Some(value) = map.get(*key)
-            && !value.is_null()
-        {
-            out.insert((*key).to_string(), value.clone());
-        }
-    }
-    out
+fn typed_value<T: serde::Serialize>(value: T) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
 /// Pseudo-keys of the unnamed-vector `vectors` object (never vector names).
@@ -443,6 +418,28 @@ mod tests {
             info["schema"]["vectors"],
             json!([{"name": null, "size": 3, "distance": "Cosine"}])
         );
+    }
+
+    /// `null` config sections read as absent, matching the runtime's typed
+    /// parse (and the gRPC/edge producers, which omit the key entirely).
+    #[test]
+    fn null_config_sections_are_absent() {
+        let info = parse_collection_info(&json!({
+            "result": {
+                "status": "green",
+                "segments_count": 1,
+                "config": {
+                    "hnsw_config": null,
+                    "optimizer_config": null,
+                    "quantization_config": null,
+                },
+            },
+        }))
+        .unwrap();
+        let schema = &info["schema"];
+        assert!(schema.get("hnsw").is_none());
+        assert!(schema.get("optimizers").is_none());
+        assert!(schema.get("quantization").is_none());
     }
 
     #[test]

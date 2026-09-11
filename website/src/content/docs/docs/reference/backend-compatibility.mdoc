@@ -22,6 +22,7 @@ in-process engine and does not depend on a server version.
 | Per-query sparse IDF (`PARAMS idf = …`) | yes | yes | yes |
 | Memory placement / `payload_memory` / dense `datatype` | yes | yes | partial |
 | Keyword index `prefix = true` | yes | yes | yes |
+| Text index `stemmer` / `stopwords` | yes | yes | yes (qdrant-edge 0.8+) |
 | MMR, recommend, formula, order-by, sample, context/discover | yes | yes | yes |
 | Quantization rescore / oversampling (`PARAMS quantization = {...}`) | yes | yes | yes |
 | Cross-encoder reranking (`CROSS RERANK`) | yes | yes | yes (client-side) |

@@ -11,6 +11,12 @@ use crate::backend::{
 };
 use crate::qdrant_grpc::qdrant;
 
+use qql_plan::types::MemoryPlacement;
+use qql_plan::{
+    BinaryQuantization, HnswConfig, MaxOptimizationThreads, OptimizersConfig, ProductQuantization,
+    QuantizationConfig, ScalarQuantization, TurboQuantization,
+};
+
 use super::memory::memory_to_str;
 
 /// Map a proto `CollectionInfo` into the shared typed metadata: status,
@@ -134,13 +140,13 @@ pub(crate) fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> Coll
             };
         }
         if let Some(hnsw) = &config.hnsw_config {
-            schema.hnsw = Some(hnsw_diff_to_map(hnsw));
+            schema.hnsw = Some(hnsw_diff_to_spec(hnsw));
         }
         if let Some(opt) = &config.optimizer_config {
-            schema.optimizers = Some(optimizer_config_diff_to_map(opt));
+            schema.optimizers = Some(optimizer_config_diff_to_spec(opt));
         }
         if let Some(quant) = &config.quantization_config {
-            schema.quantization = quantization_config_to_json(quant);
+            schema.quantization = quantization_config_to_spec(quant);
         }
     }
 
@@ -214,6 +220,161 @@ fn vector_params_to_spec(name: Option<String>, p: &qdrant::VectorParams) -> Vect
     }
 }
 
+/// Widen an `f32` through its shortest decimal form so JSON keeps `0.99`
+/// instead of the exact binary expansion `0.9899999499320984`.
+///
+/// Qdrant REST reports `f64`; the proto reports `f32`, and the dump
+/// re-serializes the value, so the shortest form keeps dumps readable and
+/// identical to the REST path.
+fn f32_to_f64(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
+}
+
+/// Proto `HnswConfigDiff` → typed plan HNSW config.
+///
+/// `inline_storage` is left unset to preserve the existing gRPC projection
+/// output; the REST/edge producers report it when the backend does.
+fn hnsw_diff_to_spec(diff: &qdrant::HnswConfigDiff) -> HnswConfig {
+    HnswConfig {
+        m: diff.m,
+        ef_construct: diff.ef_construct,
+        full_scan_threshold: diff.full_scan_threshold,
+        max_indexing_threads: diff.max_indexing_threads,
+        on_disk: diff.on_disk,
+        payload_m: diff.payload_m,
+        inline_storage: None,
+        memory: diff
+            .memory
+            .and_then(memory_to_str)
+            .and_then(MemoryPlacement::parse),
+    }
+}
+
+/// Proto `OptimizersConfigDiff` → typed plan optimizer config.
+///
+/// `memmap_threshold` / `prevent_unoptimized` are left unset to preserve the
+/// existing gRPC projection output (the proto carries them, the dump shape so
+/// far did not).
+fn optimizer_config_diff_to_spec(diff: &qdrant::OptimizersConfigDiff) -> OptimizersConfig {
+    OptimizersConfig {
+        deleted_threshold: diff.deleted_threshold,
+        vacuum_min_vector_number: diff.vacuum_min_vector_number,
+        default_segment_number: diff.default_segment_number,
+        max_segment_size: diff.max_segment_size,
+        memmap_threshold: None,
+        indexing_threshold: diff.indexing_threshold,
+        flush_interval_sec: diff.flush_interval_sec,
+        max_optimization_threads: diff.max_optimization_threads.as_ref().and_then(|mot| {
+            mot.variant.as_ref().map(|variant| match variant {
+                qdrant::max_optimization_threads::Variant::Value(val) => {
+                    MaxOptimizationThreads::Threads(*val)
+                }
+                qdrant::max_optimization_threads::Variant::Setting(_) => {
+                    MaxOptimizationThreads::Auto
+                }
+            })
+        }),
+        prevent_unoptimized: None,
+    }
+}
+
+/// Proto quantization config → typed plan config.
+///
+/// Scalar's OpenAPI `type` is always `int8`; the proto `memory` placement was
+/// not part of the previous JSON projection and stays unset to keep SHOW
+/// output unchanged for gRPC-backed collections.
+fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<QuantizationConfig> {
+    use qdrant::quantization_config::Quantization;
+    match &q.quantization {
+        Some(Quantization::Scalar(sq)) => Some(QuantizationConfig::Scalar {
+            scalar: ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: sq.quantile.map(f32_to_f64),
+                always_ram: sq.always_ram,
+                memory: None,
+            },
+        }),
+        Some(Quantization::Product(pq)) => {
+            let compression = qdrant::CompressionRatio::try_from(pq.compression)
+                .ok()?
+                .as_str_name()
+                .to_string();
+            Some(QuantizationConfig::Product {
+                product: ProductQuantization {
+                    compression,
+                    always_ram: pq.always_ram,
+                    memory: None,
+                },
+            })
+        }
+        Some(Quantization::Binary(bq)) => {
+            let encoding = bq
+                .encoding
+                .and_then(|enc| qdrant::BinaryQuantizationEncoding::try_from(enc).ok())
+                .map(|encoding| {
+                    match encoding {
+                        qdrant::BinaryQuantizationEncoding::OneBit => "one_bit",
+                        qdrant::BinaryQuantizationEncoding::TwoBits => "two_bits",
+                        qdrant::BinaryQuantizationEncoding::OneAndHalfBits => "one_and_half_bits",
+                    }
+                    .to_string()
+                });
+            let query_encoding = bq
+                .query_encoding
+                .as_ref()
+                .and_then(|qe| match qe.variant {
+                    Some(qdrant::binary_quantization_query_encoding::Variant::Setting(s)) => {
+                        qdrant::binary_quantization_query_encoding::Setting::try_from(s).ok()
+                    }
+                    None => None,
+                })
+                .map(|setting| {
+                    match setting {
+                        qdrant::binary_quantization_query_encoding::Setting::Binary => "binary",
+                        qdrant::binary_quantization_query_encoding::Setting::Scalar4Bits => {
+                            "scalar4bits"
+                        }
+                        qdrant::binary_quantization_query_encoding::Setting::Scalar8Bits => {
+                            "scalar8bits"
+                        }
+                        qdrant::binary_quantization_query_encoding::Setting::Default => "default",
+                    }
+                    .to_string()
+                });
+            Some(QuantizationConfig::Binary {
+                binary: BinaryQuantization {
+                    always_ram: bq.always_ram,
+                    encoding,
+                    query_encoding,
+                    memory: None,
+                },
+            })
+        }
+        Some(Quantization::Turboquant(tq)) => {
+            let bits = tq
+                .bits
+                .and_then(|bits| qdrant::TurboQuantBitSize::try_from(bits).ok())
+                .map(|bits| {
+                    match bits {
+                        qdrant::TurboQuantBitSize::Bits1 => "bits1",
+                        qdrant::TurboQuantBitSize::Bits15 => "bits1_5",
+                        qdrant::TurboQuantBitSize::Bits2 => "bits2",
+                        qdrant::TurboQuantBitSize::Bits4 => "bits4",
+                    }
+                    .to_string()
+                });
+            Some(QuantizationConfig::Turbo {
+                turbo: TurboQuantization {
+                    bits,
+                    always_ram: tq.always_ram,
+                    memory: None,
+                },
+            })
+        }
+        None => None,
+    }
+}
+
 fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
     if let Some(v) = diff.m {
@@ -236,43 +397,6 @@ fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, se
     }
     if let Some(name) = diff.memory.and_then(memory_to_str) {
         map.insert("memory".into(), serde_json::Value::String(name.into()));
-    }
-    map
-}
-
-fn optimizer_config_diff_to_map(
-    diff: &qdrant::OptimizersConfigDiff,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::new();
-    if let Some(v) = diff.deleted_threshold {
-        map.insert("deleted_threshold".into(), serde_json::json!(v));
-    }
-    if let Some(v) = diff.vacuum_min_vector_number {
-        map.insert("vacuum_min_vector_number".into(), serde_json::json!(v));
-    }
-    if let Some(v) = diff.default_segment_number {
-        map.insert("default_segment_number".into(), serde_json::json!(v));
-    }
-    if let Some(v) = diff.max_segment_size {
-        map.insert("max_segment_size".into(), serde_json::json!(v));
-    }
-    if let Some(v) = diff.indexing_threshold {
-        map.insert("indexing_threshold".into(), serde_json::json!(v));
-    }
-    if let Some(v) = diff.flush_interval_sec {
-        map.insert("flush_interval_sec".into(), serde_json::json!(v));
-    }
-    if let Some(ref mot) = diff.max_optimization_threads
-        && let Some(ref variant) = mot.variant
-    {
-        match variant {
-            qdrant::max_optimization_threads::Variant::Value(val) => {
-                map.insert("max_optimization_threads".into(), serde_json::json!(val));
-            }
-            qdrant::max_optimization_threads::Variant::Setting(_) => {
-                map.insert("max_optimization_threads".into(), serde_json::json!("auto"));
-            }
-        }
     }
     map
 }
@@ -491,5 +615,55 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(collection_info_from_grpc(&info).status, "yellow");
+    }
+
+    /// Proto configs lower into the same typed plan types REST/edge fill.
+    #[test]
+    fn grpc_configs_lower_to_typed_plan_types() {
+        let hnsw = hnsw_diff_to_spec(&qdrant::HnswConfigDiff {
+            m: Some(16),
+            memory: Some(qdrant::Memory::Pinned as i32),
+            ..Default::default()
+        });
+        assert_eq!(hnsw.m, Some(16));
+        assert_eq!(hnsw.memory, Some(MemoryPlacement::Pinned));
+
+        let scalar = qdrant::QuantizationConfig {
+            quantization: Some(qdrant::quantization_config::Quantization::Scalar(
+                qdrant::ScalarQuantization {
+                    quantile: Some(0.99),
+                    always_ram: Some(true),
+                    ..Default::default()
+                },
+            )),
+        };
+        match quantization_config_to_spec(&scalar).expect("typed scalar") {
+            QuantizationConfig::Scalar { scalar } => {
+                assert_eq!(scalar.qtype, "int8");
+                assert_eq!(
+                    scalar.quantile,
+                    Some(0.99),
+                    "f32 quantile widens through its shortest decimal form"
+                );
+            }
+            other => panic!("expected scalar quantization, got {other:?}"),
+        }
+
+        let quant = qdrant::QuantizationConfig {
+            quantization: Some(qdrant::quantization_config::Quantization::Turboquant(
+                qdrant::TurboQuantization {
+                    always_ram: Some(true),
+                    bits: Some(qdrant::TurboQuantBitSize::Bits15 as i32),
+                    memory: None,
+                },
+            )),
+        };
+        match quantization_config_to_spec(&quant).expect("typed turbo") {
+            QuantizationConfig::Turbo { turbo } => {
+                assert_eq!(turbo.bits.as_deref(), Some("bits1_5"));
+                assert_eq!(turbo.always_ram, Some(true));
+            }
+            other => panic!("expected turbo quantization, got {other:?}"),
+        }
     }
 }

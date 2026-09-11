@@ -112,7 +112,8 @@ pub(crate) fn overlay_optimizers(
 ///
 /// Used for per-vector overrides, `ALTER COLLECTION` (live shard config as
 /// base), and plain create-time configs (engine defaults as base). Engine
-/// `Memory` is not re-exported, so that one field is the only serde hop.
+/// `Memory` is not re-exported, so that one field is decoded from its keyword
+/// via serde (`StrDeserializer`), not a `serde_json::Value`.
 #[allow(deprecated)]
 pub(crate) fn edge_hnsw_config_over(
     config: &HnswConfig,
@@ -283,9 +284,12 @@ fn edge_sparse_vector_params(
 /// Lower a plan quantization config onto the engine type.
 ///
 /// Families map field-for-field. Engine `Memory` is not re-exported, so
-/// placement is the one serde hop (a lowercase keyword). Turbo bit-size is
-/// the same: the engine enum is crate-private, so that one string is decoded
-/// through serde rather than a whole-config JSON round-trip.
+/// placement is decoded from its keyword through `StrDeserializer` (no
+/// `serde_json::Value`). Turbo is the one family that still goes through JSON:
+/// `TurboQuantization`, `TurboQuantQuantizationConfig`, and
+/// `TurboQuantBitSize` are not re-exported, and unlike the scalar/product/
+/// binary configs there is no `From<TurboQuantization>` constructor, so the
+/// nested object cannot be built by name.
 #[allow(deprecated)]
 fn edge_quantization_config(
     config: &qql_plan::QuantizationConfig,
@@ -329,7 +333,9 @@ fn edge_quantization_config(
             }))
         }
         qql_plan::QuantizationConfig::Turbo { turbo } => {
-            // `TurboQuantBitSize` is not re-exported; decode the one keyword.
+            // `TurboQuantization` / `TurboQuantQuantizationConfig` /
+            // `TurboQuantBitSize` are not re-exported by qdrant-edge 0.8 and
+            // have no public constructor, so the nested body is the only way in.
             let mut body = serde_json::Map::new();
             if let Some(bits) = turbo.bits.as_ref() {
                 body.insert("bits".into(), serde_json::Value::String(bits.clone()));
@@ -421,19 +427,18 @@ fn resolve_on_disk(on_disk: Option<bool>, memory: Option<MemoryPlacement>) -> Op
 
 /// Decode a placement keyword into an engine `Memory` value.
 ///
-/// qdrant-edge does not re-export `Memory`; the field type is inferred from
-/// the assignment site (`HnswIndexConfig::memory`, quantization configs).
+/// qdrant-edge does not re-export `Memory`; the field type is inferred from the
+/// assignment site (`HnswIndexConfig::memory`, quantization configs). The
+/// keyword is fed through a serde string deserializer — no `serde_json::Value`
+/// is built for what is a plain enum decode.
 pub(crate) fn edge_memory<T: serde::de::DeserializeOwned>(
     placement: MemoryPlacement,
 ) -> Result<T, QqlError> {
-    serde_json::from_value(serde_json::Value::String(placement.as_str().to_string())).map_err(
-        |error| {
-            edge_config_error(format!(
-                "invalid memory placement '{}': {error}",
-                placement.as_str()
-            ))
-        },
-    )
+    let keyword = placement.as_str();
+    let deserializer = serde::de::value::StrDeserializer::<serde::de::value::Error>::new(keyword);
+    T::deserialize(deserializer).map_err(|error| {
+        edge_config_error(format!("invalid memory placement '{keyword}': {error}"))
+    })
 }
 
 fn usize_config(field: &str, value: u64) -> Result<usize, QqlError> {

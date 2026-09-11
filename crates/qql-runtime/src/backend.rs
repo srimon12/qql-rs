@@ -4,7 +4,25 @@
 //! transport adapter. They deliberately do not depend on generated OpenAPI or
 //! protobuf types. Query hits live on [`crate::executor::SearchHit`]; this
 //! module holds collection metadata used by `USING` resolution and dump.
+//!
+//! # Deliberate JSON
+//!
+//! Collection-level [`CollectionSchema::hnsw`] / [`CollectionSchema::optimizers`]
+//! / [`CollectionSchema::quantization`] are typed plan configs. What stays
+//! `serde_json` is intentional:
+//!
+//! - [`VectorSpec::hnsw`] / [`VectorSpec::quantization`] /
+//!   [`VectorSpec::multivector`] and [`SparseVectorSpec::index`]: per-vector
+//!   config fragments Qdrant owns and dump re-emits verbatim.
+//! - [`PayloadIndexSpec::params`]: Qdrant's payload-index parameter union.
+//! - Formula `DEFAULTS`: the expression engine takes JSON values directly
+//!   (`qql-edge`'s formula lowering converts the typed plan tree at the
+//!   boundary).
+//! - REST request/response bodies (`qql-plan::Route`, `crate::rest_response`):
+//!   the wire format itself.
 
+use qql_plan::{HnswConfig, OptimizersConfig, QuantizationConfig};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// One dense vector definition from collection config.
@@ -106,13 +124,13 @@ pub struct CollectionSchema {
     pub params: CollectionParamsSpec,
     /// Collection-level HNSW config (`hnsw_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hnsw: Option<serde_json::Map<String, serde_json::Value>>,
+    pub hnsw: Option<HnswConfig>,
     /// Collection-level optimizer config (`optimizer_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub optimizers: Option<serde_json::Map<String, serde_json::Value>>,
+    pub optimizers: Option<OptimizersConfig>,
     /// Collection-level quantization config (`quantization_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quantization: Option<serde_json::Value>,
+    pub quantization: Option<QuantizationConfig>,
 }
 
 /// Transport-neutral collection metadata consumed by the executor.
@@ -244,70 +262,25 @@ pub fn schema_from_rest_result(result: &serde_json::Value) -> CollectionSchema {
     }
 
     if let Some(config_obj) = result.get("config").and_then(|c| c.as_object()) {
-        schema.hnsw = config_obj
-            .get("hnsw_config")
-            .and_then(|h| h.as_object())
-            .map(filter_hnsw_map);
+        schema.hnsw = config_obj.get("hnsw_config").and_then(parse_config);
         // Qdrant REST historically uses optimizer_config (singular); accept both.
         schema.optimizers = config_obj
             .get("optimizer_config")
             .or_else(|| config_obj.get("optimizers_config"))
-            .and_then(|o| o.as_object())
-            .map(filter_optimizers_map);
-        schema.quantization = config_obj.get("quantization_config").cloned();
+            .and_then(parse_config);
+        schema.quantization = config_obj.get("quantization_config").and_then(parse_config);
     }
 
     schema
 }
 
-/// Keep only HNSW keys QQL can re-parse.
-fn filter_hnsw_map(
-    map: &serde_json::Map<String, serde_json::Value>,
-) -> serde_json::Map<String, serde_json::Value> {
-    const KEYS: &[&str] = &[
-        "m",
-        "ef_construct",
-        "full_scan_threshold",
-        "max_indexing_threads",
-        "on_disk",
-        "payload_m",
-        "inline_storage",
-        "memory",
-    ];
-    filter_known_keys(map, KEYS)
-}
-
-/// Keep only OPTIMIZERS keys QQL can re-parse.
-fn filter_optimizers_map(
-    map: &serde_json::Map<String, serde_json::Value>,
-) -> serde_json::Map<String, serde_json::Value> {
-    const KEYS: &[&str] = &[
-        "deleted_threshold",
-        "vacuum_min_vector_number",
-        "default_segment_number",
-        "max_segment_size",
-        "memmap_threshold",
-        "indexing_threshold",
-        "flush_interval_sec",
-        "max_optimization_threads",
-        "prevent_unoptimized",
-    ];
-    filter_known_keys(map, KEYS)
-}
-
-fn filter_known_keys(
-    map: &serde_json::Map<String, serde_json::Value>,
-    keys: &[&str],
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut out = serde_json::Map::new();
-    for key in keys {
-        if let Some(val) = map.get(*key)
-            && !val.is_null()
-        {
-            out.insert((*key).to_string(), val.clone());
-        }
-    }
-    out
+/// Parse one optional REST config object into its typed plan config.
+///
+/// Unknown keys are ignored, `null` reads as absent, and a shape the plan type
+/// cannot represent drops the section instead of failing the whole response —
+/// the same leniency the previous map filters had.
+fn parse_config<T: DeserializeOwned>(value: &serde_json::Value) -> Option<T> {
+    serde_json::from_value(value.clone()).ok()
 }
 
 fn is_pseudo_vector_key(name: &str) -> bool {
@@ -354,4 +327,83 @@ fn extract_vector_spec(name: Option<String>, cfg: &serde_json::Value) -> Option<
         datatype,
         memory,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Kept in lockstep with `qql-wasm/src/schema.rs`'s
+    /// `collection_info_matches_runtime_shape`: the same REST fixture must
+    /// serialize to the same canonical `CollectionSchema` JSON on both sides.
+    #[test]
+    fn schema_from_rest_result_matches_wasm_fixture() {
+        let result = json!({
+            "config": {
+                "params": {
+                    "vectors": {
+                        "title": {"size": 4, "distance": "Dot"},
+                        "body": {"size": 8, "distance": "Cosine", "multivector_config": {"comparator": "max_sim"}},
+                    },
+                    "sparse_vectors": {"text": {"modifier": "idf"}},
+                    "shard_number": 3,
+                    "sharding_method": "custom",
+                    "on_disk_payload": true,
+                    "replication_factor": 2,
+                    "payload": {"memory": "cold"},
+                },
+                "hnsw_config": {"m": 16, "ef_construct": 100, "unknown": 1},
+                "optimizer_config": {"deleted_threshold": 0.2, "unknown": 2},
+                "quantization_config": {"scalar": {"type": "int8"}},
+            },
+            "payload_schema": {
+                "tenant_id": {"data_type": "keyword", "params": {"is_tenant": true}},
+                "title": {"data_type": "text"},
+            },
+        });
+
+        assert_eq!(
+            serde_json::to_value(schema_from_rest_result(&result)).unwrap(),
+            json!({
+                "dense_vectors": ["body", "title"],
+                "sparse_vectors": [{"name": "text", "modifier": "idf"}],
+                "vectors": [
+                    {"name": "body", "size": 8, "distance": "Cosine", "multivector": {"comparator": "max_sim"}},
+                    {"name": "title", "size": 4, "distance": "Dot"},
+                ],
+                "payload_indexes": [
+                    {"field": "tenant_id", "data_type": "keyword", "params": {"is_tenant": true}, "is_tenant": true},
+                    {"field": "title", "data_type": "text", "params": {}},
+                ],
+                "params": {
+                    "shard_number": 3,
+                    "sharding_method": "custom",
+                    "on_disk_payload": true,
+                    "payload_memory": "cold",
+                    "replication_factor": 2,
+                },
+                "hnsw": {"m": 16, "ef_construct": 100},
+                "optimizers": {"deleted_threshold": 0.2},
+                "quantization": {"scalar": {"type": "int8"}},
+            })
+        );
+    }
+
+    /// A `null` REST config section reads as absent (matches gRPC/edge, where
+    /// the key is simply omitted).
+    #[test]
+    fn null_config_sections_are_absent() {
+        let result = json!({
+            "config": {
+                "hnsw_config": null,
+                "optimizer_config": null,
+                "quantization_config": null,
+            },
+        });
+        let value = serde_json::to_value(schema_from_rest_result(&result)).unwrap();
+        assert!(value.get("hnsw").is_none());
+        assert!(value.get("optimizers").is_none());
+        assert!(value.get("quantization").is_none());
+    }
 }
