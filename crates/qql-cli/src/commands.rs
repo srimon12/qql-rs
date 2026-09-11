@@ -846,10 +846,20 @@ pub fn handle_convert(
     };
 
     for stmt in &statements {
-        println!("{}", stmt);
+        // `format_stmt` renders no terminator; the CLI prints canonical QQL,
+        // so each statement gets its `;` back (and `qql fmt --check` passes).
+        println!("{};", stmt);
     }
 
     Ok(())
+}
+
+/// Whether `source` is already canonical.
+///
+/// `format()` always terminates with a newline; a file without one is still
+/// canonical, so only trailing whitespace is ignored on both sides.
+pub(crate) fn source_is_canonical(source: &str, formatted: &str) -> bool {
+    source.trim_end() == formatted.trim_end()
 }
 
 /// Format QQL source into canonical form.
@@ -875,7 +885,7 @@ pub fn handle_fmt(
     let formatted = qql_core::fmt::format(&input)?;
 
     if check {
-        if input.trim_end() != formatted {
+        if !source_is_canonical(&input, &formatted) {
             let target = path.unwrap_or("<stdin>");
             return Err(format!("{} is not formatted (run `qql fmt` to fix)", target).into());
         }
@@ -883,12 +893,11 @@ pub fn handle_fmt(
     }
 
     if write && let Some(p) = path {
-        std::fs::write(p, format!("{}\n", formatted))
-            .map_err(|e| format!("cannot write '{}': {}", p, e))?;
+        std::fs::write(p, &formatted).map_err(|e| format!("cannot write '{}': {}", p, e))?;
         return Ok(());
     }
 
-    println!("{}", formatted);
+    print!("{}", formatted);
     Ok(())
 }
 
@@ -1366,7 +1375,7 @@ pub async fn handle_check(
     // Stage 1: format check of the input.
     match qql_core::fmt::format(query) {
         Ok(formatted) => {
-            if query.trim_end() == formatted {
+            if source_is_canonical(query, &formatted) {
                 push("format", "ok", None, "format: parses cleanly".to_string());
             } else {
                 push(

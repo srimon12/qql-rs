@@ -219,18 +219,64 @@ async fn proxies_byte_identically_and_captures_search_upsert() {
     assert_eq!(lines[1]["path"], "/collections/docs/points");
     assert_eq!(lines[1]["body"], upsert);
 
-    // --qql-out converted at record time; every statement parses like hop 1's
-    // roundtrip test.
+    // --qql-out converted at record time. `# ERROR` lines are capture
+    // annotations, so the rest must parse as one whole script (not
+    // line-by-line: emitted statements may span lines).
     let qql = std::fs::read_to_string(&rec.qql_out).expect("read qql-out");
-    let stmts: Vec<&str> = qql.lines().filter(|line| !line.trim().is_empty()).collect();
+    let stmts = script_statements(&qql);
     assert_eq!(stmts.len(), 2, "{stmts:?}");
-    assert_eq!(stmts[0], "QUERY [0.1, 0.2] FROM docs LIMIT 5;");
+    assert_eq!(stmts[0], "QUERY [0.1, 0.2] FROM docs LIMIT 5");
     assert!(stmts[1].starts_with("UPSERT INTO docs"), "{}", stmts[1]);
-    for stmt in &stmts {
-        let body = stmt.strip_suffix(';').expect("semicolon terminated");
-        qql_core::parser::Parser::parse(&format!("{body};"))
-            .unwrap_or_else(|e| panic!("qql-out statement failed to parse: {stmt} ({e})"));
-    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Parse a `--qql-out` capture as a script, skipping `# ERROR` annotations.
+fn script_statements(capture: &str) -> Vec<String> {
+    let script: String = capture
+        .lines()
+        .filter(|line| !line.starts_with("# ERROR "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::script::split_statements(&script).expect("qql-out parses as a script")
+}
+
+#[tokio::test]
+async fn qql_out_multiline_statement_parses_as_script() {
+    let dir = temp_dir("multiline");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mock = start_mock(seen.clone()).await;
+    let rec = start_recorder(mock, &dir).await;
+    let client = reqwest::Client::new();
+
+    // A batch upsert formats as a multi-line statement; it must still read
+    // back as one statement of the capture script.
+    let batch = serde_json::json!({
+        "batch": {
+            "ids": [1, 2],
+            "vectors": [[0.1], [0.2]],
+            "payloads": [{"a": 1}, {"a": 2}],
+        }
+    });
+    let resp = client
+        .put(format!("http://{}/collections/docs/points", rec.addr))
+        .json(&batch)
+        .send()
+        .await
+        .expect("batch through recorder");
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let qql = std::fs::read_to_string(&rec.qql_out).expect("read qql-out");
+    let stmts = script_statements(&qql);
+    assert_eq!(stmts.len(), 1, "{stmts:?}");
+    assert!(stmts[0].contains('\n'), "expected a multi-line statement");
+    let reparsed = qql_core::parser::Parser::parse(&format!("{};", stmts[0]))
+        .unwrap_or_else(|e| panic!("multi-line statement failed to parse: {e}"));
+    assert_eq!(
+        qql_core::fmt::format_stmt(&reparsed),
+        stmts[0],
+        "multi-line capture statement is not canonical"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

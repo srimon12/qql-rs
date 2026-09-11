@@ -10,6 +10,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod commands;
 mod config;
 mod dump;
+#[cfg(test)]
+mod fmt_tests;
 mod migrate;
 mod output;
 #[cfg(feature = "record")]
