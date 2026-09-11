@@ -2,16 +2,14 @@
 //!
 //! Three input shapes are accepted:
 //!
-//! 1. **Wrapped request** — `{"method": ..., "path": ..., "body": ...}`; the
-//!    collection is derived from the path and any caller-supplied collection
-//!    is ignored.
+//! 1. **Wrapped request** — `{"method", "path", "query"?, "body"?}`; the
+//!    collection is derived from the path. `query` recovers `wait` /
+//!    `timeout` / `consistency` (also accepted as a `?…` suffix on `path`).
 //! 2. **Bare body** — raw Qdrant REST JSON without path context; the caller
-//!    supplies the collection via [`json_to_qql_with_collection`]
-//!    ([`json_to_qql`] falls back to `"unknown"`).
+//!    must supply the collection via [`convert`] / [`convert_stmts`].
 //! 3. **JSONL capture** — one wrapped request or bare body per line, as
-//!    written by `qql record`; use [`jsonl_to_qql`] /
-//!    [`jsonl_to_qql_with_collection`]. A failing line reports its 1-based
-//!    number via [`ConvertError::InvalidLine`].
+//!    written by `qql record`. A failing line reports its 1-based number via
+//!    [`ConvertError::InvalidLine`].
 //!
 //! Conversion is contract-driven and AST-based:
 //!
@@ -30,16 +28,14 @@ mod convert;
 mod decode;
 mod endpoint;
 mod json;
+mod request;
 
-pub use convert::{
-    json_to_qql, json_to_qql_with_collection, jsonl_to_qql, jsonl_to_qql_with_collection,
-};
+pub use convert::{convert, convert_stmts};
 use std::fmt;
 
 /// Typed conversion failure.
 ///
-/// Returned by [`json_to_qql`], [`json_to_qql_with_collection`],
-/// [`jsonl_to_qql`], and [`jsonl_to_qql_with_collection`].
+/// Returned by [`convert`] and [`convert_stmts`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConvertError {
     /// The input is not valid JSON. Holds the underlying parse message.
@@ -47,6 +43,8 @@ pub enum ConvertError {
     /// A wrapped request targets an endpoint with no QQL mapping.
     /// Holds `"METHOD path"`.
     UnsupportedEndpoint(String),
+    /// A bare body was given without a collection name.
+    MissingCollection,
     /// The body is absent or structurally undecodable for the endpoint.
     /// Holds a human-readable reason.
     UndecodableBody {
@@ -91,6 +89,10 @@ impl fmt::Display for ConvertError {
         match self {
             Self::InvalidJson(e) => write!(f, "invalid JSON: {e}"),
             Self::UnsupportedEndpoint(ep) => write!(f, "unsupported endpoint: {ep}"),
+            Self::MissingCollection => write!(
+                f,
+                "bare request body requires a collection (pass --collection)"
+            ),
             Self::UndecodableBody { detail } => write!(f, "cannot decode request body: {detail}"),
             Self::InvalidField { path, detail } => write!(f, "invalid field '{path}': {detail}"),
             Self::InvalidLine { line, source } => write!(f, "line {line}: {source}"),

@@ -6,7 +6,7 @@
 mod common;
 
 use common::{convert, convert_err, expect_one, wrapped};
-use qql_convert::{ConvertError, json_to_qql};
+use qql_convert::{ConvertError, convert as convert_json};
 
 // ── Queries ─────────────────────────────────────────────────────
 
@@ -136,7 +136,7 @@ fn query_order_sample_fusion_formula_rrf_feedback() {
          PARAMS (hnsw_ef = 32, rrf_k = 60, rrf_weights = [0.5, 0.5]) LIMIT 5",
     );
     expect_one(
-        r#"{"query": {"formula": {"sum": ["$score", 2.0]}}, "defaults": {}, "limit": 5}"#,
+        r#"{"query": {"formula": {"sum": ["$score", 2.0]}, "defaults": {}}, "limit": 5}"#,
         "QUERY FORMULA score + 2.0 FROM docs LIMIT 5",
     );
     expect_one(
@@ -200,7 +200,7 @@ fn point_request_scroll_count_facet() {
         serde_json::json!({"limit": 2, "with_vector": true}),
     );
     assert_eq!(
-        json_to_qql(&scroll).expect("wrapped scroll"),
+        convert_json(&scroll, None).expect("wrapped scroll"),
         ["SCROLL FROM docs WITH VECTOR true LIMIT 2"]
     );
     assert_eq!(

@@ -289,8 +289,12 @@ condition.
 ## 6. Point operations and DDL
 
 `SCROLL` requires a positive `LIMIT`. `DELETE`, `CLEAR PAYLOAD`, and
-`DELETE VECTOR` require `WHERE`. `UPDATE ... SET VECTOR` targets exactly one
-point ID; payload updates accept any filter.
+`DELETE VECTOR` require `WHERE`. `UPDATE ... SET VECTOR` replaces vectors on
+one or more points: compact `SET VECTOR [name] = … WHERE id = …` is a single
+point (a name map `{dense: …, sparse: …}` is allowed on the right-hand side);
+`SET VECTOR VALUES {id, vector}, …` is the batch form that matches REST
+`PUT /points/vectors` and gRPC `UpdatePointVectors`. Payload updates accept
+any filter.
 
 `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`,
 `UPDATE … VECTOR`, `UPDATE … PAYLOAD`, and `CREATE INDEX` accept an optional
@@ -524,6 +528,7 @@ invalid fixtures are normative for those cases.
 | `QQL-VALIDATION-FUSION-PREFETCH` | `QUERY FUSION` has no `PREFETCH` |
 | `QQL-VALIDATION-RERANK-PREFETCH` | `QUERY RERANK` has no `PREFETCH` |
 | `QQL-VALIDATION-POINTS-CLAUSE` | `QUERY POINTS` uses a clause it cannot accept |
+| `QQL-VALIDATION-UPDATE-VECTOR` | An `UPDATE … SET VECTOR VALUES` row is empty, missing `id`/`vector`, or carries extra keys |
 | `QQL-VALIDATION-UPSERT-ID` | An UPSERT point lacks a valid `id` key |
 | `QQL-VALIDATION-UPSERT-BATCH` | `upsert_many` / `upsertMany` called with `batch_size` / `batchSize` below 1 |
 | `QQL-VALIDATION-MMR` | MMR `DIVERSITY` is outside `[0, 1]` or not finite |

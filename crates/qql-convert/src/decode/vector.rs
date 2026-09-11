@@ -26,6 +26,17 @@ pub(crate) fn point_id(value: &Value, path: &str) -> Result<PointId, ConvertErro
     }
 }
 
+/// Decode the optional `shard_key` request member.
+pub(crate) fn shard_key_field(
+    obj: &json::Obj,
+    path: &str,
+) -> Result<Option<ShardKey>, ConvertError> {
+    match obj.get("shard_key").filter(|v| !v.is_null()) {
+        None => Ok(None),
+        Some(value) => Ok(Some(shard_key(value, &child(path, "shard_key"))?)),
+    }
+}
+
 /// Decode a `ShardKeySelector`.
 ///
 /// QQL routes through exactly one typed shard key, so a single key (or a

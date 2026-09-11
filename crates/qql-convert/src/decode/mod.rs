@@ -22,18 +22,24 @@ use serde_json::Value;
 
 use crate::ConvertError;
 use crate::endpoint::{Endpoint, EndpointMatch};
+use crate::request::RequestOpts;
 use qql_core::ast::Stmt;
+
+/// Per-request decode context: collection name plus recovered query opts.
+#[derive(Clone, Copy)]
+pub(crate) struct DecodeCtx<'a> {
+    /// Path-derived or caller-supplied collection.
+    pub collection: &'a str,
+    /// `wait` / `timeout` / `consistency` from the wrapped query string.
+    pub opts: &'a RequestOpts,
+}
 
 /// Decode one wrapped request into typed statements (pre-formatting).
 pub(crate) fn endpoint(
     matched: &EndpointMatch,
     body: Option<&Value>,
-    caller_collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<Vec<Stmt>, ConvertError> {
-    let collection = matched
-        .collection
-        .clone()
-        .unwrap_or_else(|| caller_collection.to_string());
     let body = match body {
         Some(body) => body,
         None if matched.op.body_required() => {
@@ -45,81 +51,89 @@ pub(crate) fn endpoint(
         None => &Value::Null,
     };
     Ok(match matched.op {
-        Endpoint::Query => vec![Stmt::Query(Box::new(query::query_request(
-            body,
-            &collection,
-        )?))],
-        Endpoint::QueryGroups => vec![Stmt::Query(Box::new(query::query_groups_request(
-            body,
-            &collection,
-        )?))],
-        Endpoint::GetPoints => vec![Stmt::Query(Box::new(points::point_request(
-            body,
-            &collection,
-        )?))],
-        Endpoint::Facet => vec![Stmt::Facet(Box::new(points::facet(body, &collection)?))],
-        Endpoint::Scroll => vec![Stmt::Scroll(Box::new(points::scroll(body, &collection)?))],
-        Endpoint::Count => vec![Stmt::Count(Box::new(points::count(body, &collection)?))],
-        Endpoint::Upsert => vec![Stmt::Upsert(Box::new(mutation::upsert(body, &collection)?))],
-        Endpoint::Delete => vec![Stmt::Delete(Box::new(mutation::delete(body, &collection)?))],
+        Endpoint::Query => vec![Stmt::Query(Box::new(query::query_request(body, ctx)?))],
+        Endpoint::QueryGroups => {
+            vec![Stmt::Query(Box::new(query::query_groups_request(
+                body, ctx,
+            )?))]
+        }
+        Endpoint::GetPoints => vec![Stmt::Query(Box::new(points::point_request(body, ctx)?))],
+        Endpoint::Facet => vec![Stmt::Facet(Box::new(points::facet(body, ctx)?))],
+        Endpoint::Scroll => vec![Stmt::Scroll(Box::new(points::scroll(body, ctx)?))],
+        Endpoint::Count => vec![Stmt::Count(Box::new(points::count(body, ctx)?))],
+        Endpoint::Upsert => vec![Stmt::Upsert(Box::new(mutation::upsert(body, ctx)?))],
+        Endpoint::Delete => vec![Stmt::Delete(Box::new(mutation::delete(body, ctx)?))],
         Endpoint::ClearPayload => vec![Stmt::ClearPayload(Box::new(mutation::clear_payload(
-            body,
-            &collection,
+            body, ctx,
         )?))],
         Endpoint::DeletePayload => vec![Stmt::DeletePayload(Box::new(mutation::delete_payload(
-            body,
-            &collection,
+            body, ctx,
         )?))],
         Endpoint::DeleteVectors => vec![Stmt::DeleteVector(Box::new(mutation::delete_vectors(
-            body,
-            &collection,
+            body, ctx,
         )?))],
-        Endpoint::UpdateVectors => mutation::update_vectors(body, &collection)?
-            .into_iter()
-            .map(|stmt| Stmt::UpdateVector(Box::new(stmt)))
-            .collect(),
+        Endpoint::UpdateVectors => vec![Stmt::UpdateVector(Box::new(mutation::update_vectors(
+            body, ctx,
+        )?))],
         Endpoint::UpdatePayload => vec![Stmt::UpdatePayload(Box::new(mutation::update_payload(
-            body,
-            &collection,
+            body, ctx,
         )?))],
         Endpoint::CreateCollection => vec![Stmt::CreateCollection(Box::new(
-            ddl::create_collection(body, &collection)?,
+            ddl::create_collection(body, ctx)?,
         ))],
         Endpoint::AlterCollection => vec![Stmt::AlterCollection(Box::new(ddl::alter_collection(
-            body,
-            &collection,
+            body, ctx,
         )?))],
-        Endpoint::DropCollection => vec![Stmt::DropCollection(Box::new(
-            qql_core::ast::DropCollectionStmt {
-                collection: collection.clone(),
-            },
-        ))],
-        Endpoint::CreateIndex => vec![Stmt::CreateIndex(Box::new(index::create_index(
-            body,
-            &collection,
-        )?))],
+        Endpoint::DropCollection => {
+            ctx.opts.reject_wait()?;
+            ctx.opts.reject_read()?;
+            vec![Stmt::DropCollection(Box::new(
+                qql_core::ast::DropCollectionStmt {
+                    collection: ctx.collection.to_string(),
+                },
+            ))]
+        }
+        Endpoint::CreateIndex => vec![Stmt::CreateIndex(Box::new(index::create_index(body, ctx)?))],
         Endpoint::DropIndex => {
+            ctx.opts.reject_wait()?;
+            ctx.opts.reject_read()?;
             let field = matched.field.clone().ok_or_else(|| {
                 ConvertError::undecodable("DROP INDEX requires a field path segment")
             })?;
             vec![Stmt::DropIndex(Box::new(qql_core::ast::DropIndexStmt {
-                collection: collection.clone(),
+                collection: ctx.collection.to_string(),
                 field,
             }))]
         }
         Endpoint::CreateShardKey => vec![Stmt::CreateShardKey(Box::new(ddl::create_shard_key(
-            body,
-            &collection,
+            body, ctx,
         )?))],
-        Endpoint::DropShardKey => vec![Stmt::DropShardKey(Box::new(ddl::drop_shard_key(
-            body,
-            &collection,
-        )?))],
-        Endpoint::ShowShardKeys => vec![Stmt::ShowShardKeys(collection.clone())],
-        Endpoint::ShowCollections => vec![Stmt::ShowCollections],
-        Endpoint::ShowCollection => vec![Stmt::ShowCollection(collection.clone())],
-        Endpoint::ShowQuotas => vec![Stmt::ShowQuotas],
-        Endpoint::SetQuota => vec![Stmt::SetQuota(Box::new(ddl::set_quota(body)?))],
+        Endpoint::DropShardKey => {
+            vec![Stmt::DropShardKey(Box::new(ddl::drop_shard_key(
+                body, ctx,
+            )?))]
+        }
+        Endpoint::ShowShardKeys => {
+            ctx.opts.reject_wait()?;
+            ctx.opts.reject_read()?;
+            vec![Stmt::ShowShardKeys(ctx.collection.to_string())]
+        }
+        Endpoint::ShowCollections => {
+            ctx.opts.reject_wait()?;
+            ctx.opts.reject_read()?;
+            vec![Stmt::ShowCollections]
+        }
+        Endpoint::ShowCollection => {
+            ctx.opts.reject_wait()?;
+            ctx.opts.reject_read()?;
+            vec![Stmt::ShowCollection(ctx.collection.to_string())]
+        }
+        Endpoint::ShowQuotas => {
+            ctx.opts.reject_wait()?;
+            ctx.opts.reject_read()?;
+            vec![Stmt::ShowQuotas]
+        }
+        Endpoint::SetQuota => vec![Stmt::SetQuota(Box::new(ddl::set_quota(body, ctx)?))],
     })
 }
 

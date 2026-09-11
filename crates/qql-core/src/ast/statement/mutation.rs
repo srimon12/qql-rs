@@ -231,18 +231,28 @@ pub struct DeleteStmt {
     pub wait: Option<bool>,
 }
 
-/// `UPDATE <collection> SET VECTOR … WHERE id = …` statement.
+/// One point in `UPDATE … SET VECTOR` (unnamed, one named vector, or a name map).
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UpdateVectorPoint {
+    /// Point whose vectors are replaced.
+    pub id: PointId,
+    /// Replacement vectors (unnamed, named map, or a parameter).
+    pub vectors: PointVectors,
+}
+
+/// `UPDATE <collection> SET VECTOR …` statement.
+///
+/// Compact form (`SET VECTOR [name] = … WHERE id = …`) is one point. Batch
+/// form (`SET VECTOR VALUES {id, vector}, …`) is the inverse of REST
+/// `PUT /points/vectors` and gRPC `UpdatePointVectors.points`.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UpdateVectorStmt {
     /// Target collection.
     pub collection: String,
-    /// Point whose vector is replaced.
-    pub point_id: PointId,
-    /// New vector value.
-    pub vector: VectorValue,
-    /// Named vector to update; `None` targets the unnamed vector.
-    pub vector_name: Option<String>,
+    /// Points whose vectors are replaced. Never empty after a successful parse.
+    pub points: Vec<UpdateVectorPoint>,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).

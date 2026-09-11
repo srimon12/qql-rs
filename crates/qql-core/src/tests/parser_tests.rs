@@ -1065,6 +1065,7 @@ fn stmt_serde_round_trips_through_json() {
         "DELETE PAYLOAD title FROM docs WHERE id = 1;",
         "DELETE VECTOR dense FROM docs WHERE id = 1;",
         "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;",
+        "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
         "UPDATE docs SET PAYLOAD = {a: 1} WHERE id = 1;",
         "COUNT FROM docs WHERE active = true WITH (exact = true);",
     ];

@@ -6,7 +6,7 @@ without hand-translating requests.
 ## Zero-code-change capture (`qql record`)
 
 `qql record` proxies a live application to Qdrant, forwards every request
-unchanged, and appends bodied `/collections/` requests as wrapped JSONL plus
+unchanged, and appends collection and quota requests as wrapped JSONL plus
 optionally converted QQL. Requires a `--features record` CLI build.
 
 ```bash
@@ -17,14 +17,14 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
 
 Defaults: listen `127.0.0.1:6334`, target `http://127.0.0.1:6333`, out
 `capture.jsonl`. Query strings (`wait`, `timeout`, `consistency`) are
-forwarded but not captured. Conversion failures append `# ERROR` lines and
-never interrupt forwarding.
+forwarded and captured on the wrapped `"query"` object. Conversion failures
+append `# ERROR` lines and never interrupt forwarding.
 
 ## Convert one request (`qql convert`)
 
-Input is either a wrapped request `{method, path, body}` (collection derived
-from the path) or a bare Qdrant body (`--collection <name>` required to avoid
-`FROM unknown`).
+Input is either a wrapped request `{method, path, query?, body?}` (collection
+derived from the path; `query` recovers `WAIT` / timeout / consistency) or a
+bare Qdrant body (`--collection <name>` required).
 
 ```bash
 qql convert search.json
@@ -43,8 +43,8 @@ echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
   `range`, geo (`GEO_BBOX` / `GEO_RADIUS` / `GEO_POLYGON`), `has_id`,
   `is_empty`, `is_null` are typed predicates.
 - Fields QQL cannot represent fail with a typed `ConvertError`
-  (`UnsupportedEndpoint`, `UndecodableBody`, `InvalidField`, `InvalidJson`) —
-  never a silent clause drop or placeholder text.
+  (`UnsupportedEndpoint`, `UndecodableBody`, `InvalidField`, `InvalidJson`,
+  `MissingCollection`) — never a silent clause drop or placeholder text.
 - The alias helper `POST /collections/aliases` is not a QQL statement and is
   reported as `UnsupportedEndpoint`.
 

@@ -150,6 +150,7 @@ UPSERT INTO docs VALUES
 
 -- Update vector by point ID
 UPDATE docs SET VECTOR dense = [0.1, 0.2, 0.3] WHERE id = 1;
+UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2]}, {id: 2, vector: {dense: [0.3, 0.4]}};
 
 -- Update payload metadata
 UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE category = 'tech';

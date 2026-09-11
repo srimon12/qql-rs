@@ -410,8 +410,10 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
             Ok(())
         }
         Stmt::UpdateVector(uv) => {
-            validate_no_unbound_point_id(&uv.point_id)?;
-            validate_no_unbound_vector_value(&uv.vector)?;
+            for point in &uv.points {
+                validate_no_unbound_point_id(&point.id)?;
+                validate_no_unbound_point_vectors(&point.vectors)?;
+            }
             validate_no_unbound_shard_key(&uv.shard_key)?;
             Ok(())
         }
@@ -661,8 +663,10 @@ pub fn validate_no_unbound_scalar_params(stmt: &Stmt) -> Result<bool, QqlError> 
             Ok(has_vec_params)
         }
         Stmt::UpdateVector(uv) => {
-            validate_no_unbound_point_id(&uv.point_id)?;
-            check_vector_value_template(&uv.vector, &mut has_vec_params);
+            for point in &uv.points {
+                validate_no_unbound_point_id(&point.id)?;
+                check_point_vectors_template(&point.vectors, &mut has_vec_params);
+            }
             Ok(has_vec_params)
         }
         // Shard placeholders (`SHARD :tenant`) are bound later like vector
@@ -1178,8 +1182,10 @@ pub fn collect_statement_params(
             collect_from_shard_key(&dv.shard_key, &mut named, &mut max_pos);
         }
         Stmt::UpdateVector(uv) => {
-            collect_from_point_id(&uv.point_id, &mut named, &mut max_pos);
-            collect_from_vector_val(&uv.vector, &mut named, &mut max_pos);
+            for point in &uv.points {
+                collect_from_point_id(&point.id, &mut named, &mut max_pos);
+                collect_from_point_vectors(&point.vectors, &mut named, &mut max_pos);
+            }
             collect_from_shard_key(&uv.shard_key, &mut named, &mut max_pos);
         }
         Stmt::UpdatePayload(up) => {

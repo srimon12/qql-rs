@@ -11,11 +11,11 @@
 //! This proves the AST decode is the exact inverse of the planner for every
 //! shape QQL itself can emit, against the same contract the runtime uses.
 //!
-//! REST query-string parameters (`wait`, `timeout`, `consistency`) are not
-//! part of the wrapped `{method, path, body}` shape, so only method, path,
-//! and body are compared.
+//! REST query-string parameters (`wait`, `timeout`, `consistency`) ride the
+//! wrapped `"query"` object so the converter can recover `WAIT` and
+//! `PARAMS (timeout / consistency)`.
 
-use qql_convert::json_to_qql_with_collection;
+use qql_convert::convert;
 use qql_core::fmt::format_stmt;
 use qql_core::params_json::bind_str_with_params;
 use qql_core::parser::Parser;
@@ -27,15 +27,22 @@ fn assert_parity(source: &str) {
     let op = plan(&stmt).unwrap_or_else(|e| panic!("plan {source}: {e}"));
     let route = to_rest_route(&op).unwrap_or_else(|e| panic!("route {source}: {e:?}"));
     let body = route.body_json();
-    let wrapped = serde_json::json!({
+    let mut wrapped = serde_json::json!({
         "method": route.method.as_str(),
         "path": route.path,
         "body": body,
-    })
-    .to_string();
+    });
+    if !route.query.is_empty() {
+        let mut query = serde_json::Map::new();
+        for (key, value) in &route.query {
+            query.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+        wrapped["query"] = serde_json::Value::Object(query);
+    }
+    let wrapped = wrapped.to_string();
 
-    let emitted = json_to_qql_with_collection(&wrapped, "unused")
-        .unwrap_or_else(|e| panic!("convert {source} ({wrapped}): {e}"));
+    let emitted =
+        convert(&wrapped, None).unwrap_or_else(|e| panic!("convert {source} ({wrapped}): {e}"));
     assert_eq!(
         emitted.len(),
         1,
@@ -55,6 +62,7 @@ fn assert_parity(source: &str) {
 
     assert_eq!(reroute.method.as_str(), route.method.as_str(), "{source}");
     assert_eq!(reroute.path, route.path, "{source}");
+    assert_eq!(reroute.query, route.query, "{source}");
     assert_eq!(
         reroute.body_json(),
         body,
@@ -78,6 +86,8 @@ const QUERY_CORPUS: &[&str] = &[
     "QUERY MMR TEXT 'q' MODEL 'e5' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING dense LIMIT 5;",
     "QUERY TEXT 'q' MODEL 'e5' FROM docs USING dense WITH PAYLOAD INCLUDE (title, url) WITH VECTOR true LIMIT 5;",
     "QUERY TEXT 'q' MODEL 'e5' FROM docs USING dense PARAMS (hnsw_ef = 64, exact = false, indexed_only = true, acorn = true, max_selectivity = 0.4) LIMIT 5;",
+    "QUERY TEXT 'q' MODEL 'e5' FROM docs USING dense PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
+    "QUERY TEXT 'q' MODEL 'e5' FROM docs USING dense PARAMS (consistency = 2) LIMIT 5;",
     "QUERY TEXT 'q' MODEL 'e5' FROM docs USING sparse PARAMS (idf = 'global') LIMIT 5;",
     "QUERY TEXT 'q' MODEL 'e5' FROM docs USING sparse PARAMS (idf = WHERE tenant = 'acme') LIMIT 5;",
     "QUERY TEXT 'q' MODEL 'e5' FROM docs SHARD 101 LIMIT 5;",
@@ -163,6 +173,8 @@ const MUTATION_CORPUS: &[&str] = &[
     "UPSERT INTO docs VALUES {id: 1, vector: [[0.1, 0.2], [0.3, 0.4]]};",
     "UPSERT INTO docs VALUES {id: 'pt-1', payload: true} SHARD 'acme';",
     "DELETE FROM docs WHERE id = 1;",
+    "DELETE FROM docs WHERE id = 1 WAIT true;",
+    "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT true;",
     "DELETE FROM docs WHERE id IN (1, 2, 'pt-3');",
     "DELETE FROM docs WHERE category = 'archived' SHARD 101;",
     "CLEAR PAYLOAD FROM docs WHERE k = 1;",
@@ -172,6 +184,8 @@ const MUTATION_CORPUS: &[&str] = &[
     "DELETE VECTOR dense, sparse FROM docs WHERE k = 1;",
     "UPDATE docs SET VECTOR = [0.5, 0.6] WHERE id = 1;",
     "UPDATE docs SET VECTOR dense = [0.5] WHERE id = 1;",
+    "UPDATE docs SET VECTOR = {dense: [0.5], sparse: {indices: [1], values: [0.8]}} WHERE id = 1;",
+    "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
     "UPDATE docs SET PAYLOAD = {a: 1, b: 'x'} WHERE id = 1;",
     "UPDATE docs SET PAYLOAD = {a: 1} WHERE k = 1;",
 ];
@@ -196,6 +210,7 @@ const DDL_CORPUS: &[&str] = &[
     "ALTER COLLECTION docs WITH SPARSE sparse (SPARSE (modifier = 'none', full_scan_threshold = 50));",
     "DROP COLLECTION docs;",
     "CREATE INDEX ON COLLECTION docs FOR city TYPE keyword;",
+    "CREATE INDEX ON COLLECTION docs FOR city TYPE keyword WAIT true;",
     "CREATE INDEX ON COLLECTION docs FOR loc TYPE geo;",
     "CREATE INDEX ON COLLECTION docs FOR tenant TYPE keyword WITH (is_tenant = true, prefix = true, memory = 'cached');",
     "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (lowercase = true, ascii_folding = true, phrase_matching = true, min_token_len = 2, max_token_len = 10, tokenizer = 'word', stemmer = 'english', stopwords = ['the', 'a']);",

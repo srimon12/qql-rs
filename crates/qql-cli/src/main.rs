@@ -85,7 +85,7 @@ enum Command {
     Convert {
         /// Path to JSON file (or stdin if omitted)
         file: Option<String>,
-        /// Collection name for bare bodies without path context
+        /// Collection name for bare bodies (required when the JSON has no path)
         #[arg(long)]
         collection: Option<String>,
     },
@@ -133,9 +133,10 @@ enum Command {
     ///
     /// Zero-code-change capture: point the app at `--listen` while Qdrant
     /// keeps serving on `--target`, and every request is forwarded
-    /// byte-identically while bodied `/collections/` requests are appended as
-    /// wrapped `{"method","path","body"}` JSONL for later `qql convert` use.
-    /// Bodies are buffered in RAM (dev tool, not a production proxy).
+    /// byte-identically while collection/quota requests are appended as
+    /// wrapped `{"method","path","query?","body?"}` JSONL for later
+    /// `qql convert` use. Bodies are buffered in RAM (dev tool, not a
+    /// production proxy).
     #[cfg(feature = "record")]
     Record {
         /// Address to listen on (the app points here instead of Qdrant)

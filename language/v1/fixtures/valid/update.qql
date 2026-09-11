@@ -18,6 +18,12 @@ UPDATE docs SET VECTOR dense = [0.1, 0.2, 0.3] WHERE id = 42;
 -- Update vector with sparse vector value
 UPDATE docs SET VECTOR sparse = {indices: [0, 3], values: [0.5, 0.8]} WHERE id = 42;
 
+-- Update several named vectors on one point
+UPDATE docs SET VECTOR = {dense: [0.1, 0.2, 0.3], sparse: {indices: [0, 3], values: [0.5, 0.8]}} WHERE id = 42;
+
+-- Batch vector update (REST PUT /points/vectors, gRPC UpdatePointVectors)
+UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2, 0.3]}, {id: 2, vector: {dense: [0.4, 0.5, 0.6]}};
+
 -- Update with string UUID
 UPDATE docs SET PAYLOAD = {status: 'updated'} WHERE id = 'a1b2c3d4';
 

@@ -165,7 +165,7 @@ async fn proxies_byte_identically_and_captures_search_upsert() {
     );
 
     // Upsert body with a query string and auth header: query + auth must reach
-    // upstream byte-identically; the recorded path drops the query.
+    // upstream byte-identically; the recorded line keeps wait in `"query"`.
     let upsert = serde_json::json!({"points": [{"id": 1, "vector": [0.1, 0.2], "payload": {"title": "hello"}}]});
     let resp = client
         .put(format!("{base}/collections/docs/points?wait=true"))
@@ -180,7 +180,7 @@ async fn proxies_byte_identically_and_captures_search_upsert() {
         br#"{"status":"ok"}"#
     );
 
-    // GET with no body: forwarded, never recorded.
+    // GET with no body: forwarded and recorded as SHOW COLLECTION.
     let resp = client
         .get(format!("{base}/collections/docs"))
         .send()
@@ -209,24 +209,32 @@ async fn proxies_byte_identically_and_captures_search_upsert() {
     assert_eq!(seen[2].method, "GET");
     assert_eq!(seen[2].path_query, "/collections/docs");
 
-    // JSONL holds exactly the two bodied requests as wrapped lines.
+    // JSONL holds the two bodied requests plus the bodyless SHOW.
     let lines = parse_jsonl(&rec.out);
-    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines.len(), 3, "{lines:?}");
     assert_eq!(lines[0]["method"], "POST");
     assert_eq!(lines[0]["path"], "/collections/docs/points/query");
     assert_eq!(lines[0]["body"], search);
     assert_eq!(lines[1]["method"], "PUT");
     assert_eq!(lines[1]["path"], "/collections/docs/points");
+    assert_eq!(lines[1]["query"]["wait"], "true");
     assert_eq!(lines[1]["body"], upsert);
+    assert_eq!(lines[2]["method"], "GET");
+    assert_eq!(lines[2]["path"], "/collections/docs");
 
     // --qql-out converted at record time. `# ERROR` lines are capture
     // annotations, so the rest must parse as one whole script (not
     // line-by-line: emitted statements may span lines).
     let qql = std::fs::read_to_string(&rec.qql_out).expect("read qql-out");
     let stmts = script_statements(&qql);
-    assert_eq!(stmts.len(), 2, "{stmts:?}");
+    assert_eq!(stmts.len(), 3, "{stmts:?}");
     assert_eq!(stmts[0], "QUERY [0.1, 0.2] FROM docs LIMIT 5");
-    assert!(stmts[1].starts_with("UPSERT INTO docs"), "{}", stmts[1]);
+    assert!(
+        stmts[1].starts_with("UPSERT INTO docs") && stmts[1].contains("WAIT true"),
+        "{}",
+        stmts[1]
+    );
+    assert_eq!(stmts[2], "SHOW COLLECTION docs");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

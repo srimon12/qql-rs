@@ -4,12 +4,12 @@
 //! green for the shared module.
 #![allow(dead_code)]
 
-use qql_convert::{ConvertError, json_to_qql_with_collection};
+use qql_convert::{ConvertError, convert as convert_json};
 use qql_core::fmt::format_stmt;
 use qql_core::parser::Parser;
 
 pub(crate) fn convert_with(input: &str, collection: &str) -> Vec<String> {
-    let stmts = json_to_qql_with_collection(input, collection)
+    let stmts = convert_json(input, Some(collection))
         .unwrap_or_else(|e| panic!("conversion failed for {input}: {e}"));
     assert_canonical(&stmts, input);
     stmts
@@ -36,6 +36,15 @@ pub(crate) fn wrapped(method: &str, path: &str, body: serde_json::Value) -> Stri
     serde_json::json!({"method": method, "path": path, "body": body}).to_string()
 }
 
+pub(crate) fn wrapped_query(
+    method: &str,
+    path: &str,
+    query: serde_json::Value,
+    body: serde_json::Value,
+) -> String {
+    serde_json::json!({"method": method, "path": path, "query": query, "body": body}).to_string()
+}
+
 /// Canonical form of an expected QQL statement.
 pub(crate) fn canon(source: &str) -> String {
     let parsed =
@@ -49,5 +58,5 @@ pub(crate) fn expect_one(input: &str, expected: &str) {
 }
 
 pub(crate) fn convert_err(input: &str) -> ConvertError {
-    json_to_qql_with_collection(input, "docs").expect_err("expected a typed error")
+    convert_json(input, Some("docs")).expect_err("expected a typed error")
 }

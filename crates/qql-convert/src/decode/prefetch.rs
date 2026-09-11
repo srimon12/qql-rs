@@ -4,11 +4,12 @@
 use serde_json::Value;
 
 use crate::ConvertError;
-use crate::decode::{filter, interface::query_interface, params::decode_params, vector};
+use crate::decode::query::core_query;
+use crate::decode::vector;
 use crate::json::{self, child, index, invalid};
 use qql_core::ast::{
     PageSpec, Prefetch, PrefetchSource, QueryCollection, QueryExpr, QueryOutput, QueryStmt,
-    SearchParams, VectorTarget,
+    VectorTarget,
 };
 
 /// Decode the optional `prefetch` member (single stage or list).
@@ -32,41 +33,40 @@ pub(crate) fn prefetch_field(obj: &json::Obj, path: &str) -> Result<Vec<Prefetch
 /// Filter, limit, score threshold, and params live on the inline query; nested
 /// stages recurse into its `PREFETCH` tail. This matches
 /// `qql_plan::prefetch::lower_prefetch_with_ctes` exactly for inline sources.
+const PREFETCH_KEYS: &[&str] = &[
+    "query",
+    "prefetch",
+    "filter",
+    "params",
+    "using",
+    "limit",
+    "score_threshold",
+    "lookup_from",
+];
+
 fn prefetch(value: &Value, path: &str) -> Result<Prefetch, ConvertError> {
     let obj = json::object(value, path)?;
-    let limit = json::opt_u64(obj, "limit", path)?;
-    let Some(query) = obj.get("query").filter(|v| !v.is_null()) else {
-        return Err(invalid(
+    json::reject_unknown(obj, path, PREFETCH_KEYS)?;
+    let core = core_query(
+        obj,
+        path,
+        invalid(
             child(path, "query"),
             "filter-only prefetch stages have no QQL representation (PREFETCH requires a QUERY)",
-        ));
-    };
-    let interface = query_interface(query, &child(path, "query"), limit)?;
-    let using = json::opt_string(obj, "using", path)?;
-    let mut expression = attach_using(interface.expression, using.as_deref(), path)?;
-    expression = attach_prefetch(expression, prefetch_field(obj, path)?, path)?;
-
-    let mut params = match obj.get("params").filter(|v| !v.is_null()) {
-        None => None,
-        Some(value) => decode_params(value, &child(path, "params"))?,
-    };
-    if let Some(rrf) = interface.rrf {
-        let params = params.get_or_insert_with(SearchParams::default);
-        params.rrf_k = rrf.k;
-        params.rrf_weights = rrf.weights;
-    }
+        ),
+    )?;
 
     let stmt = QueryStmt {
         ctes: Vec::new(),
         collection: QueryCollection::Inherited,
-        expression,
-        filter: filter::filter_field(obj, "filter", path)?,
-        params,
-        score_threshold: json::opt_f64(obj, "score_threshold", path)?,
+        expression: core.expression,
+        filter: core.filter,
+        params: core.params,
+        score_threshold: core.score_threshold,
         group: None,
         output: QueryOutput::default(),
         page: PageSpec {
-            limit,
+            limit: core.limit,
             offset: None,
             ..PageSpec::default()
         },

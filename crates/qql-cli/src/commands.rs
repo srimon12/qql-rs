@@ -840,7 +840,7 @@ pub fn handle_convert(
         return Err("no input provided".into());
     }
 
-    let statements = convert_input(&input, collection)?;
+    let statements = qql_convert::convert(&input, collection)?;
 
     for stmt in &statements {
         // `format_stmt` renders no terminator; the CLI prints canonical QQL,
@@ -849,32 +849,6 @@ pub fn handle_convert(
     }
 
     Ok(())
-}
-
-/// Convert one input, falling back to JSONL when a single document does not
-/// parse and the input has multiple lines — the shape `qql record --out`
-/// writes.
-fn convert_input(
-    input: &str,
-    collection: Option<&str>,
-) -> Result<Vec<String>, qql_convert::ConvertError> {
-    let convert_single = |text: &str| match collection {
-        Some(name) => qql_convert::json_to_qql_with_collection(text, name),
-        None => qql_convert::json_to_qql(text),
-    };
-
-    match convert_single(input) {
-        Ok(statements) => Ok(statements),
-        Err(single_error) => {
-            if input.lines().filter(|line| !line.trim().is_empty()).count() < 2 {
-                return Err(single_error);
-            }
-            match collection {
-                Some(name) => qql_convert::jsonl_to_qql_with_collection(input, name),
-                None => qql_convert::jsonl_to_qql(input),
-            }
-        }
-    }
 }
 
 /// Whether `source` is already canonical.

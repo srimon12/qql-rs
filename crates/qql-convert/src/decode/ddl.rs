@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::DecodeCtx;
 use crate::decode::vector;
 use crate::decode::{config, quantization};
 use crate::json::{self, child, invalid};
@@ -18,36 +19,46 @@ pub(crate) const DEFAULT_DENSE_VECTOR: &str = "dense";
 /// Decode a `PUT /collections/{c}` (`CreateCollection`) body.
 pub(crate) fn create_collection(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<CreateCollectionStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
-    for key in obj.keys() {
-        match key.as_str() {
-            "vectors"
-            | "sparse_vectors"
-            | "shard_number"
-            | "sharding_method"
-            | "replication_factor"
-            | "write_consistency_factor"
-            | "on_disk_payload"
-            | "payload"
-            | "hnsw_config"
-            | "optimizers_config"
-            | "quantization_config" => {}
-            "wal_config"
-            | "strict_mode_config"
-            | "metadata"
-            | "read_fan_out_factor"
-            | "read_fan_out_delay_ms" => {
-                return Err(invalid(
-                    child(path, key),
-                    format!("{key} has no QQL representation"),
-                ));
-            }
-            // Unknown top-level keys are ignored, mirroring the OpenAPI
-            // additionalProperties tolerance.
-            _ => {}
+    json::reject_unknown(
+        obj,
+        path,
+        &[
+            "vectors",
+            "sparse_vectors",
+            "shard_number",
+            "sharding_method",
+            "replication_factor",
+            "write_consistency_factor",
+            "on_disk_payload",
+            "payload",
+            "hnsw_config",
+            "optimizers_config",
+            "quantization_config",
+            "wal_config",
+            "strict_mode_config",
+            "metadata",
+            "read_fan_out_factor",
+            "read_fan_out_delay_ms",
+        ],
+    )?;
+    for key in [
+        "wal_config",
+        "strict_mode_config",
+        "metadata",
+        "read_fan_out_factor",
+        "read_fan_out_delay_ms",
+    ] {
+        if obj.contains_key(key) {
+            return Err(invalid(
+                child(path, key),
+                format!("{key} has no QQL representation"),
+            ));
         }
     }
 
@@ -87,7 +98,7 @@ pub(crate) fn create_collection(
     let config = config_used(&config).then(|| Box::new(config));
 
     Ok(CreateCollectionStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         mode: CollectionMode::Dense { model: None },
         vectors,
         sparse_vectors,
@@ -148,25 +159,32 @@ fn config_used(config: &CollectionConfig) -> bool {
 /// Decode a `PATCH /collections/{c}` (`UpdateCollection`) body.
 pub(crate) fn alter_collection(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<AlterCollectionStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
-    for key in obj.keys() {
-        match key.as_str() {
-            "vectors"
-            | "optimizers_config"
-            | "params"
-            | "hnsw_config"
-            | "quantization_config"
-            | "sparse_vectors" => {}
-            "strict_mode_config" | "metadata" => {
-                return Err(invalid(
-                    child(path, key),
-                    format!("{key} has no QQL representation"),
-                ));
-            }
-            _ => {}
+    json::reject_unknown(
+        obj,
+        path,
+        &[
+            "vectors",
+            "optimizers_config",
+            "params",
+            "hnsw_config",
+            "quantization_config",
+            "sparse_vectors",
+            "strict_mode_config",
+            "metadata",
+        ],
+    )?;
+    for key in ["strict_mode_config", "metadata"] {
+        if obj.contains_key(key) {
+            return Err(invalid(
+                child(path, key),
+                format!("{key} has no QQL representation"),
+            ));
         }
     }
 
@@ -207,7 +225,7 @@ pub(crate) fn alter_collection(
 
     let config = (!config_all_empty(&config)).then(|| Box::new(config));
     Ok(AlterCollectionStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         config,
     })
 }
@@ -301,10 +319,23 @@ fn decode_sparse_diffs(
 /// Decode a `PUT /collections/{c}/shards` (`CreateShardingKey`) body.
 pub(crate) fn create_shard_key(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<CreateShardKeyStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(
+        obj,
+        path,
+        &[
+            "shard_key",
+            "shards_number",
+            "replication_factor",
+            "placement",
+            "initial_state",
+        ],
+    )?;
     for key in ["placement", "initial_state"] {
         if obj.contains_key(key) {
             return Err(invalid(
@@ -318,7 +349,7 @@ pub(crate) fn create_shard_key(
         &child(path, "shard_key"),
     )?;
     Ok(CreateShardKeyStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         shard_key,
         shards_number: json::opt_u64(obj, "shards_number", path)?,
         replication_factor: json::opt_u64(obj, "replication_factor", path)?,
@@ -328,12 +359,15 @@ pub(crate) fn create_shard_key(
 /// Decode a `POST /collections/{c}/shards/delete` (`DropShardingKey`) body.
 pub(crate) fn drop_shard_key(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<DropShardKeyStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["shard_key"])?;
     Ok(DropShardKeyStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         shard_key: vector::shard_key(
             json::required(obj, "shard_key", path)?,
             &child(path, "shard_key"),
@@ -342,7 +376,8 @@ pub(crate) fn drop_shard_key(
 }
 
 /// Decode a `PUT /quotas` (`QuotaConfig`) body into `SET QUOTA`.
-pub(crate) fn set_quota(body: &Value) -> Result<SetQuotaStmt, ConvertError> {
+pub(crate) fn set_quota(body: &Value, ctx: DecodeCtx<'_>) -> Result<SetQuotaStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
     let mut config = Vec::new();
@@ -387,5 +422,8 @@ pub(crate) fn set_quota(body: &Value) -> Result<SetQuotaStmt, ConvertError> {
             }
         }
     }
-    Ok(SetQuotaStmt { config, wait: None })
+    Ok(SetQuotaStmt {
+        config,
+        wait: ctx.opts.wait,
+    })
 }

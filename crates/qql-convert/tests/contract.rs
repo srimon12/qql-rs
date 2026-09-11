@@ -11,7 +11,7 @@
 
 use serde_json::Value;
 
-use qql_convert::{ConvertError, json_to_qql_with_collection};
+use qql_convert::{ConvertError, convert};
 use qql_core::fmt::format_stmt;
 use qql_core::parser::Parser;
 
@@ -274,7 +274,7 @@ fn representative_bodies_decode_for_every_matrix_row() {
 
     for (method, path, body) in cases {
         let wrapped = serde_json::json!({"method": method, "path": path, "body": body}).to_string();
-        let statements = json_to_qql_with_collection(&wrapped, "caller")
+        let statements = convert(&wrapped, Some("caller"))
             .unwrap_or_else(|e| panic!("{method} {path} did not decode: {e}"));
         assert!(
             !statements.is_empty(),
@@ -298,7 +298,7 @@ fn alias_helper_is_not_a_qql_statement() {
         serde_json::json!({"method": "POST", "path": "/collections/aliases", "body": {"actions": []}})
             .to_string();
     assert!(matches!(
-        json_to_qql_with_collection(&wrapped, "docs").unwrap_err(),
+        convert(&wrapped, Some("docs")).unwrap_err(),
         ConvertError::UnsupportedEndpoint(_)
     ));
 }

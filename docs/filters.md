@@ -6,7 +6,8 @@
 
 Metadata predicates in `WHERE` for `QUERY`, `COUNT`, `SCROLL`, `FACET`, `DELETE`,
 `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`, and `UPDATE … SET PAYLOAD`.
-(`UPDATE … SET VECTOR` is point-ID scoped only.)
+(`UPDATE … SET VECTOR` is point-ID scoped only — compact `WHERE id =` or
+batch `VALUES {id, vector}` rows, never a payload filter.)
 
 **Proposition:** filters are the **isolation** surface. They lower to the same
 logical structure on REST (`filter`) and gRPC (`qdrant.Filter`).  

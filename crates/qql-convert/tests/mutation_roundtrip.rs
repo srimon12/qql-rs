@@ -3,7 +3,7 @@
 mod common;
 
 use common::{convert, expect_one, wrapped};
-use qql_convert::json_to_qql;
+use qql_convert::convert as convert_json;
 
 // ── Mutations ───────────────────────────────────────────────────
 
@@ -46,7 +46,15 @@ fn delete_and_payload_mutations() {
         ["DELETE FROM docs WHERE id IN (1, 2)"]
     );
     assert_eq!(
-        convert(r#"{"filter": {"must": [{"key": "age", "range": {"gt": 18}}]}}"#),
+        convert_json(
+            &wrapped(
+                "POST",
+                "/collections/docs/points/delete",
+                serde_json::json!({"filter": {"must": [{"key": "age", "range": {"gt": 18}}]}}),
+            ),
+            None,
+        )
+        .expect("delete by filter"),
         ["DELETE FROM docs WHERE age > 18"]
     );
     assert_eq!(
@@ -54,7 +62,15 @@ fn delete_and_payload_mutations() {
         ["DELETE FROM docs WHERE id IN (1)"]
     );
     assert_eq!(
-        convert(r#"{"filter": {"must": [{"key": "k", "match": {"value": 1}}]}}"#),
+        convert_json(
+            &wrapped(
+                "POST",
+                "/collections/docs/points/delete",
+                serde_json::json!({"filter": {"must": [{"key": "k", "match": {"value": 1}}]}}),
+            ),
+            None,
+        )
+        .expect("delete by key"),
         ["DELETE FROM docs WHERE k = 1"]
     );
     assert_eq!(
@@ -79,7 +95,7 @@ fn delete_and_payload_mutations() {
     );
     let update_vector = |body: serde_json::Value| {
         let input = wrapped("PUT", "/collections/docs/points/vectors", body);
-        json_to_qql(&input).expect("wrapped update vectors")
+        convert_json(&input, None).expect("wrapped update vectors")
     };
     assert_eq!(
         update_vector(serde_json::json!({"points": [{"id": 1, "vector": [0.5, 0.6]}]})),
@@ -88,6 +104,25 @@ fn delete_and_payload_mutations() {
     assert_eq!(
         update_vector(serde_json::json!({"points": [{"id": 1, "vector": {"dense": [0.5]}}]})),
         ["UPDATE docs SET VECTOR dense = [0.5] WHERE id = 1"]
+    );
+    assert_eq!(
+        update_vector(serde_json::json!({
+            "points": [{"id": 1, "vector": {"dense": [0.5], "sparse": {"indices": [1], "values": [0.8]}}}]
+        })),
+        [
+            "UPDATE docs SET VECTOR = {dense: [0.5], sparse: {indices: [1], values: [0.8]}} WHERE id = 1"
+        ]
+    );
+    assert_eq!(
+        update_vector(serde_json::json!({
+            "points": [
+                {"id": 1, "vector": [0.1]},
+                {"id": 2, "vector": {"dense": [0.2]}}
+            ]
+        })),
+        [
+            "UPDATE docs SET VECTOR VALUES\n  {id: 1, vector: [0.1]},\n  {id: 2, vector: {dense: [0.2]}}"
+        ]
     );
 }
 
@@ -132,7 +167,7 @@ fn create_collection_shapes() {
 fn alter_collection_shapes() {
     let alter = |body: serde_json::Value| {
         let input = wrapped("PATCH", "/collections/docs", body);
-        json_to_qql(&input).expect("wrapped alter")
+        convert_json(&input, None).expect("wrapped alter")
     };
     assert_eq!(
         alter(serde_json::json!({"optimizers_config": {"indexing_threshold": 500}})),
@@ -185,7 +220,7 @@ fn index_and_shard_key_shapes() {
         serde_json::json!({"shard_key": 101}),
     );
     assert_eq!(
-        json_to_qql(&drop_shard).expect("wrapped drop shard"),
+        convert_json(&drop_shard, None).expect("wrapped drop shard"),
         ["DROP SHARD KEY 101 ON COLLECTION docs"]
     );
     assert_eq!(

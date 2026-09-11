@@ -76,59 +76,169 @@
     {
       "UpdateVector": {
         "collection": "docs",
-        "point_id": {
-          "Number": 42
-        },
-        "shard_key": null,
-        "vector": {
-          "Dense": [
-            0.1,
-            0.2,
-            0.3
-          ]
-        },
-        "vector_name": null,
-        "wait": null
-      }
-    },
-    {
-      "UpdateVector": {
-        "collection": "docs",
-        "point_id": {
-          "Number": 42
-        },
-        "shard_key": null,
-        "vector": {
-          "Dense": [
-            0.1,
-            0.2,
-            0.3
-          ]
-        },
-        "vector_name": "dense",
-        "wait": null
-      }
-    },
-    {
-      "UpdateVector": {
-        "collection": "docs",
-        "point_id": {
-          "Number": 42
-        },
-        "shard_key": null,
-        "vector": {
-          "Sparse": {
-            "indices": [
-              0,
-              3
-            ],
-            "values": [
-              0.5,
-              0.8
-            ]
+        "points": [
+          {
+            "id": {
+              "Number": 42
+            },
+            "vectors": {
+              "Unnamed": {
+                "Dense": [
+                  0.1,
+                  0.2,
+                  0.3
+                ]
+              }
+            }
           }
-        },
-        "vector_name": "sparse",
+        ],
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "points": [
+          {
+            "id": {
+              "Number": 42
+            },
+            "vectors": {
+              "Named": [
+                [
+                  "dense",
+                  {
+                    "Dense": [
+                      0.1,
+                      0.2,
+                      0.3
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "points": [
+          {
+            "id": {
+              "Number": 42
+            },
+            "vectors": {
+              "Named": [
+                [
+                  "sparse",
+                  {
+                    "Sparse": {
+                      "indices": [
+                        0,
+                        3
+                      ],
+                      "values": [
+                        0.5,
+                        0.8
+                      ]
+                    }
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "points": [
+          {
+            "id": {
+              "Number": 42
+            },
+            "vectors": {
+              "Named": [
+                [
+                  "dense",
+                  {
+                    "Dense": [
+                      0.1,
+                      0.2,
+                      0.3
+                    ]
+                  }
+                ],
+                [
+                  "sparse",
+                  {
+                    "Sparse": {
+                      "indices": [
+                        0,
+                        3
+                      ],
+                      "values": [
+                        0.5,
+                        0.8
+                      ]
+                    }
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "vectors": {
+              "Unnamed": {
+                "Dense": [
+                  0.1,
+                  0.2,
+                  0.3
+                ]
+              }
+            }
+          },
+          {
+            "id": {
+              "Number": 2
+            },
+            "vectors": {
+              "Named": [
+                [
+                  "dense",
+                  {
+                    "Dense": [
+                      0.4,
+                      0.5,
+                      0.6
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "shard_key": null,
         "wait": null
       }
     },
@@ -175,18 +285,23 @@
     {
       "UpdateVector": {
         "collection": "docs",
-        "point_id": {
-          "Number": 7
-        },
+        "points": [
+          {
+            "id": {
+              "Number": 7
+            },
+            "vectors": {
+              "Unnamed": {
+                "Dense": [
+                  0.4,
+                  0.5,
+                  0.6
+                ]
+              }
+            }
+          }
+        ],
         "shard_key": null,
-        "vector": {
-          "Dense": [
-            0.4,
-            0.5,
-            0.6
-          ]
-        },
-        "vector_name": null,
         "wait": false
       }
     }

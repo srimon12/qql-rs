@@ -83,8 +83,8 @@ impl Endpoint {
 pub(crate) struct EndpointMatch {
     /// Matrix operation.
     pub(crate) op: Endpoint,
-    /// Collection from `/collections/{collection}/…`, sanitized fallback
-    /// `"unknown"` when the segment is empty.
+    /// Collection from `/collections/{collection}/…`. `None` for
+    /// collection-independent routes (`SHOW COLLECTIONS`, quotas).
     pub(crate) collection: Option<String>,
     /// Trailing path segment for `DELETE /collections/{c}/index/{field}`.
     pub(crate) field: Option<String>,
@@ -102,11 +102,11 @@ pub(crate) fn parse(method: &str, path: &str) -> Result<EndpointMatch, ConvertEr
     let parts: Vec<&str> = trimmed.split('/').collect();
     let unsupported = || ConvertError::UnsupportedEndpoint(format!("{method} {trimmed}"));
 
-    let collection_of = |parts: &[&str]| -> Option<String> {
-        parts
-            .get(1)
-            .map(|c| if c.is_empty() { "unknown" } else { *c })
-            .map(str::to_string)
+    let collection_of = |parts: &[&str]| -> Result<Option<String>, ConvertError> {
+        match parts.get(1) {
+            None | Some(&"") => Err(unsupported()),
+            Some(name) => Ok(Some((*name).to_string())),
+        }
     };
 
     // Bodyless collection-independent listings.
@@ -138,7 +138,7 @@ pub(crate) fn parse(method: &str, path: &str) -> Result<EndpointMatch, ConvertEr
     if parts.first() != Some(&"collections") || parts.len() < 2 {
         return Err(unsupported());
     }
-    let collection = collection_of(&parts);
+    let collection = collection_of(&parts)?;
     let rest = &parts[2..];
     let op = match (method.to_ascii_uppercase().as_str(), rest) {
         ("POST", ["points", "query"]) => Endpoint::Query,

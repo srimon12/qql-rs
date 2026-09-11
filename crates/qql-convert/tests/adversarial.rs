@@ -10,7 +10,7 @@
 mod common;
 
 use common::{canon, convert, convert_err, expect_one, wrapped};
-use qql_convert::{ConvertError, json_to_qql};
+use qql_convert::{ConvertError, convert as convert_json};
 use qql_core::parser::Parser;
 use qql_plan::{plan, to_rest_route};
 
@@ -59,7 +59,7 @@ fn empty_selectors_and_params_do_not_emit_empty_clauses() {
     );
     expect_one(
         r#"{"query": {"nearest": [0.1]}, "with_payload": {"exclude": []}}"#,
-        "QUERY [0.1] FROM docs WITH PAYLOAD true",
+        "QUERY [0.1] FROM docs",
     );
     expect_one(
         r#"{"query": {"nearest": [0.1]}, "with_vector": []}"#,
@@ -175,16 +175,16 @@ fn scroll_offset_inverts_the_exclusive_after_cursor() {
             serde_json::json!({"limit": 10, "offset": offset}),
         )
     };
-    let zero = json_to_qql(&scroll(serde_json::json!(0))).expect("offset 0");
+    let zero = convert_json(&scroll(serde_json::json!(0)), None).expect("offset 0");
     assert_eq!(zero, ["SCROLL FROM docs LIMIT 10"]);
     assert!(replanned_body(&zero[0]).get("offset").is_none());
 
-    let seven = json_to_qql(&scroll(serde_json::json!(7))).expect("offset 7");
+    let seven = convert_json(&scroll(serde_json::json!(7)), None).expect("offset 7");
     assert_eq!(seven, ["SCROLL FROM docs AFTER 6 LIMIT 10"]);
     assert_eq!(replanned_body(&seven[0])["offset"], 7);
 
     let uuid = "550e8400-e29b-41d4-a716-446655440000";
-    let uuid_scroll = json_to_qql(&scroll(serde_json::json!(uuid))).expect("offset uuid");
+    let uuid_scroll = convert_json(&scroll(serde_json::json!(uuid)), None).expect("offset uuid");
     let uuid_after = "550e8400-e29b-41d4-a716-44665543ffff";
     assert_eq!(
         uuid_scroll,
@@ -210,7 +210,7 @@ fn shard_key_types_survive_the_round_trip() {
             "/collections/docs/points/delete",
             serde_json::json!({"points": [1], "shard_key": input}),
         );
-        let statements = json_to_qql(&wrapped).expect("shard key");
+        let statements = convert_json(&wrapped, None).expect("shard key");
         assert_eq!(statements, [expected]);
         assert_eq!(replanned_body(&statements[0])["shard_key"], input);
     }
@@ -273,14 +273,14 @@ fn wrong_shapes_are_typed_errors_never_junk() {
     // Wrapped requests with a missing/undecodable body.
     let bodyless = serde_json::json!({"method": "PUT", "path": "/collections/docs"}).to_string();
     assert!(matches!(
-        json_to_qql(&bodyless).unwrap_err(),
+        convert_json(&bodyless, None).unwrap_err(),
         ConvertError::UndecodableBody { .. }
     ));
     let null_body =
         serde_json::json!({"method": "POST", "path": "/collections/docs/points/delete", "body": null})
             .to_string();
     assert!(matches!(
-        json_to_qql(&null_body).unwrap_err(),
+        convert_json(&null_body, None).unwrap_err(),
         ConvertError::InvalidField { .. }
     ));
 }

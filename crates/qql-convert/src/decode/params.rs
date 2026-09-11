@@ -9,12 +9,22 @@ use qql_core::ast::{
     IdfParams, PayloadSelector, QuantizationSearchParams, SearchParams, VectorSelector,
 };
 
+const PARAMS_KEYS: &[&str] = &[
+    "hnsw_ef",
+    "exact",
+    "indexed_only",
+    "acorn",
+    "quantization",
+    "idf",
+];
+
 /// Decode a `SearchParams` body.
 pub(crate) fn decode_params(
     value: &Value,
     path: &str,
 ) -> Result<Option<SearchParams>, ConvertError> {
     let obj = json::object(value, path)?;
+    json::reject_unknown(obj, path, PARAMS_KEYS)?;
     let mut params = SearchParams {
         hnsw_ef: json::opt_u64(obj, "hnsw_ef", path)?,
         exact: json::opt_bool(obj, "exact", path)?,
@@ -75,7 +85,8 @@ pub(crate) fn decode_with_payload(
     };
     let w_path = child(path, "with_payload");
     match value {
-        Value::Bool(true) => Ok(Some(PayloadSelector::All)),
+        // REST `true` is QQL's default (payloads included); omit the clause.
+        Value::Bool(true) => Ok(None),
         Value::Bool(false) => Ok(Some(PayloadSelector::None)),
         Value::Array(items) => {
             let names = payload_names(items, &w_path)?;
@@ -126,9 +137,8 @@ pub(crate) fn decode_with_payload(
                 (false, true) => {
                     let fields = names("exclude")?;
                     if fields.is_empty() {
-                        // Excluding nothing keeps every field; `WITH PAYLOAD true`
-                        // is the exact QQL spelling.
-                        return Ok(Some(PayloadSelector::All));
+                        // Excluding nothing keeps every field — the QQL default.
+                        return Ok(None);
                     }
                     Ok(Some(PayloadSelector::Exclude(fields)))
                 }

@@ -3,21 +3,34 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::DecodeCtx;
 use crate::decode::payload::{decode_payload, payload_at};
-use crate::decode::query::decode_shard_key_field;
 use crate::decode::{filter, vector};
 use crate::json::{self, child, index, invalid};
 use qql_core::ast::{
     ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointEntry, PointSelector,
-    PointVectors, ShardKey, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
+    PointVectors, ShardKey, UpdatePayloadStmt, UpdateVectorPoint, UpdateVectorStmt, UpsertPoint,
+    UpsertStmt,
 };
 
 /// Decode a `PUT /points` (`PointInsertOperations`) body into `UPSERT`.
-pub(crate) fn upsert(body: &Value, collection: &str) -> Result<UpsertStmt, ConvertError> {
+pub(crate) fn upsert(body: &Value, ctx: DecodeCtx<'_>) -> Result<UpsertStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(
+        obj,
+        path,
+        &[
+            "points",
+            "batch",
+            "shard_key",
+            "update_filter",
+            "update_mode",
+        ],
+    )?;
     reject_update_guards(obj, path)?;
-    let shard_key = decode_shard_key_field(obj, path)?;
+    let shard_key = vector::shard_key_field(obj, path)?;
     let points = if let Some(batch) = obj.get("batch") {
         decode_batch(batch, &child(path, "batch"))?
     } else {
@@ -36,12 +49,12 @@ pub(crate) fn upsert(body: &Value, collection: &str) -> Result<UpsertStmt, Conve
         ));
     }
     Ok(UpsertStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         points,
         embedding: None,
         embed: Vec::new(),
         shard_key,
-        wait: None,
+        wait: ctx.opts.wait,
     })
 }
 
@@ -210,39 +223,49 @@ fn selector(obj: &json::Obj, path: &str) -> Result<PointSelector, ConvertError> 
 }
 
 /// Decode a `POST /points/delete` body into `DELETE`.
-pub(crate) fn delete(body: &Value, collection: &str) -> Result<DeleteStmt, ConvertError> {
+pub(crate) fn delete(body: &Value, ctx: DecodeCtx<'_>) -> Result<DeleteStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["points", "filter", "shard_key"])?;
     Ok(DeleteStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         selector: selector(obj, path)?,
-        shard_key: decode_shard_key_field(obj, path)?,
-        wait: None,
+        shard_key: vector::shard_key_field(obj, path)?,
+        wait: ctx.opts.wait,
     })
 }
 
 /// Decode a `POST /points/payload/clear` body into `CLEAR PAYLOAD`.
 pub(crate) fn clear_payload(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<ClearPayloadStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["points", "filter", "shard_key"])?;
     Ok(ClearPayloadStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         selector: selector(obj, path)?,
-        shard_key: decode_shard_key_field(obj, path)?,
-        wait: None,
+        shard_key: vector::shard_key_field(obj, path)?,
+        wait: ctx.opts.wait,
     })
 }
 
 /// Decode a `POST /points/payload` (`SetPayload`) body into `UPDATE … SET PAYLOAD`.
 pub(crate) fn update_payload(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<UpdatePayloadStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(
+        obj,
+        path,
+        &["payload", "points", "filter", "shard_key", "key"],
+    )?;
     if obj.contains_key("key") {
         return Err(invalid(
             child(path, "key"),
@@ -254,21 +277,23 @@ pub(crate) fn update_payload(
         &child(path, "payload"),
     )?;
     Ok(UpdatePayloadStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         selector: selector(obj, path)?,
         payload,
-        shard_key: decode_shard_key_field(obj, path)?,
-        wait: None,
+        shard_key: vector::shard_key_field(obj, path)?,
+        wait: ctx.opts.wait,
     })
 }
 
 /// Decode a `POST /points/payload/delete` body into `DELETE PAYLOAD`.
 pub(crate) fn delete_payload(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<DeletePayloadStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["keys", "points", "filter", "shard_key"])?;
     let keys_path = child(path, "keys");
     let keys = json::required(obj, "keys", path)
         .and_then(|v| json::array(v, &keys_path))?
@@ -283,21 +308,23 @@ pub(crate) fn delete_payload(
         ));
     }
     Ok(DeletePayloadStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         keys,
         selector: selector(obj, path)?,
-        shard_key: decode_shard_key_field(obj, path)?,
-        wait: None,
+        shard_key: vector::shard_key_field(obj, path)?,
+        wait: ctx.opts.wait,
     })
 }
 
 /// Decode a `POST /points/vectors/delete` body into `DELETE VECTOR`.
 pub(crate) fn delete_vectors(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<DeleteVectorStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["vector", "points", "filter", "shard_key"])?;
     let names_path = child(path, "vector");
     let vector_names = json::required(obj, "vector", path)
         .and_then(|v| json::array(v, &names_path))?
@@ -312,74 +339,56 @@ pub(crate) fn delete_vectors(
         ));
     }
     Ok(DeleteVectorStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         selector: selector(obj, path)?,
         vector_names,
-        shard_key: decode_shard_key_field(obj, path)?,
-        wait: None,
+        shard_key: vector::shard_key_field(obj, path)?,
+        wait: ctx.opts.wait,
     })
 }
 
 /// Decode a `PUT /points/vectors` (`UpdateVectors`) body into one
-/// `UPDATE … SET VECTOR` statement per point/vector pair.
+/// `UPDATE … SET VECTOR` statement. Named maps and multiple points stay on
+/// the statement; the formatter picks compact `WHERE id =` vs `VALUES`.
 pub(crate) fn update_vectors(
     body: &Value,
-    collection: &str,
-) -> Result<Vec<UpdateVectorStmt>, ConvertError> {
+    ctx: DecodeCtx<'_>,
+) -> Result<UpdateVectorStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["points", "shard_key", "update_filter"])?;
     if obj.contains_key("update_filter") {
         return Err(invalid(
             child(path, "update_filter"),
             "update_filter has no QQL representation",
         ));
     }
-    let shard_key: Option<ShardKey> = decode_shard_key_field(obj, path)?;
+    let shard_key: Option<ShardKey> = vector::shard_key_field(obj, path)?;
     let points_path = child(path, "points");
     let points = json::required(obj, "points", path).and_then(|v| json::array(v, &points_path))?;
     if points.is_empty() {
         return Err(invalid(points_path, "points must not be empty"));
     }
-    let mut statements = Vec::new();
+    let mut decoded = Vec::with_capacity(points.len());
     for (i, point) in points.iter().enumerate() {
         let point_path = index(&points_path, i);
         let point = json::object(point, &point_path)?;
-        let id = vector::point_id(
-            json::required(point, "id", &point_path)?,
-            &child(&point_path, "id"),
-        )?;
-        let vectors = vector::point_vectors(
-            json::required(point, "vector", &point_path)?,
-            &child(&point_path, "vector"),
-        )?;
-        match vectors {
-            PointVectors::Unnamed(value) => statements.push(UpdateVectorStmt {
-                collection: collection.to_string(),
-                point_id: id,
-                vector: value,
-                vector_name: None,
-                shard_key: shard_key.clone(),
-                wait: None,
-            }),
-            PointVectors::Named(entries) => {
-                for (name, value) in entries {
-                    statements.push(UpdateVectorStmt {
-                        collection: collection.to_string(),
-                        point_id: id.clone(),
-                        vector: value,
-                        vector_name: Some(name),
-                        shard_key: shard_key.clone(),
-                        wait: None,
-                    });
-                }
-            }
-            PointVectors::Param(..) | PointVectors::PositionalParam(..) => {
-                return Err(invalid(
-                    child(&point_path, "vector"),
-                    "parameter placeholders cannot be decoded from JSON",
-                ));
-            }
-        }
+        decoded.push(UpdateVectorPoint {
+            id: vector::point_id(
+                json::required(point, "id", &point_path)?,
+                &child(&point_path, "id"),
+            )?,
+            vectors: vector::point_vectors(
+                json::required(point, "vector", &point_path)?,
+                &child(&point_path, "vector"),
+            )?,
+        });
     }
-    Ok(statements)
+    Ok(UpdateVectorStmt {
+        collection: ctx.collection.to_string(),
+        points: decoded,
+        shard_key,
+        wait: ctx.opts.wait,
+    })
 }

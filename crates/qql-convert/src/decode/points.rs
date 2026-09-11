@@ -3,8 +3,8 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::DecodeCtx;
 use crate::decode::params::{decode_with_payload, decode_with_vector};
-use crate::decode::query::decode_shard_key_field;
 use crate::decode::{filter, vector};
 use crate::json::{self, child, index, invalid};
 use qql_core::ast::{
@@ -13,9 +13,16 @@ use qql_core::ast::{
 };
 
 /// Decode a `POST /points` (`PointRequest`) body into `QUERY POINTS`.
-pub(crate) fn point_request(body: &Value, collection: &str) -> Result<QueryStmt, ConvertError> {
+pub(crate) fn point_request(body: &Value, ctx: DecodeCtx<'_>) -> Result<QueryStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(
+        obj,
+        path,
+        &["ids", "with_payload", "with_vector", "shard_key"],
+    )?;
     let ids_path = child(path, "ids");
     let ids = json::required(obj, "ids", path)
         .and_then(|v| json::array(v, &ids_path))?
@@ -28,7 +35,7 @@ pub(crate) fn point_request(body: &Value, collection: &str) -> Result<QueryStmt,
     }
     Ok(QueryStmt {
         ctes: Vec::new(),
-        collection: QueryCollection::Explicit(collection.to_string()),
+        collection: QueryCollection::Explicit(ctx.collection.to_string()),
         expression: QueryExpr::Points { ids },
         filter: None,
         params: None,
@@ -39,14 +46,29 @@ pub(crate) fn point_request(body: &Value, collection: &str) -> Result<QueryStmt,
             vectors: decode_with_vector(obj, path)?,
         },
         page: PageSpec::default(),
-        shard_key: decode_shard_key_field(obj, path)?,
+        shard_key: vector::shard_key_field(obj, path)?,
     })
 }
 
 /// Decode a `POST /points/scroll` (`ScrollRequest`) body into `SCROLL`.
-pub(crate) fn scroll(body: &Value, collection: &str) -> Result<ScrollStmt, ConvertError> {
+pub(crate) fn scroll(body: &Value, ctx: DecodeCtx<'_>) -> Result<ScrollStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(
+        obj,
+        path,
+        &[
+            "offset",
+            "limit",
+            "filter",
+            "with_payload",
+            "with_vector",
+            "order_by",
+            "shard_key",
+        ],
+    )?;
     if obj.contains_key("order_by") {
         return Err(invalid(
             child(path, "order_by"),
@@ -67,11 +89,11 @@ pub(crate) fn scroll(body: &Value, collection: &str) -> Result<ScrollStmt, Conve
         Some(offset) => offset_to_after(&vector::point_id(offset, &child(path, "offset"))?),
     };
     Ok(ScrollStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         limit,
         filter: filter::filter_field(obj, "filter", path)?,
         after,
-        shard_key: decode_shard_key_field(obj, path)?,
+        shard_key: vector::shard_key_field(obj, path)?,
         with_vector: decode_with_vector(obj, path)?,
         limit_param: None,
         limit_span: None,
@@ -114,30 +136,34 @@ fn decrement_uuid(value: &str) -> String {
 }
 
 /// Decode a `POST /points/count` (`CountRequest`) body into `COUNT`.
-pub(crate) fn count(body: &Value, collection: &str) -> Result<CountStmt, ConvertError> {
+pub(crate) fn count(body: &Value, ctx: DecodeCtx<'_>) -> Result<CountStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["filter", "exact", "shard_key"])?;
     Ok(CountStmt {
-        collection: QueryCollection::Explicit(collection.to_string()),
+        collection: QueryCollection::Explicit(ctx.collection.to_string()),
         filter: filter::filter_field(obj, "filter", path)?,
-        shard_key: decode_shard_key_field(obj, path)?,
+        shard_key: vector::shard_key_field(obj, path)?,
         exact: json::opt_bool(obj, "exact", path)?,
     })
 }
 
 /// Decode a `POST /facet` (`FacetRequest`) body into `FACET`.
-pub(crate) fn facet(body: &Value, collection: &str) -> Result<FacetStmt, ConvertError> {
+pub(crate) fn facet(body: &Value, ctx: DecodeCtx<'_>) -> Result<FacetStmt, ConvertError> {
+    ctx.opts.reject_wait()?;
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
-    let key = json::required(obj, "key", path)
-        .and_then(|v| Ok(json::string_at(v, &child(path, "key"))?.to_string()))?;
+    json::reject_unknown(obj, path, &["key", "filter", "limit", "exact", "shard_key"])?;
     Ok(FacetStmt {
-        key,
-        collection: QueryCollection::Explicit(collection.to_string()),
+        key: json::required_str(obj, "key", path)?,
+        collection: QueryCollection::Explicit(ctx.collection.to_string()),
         filter: filter::filter_field(obj, "filter", path)?,
         limit: json::opt_u64(obj, "limit", path)?,
         exact: json::opt_bool(obj, "exact", path)?,
-        shard_key: decode_shard_key_field(obj, path)?,
+        shard_key: vector::shard_key_field(obj, path)?,
         limit_param: None,
         limit_span: None,
     })

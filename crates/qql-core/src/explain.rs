@@ -353,10 +353,7 @@ pub fn explain_node(statement: &Stmt) -> String {
                 "Statement: UPDATE VECTOR ON {}",
                 statement.collection
             );
-            let _ = writeln!(output, "├── Point: {:?}", statement.point_id);
-            if let Some(name) = &statement.vector_name {
-                let _ = writeln!(output, "├── Vector: {name}");
-            }
+            let _ = writeln!(output, "├── Points: {}", statement.points.len());
             if let Some(shard) = &statement.shard_key {
                 let _ = writeln!(output, "├── Shard Key: {shard}");
             }

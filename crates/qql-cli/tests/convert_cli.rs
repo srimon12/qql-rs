@@ -72,14 +72,11 @@ fn bad_capture_line_is_reported_with_its_number() {
 }
 
 #[test]
-fn bare_body_without_collection_renders_unknown() {
+fn bare_body_without_collection_fails() {
     let path = temp_jsonl("bare", "{\"ids\": [1]}\n");
     let out = qql(&["convert", path.to_str().expect("utf8 path")]);
 
-    assert!(out.status.success());
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("FROM unknown"),
-        "stdout: {}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    assert!(!out.status.success(), "expected non-zero exit");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("requires a collection"), "stderr: {stderr}");
 }

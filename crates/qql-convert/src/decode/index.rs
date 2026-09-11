@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::DecodeCtx;
 use crate::json::{self, child, invalid, type_name};
 use qql_core::ast::{CreateIndexStmt, Value as AstValue};
 
@@ -14,10 +15,12 @@ const INDEX_TYPES: [&str; 8] = [
 /// Decode a `PUT /collections/{c}/index` (`CreateFieldIndex`) body.
 pub(crate) fn create_index(
     body: &Value,
-    collection: &str,
+    ctx: DecodeCtx<'_>,
 ) -> Result<CreateIndexStmt, ConvertError> {
+    ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    json::reject_unknown(obj, path, &["field_name", "field_schema"])?;
     let field = json::required(obj, "field_name", path)
         .and_then(|v| Ok(json::string_at(v, &child(path, "field_name"))?.to_string()))?;
     let (field_type, options) = match obj.get("field_schema").filter(|v| !v.is_null()) {
@@ -48,11 +51,11 @@ pub(crate) fn create_index(
         }
     };
     Ok(CreateIndexStmt {
-        collection: collection.to_string(),
+        collection: ctx.collection.to_string(),
         field,
         field_type,
         options,
-        wait: None,
+        wait: ctx.opts.wait,
     })
 }
 

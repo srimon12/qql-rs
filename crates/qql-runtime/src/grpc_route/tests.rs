@@ -134,6 +134,7 @@ fn test_grpc_route_conversion_all_statements() {
         "UPSERT INTO docs VALUES {id: 1, text: 'hello', category: 'tech'} USING DENSE MODEL 'm';",
         "DELETE FROM docs WHERE category = 'old';",
         "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;",
+        "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
         "UPDATE docs SET PAYLOAD = {status: 'ok'} WHERE id = 1;",
         "CREATE COLLECTION docs (dense VECTOR(384, COSINE), sparse SPARSE);",
         "ALTER COLLECTION docs WITH HNSW (m = 16);",
@@ -233,6 +234,16 @@ fn converts_collection_quantization_and_vector_update() {
     } else {
         panic!("expected UpdateVectors");
     }
+
+    let batch = Parser::parse(
+        "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&batch).unwrap();
+    let qql_plan::PlannedOperation::UpdateVectors { request, .. } = op else {
+        panic!("expected UpdateVectors");
+    };
+    assert_eq!(request.points.len(), 2);
 }
 
 /// Query → gRPC with limit, offset, using, score_threshold

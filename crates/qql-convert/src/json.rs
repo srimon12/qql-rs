@@ -2,9 +2,9 @@
 //!
 //! Mirrors the `qql-runtime::rest_response` decode style: an expected field
 //! must exist and have the exact type, otherwise decoding fails with a typed
-//! [`ConvertError::InvalidField`] naming the path. Unknown extra keys are
-//! ignored (OpenAPI permits them in payload-like objects); known keys with a
-//! wrong shape are never coerced.
+//! [`ConvertError::InvalidField`] naming the path. Request objects reject
+//! unknown keys via [`reject_unknown`]; payload-like maps keep arbitrary
+//! keys. Known keys with a wrong shape are never coerced.
 
 use serde_json::{Map, Value};
 
@@ -33,6 +33,25 @@ pub(crate) fn index(path: &str, i: usize) -> String {
 /// Fail with a typed invalid-field error.
 pub(crate) fn invalid(path: impl Into<String>, detail: impl Into<String>) -> ConvertError {
     ConvertError::invalid(path, detail)
+}
+
+/// Reject any object key that is not in `known`.
+///
+/// Extra OpenAPI properties that QQL cannot represent must fail closed
+/// rather than being dropped. Callers pass the fields they decode (and the
+/// fields they reject with a more specific message, which they check first).
+pub(crate) fn reject_unknown(obj: &Obj, path: &str, known: &[&str]) -> Result<(), ConvertError> {
+    for key in obj.keys() {
+        if !known.contains(&key.as_str()) {
+            return Err(invalid(child(path, key), format!("unknown field '{key}'")));
+        }
+    }
+    Ok(())
+}
+
+/// Required string member, returned owned.
+pub(crate) fn required_str(obj: &Obj, key: &str, path: &str) -> Result<String, ConvertError> {
+    Ok(string_at(required(obj, key, path)?, &child(path, key))?.to_string())
 }
 
 /// Access a JSON object, failing closed on any other JSON type.

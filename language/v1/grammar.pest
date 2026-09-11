@@ -428,8 +428,11 @@ delete_payload = {
 update = {
     ^"UPDATE" ~ collection ~ ^"SET"
     ~ (
-        ^"VECTOR" ~ vector_name? ~ "=" ~ (param | vector_value)
-        ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
+        ^"VECTOR" ~ (
+            ^"VALUES" ~ point_object ~ ("," ~ point_object)*
+            | vector_name? ~ "=" ~ (param | vector_value | object)
+              ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
+        )
         ~ (^"SHARD" ~ shard_key)?
         | ^"PAYLOAD" ~ "=" ~ (param | object)
         ~ ^"WHERE" ~ filter

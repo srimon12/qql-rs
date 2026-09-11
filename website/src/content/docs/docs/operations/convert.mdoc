@@ -51,11 +51,12 @@ keeps serving on `127.0.0.1:6333`, and the recorder listens on
 qql record
 ```
 
-Query strings are forwarded but not captured: `wait`, `timeout`, and
-`consistency` are endpoint features, not QQL statement content. Bodies are
-buffered in memory per request, which is fine for interactive captures and
-large batched upserts, but this is a development tool, not a production
-proxy.
+Query strings are forwarded and captured as a `"query"` object so `WAIT`,
+`timeout`, and `consistency` survive conversion. Bodies are buffered in
+memory per request, which is fine for interactive captures and large batched
+upserts, but this is a development tool, not a production proxy. Bodyless
+collection and quota routes (`SHOW`, `DROP COLLECTION`, `DROP INDEX`) are
+recorded too.
 
 ## Convert a request (`qql convert`)
 
@@ -99,8 +100,8 @@ echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
 # QUERY POINTS (1, 'point-2') FROM docs;
 {% /terminal %}
 
-Without `--collection`, a bare body renders `FROM unknown` so the omission
-is visible rather than guessed.
+Without `--collection`, a bare body fails with `MissingCollection` rather
+than inventing a collection name.
 
 ## What is covered
 

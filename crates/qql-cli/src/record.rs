@@ -10,12 +10,13 @@
 //! - Bodies are buffered fully in RAM (`axum` `Bytes` → `reqwest` `Body`);
 //!   multi-hundred-MB single upserts are held in memory. ColBERT-size batches
 //!   are fine.
-//! - Query strings are forwarded upstream but NOT recorded: the wrapped
-//!   `{method, path, body}` shape (and `qql-convert` endpoint matching) has no
-//!   query representation. A trailing `/` is stripped from the recorded path
-//!   for the same reason; forwarding always uses the original URI.
+//! - Query strings are forwarded upstream and recorded as a `"query"` object
+//!   (`wait`, `timeout`, `consistency`) so `qql convert` can recover `WAIT`
+//!   and `PARAMS`. A trailing `/` is stripped from the recorded path;
+//!   forwarding always uses the original URI.
 //! - Non-JSON bodies are forwarded but not recorded (a wrapped line must hold
-//!   JSON to stay convertible).
+//!   JSON to stay convertible). Bodyless collection and quota routes
+//!   (`SHOW`, `DROP COLLECTION`, `DROP INDEX`) are recorded with no `body`.
 //!
 //! Requires the `record` Cargo feature (opt-in so default builds stay lean).
 
@@ -169,9 +170,8 @@ fn forwarded(headers: &HeaderMap) -> HeaderMap {
     out
 }
 
-/// Path recorded into the wrapped line: query strings never reach the file
-/// (the wrapped shape has no query field and endpoint matching is exact), and
-/// a trailing `/` is stripped (Qdrant ignores it).
+/// Path recorded into the wrapped line: query strings move to the `"query"`
+/// object, and a trailing `/` is stripped (Qdrant ignores it).
 fn record_path(path: &str) -> String {
     let stripped = path.strip_suffix('/').unwrap_or(path);
     if stripped.is_empty() {
@@ -181,17 +181,21 @@ fn record_path(path: &str) -> String {
     }
 }
 
-/// Record iff the request has a body, targets `/collections/` (or exactly
-/// `/collections`), and the body is JSON (a wrapped line must stay valid and
-/// convertible).
+/// Record collection and quota routes. Bodyless GETs/DELETEs are included;
+/// non-JSON bodies are skipped.
+fn in_record_scope(path: &str) -> bool {
+    let trimmed = path.trim_start_matches('/');
+    trimmed == "collections"
+        || trimmed.starts_with("collections/")
+        || trimmed == "quotas"
+        || trimmed.starts_with("quotas/")
+}
+
 fn should_record(path: &str, body: &[u8]) -> bool {
-    if body.is_empty() {
+    if !in_record_scope(path) {
         return false;
     }
-    if !(path == "/collections" || path.starts_with("/collections/")) {
-        return false;
-    }
-    serde_json::from_slice::<serde_json::Value>(body).is_ok()
+    body.is_empty() || serde_json::from_slice::<serde_json::Value>(body).is_ok()
 }
 
 /// Forward any request to `--target` and capture convertible ones.
@@ -205,6 +209,7 @@ async fn proxy(State(rec): State<Arc<Recorder>>, req: Request) -> Response {
         .map(|pq| pq.to_string())
         .unwrap_or_else(|| "/".to_string());
     let path = req.uri().path().to_string();
+    let query = req.uri().query().unwrap_or("").to_string();
     let headers = forwarded(req.headers());
     // Buffer fully: simple and byte-exact; huge single upserts sit in RAM
     // (documented dev-tool trade-off).
@@ -242,13 +247,14 @@ async fn proxy(State(rec): State<Arc<Recorder>>, req: Request) -> Response {
     };
     let recorded_path = record_path(&path);
     if should_record(&recorded_path, &body) {
-        // The body was JSON-checked by `should_record`; re-parse is safe.
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-        record_request(&rec, method.as_str(), &recorded_path, &json).await;
+        let json = if body.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_slice(&body).unwrap_or_else(|_| serde_json::json!({})))
+        };
+        record_request(&rec, method.as_str(), &recorded_path, &query, json.as_ref()).await;
         eprintln!("{method} {recorded_path} -> {}", status.as_u16());
-    } else if !body.is_empty()
-        && (recorded_path == "/collections" || recorded_path.starts_with("/collections/"))
-    {
+    } else if !body.is_empty() && in_record_scope(&recorded_path) {
         eprintln!(
             "{method} {recorded_path} -> {} (not recorded: body is not JSON)",
             status.as_u16()
@@ -264,8 +270,21 @@ async fn proxy(State(rec): State<Arc<Recorder>>, req: Request) -> Response {
 ///
 /// File errors are logged, never propagated: capture must not break
 /// forwarding.
-async fn record_request(rec: &Arc<Recorder>, method: &str, path: &str, body: &serde_json::Value) {
-    let line = serde_json::json!({"method": method, "path": path, "body": body}).to_string();
+async fn record_request(
+    rec: &Arc<Recorder>,
+    method: &str,
+    path: &str,
+    query: &str,
+    body: Option<&serde_json::Value>,
+) {
+    let mut line = serde_json::json!({"method": method, "path": path});
+    if !query.is_empty() {
+        line["query"] = query_object(query);
+    }
+    if let Some(body) = body {
+        line["body"] = body.clone();
+    }
+    let line = line.to_string();
     let mut files = rec.files.lock().await;
     files.lines += 1;
     let lineno = files.lines;
@@ -273,10 +292,11 @@ async fn record_request(rec: &Arc<Recorder>, method: &str, path: &str, body: &se
         eprintln!("qql record: cannot write {}: {e}", rec.out_label);
         return;
     }
+    rec.recorded.fetch_add(1, Ordering::Relaxed);
     let Some(qql) = files.qql.as_mut() else {
         return;
     };
-    match qql_convert::json_to_qql(&line) {
+    match qql_convert::convert(&line, None) {
         Ok(stmts) => {
             for stmt in &stmts {
                 if let Err(e) = write_line(qql, &format!("{stmt};")).await {
@@ -293,7 +313,25 @@ async fn record_request(rec: &Arc<Recorder>, method: &str, path: &str, body: &se
             }
         }
     }
-    rec.recorded.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Split `a=b&c=d` into a JSON object of string values.
+fn query_object(raw: &str) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    for pair in raw.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = match pair.split_once('=') {
+            Some((key, value)) => (key, value),
+            None => (pair, ""),
+        };
+        obj.insert(
+            key.to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    serde_json::Value::Object(obj)
 }
 
 /// Append one `\n`-terminated line and fsync (dev-tool durability).
@@ -355,14 +393,17 @@ mod tests {
     }
 
     #[test]
-    fn should_record_needs_json_body_under_collections() {
+    fn should_record_covers_collection_and_quota_routes() {
         let body = br#"{"vector": [0.1], "limit": 1}"#;
         assert!(should_record("/collections/docs/points/query", body));
         assert!(should_record("/collections/docs/points", body));
-        // No body (GET / health checks): forwarded, never recorded.
-        assert!(!should_record("/collections/docs/points/query", b""));
-        // Outside /collections/: forwarded, never recorded.
+        // Bodyless SHOW / DROP: recorded with no `body` field.
+        assert!(should_record("/collections/docs", b""));
+        assert!(should_record("/collections", b""));
+        assert!(should_record("/quotas", b""));
+        // Outside collection/quota routes: forwarded, never recorded.
         assert!(!should_record("/cluster", body));
+        assert!(!should_record("/healthz", b""));
         // Non-JSON bodies cannot form a convertible wrapped line.
         assert!(!should_record("/collections/docs/points", b"\x00\x01"));
     }

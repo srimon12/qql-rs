@@ -3,7 +3,7 @@
 mod common;
 
 use common::{convert, convert_err, wrapped};
-use qql_convert::{ConvertError, json_to_qql, json_to_qql_with_collection};
+use qql_convert::{ConvertError, convert as convert_json};
 
 // ── Wrapped requests / bodyless routes ──────────────────────────
 
@@ -160,7 +160,7 @@ fn wrapped_collection_overrides_caller() {
         "/collections/docs/points",
         serde_json::json!({"ids": [1]}),
     );
-    let stmts = json_to_qql_with_collection(&input, "other").expect("wrapped conversion");
+    let stmts = convert_json(&input, Some("other")).expect("wrapped conversion");
     assert_eq!(stmts, ["QUERY POINTS (1) FROM docs"]);
 }
 
@@ -177,7 +177,7 @@ fn unsupported_endpoints_fail_closed() {
         let input = wrapped(method, path, serde_json::json!({}));
         assert!(
             matches!(
-                json_to_qql(&input).unwrap_err(),
+                convert_json(&input, None).unwrap_err(),
                 ConvertError::UnsupportedEndpoint(_)
             ),
             "{method} {path} must be unsupported"
@@ -188,19 +188,19 @@ fn unsupported_endpoints_fail_closed() {
 #[test]
 fn typed_errors_cover_invalid_inputs() {
     assert!(matches!(
-        json_to_qql("not json").unwrap_err(),
+        convert_json("not json", None).unwrap_err(),
         ConvertError::InvalidJson(_)
     ));
     assert!(matches!(
-        json_to_qql("[1, 2]").unwrap_err(),
+        convert_json("[1, 2]", None).unwrap_err(),
         ConvertError::UndecodableBody { .. }
     ));
     assert!(matches!(
-        json_to_qql(r#"{"limit": 1}"#).unwrap_err(),
+        convert_json(r#"{"limit": 1}"#, Some("docs")).unwrap_err(),
         ConvertError::UndecodableBody { .. }
     ));
     assert!(matches!(
-        json_to_qql(r#"{"unrelated": true}"#).unwrap_err(),
+        convert_json(r#"{"unrelated": true}"#, Some("docs")).unwrap_err(),
         ConvertError::UndecodableBody { .. }
     ));
 
@@ -279,7 +279,7 @@ fn unrepresentable_fields_are_typed_errors() {
     ];
     for (method, path, body) in cases {
         let wrapped = wrapped(method, path, serde_json::from_str(body).expect("case body"));
-        match json_to_qql(&wrapped).unwrap_err() {
+        match convert_json(&wrapped, None).unwrap_err() {
             ConvertError::InvalidField { path: field, .. } => {
                 assert!(
                     !field.is_empty(),
@@ -295,13 +295,17 @@ fn unrepresentable_fields_are_typed_errors() {
 
 #[test]
 fn bare_body_collection_passthrough() {
-    let stmts = json_to_qql_with_collection(r#"{"ids": [1]}"#, "docs").expect("conversion");
+    let stmts = convert_json(r#"{"ids": [1]}"#, Some("docs")).expect("conversion");
     assert_eq!(stmts, ["QUERY POINTS (1) FROM docs"]);
 
-    let stmts = json_to_qql(r#"{"ids": [1]}"#).expect("conversion");
-    assert_eq!(stmts, ["QUERY POINTS (1) FROM unknown"]);
-    let stmts = json_to_qql_with_collection(r#"{"ids": [1]}"#, "").expect("conversion");
-    assert_eq!(stmts, ["QUERY POINTS (1) FROM unknown"]);
+    assert!(matches!(
+        convert_json(r#"{"ids": [1]}"#, None).unwrap_err(),
+        ConvertError::MissingCollection
+    ));
+    assert!(matches!(
+        convert_json(r#"{"ids": [1]}"#, Some("")).unwrap_err(),
+        ConvertError::MissingCollection
+    ));
 }
 
 #[test]
@@ -347,11 +351,11 @@ fn bare_body_detection_table() {
         convert(r#"{"shard_key": "acme", "shards_number": 2}"#)[0].starts_with("CREATE SHARD KEY")
     );
     assert!(convert(r#"{"enabled": true}"#)[0].starts_with("SET QUOTA"));
-    // filter-only bodies default to DELETE; +limit is SCROLL; +exact is COUNT.
-    assert!(
-        convert(r#"{"filter": {"must": [{"key": "a", "match": {"value": 1}}]}}"#)[0]
-            .starts_with("DELETE")
-    );
+    // filter-only bodies are ambiguous; +limit is SCROLL; +exact is COUNT.
+    assert!(matches!(
+        convert_err(r#"{"filter": {"must": [{"key": "a", "match": {"value": 1}}]}}"#),
+        ConvertError::UndecodableBody { .. }
+    ));
     assert!(
         convert(r#"{"filter": {"must": [{"key": "a", "match": {"value": 1}}]}, "limit": 3}"#)[0]
             .starts_with("SCROLL")
@@ -371,10 +375,70 @@ fn bare_ambiguities_fail_closed() {
     ] {
         assert!(
             matches!(
-                json_to_qql(input).unwrap_err(),
+                convert_json(input, Some("docs")).unwrap_err(),
                 ConvertError::UndecodableBody { .. }
             ),
             "{input}"
         );
     }
+}
+
+#[test]
+fn wait_and_read_opts_round_trip_from_query() {
+    let upsert = wrapped_query(
+        "PUT",
+        "/collections/docs/points",
+        serde_json::json!({"wait": "true"}),
+        serde_json::json!({"points": [{"id": 1, "vector": [0.1]}]}),
+    );
+    assert_eq!(
+        convert_json(&upsert, None).expect("wait"),
+        ["UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT true"]
+    );
+
+    let query = wrapped_query(
+        "POST",
+        "/collections/docs/points/query",
+        serde_json::json!({"timeout": "30", "consistency": "majority"}),
+        serde_json::json!({"query": {"nearest": [0.1]}, "limit": 5}),
+    );
+    assert_eq!(
+        convert_json(&query, None).expect("timeout"),
+        ["QUERY [0.1] FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5"]
+    );
+
+    let path_qs = serde_json::json!({
+        "method": "POST",
+        "path": "/collections/docs/points/delete?wait=false",
+        "body": {"points": [1]},
+    })
+    .to_string();
+    assert_eq!(
+        convert_json(&path_qs, None).expect("path query"),
+        ["DELETE FROM docs WHERE id IN (1) WAIT false"]
+    );
+}
+
+fn wrapped_query(
+    method: &str,
+    path: &str,
+    query: serde_json::Value,
+    body: serde_json::Value,
+) -> String {
+    serde_json::json!({"method": method, "path": path, "query": query, "body": body}).to_string()
+}
+
+#[test]
+fn unknown_request_fields_fail_closed() {
+    let err = convert_err(r#"{"query": {"nearest": [0.1]}, "not_a_field": 1}"#);
+    assert!(
+        matches!(err, ConvertError::InvalidField { ref path, .. } if path == "body.not_a_field"),
+        "{err:?}"
+    );
+    let err =
+        convert_err(r#"{"query": {"nearest": [0.1]}, "params": {"hnsw_ef": 32, "foo": true}}"#);
+    assert!(
+        matches!(err, ConvertError::InvalidField { ref path, .. } if path == "body.params.foo"),
+        "{err:?}"
+    );
 }
