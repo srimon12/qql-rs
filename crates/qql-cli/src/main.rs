@@ -9,10 +9,13 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
 mod config;
-mod convert;
 mod dump;
 mod migrate;
 mod output;
+#[cfg(feature = "record")]
+mod record;
+#[cfg(all(test, feature = "record"))]
+mod record_tests;
 mod repl;
 mod script;
 mod table;
@@ -80,6 +83,9 @@ enum Command {
     Convert {
         /// Path to JSON file (or stdin if omitted)
         file: Option<String>,
+        /// Collection name for bare bodies without path context
+        #[arg(long)]
+        collection: Option<String>,
     },
     /// Format QQL source into canonical form
     Fmt {
@@ -120,6 +126,29 @@ enum Command {
         /// Quiet mode
         #[arg(long, short)]
         quiet: bool,
+    },
+    /// Record Qdrant REST traffic while proxying it unchanged (needs `--features record`)
+    ///
+    /// Zero-code-change capture: move Qdrant to `--target`, point the app at
+    /// `--listen`, and every request is forwarded byte-identically while
+    /// bodied `/collections/` requests are appended as wrapped
+    /// `{"method","path","body"}` JSONL for later `qql convert` use.
+    /// Bodies are buffered in RAM (dev tool, not a production proxy).
+    #[cfg(feature = "record")]
+    Record {
+        /// Address to listen on (the app keeps pointing here)
+        #[arg(long, default_value = "127.0.0.1:6333")]
+        listen: std::net::SocketAddr,
+        /// Upstream Qdrant base URL to forward to
+        #[arg(long, default_value = "http://127.0.0.1:6334")]
+        target: String,
+        /// JSONL capture file (created/appended, fsynced per line)
+        #[arg(long, default_value = "capture.jsonl")]
+        out: PathBuf,
+        /// Optional QQL capture file (converted at record time; failures
+        /// become `# ERROR <file:line> <error>` comments)
+        #[arg(long)]
+        qql_out: Option<PathBuf>,
     },
     /// Triage one statement: format, explain, embed probe, topology, doctor
     Check {
@@ -557,7 +586,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::handle_explain(&query, exec_params.as_ref(), json, quiet)
         }
         Command::Connect => commands::handle_connect(&url, use_edge).await,
-        Command::Convert { file } => commands::handle_convert(file.as_deref()),
+        Command::Convert { file, collection } => {
+            commands::handle_convert(file.as_deref(), collection.as_deref())
+        }
         Command::Fmt { file, check, write } => commands::handle_fmt(file.as_deref(), check, write),
         Command::Dump {
             collection,
@@ -745,6 +776,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Doctor { json, quiet } => {
             commands::handle_doctor(&url, use_edge, json, quiet).await
         }
+        #[cfg(feature = "record")]
+        Command::Record {
+            listen,
+            target,
+            out,
+            qql_out,
+        } => record::run(record::RecordOptions {
+            listen,
+            target,
+            out,
+            qql_out,
+        })
+        .await
+        .map_err(|e| e as Box<dyn std::error::Error>),
         Command::Check {
             query,
             params,

@@ -8,6 +8,7 @@ members = [
     "crates/qql-embed",
     "crates/qql-runtime",
     "crates/qql-cli",
+    "crates/qql-convert",
     "crates/qql-edge",
     "crates/qql-wasm",
     "crates/pyqql",
@@ -34,6 +35,7 @@ homepage = "https://github.com/srimon12/qql-rs"
 missing_docs = "warn"
 
 [workspace.dependencies]
+qql-convert = { version = "0.4.0", path = "crates/qql-convert" }
 qql-core = { version = "0.4.0", path = "crates/qql-core" }
 qql-plan = { version = "0.4.0", path = "crates/qql-plan" }
 qql-embed = { version = "0.4.0", path = "crates/qql-embed" }

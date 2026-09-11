@@ -417,7 +417,6 @@ fn print_doctor_hosts(hosts: &serde_json::Value) {
         }
     }
 }
-use crate::convert;
 use crate::dump;
 use crate::migrate;
 use crate::output;
@@ -823,7 +822,10 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
     }
 }
 
-pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn handle_convert(
+    path: Option<&str>,
+    collection: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let input = if let Some(p) = path {
         std::fs::read_to_string(p).map_err(|e| format!("cannot read file: {}", e))?
     } else {
@@ -838,7 +840,10 @@ pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Erro
         return Err("no input provided".into());
     }
 
-    let statements = convert::json_to_qql(&input)?;
+    let statements = match collection {
+        Some(c) => qql_convert::json_to_qql_with_collection(&input, c)?,
+        None => qql_convert::json_to_qql(&input)?,
+    };
 
     for stmt in &statements {
         println!("{}", stmt);

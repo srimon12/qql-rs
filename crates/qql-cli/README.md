@@ -29,6 +29,7 @@ Binary: `target/release/qql`.
 | `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql execute`) |
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
 | `qql doctor` | Health + embed host snapshot |
+| `qql record` | Transparent REST recorder → JSONL + QQL (needs `--features record`) |
 | `qql --edge …` | Use configured local edge backend |
 | `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
 | `qql edge bootstrap <coll> --from <url>` | Seed a local edge collection from a remote shard snapshot |
@@ -143,6 +144,32 @@ SHARD 'acme'
 LIMIT 10;
 ```
 
+## Recorder (`qql record`, opt-in)
+
+Zero-code-change capture for migration: move Qdrant off its port, point the
+app at the recorder, change nothing else. Every request is forwarded to
+`--target` byte-identically (status, headers, body — auth included); bodied
+requests under `/collections/` are appended as wrapped
+`{"method","path","body"}` JSONL for later `qql convert` use.
+
+```bash
+cargo build -p qql-cli --features record
+# Qdrant moved to :6334 (e.g. docker -p 6334:6333), app still uses :6333:
+qql record --listen 127.0.0.1:6333 --target http://127.0.0.1:6334 \
+  --out capture.jsonl --qql-out capture.qql
+# ... run the app ...
+qql convert capture.jsonl        # replay/migrate later
+```
+
+Bare `qql record` uses those defaults. Notes: query strings are forwarded
+but not recorded (the wrapped shape has no query field; a trailing `/` is
+stripped from the recorded path only); non-JSON bodies are forwarded, not
+recorded; bodies are buffered in RAM (multi-hundred-MB single upserts sit in
+memory — fine for ColBERT-size batches); `--qql-out` converts at record time
+and failures become `# ERROR <file:line> <error>` comments (delete those
+lines before `qql execute` replay — `#` is not a QQL comment). Ctrl-C stops
+the recorder; files are fsynced per line so nothing is lost.
+
 ## Script format
 
 Semicolon-separated statements. `--` comments OK.
@@ -172,6 +199,7 @@ LIMIT 10;
 | `rest` | yes | REST |
 | `grpc` | yes | gRPC |
 | `edge` | no | In-process edge + FastEmbed |
+| `record` | no | Transparent REST recorder (`qql record`; axum + reqwest, versions already pinned) |
 
 ## Docs
 
