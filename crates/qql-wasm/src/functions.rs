@@ -133,9 +133,11 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
         }));
     }
 
-    // Panic-mode recovery: keep statements that parsed and collect every
-    // recoverable error so the IDE can show more than the first span.
-    // `is_valid` / `parse_and_plan` stay fail-fast (execution contract).
+    // `error` / `valid` stay on the fail-fast execution contract
+    // (`parse_and_plan`) so language-corpus `-- @error` codes and older
+    // clients keep seeing the first rejection. `errors` is the panic-mode
+    // recovery list for IDEs that want every span.
+    let fail_fast = qql_plan::parse_and_plan(input);
     let recovered = Parser::parse_all_recovering(input);
     let mut errors: Vec<serde_json::Value> = recovered.errors.iter().map(err_json).collect();
     let stmts: Vec<_> = recovered
@@ -149,6 +151,12 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
             Ok(compiled) => routes_val.push(compiled_route_json(&compiled)),
             Err(err) => errors.push(err_json(&err)),
         }
+    }
+    let fail_fast_error = fail_fast.as_ref().err().map(err_json);
+    if errors.is_empty()
+        && let Some(err) = fail_fast_error.clone()
+    {
+        errors.push(err);
     }
     let ast_val = if stmts.is_empty() {
         serde_json::Value::Null
@@ -164,16 +172,15 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
         .first()
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    let first_error = errors.first().cloned().unwrap_or(serde_json::Value::Null);
     serde_json::json!({
-        "valid": errors.is_empty(),
+        "valid": fail_fast.is_ok(),
         "statements_count": stmts.len(),
         "tokens": tokens,
         "ast": ast_val,
         "route": route_val,
         "routes": routes_val,
         "explain": explain_val,
-        "error": first_error,
+        "error": fail_fast_error.unwrap_or(serde_json::Value::Null),
         "errors": errors,
     })
 }

@@ -102,7 +102,7 @@ export interface AnalysisResult {
     /** First error, kept for older IDE clients. Prefer `errors`. */
     error: AnalysisError | null;
     /** Every recoverable diagnostic from panic-mode parse + plan. */
-    errors?: AnalysisError[];
+    errors: AnalysisError[];
 }
 
 
