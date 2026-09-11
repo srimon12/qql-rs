@@ -9,41 +9,66 @@
 //!    supplies the collection via [`json_to_qql_with_collection`]
 //!    ([`json_to_qql`] falls back to `"unknown"`).
 //!
-//! Conversion is deterministic: the same JSON always yields the same QQL.
-//! Every emitted statement is valid QQL — unsupported geo predicates fail
-//! with [`ConvertError::GeoUnsupported`] instead of emitting placeholders.
+//! Conversion is contract-driven and AST-based:
+//!
+//! ```text
+//! OpenAPI request JSON -> qql_core::ast::Stmt -> qql_core::fmt::format_stmt
+//! ```
+//!
+//! The returned strings are **only** produced by the canonical formatter
+//! (the same emitter behind `qql fmt`), so every emitted statement re-parses
+//! and is byte-stable under `format_stmt(parse(emit))`. Decoding fails closed:
+//! shapes the QQL AST cannot express return a typed [`ConvertError`], never a
+//! placeholder or a silently dropped field.
 
-mod converter;
-mod decoder;
-mod detect;
-mod filter;
-mod formatters;
-mod formulas;
-mod operations;
-mod rest_types;
-mod sanitize;
+mod bare;
+mod convert;
+mod decode;
+mod endpoint;
+mod json;
 
-pub use converter::{json_to_qql, json_to_qql_with_collection};
+pub use convert::{json_to_qql, json_to_qql_with_collection};
 use std::fmt;
 
 /// Typed conversion failure.
 ///
 /// Returned by [`json_to_qql`] and [`json_to_qql_with_collection`].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConvertError {
     /// The input is not valid JSON. Holds the underlying parse message.
     InvalidJson(String),
     /// A wrapped request targets an endpoint with no QQL mapping.
     /// Holds `"METHOD path"`.
     UnsupportedEndpoint(String),
-    /// A bare body matched no known operation shape.
-    UndetectableOperation,
-    /// A structurally recognized payload has invalid content.
-    /// Holds a static reason (e.g. `"no points in upsert payload"`).
-    InvalidPayload(&'static str),
-    /// A geo predicate (`geo_bounding_box`, `geo_radius`, `geo_polygon`)
-    /// has no QQL representation. Holds the predicate name.
-    GeoUnsupported(&'static str),
+    /// The body is absent or structurally undecodable for the endpoint.
+    /// Holds a human-readable reason.
+    UndecodableBody {
+        /// Why the body cannot be decoded.
+        detail: String,
+    },
+    /// A structurally recognized body has an invalid or unrepresentable
+    /// field at `path` (e.g. `points[0].vector`).
+    InvalidField {
+        /// Dot/bracket path of the offending field.
+        path: String,
+        /// Why the field is invalid or cannot be represented in QQL.
+        detail: String,
+    },
+}
+
+impl ConvertError {
+    pub(crate) fn invalid(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::InvalidField {
+            path: path.into(),
+            detail: detail.into(),
+        }
+    }
+
+    pub(crate) fn undecodable(detail: impl Into<String>) -> Self {
+        Self::UndecodableBody {
+            detail: detail.into(),
+        }
+    }
 }
 
 impl fmt::Display for ConvertError {
@@ -51,13 +76,8 @@ impl fmt::Display for ConvertError {
         match self {
             Self::InvalidJson(e) => write!(f, "invalid JSON: {e}"),
             Self::UnsupportedEndpoint(ep) => write!(f, "unsupported endpoint: {ep}"),
-            Self::UndetectableOperation => {
-                write!(f, "cannot detect operation from JSON structure")
-            }
-            Self::InvalidPayload(reason) => write!(f, "{reason}"),
-            Self::GeoUnsupported(pred) => {
-                write!(f, "geo predicate '{pred}' has no QQL representation")
-            }
+            Self::UndecodableBody { detail } => write!(f, "cannot decode request body: {detail}"),
+            Self::InvalidField { path, detail } => write!(f, "invalid field '{path}': {detail}"),
         }
     }
 }

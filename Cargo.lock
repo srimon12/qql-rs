@@ -4385,7 +4385,7 @@ name = "qql-convert"
 version = "0.4.0"
 dependencies = [
  "qql-core",
- "serde",
+ "qql-plan",
  "serde_json",
 ]
 
