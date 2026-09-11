@@ -124,6 +124,36 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "qql.showTokens",
+        "title": "Show Tokens",
+        "category": "QQL",
+        "icon": "$(symbol-keyword)"
+      },
+      {
+        "command": "qql.run",
+        "title": "Run Statement",
+        "category": "QQL",
+        "icon": "$(play)"
+      },
+      {
+        "command": "qql.addFilter",
+        "title": "Add Tenant Filter",
+        "category": "QQL",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "qql.validateWorkspace",
+        "title": "Validate Workspace (.qql)",
+        "category": "QQL",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "qql.selectParamsProfile",
+        "title": "Select Params Profile",
+        "category": "QQL",
+        "icon": "$(database)"
+      },
+      {
         "command": "qql.analyze",
         "title": "Re-analyze Document",
         "category": "QQL",
@@ -173,6 +203,26 @@
           "when": "resourceLangId == qql"
         },
         {
+          "command": "qql.showTokens",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.run",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.addFilter",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.validateWorkspace",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.selectParamsProfile",
+          "when": "resourceLangId == qql"
+        },
+        {
           "command": "qql.analyze",
           "when": "resourceLangId == qql"
         },
@@ -207,8 +257,28 @@
           "group": "qql@4"
         },
         {
-          "command": "qql.analyze",
+          "command": "qql.showTokens",
           "group": "qql@5"
+        },
+        {
+          "command": "qql.run",
+          "group": "qql@6"
+        },
+        {
+          "command": "qql.addFilter",
+          "group": "qql@7"
+        },
+        {
+          "command": "qql.validateWorkspace",
+          "group": "qql@8"
+        },
+        {
+          "command": "qql.selectParamsProfile",
+          "group": "qql@9"
+        },
+        {
+          "command": "qql.analyze",
+          "group": "qql@10"
         }
       ]
     },
@@ -257,6 +327,24 @@
           "type": "string",
           "default": "http://localhost:6333",
           "description": "Base URL used when generating curl commands for compiled REST routes."
+        },
+        "qql.params": {
+          "type": [
+            "object",
+            "array"
+          ],
+          "default": {},
+          "description": "Bind values for :name (object) or ? (array) placeholders. A `-- qql-params: {...}` header overrides this per file."
+        },
+        "qql.paramProfiles": {
+          "type": "object",
+          "default": {},
+          "description": "Named params sets for :name / ? placeholders. Activate one via qql.activeProfile or the status bar."
+        },
+        "qql.activeProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Active qql.paramProfiles entry (empty = default qql.params). The -- qql-params header still wins per file."
         }
       }
     },

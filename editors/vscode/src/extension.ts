@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { AnalysisService } from "./core/analysis";
 import { initWasm, isWasmReady } from "./core/wasm";
+import { QqlCodeActionProvider } from "./providers/codeActions";
 import { QqlCodeLensProvider } from "./providers/codelens";
 import { QqlCompletionProvider } from "./providers/completions";
 import { QqlDefinitionProvider } from "./providers/definition";
@@ -65,13 +66,16 @@ export function activate(context: vscode.ExtensionContext) {
     ),
     vscode.languages.registerDefinitionProvider(QQL_SELECTOR, new QqlDefinitionProvider(analysis)),
     vscode.languages.registerCodeLensProvider(QQL_SELECTOR, codeLensProvider),
+    vscode.languages.registerCodeActionsProvider(QQL_SELECTOR, new QqlCodeActionProvider(), {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    }),
     vscode.languages.registerDocumentFormattingEditProvider(
       QQL_SELECTOR,
       new QqlFormattingProvider()
     )
   );
 
-  registerCommands(context, analysis);
+  registerCommands(context, analysis, diagnosticCollection);
 
   // ── Document lifecycle (single owner of analyze/schedule) ─────
   // Providers must not drive analysis. Only these events do.
@@ -112,6 +116,30 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (e.affectsConfiguration("qql.codeLens.enabled")) {
         codeLensProvider.refresh();
+      }
+      if (e.affectsConfiguration("qql.params")) {
+        // Bind values changed — cached analyses may carry stale QQL-BIND-* errors.
+        if (isWasmReady()) {
+          for (const doc of vscode.workspace.textDocuments) {
+            if (doc.languageId === "qql") {
+              analysis.analyzeNow(doc, { force: true });
+            }
+          }
+        }
+      }
+      if (
+        e.affectsConfiguration("qql.activeProfile") ||
+        e.affectsConfiguration("qql.paramProfiles")
+      ) {
+        // Effective params changed — same refresh, plus CodeLens/status tooltips.
+        codeLensProvider.refresh();
+        if (isWasmReady()) {
+          for (const doc of vscode.workspace.textDocuments) {
+            if (doc.languageId === "qql") {
+              analysis.analyzeNow(doc, { force: true });
+            }
+          }
+        }
       }
     })
   );

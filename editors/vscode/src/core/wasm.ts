@@ -5,13 +5,23 @@
  * no async init() is required.
  */
 
+import type { QqlParams } from "./params";
 import type { CompiledRoute, WasmAnalyzeResult } from "./types";
 
-export type { CompiledRoute, WasmAnalyzeResult };
+export type { CompiledRoute, QqlParams, WasmAnalyzeResult };
 
 let _analyze: ((input: string) => WasmAnalyzeResult) | null = null;
 let _explain: ((input: string) => string) | null = null;
-let _compile: ((input: string) => CompiledRoute) | null = null;
+let _compile: ((query: string, params?: unknown) => CompiledRoute) | null = null;
+let _bind: ((query: string, params?: unknown, options?: unknown) => string) | null = null;
+let _Stmt:
+  | (new (
+      input: string
+    ) => {
+      injectFilter(field: string, op: string, value: unknown): void;
+      toString(): string;
+    })
+  | null = null;
 let _tokenize: ((input: string) => unknown[]) | null = null;
 let _isValid: ((input: string) => boolean) | null = null;
 let _parse: ((input: string) => unknown[]) | null = null;
@@ -31,7 +41,12 @@ export function initWasm(): void {
     }
     _analyze = qqlWasm.analyze as (input: string) => WasmAnalyzeResult;
     _explain = typeof qqlWasm.explain === "function" ? qqlWasm.explain : null;
-    _compile = typeof qqlWasm.compile === "function" ? qqlWasm.compile : null;
+    _compile =
+      typeof qqlWasm.compile === "function"
+        ? (qqlWasm.compile as (query: string, params?: unknown) => CompiledRoute)
+        : null;
+    _bind = typeof qqlWasm.bind === "function" ? qqlWasm.bind : null;
+    _Stmt = typeof qqlWasm.Stmt === "function" ? qqlWasm.Stmt : null;
     _tokenize = typeof qqlWasm.tokenize === "function" ? qqlWasm.tokenize : null;
     _isValid = typeof qqlWasm.isValid === "function" ? qqlWasm.isValid : null;
     _parse = typeof qqlWasm.parse === "function" ? qqlWasm.parse : null;
@@ -58,14 +73,50 @@ const EMPTY: WasmAnalyzeResult = {
   error: null,
 };
 
-export function analyzeQql(source: string): WasmAnalyzeResult {
+export function analyzeQql(source: string, params?: QqlParams | null): WasmAnalyzeResult {
   if (!_analyze) {
     throw new Error("WASM parser not initialized — call initWasm() first");
   }
   if (!source.trim()) {
     return EMPTY;
   }
-  return _analyze(source);
+  const raw = _analyze(source);
+  // Raw-first: valid documents (and non-bind errors) never pay for a second
+  // pass and keep exact byte offsets. Only unbound `:name` / `?` placeholders
+  // retry against the bound text — without params there is nothing to retry.
+  if (raw.valid || params == null || _bind == null || !isBindError(raw.error?.code)) {
+    return raw;
+  }
+  try {
+    const bound = _bind(source, params);
+    if (bound === source) return raw;
+    return _analyze(bound);
+  } catch {
+    return raw;
+  }
+}
+
+/** Substitute `:name` / `?` placeholders; returns `query` unchanged without params. */
+export function bindQql(query: string, params?: QqlParams | null): string {
+  if (params == null || _bind == null) return query;
+  return _bind(query, params);
+}
+
+/**
+ * Inject `field op value` into one statement and return canonical QQL.
+ * Fail-closed: unsupported statements/operators throw with the WASM message.
+ */
+export function injectFilterQql(source: string, field: string, op: string, value: unknown): string {
+  if (_Stmt == null) {
+    throw new Error("injectFilter() is not available from the WASM module");
+  }
+  const stmt = new _Stmt(source);
+  stmt.injectFilter(field, op, value);
+  return stmt.toString();
+}
+
+function isBindError(code: string | null | undefined): boolean {
+  return code?.startsWith("QQL-BIND-") ?? false;
 }
 
 /**
@@ -74,14 +125,14 @@ export function analyzeQql(source: string): WasmAnalyzeResult {
  * Prefer analyze() so multi-statement scripts and single statements share the
  * same path. The raw wasm `explain()` only accepts a single statement.
  */
-export function explainQql(source: string): string {
+export function explainQql(source: string, params?: QqlParams | null): string {
   const trimmed = source.trim();
   if (!trimmed) {
     throw new Error("Nothing to explain — empty selection");
   }
 
   // analyze() returns explain_nodes for the full script (1..N statements)
-  const result = analyzeQql(trimmed);
+  const result = analyzeQql(trimmed, params);
   if (result.explain) {
     return result.explain;
   }
@@ -91,20 +142,24 @@ export function explainQql(source: string): string {
 
   // Fallback if analyze omitted explain for some reason
   if (_explain) {
-    return _explain(trimmed);
+    try {
+      return _explain(bindQql(trimmed, params));
+    } catch {
+      return _explain(trimmed);
+    }
   }
   throw new Error("explain() is not available from the WASM module");
 }
 
-export function compileQql(source: string): CompiledRoute {
+export function compileQql(source: string, params?: QqlParams | null): CompiledRoute {
   if (!_compile) {
-    const result = analyzeQql(source);
+    const result = analyzeQql(source, params);
     if (result.route) return result.route;
     if (result.routes.length === 1) return result.routes[0];
     if (result.error) throw new Error(`${result.error.code}: ${result.error.message}`);
     throw new Error("compile() is not available from the WASM module");
   }
-  return _compile(source);
+  return _compile(source, params ?? undefined);
 }
 
 export function tokenizeQql(source: string): unknown[] {

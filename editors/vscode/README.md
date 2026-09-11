@@ -14,9 +14,9 @@
 
 ## Features
 
-### Language support (QQL 1.5 / Qdrant 1.19)
+### Language support (QQL 1.7 / Qdrant 1.19)
 
-Highlights and completions cover the full QQL 1.5 surface, including:
+Highlights and completions cover the full QQL 1.7 surface, including:
 
 | Feature | Example |
 |---------|---------|
@@ -24,6 +24,10 @@ Highlights and completions cover the full QQL 1.5 surface, including:
 | Implicit vector search | `QUERY [0.1, 0.2, ...] FROM docs LIMIT 10;` |
 | Default payload | Point payloads returned by default (`WITH PAYLOAD true`) |
 | Quotas | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` |
+| DURABILITY (`WAIT`) | `DELETE FROM docs WHERE status = 'archived' WAIT true;` (`UPSERT`, `CREATE INDEX`, …) |
+| Typed shard keys | `SHARD 'acme'` (keyword) or `SHARD 101` (numeric); `CREATE/DROP SHARD KEY 101 …` |
+| ALTER per-vector diffs | `WITH VECTOR dense (HNSW (m = 32))`, `WITH SPARSE bm25 (SPARSE (modifier = 'idf'))` |
+| Param placeholders | `QUERY TEXT :q FROM docs USING dense LIMIT :n` (see Query parameters) |
 | Memory placement | `WITH VECTOR (memory = 'cached')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'` |
 | MATCH PREFIX | `WHERE title MATCH PREFIX 'Comp'` |
 | SLICE sampling | `WHERE SLICE (4, 1)` |
@@ -48,14 +52,13 @@ QUERY TEXT 'hello' FROM docs USING dense LIMIT 10;
 Every `.qql` file is parsed in real time by the same WASM build of `qql-core`. Parse errors appear as red squiggles with the exact error code, message, and span from the Rust pipeline.
 
 - Updates within ~300ms of typing (configurable)
-- Byte-accurate spans (UTF-8 → UTF-16 conversion)
+- Byte-accurate spans (UTF-8 → UTF-16 conversion); unbound placeholders narrow to the exact `:name` / `?` token
 - Zero network — the WASM binary is bundled
 
 ### Hover Intelligence
 
 - **Keyword docs** for statements, modes, clauses, filters, formula helpers
-- **Live plan** for the enclosing statement (intent, collection, CTEs, limit)
-- **REST route** summary when the statement compiles (`POST /collections/…/points/query`)
+- **Compiled preview** first (`` `POST /… · LIMIT n` ``), then the live plan and REST route summary
 
 ### Outline & Folding
 
@@ -84,13 +87,33 @@ Disable with `qql.codeLens.enabled`.
 | **QQL: Compile to REST Route** | `Ctrl+K Ctrl+R` | Compiled route JSON |
 | **QQL: Copy as curl** | `Ctrl+K Ctrl+C` | Clipboard curl (uses `qql.baseUrl`) |
 | **QQL: Show AST** | — | Parsed AST as JSON |
-| **QQL: Re-analyze Document** | click status bar | Force re-parse |
+| **QQL: Show Tokens** | — | Lexer tokens (`KIND 'text' @start-end`) |
+| **QQL: Run Statement** | — | POST the compiled route to `qql.baseUrl`, render hits/count |
+| **QQL: Add Tenant Filter** | — | Inject `field op value` via WASM, rewrite in place |
+| **QQL: Validate Workspace (.qql)** | — | Analyze every `.qql` file into Problems |
+| **QQL: Select Params Profile** | click status bar¹ | QuickPick for params profiles + re-analyze |
+| **QQL: Re-analyze Document** | click status bar¹ | Force re-parse |
+
+Also available from the editor title bar and right-click **QQL** submenu.
+
+¹ Click re-analyzes directly; with named `qql.paramProfiles` configured it opens the profile picker instead (which also offers re-analyze).
 
 Also available from the editor title bar and right-click **QQL** submenu.
 
 ### Status Bar
 
-Shows `✓ QQL N` when valid, or `✗ QQL` with the error code on failure. Click to re-analyze.
+Shows `✓ QQL 1.7 · N` when valid, or `✗ QQL 1.7` with the error code on failure. The active params profile is appended (`· acme`) when one is selected. Click to re-analyze (or pick a profile when `qql.paramProfiles` is configured).
+
+### Quick Fixes & error links
+
+- Duplicate `WAIT` offers **Remove duplicate WAIT**; unbound `:name` / `?` offers **Add to qql-params** (scaffolds the header entry — fill in the value).
+- Every error code links to its reference section (`reference/error-codes`).
+
+### Run & workspace
+
+- **Run Statement** compiles the selection (or a single-statement file) and POSTs it to `qql.baseUrl`, rendering hit counts + first hits into the QQL channel. Nothing runs without the command.
+- **Validate Workspace** analyzes every `**/*.qql` (skipping `node_modules`, capped at 200 files) into a separate Problems source; open files keep their live diagnostics.
+- Hover shows the compiled `` `METHOD /path · LIMIT n` `` preview first, then keyword docs and the plan.
 
 ### Go to Definition
 
@@ -101,10 +124,25 @@ Jump from a CTE reference in `PREFETCH (…)` back to its `name AS (` definition
 - **Contextual follow-ups** — after `QUERY` suggest modes; after `FUSION` suggest `RRF`/`DBSF`; after `TYPE` suggest index types; …
 - **Collection names** harvested from the current file
 - **CTE names** suggested inside `PREFETCH`
-- **Snippets** for hybrid, CTE fusion, rerank, recommend, DDL, shards, quotas, MATCH PREFIX, SLICE, memory placement, …
+- **Snippets** for hybrid, CTE fusion, rerank, recommend, DDL, shards (keyword + numeric), quotas, ALTER vector/sparse diffs, WAIT durability, `:name` params, MATCH PREFIX, SLICE, memory placement, …
 - Full keyword list still available for filter-as-you-type
 
-Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`, `qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, `qslice`.
+Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`, `qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, `qslice`, `qalter`, `qaltersparse`, `qalterhnsw`, `qshardnum`, `qshardkeynum`, `qparams`.
+
+### Query parameters (`:name` / `?`)
+
+Queries with placeholders validate against bind values instead of failing with `QQL-BIND-*`. Two supply paths (header wins):
+
+```qql
+-- qql-params: {"q": "supply chain risks", "limit": 10}
+QUERY TEXT :q FROM sec10k USING dense LIMIT :limit;
+```
+
+- **Header** — `-- qql-params: {...}` (object for `:name`) or `-- qql-params: [...]` (array for `?`). Single-line JSON in the first 10 lines.
+- **Profile** — named sets in `qql.paramProfiles`, activated via `qql.activeProfile` or the status-bar picker. The Explain CodeLens tooltip shows the active source (`params: acme`).
+- **Setting** — `qql.params` in settings JSON when one value set fits every file.
+
+`qparams` inserts a ready-made header + query. Explain / Compile / curl / Run bind the same values.
 
 ### Language Ergonomics
 
@@ -121,7 +159,10 @@ Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qc
 |---------|---------|-------------|
 | `qql.diagnostics.debounceMs` | `300` | Debounce before re-analyze |
 | `qql.codeLens.enabled` | `true` | Statement CodeLens |
-| `qql.baseUrl` | `http://localhost:6333` | Base URL for curl export |
+| `qql.baseUrl` | `http://localhost:6333` | Base URL for curl export + Run Statement |
+| `qql.params` | `{}` | Bind values for `:name` / `?` (overridden per file by `-- qql-params:`) |
+| `qql.paramProfiles` | `{}` | Named params sets, e.g. `{"acme": {"tenant": "acme"}}` |
+| `qql.activeProfile` | `""` | Active profile name (empty = default `qql.params`) |
 
 ---
 
@@ -139,11 +180,11 @@ Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qc
     │              │ plan/route  │
     │              └──────┬──────┘
     │                     │
-    ├── Diagnostics (errors)
-    ├── Status bar (valid / N stmts)
+    ├── Diagnostics (errors + QuickFixes)
+    ├── Status bar (valid / N stmts / profile)
     ├── CodeLens (Explain · REST · curl)
     ├── Outline symbols + CTE children
-    ├── Hover (keyword docs + plan)
+    ├── Hover (route preview + keyword docs + plan)
     └── Completions (context + collections)
 ```
 

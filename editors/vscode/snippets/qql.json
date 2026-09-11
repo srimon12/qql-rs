@@ -46,9 +46,10 @@
     "body": [
       "UPSERT INTO ${1:collection} VALUES",
       "  {id: ${2:1}, text: '${3:document}'}",
-      "  USING DENSE MODEL '${4:all-MiniLM-L6-v2}';"
+      "  USING DENSE MODEL '${4:all-MiniLM-L6-v2}'",
+      "  WAIT ${5|true,false|};"
     ],
-    "description": "Upsert points with auto-embedding"
+    "description": "Upsert points with auto-embedding (durable with WAIT)"
   },
   "Cross rerank": {
     "prefix": ["qcross", "qrerank"],
@@ -78,6 +79,57 @@
       "  EXACT ${5:true};"
     ],
     "description": "In-database categorical facet count"
+  },
+  "Alter vector diff": {
+    "prefix": ["qalter", "qvectordiff"],
+    "body": [
+      "ALTER COLLECTION ${1:collection}",
+      "  WITH VECTOR ${2:dense} (HNSW (m = ${3:32}), QUANTIZATION (type = '${4:scalar}'));"
+    ],
+    "description": "Per-vector ALTER diff (HNSW / QUANTIZATION / VECTOR)"
+  },
+  "Alter sparse diff": {
+    "prefix": ["qaltersparse", "qsparsediff"],
+    "body": [
+      "ALTER COLLECTION ${1:collection}",
+      "  WITH SPARSE ${2:bm25} (SPARSE (modifier = '${3:idf}', full_scan_threshold = ${4:5000}));"
+    ],
+    "description": "Per-sparse-vector ALTER diff"
+  },
+  "Alter HNSW": {
+    "prefix": ["qalterhnsw"],
+    "body": [
+      "ALTER COLLECTION ${1:collection} WITH HNSW (m = ${2:32});"
+    ],
+    "description": "Patch collection HNSW params"
+  },
+  "Shard numeric routing": {
+    "prefix": ["qshardnum"],
+    "body": [
+      "QUERY TEXT '${1:search}'",
+      "  FROM ${2:collection} USING ${3:dense}",
+      "  WHERE ${4:tenant_id} = '${5:acme}'",
+      "  SHARD ${6:101}",
+      "  LIMIT ${7:10};"
+    ],
+    "description": "Typed shard routing to a numeric partition"
+  },
+  "Query with params": {
+    "prefix": ["qparams", "qbind"],
+    "body": [
+      "-- qql-params: {\"q\": \"${1:search term}\", \"limit\": ${2:10}}",
+      "QUERY TEXT :q",
+      "  FROM ${3:collection} USING ${4:dense}",
+      "  LIMIT :limit;"
+    ],
+    "description": "Placeholder query with a qql-params header"
+  },
+  "Create shard key numeric": {
+    "prefix": ["qshardkeynum"],
+    "body": [
+      "CREATE SHARD KEY ${1:101} ON COLLECTION ${2:collection} WITH (shards_number = ${3:2});"
+    ],
+    "description": "Create a numeric shard key for multi-tenancy"
   },
   "Recommend": {
     "prefix": ["qrecommend"],
