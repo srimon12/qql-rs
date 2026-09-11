@@ -16,6 +16,7 @@ use qql_core::error::QqlError;
 // Re-export shared API so existing `qql::embedder::Embedder` paths keep working.
 pub use qql_embed::SparseVector;
 pub use qql_embed::embedder::{Embedder, EmbedderBound, SparseEmbedder};
+pub use qql_embed::sparse::Bm25Params;
 
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +81,19 @@ pub struct HttpEmbedderOptions {
     pub rerank_api_key: Option<String>,
     /// Cross-encoder model name (Cohere-style `rerank` API).
     pub rerank_model: Option<String>,
+    /// Client-side BM25 `k1` for local **document** sparse embedding. `None`
+    /// keeps the Qdrant `qdrant/bm25` default (`1.2`). Write-path only: it does
+    /// not affect dense/multi/image/rerank HTTP inference, query-side sparse
+    /// weights (always unit), or server-side inference. Documents written
+    /// before a change keep their vectors — re-ingest to apply. Invalid values
+    /// fail closed with `QQL-VALIDATION-CONFIG`.
+    pub bm25_k1: Option<f64>,
+    /// Client-side BM25 `b` (length normalization, `[0, 1]`); `None` keeps the
+    /// Qdrant default (`0.75`). See [`Self::bm25_k1`].
+    pub bm25_b: Option<f64>,
+    /// Client-side BM25 expected average document length in tokens; `None`
+    /// keeps the Qdrant default (`256`). See [`Self::bm25_k1`].
+    pub bm25_avg_len: Option<f64>,
 }
 
 /// OpenAI-compatible HTTP embedder (`POST {"model","input":[...]}`).
@@ -107,6 +121,7 @@ pub struct HttpEmbedder {
     rerank_endpoint: Option<String>,
     rerank_api_key: Option<String>,
     rerank_model: Option<String>,
+    bm25: Bm25Params,
     client: Client,
 }
 
@@ -154,6 +169,8 @@ impl HttpEmbedder {
             ));
         }
 
+        let bm25 = Bm25Params::resolve(opts.bm25_k1, opts.bm25_b, opts.bm25_avg_len)?;
+
         let client = Client::builder().build().map_err(|e| {
             QqlError::execution(
                 "QQL-EMBEDDING",
@@ -178,6 +195,7 @@ impl HttpEmbedder {
             rerank_endpoint: opts.rerank_endpoint.filter(|s| !s.trim().is_empty()),
             rerank_api_key: opts.rerank_api_key,
             rerank_model: opts.rerank_model.filter(|s| !s.trim().is_empty()),
+            bm25,
             client,
         })
     }
@@ -693,6 +711,10 @@ impl Embedder for HttpEmbedder {
         Ok(qql_embed::sparse::embed_query(text))
     }
 
+    fn bm25_params(&self) -> Bm25Params {
+        self.bm25
+    }
+
     async fn embed_sparse_document(
         &self,
         text: &str,
@@ -701,7 +723,9 @@ impl Embedder for HttpEmbedder {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        Ok(qql_embed::sparse::embed_document(text))
+        Ok(qql_embed::sparse::embed_document_with_params(
+            text, &self.bm25,
+        ))
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {

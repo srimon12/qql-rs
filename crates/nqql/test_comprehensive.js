@@ -527,6 +527,65 @@ test('HttpEmbedder accepts rerank fields (snake_case aliases)', () => {
   assert.strictEqual(e.rerankApiKey, 'rk-snake');
 });
 
+// Client-side BM25 document params (local sparse encoder; write-path only).
+// The wrapper must forward them to the native Client, which fails closed on
+// out-of-range values with QQL-VALIDATION-CONFIG.
+test('HttpEmbedder accepts BM25 fields (camelCase)', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25K1: 2.0,
+    bm25B: 0.5,
+    bm25AvgLen: 8,
+  });
+  assert.strictEqual(e.bm25K1, 2.0);
+  assert.strictEqual(e.bm25B, 0.5);
+  assert.strictEqual(e.bm25AvgLen, 8);
+});
+
+test('HttpEmbedder accepts BM25 fields (snake_case aliases)', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25_k1: 1.5,
+    bm25_b: 0.25,
+    bm25_avg_len: 16,
+  });
+  assert.strictEqual(e.bm25K1, 1.5);
+  assert.strictEqual(e.bm25B, 0.25);
+  assert.strictEqual(e.bm25AvgLen, 16);
+});
+
+test('HttpEmbedder rejects non-number BM25 values', () => {
+  assert.throws(
+    () =>
+      new nqql.HttpEmbedder({
+        endpoint: 'http://localhost:8080/v1/embeddings',
+        model: 'test-model',
+        dimension: 768,
+        bm25K1: 'nope',
+      }),
+    /must be a number/
+  );
+});
+
+test('Client with embedder (including BM25 fields) constructs w/o error', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25K1: 2.0,
+    bm25B: 0.5,
+    bm25AvgLen: 8,
+  });
+  const c = new nqql.Client({ url: QDRANT_URL, embedder: e, useGrpc: false });
+  assert.ok(c instanceof nqql.Client);
+  const plan = c.explain('QUERY TEXT "hello" FROM docs LIMIT 5');
+  assert.ok(plan.length > 0);
+});
+
 test('Client with embedder (including rerank fields) constructs w/o error', () => {
   const e = new nqql.HttpEmbedder({
     endpoint: 'http://localhost:8080/v1/embeddings',

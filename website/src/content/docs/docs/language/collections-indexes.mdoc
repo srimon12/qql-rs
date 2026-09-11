@@ -74,6 +74,42 @@ keys, and `QUANTIZATION (disabled = true)` is an ALTER form. `ALTER COLLECTION`
 applies any of the `HNSW`, `VECTOR`, `OPTIMIZERS`, `PARAMS`, or `QUANTIZATION`
 blocks to an existing collection.
 
+### Alter one vector
+
+`ALTER` also accepts per-vector diffs. The named dense form is
+`WITH VECTOR <name> (<nested blocks>)` with `HNSW (...)`, `QUANTIZATION (...)`,
+or `VECTOR (...)` blocks — comma-separated, each at most once. The unnamed
+`WITH VECTOR (...)` form targets the default unnamed vector. Sparse vectors use
+`WITH SPARSE <name> (SPARSE (...) | INDEX (...))`. Every block is field-wise:
+unset keys keep their current value. `datatype` has no per-vector diff field on
+the Qdrant wire and is rejected (`QQL-PARSE-VECTOR-DIFF`); duplicate vector
+names, duplicate nested blocks, and empty blocks are rejected too. Diff names
+are validated against the collection schema before the update is sent
+(`QQL-UNKNOWN-VECTOR` when the vector does not exist).
+
+{% qqlExample title="Per-vector ALTER diffs" %}
+```sql
+ALTER COLLECTION docs
+  WITH VECTOR dense (
+    HNSW (m = 32, memory = 'cold'),
+    QUANTIZATION (type = 'scalar', quantile = 0.99),
+    VECTOR (memory = 'cached', on_disk = true)
+  );
+
+ALTER COLLECTION docs WITH VECTOR colbert (QUANTIZATION (disabled = true));
+
+ALTER COLLECTION docs
+  WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000, datatype = 'float16'));
+```
+{% /qqlExample %}
+
+{% aside type="note" title="Per-vector backend coverage" %}
+REST and gRPC apply every diff field. The in-process edge backend applies
+per-vector `HNSW` only, and rejects `quantization_config`, `on_disk`, `memory`,
+and every sparse diff with `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` /
+`QQL-EDGE-UNSUPPORTED-SPARSE-DIFF`.
+{% /aside %}
+
 ### Memory placement (Qdrant 1.19+)
 
 `memory` controls how a component is held in RAM while data remains on disk:
@@ -200,8 +236,10 @@ DROP SHARD KEY 'acme' ON COLLECTION research;
 
 {% aside type="note" title="Remote-backend capability" %}
 Shard-key DDL and cluster quotas are Qdrant remote capabilities. The in-process
-edge backend does not support shard keys, `ALTER COLLECTION`, grouped queries,
-or `SHOW QUOTAS` / `SET QUOTA`. Quotas are also unavailable over gRPC.
+edge backend supports grouped queries and `ALTER COLLECTION` for global HNSW /
+optimizers and per-vector `HNSW` diffs, but not shard keys,
+`ALTER COLLECTION … WITH PARAMS` / `QUANTIZATION`, other per-vector fields, or
+`SHOW QUOTAS` / `SET QUOTA`. Quotas are also unavailable over gRPC.
 {% /aside %}
 
 Next: [Data operations](/docs/language/data-operations/) and

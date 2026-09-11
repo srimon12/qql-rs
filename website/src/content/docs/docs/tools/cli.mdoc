@@ -38,6 +38,8 @@ the `grpc` feature. Otherwise the REST transport is used.
 | `qql doctor` | Check backend reachability, probe the embedder dim, and compare it against EMBED_DIM and collection vector sizes (`--json`) |
 | `qql check "<query>"` | Triage one statement in order: format, offline explain, embed dim probe, USING topology, backend doctor (one line per stage; `--json`) |
 | `qql config edge` | Configure persistent edge settings (see below) |
+| `qql edge optimize <collection>` | Run the qdrant-edge optimizers (merge segments, build HNSW/sparse indexes); prints counts before/after (`--json`) |
+| `qql edge bootstrap <collection> --from <url>` | Seed a local edge collection from a remote Qdrant shard snapshot (`--shard-id`, `--force`, `--json`) |
 | `qql version` | Print version as JSON |
 
 {% qqlExample title="Executable input" %}
@@ -82,12 +84,15 @@ The full operator guide lives at [Cluster migration](/docs/operations/cluster-mi
 
 `qql config edge` writes persistent settings for the in-process edge backend to
 `<config_dir>/edge.json` (mode `0600`). The edge executor reads this file every
-time you run a command with `--edge`.
+time you run a command with `--edge`. Updates are merged: only the flags you
+pass are written, and keys you did not set (including unknown/future ones) are
+preserved.
 
 | Flag | Purpose |
 |---|---|
 | `--data-dir` | Directory for persistent qdrant-edge data |
-| `--in-memory` | Keep payloads in RAM instead of persisting them to disk |
+| `--in-memory` / `--on-disk` | Keep payloads in RAM / persist them to disk |
+| `--wal-segment-mb N` | WAL segment capacity in MiB (seeds new shards; a persisted value wins; also exposed by the Python/Node edge SDKs) |
 | `--embedder fastembed\|http` | Embedding backend (default `fastembed`) |
 | `--model` | Local FastEmbed dense model name or alias |
 | `--sparse-model` | Offline sparse model for fastembed (e.g. `splade`, `bge-m3`) |
@@ -95,7 +100,7 @@ time you run a command with `--edge`.
 | `--image-model` | Offline CLIP vision model for fastembed (e.g. `clip-vision`) |
 | `--reranker-model` | Offline cross-encoder model (e.g. `bge-reranker-base`) |
 | `--cache-dir` | Directory for downloaded FastEmbed models |
-| `--show-download-progress` | Show model download progress |
+| `--show-download-progress` / `--no-show-download-progress` | Show / hide model download progress |
 | `--embed-url` | OpenAI-compatible embedding endpoint for the HTTP backend |
 | `--embed-key` | API key for the HTTP embedding backend |
 | `--embed-model` | Model name sent to the HTTP backend (default `nomic-embed-text`) |
@@ -131,6 +136,8 @@ qql --edge doctor
 qql --edge connect
 qql --edge execute script.qql
 qql --edge dump listings out.qql
+qql edge optimize listings
+qql edge bootstrap listings --from http://localhost:6333
 {% /terminal %}
 
 {% qqlExample title="Query the edge backend" %}
@@ -146,7 +153,8 @@ LIMIT 10;
 
 {% aside type="note" title="Edge capability surface" %}
 The edge backend deliberately implements a smaller query subset than a Qdrant
-cluster: no `GROUP BY`, `SHARD` keys, or `ALTER COLLECTION`. See [the
+cluster: no custom `SHARD` routing, shard-key DDL, or cross-collection
+`LOOKUP FROM`. See [the
 edge backend overview](/docs/edge/) and [the edge CLI reference](/docs/edge/cli/).
 {% /aside %}
 

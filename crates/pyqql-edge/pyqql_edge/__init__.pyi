@@ -189,6 +189,10 @@ def local_executor(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
+    wal_segment_mb: Optional[int] = None,
+    bm25_k1: Optional[float] = None,
+    bm25_b: Optional[float] = None,
+    bm25_avg_len: Optional[float] = None,
 ) -> Client: ...
 def http_executor(
     data_dir: str,
@@ -197,6 +201,10 @@ def http_executor(
     embed_model: str,
     embed_dim: int,
     on_disk_payload: bool = True,
+    *,
+    bm25_k1: Optional[float] = None,
+    bm25_b: Optional[float] = None,
+    bm25_avg_len: Optional[float] = None,
 ) -> Client: ...
 def list_embedding_models() -> List[Dict[str, Any]]: ...
 def execute(
@@ -212,6 +220,9 @@ def execute(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
+    bm25_k1: Optional[float] = None,
+    bm25_b: Optional[float] = None,
+    bm25_avg_len: Optional[float] = None,
     on_error: str = "stop",
 ) -> ExecutionReport: ...
 async def execute_async(
@@ -227,6 +238,9 @@ async def execute_async(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
+    bm25_k1: Optional[float] = None,
+    bm25_b: Optional[float] = None,
+    bm25_avg_len: Optional[float] = None,
     on_error: str = "stop",
 ) -> ExecutionReport: ...
 def execute_hits(

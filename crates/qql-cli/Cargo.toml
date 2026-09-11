@@ -24,7 +24,7 @@ rest = ["qql/rest"]
 # Local in-process qdrant-edge backend (no Qdrant server needed).
 # Opt-in because FastEmbed and ONNX materially increase compile time and
 # the optimized CLI binary size.
-edge = ["qql-edge", "qql-edge/http-embedding"]
+edge = ["qql-edge", "qql-edge/fastembed-local", "qql-edge/http-embedding"]
 
 [dependencies]
 qql-core = { workspace = true, features = ["serde", "json", "std"] }

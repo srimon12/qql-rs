@@ -10,7 +10,11 @@ use qql_core::ast::{ShardKey, Stmt};
 use qql_core::parser::Parser;
 use qql_plan::filter::top_level_filter;
 use qql_plan::types::FilterExpression;
-use serde_json::{Value, json};
+use qql_plan::{
+    BinaryQuantization, ProductQuantization, QuantizationConfig, ScalarQuantization,
+    TurboQuantization,
+};
+use serde_json::Value;
 
 use super::checkpoint::Checkpoint;
 use super::discover::create_shard_key_sql;
@@ -38,10 +42,11 @@ pub fn apply_overrides(info: &mut CollectionInfo, opts: &MigrateOptions) {
         info.schema.params.sharding_method = Some("custom".into());
     }
     if let Some(ref spec) = opts.quantize {
-        let q = quantize_json(spec);
-        info.schema.quantization = Some(q.clone());
+        let q = quantize_config(spec);
+        let q_value = serde_json::to_value(&q).unwrap_or(Value::Null);
+        info.schema.quantization = Some(q);
         for vector in &mut info.schema.vectors {
-            vector.quantization = Some(q.clone());
+            vector.quantization = Some(q_value.clone());
         }
     }
 }
@@ -49,46 +54,58 @@ pub fn apply_overrides(info: &mut CollectionInfo, opts: &MigrateOptions) {
 /// Raise `indexing_threshold` so HNSW is not built concurrently with ingest.
 /// Returns the original threshold (if any) for later restore.
 pub fn suppress_indexing(info: &mut CollectionInfo, threshold_kb: u64) -> Option<u64> {
-    let original = info
-        .schema
-        .optimizers
-        .as_ref()
-        .and_then(|m| m.get("indexing_threshold"))
-        .and_then(Value::as_u64);
-    let map = info.schema.optimizers.get_or_insert_with(Default::default);
-    map.insert("indexing_threshold".into(), json!(threshold_kb));
+    let optimizers = info.schema.optimizers.get_or_insert_with(Default::default);
+    let original = optimizers.indexing_threshold;
+    optimizers.indexing_threshold = Some(threshold_kb);
     original
 }
 
-/// Nested REST quantization object (`{ "scalar": { … } }`).
-pub fn quantize_json(spec: &QuantizeSpec) -> Value {
-    let always = json!(spec.always_ram);
+/// Typed quantization config for a migrate `--quantize` override.
+pub fn quantize_config(spec: &QuantizeSpec) -> QuantizationConfig {
+    let always_ram = Some(spec.always_ram);
     match spec.kind {
-        QuantizeKind::Scalar => json!({
-            "scalar": {
-                "type": "int8",
-                "quantile": spec.quantile,
-                "always_ram": always,
-            }
-        }),
-        QuantizeKind::Binary => json!({
-            "binary": {
-                "always_ram": always,
-                "encoding": spec.encoding,
-            }
-        }),
-        QuantizeKind::Product => json!({
-            "product": {
-                "compression": spec.compression,
-                "always_ram": always,
-            }
-        }),
-        QuantizeKind::Turbo => json!({
-            "turbo": {
-                "bits": spec.bits,
-                "always_ram": always,
-            }
-        }),
+        QuantizeKind::Scalar => QuantizationConfig::Scalar {
+            scalar: ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: Some(spec.quantile),
+                always_ram,
+                memory: None,
+            },
+        },
+        QuantizeKind::Binary => QuantizationConfig::Binary {
+            binary: BinaryQuantization {
+                always_ram,
+                encoding: Some(spec.encoding.clone()),
+                query_encoding: None,
+                memory: None,
+            },
+        },
+        QuantizeKind::Product => QuantizationConfig::Product {
+            product: ProductQuantization {
+                compression: spec.compression.clone(),
+                always_ram,
+                memory: None,
+            },
+        },
+        QuantizeKind::Turbo => QuantizationConfig::Turbo {
+            turbo: TurboQuantization {
+                bits: Some(turbo_bits_label(&spec.bits)),
+                always_ram,
+                memory: None,
+            },
+        },
+    }
+}
+
+/// Map the CLI's numeric turbo bits (`1` / `1.5` / `2` / `4`) onto the OpenAPI
+/// `bitsN` label the plan serializes.
+fn turbo_bits_label(bits: &str) -> String {
+    match bits {
+        "1" => "bits1".into(),
+        "1.5" => "bits1_5".into(),
+        "2" => "bits2".into(),
+        "4" => "bits4".into(),
+        other => format!("bits{other}"),
     }
 }
 
@@ -109,8 +126,7 @@ pub fn build_plan(info: &CollectionInfo, opts: &MigrateOptions) -> MigratePlan {
         .schema
         .optimizers
         .as_ref()
-        .and_then(|m| m.get("indexing_threshold"))
-        .and_then(Value::as_u64);
+        .and_then(|optimizers| optimizers.indexing_threshold);
     if opts.fast_bulk {
         suppress_indexing(&mut info, opts.bulk_indexing_threshold);
     }
@@ -191,8 +207,7 @@ pub async fn prepare_target(
         info.schema
             .optimizers
             .as_ref()
-            .and_then(|m| m.get("indexing_threshold"))
-            .and_then(Value::as_u64)
+            .and_then(|optimizers| optimizers.indexing_threshold)
     };
     checkpoint.original_indexing_threshold = original_threshold;
 

@@ -30,10 +30,12 @@
 //! [qdrant-edge]: https://crates.io/crates/qdrant-edge
 
 mod backend;
+mod bootstrap;
 #[cfg(feature = "fastembed-local")]
 mod embedder;
 
 pub use backend::EdgeQdrant;
+pub use bootstrap::{ShardSummary, inspect_shard, unpack_snapshot};
 #[cfg(feature = "fastembed-local")]
 pub use embedder::{
     EmbeddingModelInfo, FastEmbedder, FastEmbedderOptions, list_embedding_models,
@@ -53,6 +55,17 @@ pub struct LocalExecutorOptions {
     /// this struct defaults to `false` for Rust ergonomics matching the
     /// historical `local_executor(path, false)` tests).
     pub on_disk_payload: bool,
+    /// Write-ahead-log segment capacity in bytes. qdrant-edge pre-allocates
+    /// each WAL segment to this size (default 32 MiB), which dominates the
+    /// on-disk footprint of small embedded shards.
+    ///
+    /// Seeds the value when a shard is created or when it exists without a
+    /// persisted WAL capacity; a capacity already persisted in
+    /// `edge_config.json` wins, so later opens cannot ratchet the shard's
+    /// config. Hosts configure it in MiB — [`wal_segment_capacity_bytes`]
+    /// performs the conversion: the CLI via `--wal-segment-mb`, Python via
+    /// `wal_segment_mb`, and Node via `walSegmentMb`.
+    pub wal_segment_capacity: Option<usize>,
     /// Local ONNX dense model name. See [`resolve_embedding_model`] for accepted forms.
     /// `None` → default `BGESmallENV15` (384-d).
     #[cfg(feature = "fastembed-local")]
@@ -80,6 +93,52 @@ pub struct LocalExecutorOptions {
     /// Show HuggingFace download progress bars (default: `false`).
     #[cfg(feature = "fastembed-local")]
     pub show_download_progress: bool,
+    /// Client-side BM25 `k1` for the local wire-compatible document encoder
+    /// (used when no offline sparse model is configured). `None` keeps the
+    /// Qdrant `qdrant/bm25` default (`1.2`). Write-path only; invalid values
+    /// fail closed with `QQL-VALIDATION-CONFIG` at executor construction.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_k1: Option<f64>,
+    /// Client-side BM25 `b` (`[0, 1]`); `None` keeps the Qdrant default
+    /// (`0.75`). See [`Self::bm25_k1`].
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_b: Option<f64>,
+    /// Client-side BM25 expected average document length in tokens; `None`
+    /// keeps the Qdrant default (`256`). See [`Self::bm25_k1`].
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_avg_len: Option<f64>,
+}
+
+/// Convert a MiB WAL segment capacity into the byte count
+/// [`LocalExecutorOptions::wal_segment_capacity`] expects.
+///
+/// Host surfaces configure the knob in whole MiB (CLI `--wal-segment-mb`,
+/// Python `wal_segment_mb`, Node `walSegmentMb`). `None` keeps the engine
+/// default (32 MiB); zero or a value that overflows `usize` bytes fails closed
+/// with `QQL-VALIDATION-CONFIG` instead of silently producing a nonsensical
+/// WAL capacity.
+pub fn wal_segment_capacity_bytes(
+    mb: Option<u64>,
+) -> Result<Option<usize>, qql_core::error::QqlError> {
+    match mb {
+        None => Ok(None),
+        Some(0) => Err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            "wal_segment_mb must be greater than zero; omit it for the qdrant-edge 32 MiB default",
+            None,
+        )),
+        Some(mb) => usize::try_from(mb)
+            .ok()
+            .and_then(|mb| mb.checked_mul(1024 * 1024))
+            .map(Some)
+            .ok_or_else(|| {
+                qql_core::error::QqlError::validation(
+                    "QQL-VALIDATION-CONFIG",
+                    "wal_segment_mb is too large for this platform",
+                    None,
+                )
+            }),
+    }
 }
 
 /// Build a fully-local [`Executor`] backed by fastembed-rs and qdrant-edge.
@@ -109,7 +168,10 @@ pub fn local_executor_with_options(
     data_dir: impl Into<PathBuf>,
     opts: LocalExecutorOptions,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, opts.on_disk_payload));
+    let client = Box::new(
+        EdgeQdrant::new(data_dir, opts.on_disk_payload)
+            .with_wal_segment_capacity(opts.wal_segment_capacity),
+    );
     let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
         model: opts.model,
         sparse_model: opts.sparse_model,
@@ -118,6 +180,9 @@ pub fn local_executor_with_options(
         reranker_model: opts.reranker_model,
         cache_dir: opts.cache_dir,
         show_download_progress: opts.show_download_progress,
+        bm25_k1: opts.bm25_k1,
+        bm25_b: opts.bm25_b,
+        bm25_avg_len: opts.bm25_avg_len,
     })?;
 
     // Pin collection vector size to the actual model dimension. Without this,
@@ -214,7 +279,23 @@ pub fn http_executor_with_options(
     on_disk_payload: bool,
     opts: qql::embedder::HttpEmbedderOptions,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
+    http_executor_with_options_and_wal(data_dir, on_disk_payload, None, opts)
+}
+
+/// Like [`http_executor_with_options`], with an explicit WAL segment capacity
+/// (bytes) applied to every shard the executor opens or creates; `None` keeps
+/// the engine default (32 MiB) for new shards and the persisted value for
+/// existing ones.
+#[cfg(feature = "http-embedding")]
+pub fn http_executor_with_options_and_wal(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    wal_segment_capacity: Option<usize>,
+    opts: qql::embedder::HttpEmbedderOptions,
+) -> Result<Executor, qql_core::error::QqlError> {
+    let client = Box::new(
+        EdgeQdrant::new(data_dir, on_disk_payload).with_wal_segment_capacity(wal_segment_capacity),
+    );
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: opts.dimension,
@@ -265,7 +346,22 @@ pub fn custom_executor_with_dimension(
     embedder: Arc<dyn Embedder>,
     dimension: Option<usize>,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
+    custom_executor_with_storage(data_dir, on_disk_payload, None, embedder, dimension)
+}
+
+/// Like [`custom_executor_with_dimension`], with an explicit WAL segment
+/// capacity (bytes) applied to every shard the executor opens or creates;
+/// `None` keeps the engine default.
+pub fn custom_executor_with_storage(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    wal_segment_capacity: Option<usize>,
+    embedder: Arc<dyn Embedder>,
+    dimension: Option<usize>,
+) -> Result<Executor, qql_core::error::QqlError> {
+    let client = Box::new(
+        EdgeQdrant::new(data_dir, on_disk_payload).with_wal_segment_capacity(wal_segment_capacity),
+    );
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: embedder.dimension().or(dimension).unwrap_or(0),
@@ -337,6 +433,125 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    #[cfg(feature = "fastembed-local")]
+    fn local_executor_options_bm25_defaults_are_unset() {
+        let opts = LocalExecutorOptions::default();
+        assert_eq!(opts.bm25_k1, None);
+        assert_eq!(opts.bm25_b, None);
+        assert_eq!(opts.bm25_avg_len, None);
+    }
+
+    /// Executor-level end-to-end: BM25 parameters configured on the embedder
+    /// must land in the sparse vector qdrant-edge actually stores for a TEXT
+    /// upsert, matching `qql_embed::sparse::embed_document_with_params`.
+    ///
+    /// Uses the edge HTTP executor so no ONNX model is needed: dense/multi
+    /// inference goes to the (unused) endpoint, while sparse document encoding
+    /// is the local wire-compatible BM25 path.
+    #[test]
+    #[cfg(feature = "http-embedding")]
+    fn configured_bm25_params_land_in_stored_sparse_vector() {
+        use qql::embedder::HttpEmbedderOptions;
+        use qql::executor::OnError;
+        use qql_plan::{PlanVectorStruct, PlanVectorValue};
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let data_dir =
+                std::env::temp_dir().join(format!("qql-edge-bm25-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&data_dir);
+
+            let params = qql_embed::Bm25Params::new(2.0, 0.5, 4.0).expect("valid params");
+            let executor = http_executor_with_options_and_wal(
+                &data_dir,
+                false,
+                None,
+                HttpEmbedderOptions {
+                    endpoint: "http://127.0.0.1:9/v1/embeddings".to_string(),
+                    api_key: String::new(),
+                    model: "unused-dense".to_string(),
+                    dimension: 3,
+                    bm25_k1: Some(params.k1()),
+                    bm25_b: Some(params.b()),
+                    bm25_avg_len: Some(params.avg_len()),
+                    ..Default::default()
+                },
+            )
+            .expect("http edge executor");
+
+            let report = executor
+                .execute("CREATE COLLECTION bm25_docs (sparse SPARSE)", OnError::Stop)
+                .await
+                .expect("create collection");
+            assert!(report.ok, "create failed: {report:?}");
+
+            let text = "cat sat mat cat";
+            let report = executor
+                .execute(
+                    &format!("UPSERT INTO bm25_docs VALUES {{id: 1, text: '{text}'}}"),
+                    OnError::Stop,
+                )
+                .await
+                .expect("upsert");
+            assert!(report.ok, "upsert failed: {report:?}");
+
+            let report = executor
+                .execute(
+                    "QUERY POINTS (1) FROM bm25_docs WITH VECTOR true",
+                    OnError::Stop,
+                )
+                .await
+                .expect("point lookup");
+            assert!(report.ok, "lookup failed: {report:?}");
+            let hits = report.results[0].hits_ref().expect("hits");
+            let vector = hits[0].vector.as_ref().expect("stored vector");
+            let stored = match vector {
+                PlanVectorStruct::Single(v) => v,
+                PlanVectorStruct::Named(map) => map.get("sparse").expect("sparse named vector"),
+            };
+            let (indices, values) = match stored {
+                PlanVectorValue::Sparse { indices, values } => (indices, values),
+                other => panic!("expected sparse vector, got {other:?}"),
+            };
+
+            let expected = qql_embed::sparse::embed_document_with_params(text, &params);
+            assert_eq!(*indices, expected.indices, "stored indices must match");
+            assert_eq!(values.len(), expected.values.len());
+            for (got, want) in values.iter().zip(&expected.values) {
+                assert!(
+                    (got - want).abs() < 1e-6,
+                    "stored BM25 weight {got} != configured {want}"
+                );
+            }
+
+            // The configured k1/b/avg_len genuinely differ from the defaults.
+            let default = qql_embed::sparse::embed_document(text);
+            assert_ne!(*values, default.values);
+
+            executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(data_dir);
+        });
+    }
+
+    #[test]
+    fn wal_segment_capacity_bytes_scales_mib() {
+        assert_eq!(wal_segment_capacity_bytes(None).unwrap(), None);
+        assert_eq!(wal_segment_capacity_bytes(Some(4)).unwrap(), Some(4 << 20));
+    }
+
+    #[test]
+    fn wal_segment_capacity_bytes_rejects_zero_and_overflow() {
+        let zero = wal_segment_capacity_bytes(Some(0)).expect_err("zero must fail closed");
+        assert_eq!(zero.code, "QQL-VALIDATION-CONFIG");
+        let overflow =
+            wal_segment_capacity_bytes(Some(u64::MAX)).expect_err("overflow must fail closed");
+        assert_eq!(overflow.code, "QQL-VALIDATION-CONFIG");
     }
 
     #[test]

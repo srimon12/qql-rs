@@ -42,6 +42,17 @@ exec.execute(
 
 Convenience: `Executor::rest(url, api_key)` / `Executor::grpc(url, api_key)`.
 
+### Local sparse (BM25) tuning
+
+`HttpEmbedder` serves dense/multi/image/rerank over HTTP but always encodes
+sparse **documents locally** (wire-compatible `qdrant/bm25`). Tune the document
+encoder via `HttpEmbedderOptions { bm25_k1, bm25_b, bm25_avg_len, .. }` (or
+`QqlConfig.bm25_*` for config-file hosts). Client-side and write-path only:
+query weights stay unit, server-side inference is untouched, and vectors
+already written keep their weights — re-ingest to apply. Unset = Qdrant
+defaults (`1.2 / 0.75 / 256`); invalid values fail closed with
+`QQL-VALIDATION-CONFIG`. Full host-surface table: [qql-embed README](../qql-embed/README.md#tuning-k1-b-avg_len).
+
 ## QdrantOps
 
 Unified backend trait (collections, indexes, `execute_planned`, query/update
@@ -51,7 +62,7 @@ batches). Implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant` (other crate
 |---------|----------------|--------|
 | REST | 6333 | OpenAPI **1.19.0** JSON body (`openapi.json`) |
 | gRPC | 6334 | tonic + public protos in `proto/` (1.19.0 pin) |
-| Edge | n/a | qdrant-edge **0.8** (IDF + ACORN yes; quotas / SHARD / GROUP BY no) |
+| Edge | n/a | qdrant-edge **0.8** (IDF + ACORN + GROUP BY yes; quotas / SHARD / LOOKUP FROM no) |
 
 API key: REST header `api-key`; gRPC `ApiKeyInterceptor`.
 

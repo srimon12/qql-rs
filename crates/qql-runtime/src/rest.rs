@@ -29,6 +29,18 @@ pub struct RestQdrant {
     client: Client,
 }
 
+/// Redacts the API key: adapters surface in logs and error contexts.
+impl std::fmt::Debug for RestQdrant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RestQdrant")
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("route_affinity", &self.route_affinity)
+            .field("client", &self.client)
+            .finish()
+    }
+}
+
 pub(crate) fn classify_backend_error_code(status: u16, body: &str) -> &'static str {
     let lower = body.to_ascii_lowercase();
     if lower.contains("strict-mode")
@@ -125,6 +137,38 @@ impl RestQdrant {
             route_affinity: None,
             client,
         }
+    }
+
+    /// Construct with a per-read (stall) timeout and **no total request cap**.
+    ///
+    /// For streaming opaque bodies (shard snapshots) the 30 s default total
+    /// timeout would abort a multi-GB transfer mid-stream, while dropping the
+    /// timeout entirely would hang forever on a dead peer. `read_timeout`
+    /// bounds each read operation instead: the transfer may take as long as it
+    /// makes progress and fails once no bytes arrive for `read_timeout`.
+    pub fn with_read_timeout(
+        base_url: impl Into<String>,
+        api_key: Option<String>,
+        read_timeout: Duration,
+    ) -> Result<Self, QqlError> {
+        let base_url = base_url.into();
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(read_timeout)
+            .build()
+            .map_err(|e| {
+                QqlError::transport(
+                    "QQL-TRANSPORT",
+                    format!("failed to build HTTP client: {e}"),
+                    None,
+                )
+            })?;
+        Ok(Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            api_key,
+            route_affinity: None,
+            client,
+        })
     }
 
     /// Pin subsequent reads to a stable replica via `X-Qdrant-Route-Affinity`.
@@ -238,6 +282,53 @@ impl RestQdrant {
         body: Option<Value>,
     ) -> Result<T, QqlError> {
         self.call_body(method, path, body.as_ref()).await
+    }
+
+    /// GET a JSON route and return the validated success-envelope value.
+    pub(crate) async fn get_value(&self, path: &str) -> Result<Value, QqlError> {
+        self.call::<Value>(Method::GET, path, None).await
+    }
+
+    /// Begin a streaming GET for an opaque, non-JSON body (a snapshot archive).
+    ///
+    /// Applies the same API-key / affinity / request-id headers and backend
+    /// error classification as [`Self::call_body`], but leaves the body
+    /// unread and unparsed so callers consume it chunk by chunk.
+    pub(crate) async fn get_stream(&self, path: &str) -> Result<reqwest::Response, QqlError> {
+        let url = format!("{}{}", self.base_url, path);
+        let request_id = next_request_id();
+        let request = self.apply_headers(self.client.get(&url), &request_id);
+        let response = request.send().await.map_err(|error| {
+            QqlError::transport(
+                "QQL-TRANSPORT",
+                format!("HTTP request failed: {error} (request id: {request_id})"),
+                None,
+            )
+            .with_url(url.clone())
+            .with_field("request_id", request_id.clone())
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            let server_request_id = response
+                .headers()
+                .get(REQUEST_ID_HEADER)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+                .unwrap_or_else(|| request_id.clone());
+            let body = response.text().await.unwrap_or_default();
+            let limit = body.floor_char_boundary(4096);
+            let detail = &body[..limit];
+            let code = classify_backend_error_code(status.as_u16(), detail);
+            return Err(QqlError::backend(
+                code,
+                format!("Qdrant returned {status}: {detail} (request id: {server_request_id})"),
+                None,
+            )
+            .with_status(status.as_u16())
+            .with_url(url)
+            .with_field("request_id", server_request_id));
+        }
+        Ok(response)
     }
 }
 
@@ -602,5 +693,18 @@ mod tests {
         // Lowercase body text (e.g. "index not found" inside a 200 envelope)
         // must not read as collection-missing (RT-09 asymmetry).
         assert!(!is_collection_missing_message("index not found"));
+    }
+
+    #[test]
+    fn debug_redacts_api_key() {
+        let rest = RestQdrant::with_timeout(
+            "http://localhost:6333",
+            Some("super-secret".into()),
+            Duration::from_secs(1),
+        )
+        .expect("client");
+        let debug = format!("{rest:?}");
+        assert!(!debug.contains("super-secret"), "{debug}");
+        assert!(debug.contains("<redacted>"), "{debug}");
     }
 }

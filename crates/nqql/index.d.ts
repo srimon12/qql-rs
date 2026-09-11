@@ -157,6 +157,16 @@ export interface HttpEmbedderOptions {
   rerank_api_key?: string;
   rerankModel?: string;
   rerank_model?: string;
+  /** Client-side BM25 `k1` for the local sparse document encoder (default 1.2;
+   * write-path only — does not change query weights or server-side inference) */
+  bm25K1?: number;
+  bm25_k1?: number;
+  /** Client-side BM25 `b` length normalization in [0, 1] (default 0.75) */
+  bm25B?: number;
+  bm25_b?: number;
+  /** Client-side BM25 expected average document length in tokens (default 256) */
+  bm25AvgLen?: number;
+  bm25_avg_len?: number;
 }
 
 export class HttpEmbedder {

@@ -44,8 +44,8 @@ qql --edge exec "UPSERT INTO docs VALUES {id: 1, text: 'hello'}"
 qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"   # still there
 {% /terminal %}
 
-The vector schema is fixed at creation (`edge_config.json`); edge has no
-`ALTER COLLECTION`.
+The vector schema is fixed at creation (`edge_config.json`); `ALTER COLLECTION`
+can update HNSW and optimizer config, but not vector definitions.
 
 ## `close()` — flushing the WAL and segments
 
@@ -109,10 +109,43 @@ language bindings default to `true` (on-disk), while the Rust
 The WAL captures every collection update operation before it is applied to
 segments, which is what makes a crash restart safe. qdrant-edge defaults to
 WAL segments of 32 MiB capacity and recycles them as they are flushed to
-segments. Smaller capacities are useful for embedded or memory-constrained
-deployments; the `wal_options` are configurable at the qdrant-edge
-`EdgeConfig` layer (they are not currently exposed through `qql-edge`
-`LocalExecutorOptions`).
+segments. qdrant-edge **pre-allocates** each segment to its capacity, so the
+32 MiB default can dominate the on-disk footprint of small embedded shards and
+inflate naive backup sizes.
+
+The capacity is exposed through qql-edge:
+
+| Layer | Knob |
+|---|---|
+| CLI | `qql config edge --wal-segment-mb 4` (or `qql edge bootstrap` / `qql edge optimize` with the persisted config) |
+| Environment | `QQL_EDGE_WAL_SEGMENT_MB=4` |
+| Rust | `LocalExecutorOptions { wal_segment_capacity: Some(4 * 1024 * 1024), .. }` or `EdgeQdrant::with_wal_segment_capacity(...)` |
+| Python | `local_executor(..., wal_segment_mb=4)` |
+| Node | `localExecutor(dir, { walSegmentMb: 4 })` (qdrant-edge 0.8's own Python binding cannot set it) |
+
+Precedence is **seed-once**: the value is written to `edge_config.json` when a
+shard is created (or first opened without a persisted capacity), and from then
+on the persisted value wins. Reopening a shard with the environment still set
+to a different value — or with it unset — does not rewrite the shard config, so
+an environment override cannot ratchet existing collections away from their
+recorded capacity. When unset on a brand-new shard, the engine default (32 MiB)
+applies.
+
+## Snapshot staging
+
+`qql edge bootstrap` uses a hidden staging workspace under the data directory:
+
+```
+<base_path>/
+└── .qql-bootstrap/<collection>/
+    ├── shard.snapshot   # streamed remote snapshot archive
+    └── stage/           # unpacked + verified shard, moved into place on success
+```
+
+A failed bootstrap leaves the workspace cleaned up and any existing collection
+untouched. Only after the snapshot downloads, unpacks, and loads successfully
+is the target directory replaced (with `--force`). Never unpack or merge
+snapshot archives by hand — the engine's snapshot API is the contract.
 
 ## Operational notes
 

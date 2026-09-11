@@ -157,6 +157,70 @@ async fn test_alter_collection_disable_quantization() {
     assert_eq!(req["quantization_config"], "Disabled");
 }
 
+/// Named per-vector diffs lower onto the PATCH body and their names are
+/// validated against the cached schema before dispatch (fail-fast).
+#[tokio::test]
+async fn test_alter_collection_vector_diffs_validate_names_and_project() {
+    let client = MockQdrantClient {
+        exists: true,
+        collections: vec!["mycol".to_string()],
+        info: Some(collection_with_vectors(&["dense"], &["bm25"])),
+        ..Default::default()
+    };
+    let last_planned = client.last_planned.clone();
+    let info_count = client.info_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    executor
+        .execute(
+            "ALTER COLLECTION mycol \
+             WITH VECTOR dense (HNSW (m = 32), VECTOR (memory = 'cold')) \
+             WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000))",
+            OnError::Stop,
+        )
+        .await
+        .expect("named vector diffs must apply");
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
+    assert_eq!(route.method, qql_plan::Method::Patch);
+    let req = route.body_json().unwrap();
+    assert_eq!(req["vectors"]["dense"]["hnsw_config"]["m"], 32);
+    assert_eq!(req["vectors"]["dense"]["memory"], "cold");
+    assert_eq!(req["sparse_vectors"]["bm25"]["modifier"], "idf");
+    assert_eq!(
+        req["sparse_vectors"]["bm25"]["index"]["full_scan_threshold"],
+        5000
+    );
+    assert_eq!(*info_count.lock().unwrap(), 1, "one schema fetch");
+
+    for (query, label) in [
+        (
+            "ALTER COLLECTION mycol WITH VECTOR missing (HNSW (m = 16))",
+            "unknown dense name",
+        ),
+        (
+            "ALTER COLLECTION mycol WITH SPARSE dense (SPARSE (modifier = 'idf'))",
+            "dense name used as sparse",
+        ),
+        (
+            "ALTER COLLECTION mycol WITH VECTOR (on_disk = true)",
+            "default-vector form on a named collection",
+        ),
+    ] {
+        let err = executor
+            .execute(query, OnError::Stop)
+            .await
+            .expect_err(label);
+        assert_eq!(err.code, "QQL-UNKNOWN-VECTOR", "{label}: {err}");
+    }
+    assert_eq!(
+        *info_count.lock().unwrap(),
+        2,
+        "successful ALTER invalidates the cache once, then validation failures reuse the refetched schema"
+    );
+}
+
 #[tokio::test]
 async fn test_schema_cache_reuses_and_invalidates_on_ddl() {
     let client = MockQdrantClient {

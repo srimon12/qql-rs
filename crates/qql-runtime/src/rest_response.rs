@@ -180,6 +180,9 @@ pub(crate) fn parse_collection_info(envelope: &Value) -> Result<CollectionInfo, 
             .get("points_count")
             .and_then(Value::as_u64)
             .unwrap_or(0),
+        // `indexed_vectors_count` is nullable in the OpenAPI schema; absent or
+        // null both read as "not reported".
+        indexed_vectors_count: result.get("indexed_vectors_count").and_then(Value::as_u64),
         segments_count,
         schema: crate::backend::schema_from_rest_result(result),
     })

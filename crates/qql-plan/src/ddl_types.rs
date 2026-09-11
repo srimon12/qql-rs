@@ -8,10 +8,10 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use qql_core::ast::{MemoryPlacement, VectorDatatype, VectorDistance};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// HNSW index configuration for collection creation/update.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct HnswConfig {
     /// Edges per node (`m`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,8 +57,42 @@ impl Serialize for MaxOptimizationThreads {
     }
 }
 
+impl<'de> Deserialize<'de> for MaxOptimizationThreads {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = MaxOptimizationThreads;
+
+            fn expecting(&self, formatter: &mut alloc::fmt::Formatter) -> alloc::fmt::Result {
+                formatter.write_str("a thread count or \"auto\"")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(MaxOptimizationThreads::Threads(value))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                u64::try_from(value)
+                    .map(MaxOptimizationThreads::Threads)
+                    .map_err(|_| E::invalid_value(serde::de::Unexpected::Signed(value), &self))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                if value.eq_ignore_ascii_case("auto") {
+                    Ok(MaxOptimizationThreads::Auto)
+                } else {
+                    Err(E::invalid_value(serde::de::Unexpected::Str(value), &self))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 /// Segment optimizer configuration for collection creation/update.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct OptimizersConfig {
     /// Deleted-vector ratio that triggers segment merges (`deleted_threshold`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,7 +124,7 @@ pub struct OptimizersConfig {
 }
 
 /// Vector quantization config (scalar/product/binary/turbo).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum QuantizationConfig {
     /// Scalar (int8) quantization (`{"scalar": …}`).
@@ -134,7 +168,7 @@ impl Serialize for QuantizationConfigDiff {
 }
 
 /// OpenAPI scalar quantization config (type `int8`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScalarQuantization {
     /// Qdrant REST/OpenAPI expects `"int8"` for scalar quantization type.
     #[serde(rename = "type")]
@@ -151,7 +185,7 @@ pub struct ScalarQuantization {
 }
 
 /// OpenAPI product quantization config.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProductQuantization {
     /// Compression ratio: `x4`, `x8`, `x16`, `x32`, or `x64`.
     pub compression: String,
@@ -164,7 +198,7 @@ pub struct ProductQuantization {
 }
 
 /// OpenAPI binary quantization config.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BinaryQuantization {
     /// Keep quantized vectors in RAM.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,7 +215,7 @@ pub struct BinaryQuantization {
 }
 
 /// OpenAPI `TurboQuantQuantizationConfig`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurboQuantization {
     /// OpenAPI enum: `bits1` | `bits1_5` | `bits2` | `bits4`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -287,6 +321,38 @@ pub struct SparseVectorParams {
     pub modifier: SparseModifier,
 }
 
+/// OpenAPI `VectorParamsDiff` (per-vector dense patch on `UpdateCollection`).
+///
+/// Field-wise: every unset key leaves the collection's current setting as-is.
+/// The wire shape has no `datatype` field — a datatype change fails planning.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VectorParamsDiff {
+    /// Replacement HNSW settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hnsw_config: Option<HnswConfig>,
+    /// Replacement quantization settings (`"Disabled"` clears them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantization_config: Option<QuantizationConfigDiff>,
+    /// Legacy on-disk flag (prefer `memory`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_disk: Option<bool>,
+    /// Memory placement of the original vector storage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
+}
+
+/// OpenAPI `SparseVectorParams` as a patch: `modifier` and every index key are
+/// optional, so unset fields keep their current value.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SparseVectorParamsDiff {
+    /// Replacement sparse index settings (field-wise).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<SparseIndexParams>,
+    /// Replacement value modifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modifier: Option<SparseModifier>,
+}
+
 /// OpenAPI `PayloadStorageParams`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PayloadStorageParams {
@@ -378,6 +444,13 @@ pub struct UpdateCollectionRequest {
     /// Quantization replacement (`Disabled` or a config).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<QuantizationConfigDiff>,
+    /// Per-vector dense diffs: REST `VectorsConfigDiff` is this name-keyed map
+    /// (`""` addresses the default unnamed vector).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vectors: Option<BTreeMap<String, VectorParamsDiff>>,
+    /// Per-sparse-vector diffs (`sparse_vectors` on the PATCH body).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sparse_vectors: Option<BTreeMap<String, SparseVectorParamsDiff>>,
 }
 
 /// Plan IR for creating a custom shard key on a collection.

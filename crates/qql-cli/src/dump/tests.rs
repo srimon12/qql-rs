@@ -14,6 +14,7 @@ fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> Collectio
     CollectionInfo {
         status: "green".into(),
         points_count: 0,
+        indexed_vectors_count: None,
         segments_count: 1,
         schema: CollectionSchema {
             dense_vectors: vectors.iter().filter_map(|v| v.name.clone()).collect(),
@@ -373,6 +374,11 @@ fn schema_from_rest_result_feeds_create() {
                 "vectors": { "size": 8, "distance": "Euclid" },
                 "sparse_vectors": { "bm25": {} },
                 "shard_number": 1
+            },
+            "hnsw_config": { "m": 16, "memory": "pinned", "unknown": 1 },
+            "optimizer_config": { "indexing_threshold": 20000, "max_optimization_threads": "auto" },
+            "quantization_config": {
+                "scalar": { "type": "int8", "quantile": 0.99, "always_ram": true }
             }
         },
         "payload_schema": {
@@ -383,10 +389,25 @@ fn schema_from_rest_result_feeds_create() {
     let info = CollectionInfo {
         status: "green".into(),
         points_count: 0,
+        indexed_vectors_count: None,
         segments_count: 1,
         schema,
     };
     let create = format!("{};", generate_create_statement("docs", &info));
+    assert!(
+        create.contains("WITH HNSW (m = 16, memory = 'pinned')"),
+        "{create}"
+    );
+    assert!(
+        create.contains(
+            "WITH OPTIMIZERS (indexing_threshold = 20000, max_optimization_threads = 'auto')"
+        ),
+        "{create}"
+    );
+    assert!(
+        create.contains("WITH QUANTIZATION (type = 'scalar', always_ram = true, quantile = 0.99)"),
+        "{create}"
+    );
     qql_core::parser::Parser::parse(&create).expect("create from rest schema");
     let indexes = generate_index_statements("docs", &info.schema.payload_indexes);
     assert_eq!(indexes.len(), 1);
@@ -395,18 +416,15 @@ fn schema_from_rest_result_feeds_create() {
 
 #[test]
 fn create_omits_zero_positive_only_hnsw_and_optimizer_keys() {
-    let mut hnsw = serde_json::Map::new();
-    hnsw.insert("m".into(), json!(16));
-    hnsw.insert("max_indexing_threads".into(), json!(0));
-    let mut opts = serde_json::Map::new();
-    opts.insert("default_segment_number".into(), json!(0));
-    opts.insert("indexing_threshold".into(), json!(20000));
+    let mut vector_hnsw = serde_json::Map::new();
+    vector_hnsw.insert("m".into(), json!(16));
+    vector_hnsw.insert("max_indexing_threads".into(), json!(0));
     let mut info = info_with_vectors(
         vec![VectorSpec {
             name: Some("dense".into()),
             size: 4,
             distance: "Cosine".into(),
-            hnsw: Some(hnsw),
+            hnsw: Some(vector_hnsw),
             quantization: None,
             multivector: None,
             on_disk: None,
@@ -415,13 +433,16 @@ fn create_omits_zero_positive_only_hnsw_and_optimizer_keys() {
         }],
         vec![],
     );
-    info.schema.hnsw = Some({
-        let mut collection_hnsw = serde_json::Map::new();
-        collection_hnsw.insert("m".into(), json!(16));
-        collection_hnsw.insert("max_indexing_threads".into(), json!(0i64));
-        collection_hnsw
+    info.schema.hnsw = Some(qql_plan::HnswConfig {
+        m: Some(16),
+        max_indexing_threads: Some(0),
+        ..Default::default()
     });
-    info.schema.optimizers = Some(opts);
+    info.schema.optimizers = Some(qql_plan::OptimizersConfig {
+        default_segment_number: Some(0),
+        indexing_threshold: Some(20000),
+        ..Default::default()
+    });
     let stmt = generate_create_statement("docs", &info);
     assert!(
         !stmt.contains("max_indexing_threads"),
@@ -571,6 +592,37 @@ fn format_quantization_product_and_binary() {
     assert!(s.contains("encoding = 'two_bits'"));
 }
 
+/// Typed collection configs keep the previous JSON-map key order, including
+/// `memory` (alphabetical inside the nested object) — dump SQL is unchanged.
+#[test]
+fn typed_quantization_memory_keeps_legacy_key_order() {
+    let scalar = qql_plan::QuantizationConfig::Scalar {
+        scalar: qql_plan::ScalarQuantization {
+            qtype: "int8".into(),
+            quantile: Some(0.99),
+            always_ram: Some(true),
+            memory: Some(qql_plan::types::MemoryPlacement::Pinned),
+        },
+    };
+    assert_eq!(
+        format_quantization_config(&scalar),
+        "type = 'scalar', always_ram = true, memory = 'pinned', quantile = 0.99"
+    );
+
+    let binary = qql_plan::QuantizationConfig::Binary {
+        binary: qql_plan::BinaryQuantization {
+            always_ram: Some(false),
+            encoding: Some("two_bits".into()),
+            query_encoding: Some("scalar8bits".into()),
+            memory: Some(qql_plan::types::MemoryPlacement::Cold),
+        },
+    };
+    assert_eq!(
+        format_quantization_config(&binary),
+        "type = 'binary', always_ram = false, encoding = 'two_bits', memory = 'cold', query_encoding = 'scalar8bits'"
+    );
+}
+
 #[test]
 fn binary_encoding_numeric_alias_parses_canonical() {
     let stmt = "CREATE COLLECTION docs (v VECTOR(8, COSINE) WITH QUANTIZATION (type = 'binary', encoding = 2, query_encoding = 'scalar8bits'));";
@@ -607,14 +659,6 @@ fn multivector_and_collection_level_blocks_roundtrip() {
 
 #[test]
 fn dump_emits_multivector_collection_blocks_and_query_encoding() {
-    let mut hnsw = serde_json::Map::new();
-    hnsw.insert("m".into(), json!(16));
-    let mut optimizers = serde_json::Map::new();
-    optimizers.insert("indexing_threshold".into(), json!(20000));
-    optimizers.insert("max_optimization_threads".into(), json!("auto"));
-    // Noise keys that must not be emitted (would fail re-parse).
-    optimizers.insert("unknown_qdrant_field".into(), json!(1));
-
     let mut multivector = serde_json::Map::new();
     multivector.insert("comparator".into(), json!("max_sim"));
 
@@ -639,11 +683,23 @@ fn dump_emits_multivector_collection_blocks_and_query_encoding() {
         }],
         vec![],
     );
-    info.schema.hnsw = Some(hnsw);
-    info.schema.optimizers = Some(optimizers);
-    info.schema.quantization = Some(json!({
-        "scalar": { "type": "scalar", "quantile": 0.99, "always_ram": true }
-    }));
+    info.schema.hnsw = Some(qql_plan::HnswConfig {
+        m: Some(16),
+        ..Default::default()
+    });
+    info.schema.optimizers = Some(qql_plan::OptimizersConfig {
+        indexing_threshold: Some(20000),
+        max_optimization_threads: Some(qql_plan::MaxOptimizationThreads::Auto),
+        ..Default::default()
+    });
+    info.schema.quantization = Some(qql_plan::QuantizationConfig::Scalar {
+        scalar: qql_plan::ScalarQuantization {
+            qtype: "int8".into(),
+            quantile: Some(0.99),
+            always_ram: Some(true),
+            memory: None,
+        },
+    });
 
     let stmt = generate_create_statement("docs", &info);
     assert!(stmt.contains("WITH MULTIVECTOR (comparator = 'max_sim')"));
@@ -653,7 +709,6 @@ fn dump_emits_multivector_collection_blocks_and_query_encoding() {
     assert!(stmt.contains("WITH OPTIMIZERS ("));
     assert!(stmt.contains("indexing_threshold = 20000"));
     assert!(stmt.contains("max_optimization_threads = 'auto'"));
-    assert!(!stmt.contains("unknown_qdrant_field"));
     assert!(stmt.contains("WITH QUANTIZATION ("));
     assert!(stmt.contains("type = 'scalar'"));
 

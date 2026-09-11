@@ -1,8 +1,32 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
+use qql_core::error::QqlError;
 use std::sync::atomic::AtomicBool;
 
 use crate::PyClient;
+use pyqql_common::qql_py_value_error;
+
+/// Parse ``wal_segment_mb`` (whole MiB) into the byte capacity
+/// [`qql_edge::LocalExecutorOptions::wal_segment_capacity`] expects.
+///
+/// ``None`` keeps the qdrant-edge default (32 MiB). Zero, negative,
+/// fractional, non-finite, or overflowing values fail closed with
+/// ``QQL-VALIDATION-CONFIG`` instead of silently rounding or clamping.
+#[cfg(feature = "fastembed-local")]
+fn wal_segment_capacity(mb: Option<f64>) -> Result<Option<usize>, QqlError> {
+    let Some(mb) = mb else {
+        return qql_edge::wal_segment_capacity_bytes(None);
+    };
+    if !mb.is_finite() || mb.fract() != 0.0 || mb < 1.0 {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            "wal_segment_mb must be a positive whole number of MiB; omit it for the qdrant-edge 32 MiB default",
+            None,
+        ));
+    }
+    // `as` saturates; the shared helper rejects any byte count that overflows.
+    qql_edge::wal_segment_capacity_bytes(Some(mb as u64))
+}
 
 /// List dense ONNX models available for ``local_executor(model=...)``.
 ///
@@ -34,7 +58,7 @@ pub fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false))]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, wal_segment_mb=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None))]
 pub fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
@@ -45,11 +69,18 @@ pub fn local_executor(
     reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
+    wal_segment_mb: Option<f64>,
+    bm25_k1: Option<f64>,
+    bm25_b: Option<f64>,
+    bm25_avg_len: Option<f64>,
 ) -> PyResult<PyClient> {
+    let wal_segment_capacity = wal_segment_capacity(wal_segment_mb).map_err(qql_py_value_error)?;
+    validate_bm25(bm25_k1, bm25_b, bm25_avg_len)?;
     let exec = qql_edge::local_executor_with_options(
         data_dir,
         qql_edge::LocalExecutorOptions {
             on_disk_payload,
+            wal_segment_capacity,
             model,
             sparse_model,
             multi_model,
@@ -57,6 +88,9 @@ pub fn local_executor(
             reranker_model,
             cache_dir: cache_dir.map(std::path::PathBuf::from),
             show_download_progress,
+            bm25_k1,
+            bm25_b,
+            bm25_avg_len,
         },
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -69,12 +103,21 @@ pub fn local_executor(
     })
 }
 
+/// Validate client-side BM25 document parameters eagerly so bad values raise
+/// `ValueError` (`QQL-VALIDATION-CONFIG`) before any model is loaded.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn validate_bm25(k1: Option<f64>, b: Option<f64>, avg_len: Option<f64>) -> PyResult<()> {
+    qql::embedder::Bm25Params::resolve(k1, b, avg_len)
+        .map(|_| ())
+        .map_err(qql_py_value_error)
+}
+
 /// One-shot local execution. Prefer a long-lived `Client` for repeated calls
 /// so the model and edge shards stay open.
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, on_error="stop"))]
 pub fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
@@ -88,6 +131,9 @@ pub fn execute<'py>(
     reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
+    bm25_k1: Option<f64>,
+    bm25_b: Option<f64>,
+    bm25_avg_len: Option<f64>,
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = local_executor(
@@ -100,6 +146,10 @@ pub fn execute<'py>(
         reranker_model,
         cache_dir,
         show_download_progress,
+        None,
+        bm25_k1,
+        bm25_b,
+        bm25_avg_len,
     )?;
     let res = client.execute(py, query, params, on_error);
     let _ = client.close();
@@ -110,7 +160,7 @@ pub fn execute<'py>(
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, on_error="stop"))]
 pub fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
@@ -124,6 +174,9 @@ pub fn execute_async<'py>(
     reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
+    bm25_k1: Option<f64>,
+    bm25_b: Option<f64>,
+    bm25_avg_len: Option<f64>,
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = local_executor(
@@ -136,6 +189,10 @@ pub fn execute_async<'py>(
         reranker_model,
         cache_dir,
         show_download_progress,
+        None,
+        bm25_k1,
+        bm25_b,
+        bm25_avg_len,
     )?;
     let input = pyqql_common::prepare_input(&query, params)?;
     let on_error = pyqql_common::parse_on_error(on_error)?;
@@ -155,7 +212,8 @@ pub fn execute_async<'py>(
 
 #[cfg(feature = "http-embedding")]
 #[pyfunction]
-#[pyo3(signature = (data_dir, url, embed_key, embed_model, embed_dim, on_disk_payload=true))]
+#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (data_dir, url, embed_key, embed_model, embed_dim, on_disk_payload=true, *, bm25_k1=None, bm25_b=None, bm25_avg_len=None))]
 pub fn http_executor(
     data_dir: &str,
     url: &str,
@@ -163,14 +221,25 @@ pub fn http_executor(
     embed_model: &str,
     embed_dim: usize,
     on_disk_payload: bool,
+    bm25_k1: Option<f64>,
+    bm25_b: Option<f64>,
+    bm25_avg_len: Option<f64>,
 ) -> PyResult<PyClient> {
-    let exec = qql_edge::http_executor(
+    validate_bm25(bm25_k1, bm25_b, bm25_avg_len)?;
+    let exec = qql_edge::http_executor_with_options_and_wal(
         data_dir,
         on_disk_payload,
-        url.to_string(),
-        embed_key.to_string(),
-        embed_model.to_string(),
-        embed_dim,
+        None,
+        qql::embedder::HttpEmbedderOptions {
+            endpoint: url.to_string(),
+            api_key: embed_key.to_string(),
+            model: embed_model.to_string(),
+            dimension: embed_dim,
+            bm25_k1,
+            bm25_b,
+            bm25_avg_len,
+            ..Default::default()
+        },
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     let rt = tokio::runtime::Runtime::new()
@@ -180,4 +249,26 @@ pub fn http_executor(
         runtime: rt,
         closed: AtomicBool::new(false),
     })
+}
+
+#[cfg(test)]
+#[cfg(feature = "fastembed-local")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wal_segment_mb_converts_to_bytes() {
+        assert_eq!(wal_segment_capacity(None).unwrap(), None);
+        assert_eq!(wal_segment_capacity(Some(1.0)).unwrap(), Some(1 << 20));
+        assert_eq!(wal_segment_capacity(Some(4.0)).unwrap(), Some(4 << 20));
+    }
+
+    #[test]
+    fn wal_segment_mb_rejects_invalid_values() {
+        for bad in [0.0, -1.0, 1.5, f64::NAN, f64::INFINITY, 1e30] {
+            let err = wal_segment_capacity(Some(bad))
+                .expect_err(&format!("wal_segment_mb={bad} must fail closed"));
+            assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "wal_segment_mb={bad}");
+        }
+    }
 }

@@ -216,6 +216,17 @@ multivector form everywhere params enter. Statement indexes in the typed
 accessors use Python list semantics on all hosts (`-1` is the last statement;
 out-of-range returns `[]` or `0`).
 
+Response shaping is strict and canonical, matching the native SDKs' typed
+`ExecData` report: every operation reads exactly its Qdrant OpenAPI response
+field (`result.points`, the bare `result` array for `QUERY POINTS`,
+`result.groups`, `result.count`, facet `result.hits`, `result.collections`,
+`result.shard_keys`, `result.config`, `CollectionInfo`) and emits the same JSON
+shapes (hits carry no separate `text`, groups are `{ groups: [{ id, hits }] }`,
+counts are `{ count }`, collections and shard keys are `{ collections }` /
+`{ shard_keys }`). A missing or mistyped backend field fails the statement with
+`QQL-BACKEND-ENVELOPE` instead of silently returning an empty or synthesized
+result. Server telemetry (`time`, `usage`) stays optional and lenient.
+
 ## Bulk ingest
 
 ```javascript

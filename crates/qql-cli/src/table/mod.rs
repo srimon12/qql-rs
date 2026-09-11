@@ -424,6 +424,7 @@ mod tests {
             data: Some(ExecData::Collection(qql::backend::CollectionInfo {
                 status: "green".into(),
                 points_count: 12,
+                indexed_vectors_count: None,
                 segments_count: 2,
                 schema: Default::default(),
             })),

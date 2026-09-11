@@ -559,7 +559,7 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
         }),
         Stmt::AlterCollection(alter) => Ok(PlannedOperation::UpdateCollection {
             collection: alter.collection.clone(),
-            request: lower_alter_collection(alter),
+            request: lower_alter_collection(alter)?,
         }),
         Stmt::DropCollection(drop) => Ok(PlannedOperation::DropCollection {
             collection: drop.collection.clone(),

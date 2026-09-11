@@ -333,6 +333,21 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             .or_else(|| emb.get("rerank_model"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        // Client-side BM25 document parameters for the local sparse path.
+        // Raw `serde_json::Number` access: invalid types are left to the
+        // native HttpEmbedderOptions validator (`QQL-VALIDATION-CONFIG`).
+        config.bm25_k1 = emb
+            .get("bm25K1")
+            .or_else(|| emb.get("bm25_k1"))
+            .and_then(|v| v.as_f64());
+        config.bm25_b = emb
+            .get("bm25B")
+            .or_else(|| emb.get("bm25_b"))
+            .and_then(|v| v.as_f64());
+        config.bm25_avg_len = emb
+            .get("bm25AvgLen")
+            .or_else(|| emb.get("bm25_avg_len"))
+            .and_then(|v| v.as_f64());
     }
 
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
@@ -387,6 +402,9 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     rerank_endpoint: config.rerank_endpoint.clone(),
                     rerank_api_key: config.rerank_api_key.clone(),
                     rerank_model: config.rerank_model.clone(),
+                    bm25_k1: config.bm25_k1,
+                    bm25_b: config.bm25_b,
+                    bm25_avg_len: config.bm25_avg_len,
                 })
                 .map_err(common::to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)

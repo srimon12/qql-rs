@@ -303,6 +303,10 @@ impl Executor {
             self.prepare_create_collection(create).await?;
         }
 
+        if let Stmt::AlterCollection(alter) = &stmt {
+            self.configure_alter_collection(alter).await?;
+        }
+
         if let Stmt::Upsert(u) = &stmt {
             if let Some(ref emb) = u.embedding {
                 type SpecTuple<'a> = (

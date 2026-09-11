@@ -107,6 +107,11 @@ enum Command {
     },
     /// Migrate a collection between clusters (schema + points, not snapshots)
     Migrate(Box<MigrateArgs>),
+    /// Local qdrant-edge backend utilities (no server required)
+    Edge {
+        #[command(subcommand)]
+        command: Box<EdgeCommand>,
+    },
     /// Check Qdrant connection health
     Doctor {
         /// Output as JSON
@@ -155,6 +160,9 @@ struct MigrateArgs {
     /// Use the local edge backend as the target
     #[arg(long)]
     target_edge: bool,
+    /// Use the local edge backend as the source (also implied by the global --edge flag)
+    #[arg(long)]
+    source_edge: bool,
     /// API key for the target cluster
     #[arg(long, env = "QDRANT_TARGET_API_KEY")]
     target_api_key: Option<String>,
@@ -266,22 +274,41 @@ impl From<CliQuantize> for migrate::QuantizeKind {
 #[derive(clap::Subcommand)]
 enum ConfigCommand {
     /// Configure the local qdrant-edge backend used by --edge.
+    ///
+    /// Only the flags you pass are written; every other key in `edge.json`
+    /// (including unknown/future ones) is preserved.
     Edge {
         /// Directory for persistent qdrant-edge data.
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Keep payloads in memory instead of persisting them to disk.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "on_disk")]
         in_memory: bool,
-        /// Embedding backend: fastembed or an OpenAI-compatible HTTP endpoint.
-        #[arg(long, default_value = "fastembed")]
-        embedder: String,
+        /// Persist payloads to disk (the default; flips an existing
+        /// `--in-memory` config back).
+        #[arg(long, conflicts_with = "in_memory")]
+        on_disk: bool,
+        /// WAL segment capacity in MiB for local edge shards (default: qdrant-edge 32 MiB).
+        #[arg(long)]
+        wal_segment_mb: Option<u64>,
+        /// Embedding backend: fastembed (default) or an OpenAI-compatible HTTP endpoint.
+        #[arg(long)]
+        embedder: Option<String>,
         /// Local FastEmbed dense model name or alias.
         #[arg(long)]
         model: Option<String>,
         /// Offline sparse model for fastembed (e.g. splade, bge-m3).
         #[arg(long)]
         sparse_model: Option<String>,
+        /// Client-side BM25 k1 for local sparse document encoding (default: 1.2).
+        #[arg(long)]
+        bm25_k1: Option<f64>,
+        /// Client-side BM25 b length normalization in [0, 1] (default: 0.75).
+        #[arg(long)]
+        bm25_b: Option<f64>,
+        /// Client-side BM25 expected average document length in tokens (default: 256).
+        #[arg(long)]
+        bm25_avg_len: Option<f64>,
         /// Offline multivector model for fastembed (e.g. bge-m3).
         #[arg(long)]
         multi_model: Option<String>,
@@ -295,20 +322,24 @@ enum ConfigCommand {
         #[arg(long)]
         cache_dir: Option<PathBuf>,
         /// Show model download progress.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "no_show_download_progress")]
         show_download_progress: bool,
+        /// Hide model download progress (flips an existing
+        /// `--show-download-progress` config back).
+        #[arg(long, conflicts_with = "show_download_progress")]
+        no_show_download_progress: bool,
         /// OpenAI-compatible embedding endpoint used by the HTTP backend.
         #[arg(long)]
         embed_url: Option<String>,
         /// API key used by the HTTP embedding backend.
-        #[arg(long, default_value = "")]
-        embed_key: String,
-        /// Model name sent to the HTTP embedding backend.
-        #[arg(long, default_value = "nomic-embed-text")]
-        embed_model: String,
-        /// Expected HTTP embedding dimension.
-        #[arg(long, default_value_t = 768)]
-        embed_dim: usize,
+        #[arg(long)]
+        embed_key: Option<String>,
+        /// Model name sent to the HTTP embedding backend (default: nomic-embed-text).
+        #[arg(long)]
+        embed_model: Option<String>,
+        /// Expected HTTP embedding dimension (default: 768).
+        #[arg(long)]
+        embed_dim: Option<usize>,
         /// Optional multi/ColBERT HTTP embedding endpoint.
         #[arg(long)]
         multi_embed_url: Option<String>,
@@ -319,8 +350,8 @@ enum ConfigCommand {
         #[arg(long)]
         multi_embed_model: Option<String>,
         /// Per-token dimension for multi embeds (0 = skip check).
-        #[arg(long, default_value_t = 0)]
-        multi_embed_dim: usize,
+        #[arg(long)]
+        multi_embed_dim: Option<usize>,
         /// Optional image/CLIP vision HTTP embedding endpoint.
         #[arg(long)]
         image_embed_url: Option<String>,
@@ -331,8 +362,56 @@ enum ConfigCommand {
         #[arg(long)]
         image_embed_model: Option<String>,
         /// Dense dimension for image embeds (CLIP = 512; 0 = use dense dim).
-        #[arg(long, default_value_t = 0)]
-        image_embed_dim: usize,
+        #[arg(long)]
+        image_embed_dim: Option<usize>,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum EdgeCommand {
+    /// Run qdrant-edge storage optimizers on a local collection
+    ///
+    /// qdrant-edge has no background optimizer: segments are merged and HNSW /
+    /// sparse indexes are built only when this runs. Run it after bulk writes
+    /// or when `qql doctor --edge` reports indexing lag.
+    Optimize {
+        /// Local edge collection to optimize
+        collection: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Seed a local edge collection from a remote Qdrant shard snapshot
+    ///
+    /// Streams the remote shard snapshot, unpacks it with the engine's snapshot
+    /// API, verifies it, and swaps it into the local edge data directory. The
+    /// snapshot carries the source collection's config, built HNSW indexes and
+    /// quantized data, so nothing is re-indexed locally. An existing local
+    /// collection is only replaced with --force.
+    Bootstrap {
+        /// Collection name (the local edge collection gets the same name)
+        collection: String,
+        /// Remote Qdrant base URL (defaults to --url / QDRANT_URL)
+        #[arg(long = "from")]
+        from: Option<String>,
+        /// Remote API key (defaults to QDRANT_API_KEY)
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Remote shard id (default: the only shard of a single-shard collection)
+        #[arg(long)]
+        shard_id: Option<u32>,
+        /// Replace an existing local collection directory
+        #[arg(long)]
+        force: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
     },
 }
 
@@ -597,7 +676,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
             let stats = commands::handle_migrate(
                 &url,
-                use_edge,
+                use_edge || args.source_edge,
                 &target_url,
                 args.target_edge,
                 args.target_api_key,
@@ -611,6 +690,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_migrate_result(&args.collection, &target_collection, &stats, args.json)?;
             Ok(())
         }
+        Command::Edge { command } => match *command {
+            EdgeCommand::Optimize {
+                collection,
+                json,
+                quiet,
+            } => {
+                #[cfg(feature = "edge")]
+                {
+                    commands::handle_edge_optimize(&collection, json, quiet).await
+                }
+                #[cfg(not(feature = "edge"))]
+                {
+                    let _ = (collection, json, quiet);
+                    Err(
+                        "edge support is not installed; reinstall qql-cli with --features edge"
+                            .into(),
+                    )
+                }
+            }
+            EdgeCommand::Bootstrap {
+                collection,
+                from,
+                api_key,
+                shard_id,
+                force,
+                json,
+                quiet,
+            } => {
+                #[cfg(feature = "edge")]
+                {
+                    let from = from.unwrap_or_else(|| url.clone());
+                    commands::handle_edge_bootstrap(
+                        &from,
+                        api_key,
+                        &collection,
+                        shard_id,
+                        force,
+                        json,
+                        quiet,
+                    )
+                    .await
+                }
+                #[cfg(not(feature = "edge"))]
+                {
+                    let _ = (collection, from, api_key, shard_id, force, json, quiet);
+                    Err(
+                        "edge support is not installed; reinstall qql-cli with --features edge"
+                            .into(),
+                    )
+                }
+            }
+        },
         Command::Doctor { json, quiet } => {
             commands::handle_doctor(&url, use_edge, json, quiet).await
         }
@@ -628,14 +759,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ConfigCommand::Edge {
                 data_dir,
                 in_memory,
+                on_disk,
+                wal_segment_mb,
                 embedder,
                 model,
                 sparse_model,
+                bm25_k1,
+                bm25_b,
+                bm25_avg_len,
                 multi_model,
                 image_model,
                 reranker_model,
                 cache_dir,
                 show_download_progress,
+                no_show_download_progress,
                 embed_url,
                 embed_key,
                 embed_model,
@@ -648,17 +785,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image_embed_key,
                 image_embed_model,
                 image_embed_dim,
-            } => commands::handle_configure_edge(config::EdgeConfig {
-                data_dir: data_dir.unwrap_or_else(|| config::EdgeConfig::default().data_dir),
-                on_disk_payload: !in_memory,
+            } => commands::handle_configure_edge(config::EdgeConfigPatch {
+                data_dir,
+                on_disk_payload: if in_memory {
+                    Some(false)
+                } else if on_disk {
+                    Some(true)
+                } else {
+                    None
+                },
+                wal_segment_mb,
                 embedder,
                 model,
                 sparse_model,
+                bm25_k1,
+                bm25_b,
+                bm25_avg_len,
                 multi_model,
                 image_model,
                 reranker_model,
                 cache_dir,
-                show_download_progress,
+                show_download_progress: if show_download_progress {
+                    Some(true)
+                } else if no_show_download_progress {
+                    Some(false)
+                } else {
+                    None
+                },
                 embed_url,
                 embed_key,
                 embed_model,
@@ -711,5 +864,16 @@ mod tests {
             true,
         )
         .unwrap();
+    }
+
+    #[cfg(feature = "edge")]
+    #[test]
+    fn wal_segment_capacity_scales_mib_and_rejects_zero() {
+        assert_eq!(commands::wal_segment_capacity_bytes(None).unwrap(), None);
+        assert!(commands::wal_segment_capacity_bytes(Some(0)).is_err());
+        assert_eq!(
+            commands::wal_segment_capacity_bytes(Some(4)).unwrap(),
+            Some(4 * 1024 * 1024)
+        );
     }
 }

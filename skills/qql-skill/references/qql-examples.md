@@ -112,7 +112,7 @@ QUERY FUSION RRF FROM incidents
 
 **Problem:** Top-5 results per author are needed, but the group IDs live in a separate `author_metadata` collection.
 
-**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection. `OFFSET` is supported with `GROUP BY` (maps to `group_offset`). Edge rejects `GROUP BY` entirely; use remote Qdrant for grouped search.
+**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection. `OFFSET` is supported with `GROUP BY` (maps to `group_offset`). Edge executes plain `GROUP BY` (including `SIZE`/`LIMIT`/`OFFSET`); `LOOKUP FROM` stays remote-only.
 
 ```sql
 QUERY TEXT 'machine learning optimization' FROM research_papers

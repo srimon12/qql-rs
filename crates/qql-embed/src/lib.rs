@@ -29,7 +29,7 @@ pub use embedder::{
     sparse_model_unsupported_error,
 };
 pub use resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, resolve_embeddings};
-pub use sparse::SparseVector;
+pub use sparse::{Bm25Params, SparseVector};
 pub use topology::{
     TopologyNames, query_needs_kind_resolution, resolve_query_vector_kinds,
     resolve_query_vector_kinds_simple,

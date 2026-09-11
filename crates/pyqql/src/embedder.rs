@@ -19,12 +19,15 @@ pub struct PyHttpEmbedder {
     pub rerank_endpoint: Option<String>,
     pub rerank_api_key: Option<String>,
     pub rerank_model: Option<String>,
+    pub bm25_k1: Option<f64>,
+    pub bm25_b: Option<f64>,
+    pub bm25_avg_len: Option<f64>,
 }
 
 #[pymethods]
 impl PyHttpEmbedder {
     #[new]
-    #[pyo3(signature = (endpoint, model, dimension, api_key=None, multi_endpoint=None, multi_api_key=None, multi_model=None, multi_dimension=None, image_endpoint=None, image_api_key=None, image_model=None, image_dimension=None, rerank_endpoint=None, rerank_api_key=None, rerank_model=None))]
+    #[pyo3(signature = (endpoint, model, dimension, api_key=None, multi_endpoint=None, multi_api_key=None, multi_model=None, multi_dimension=None, image_endpoint=None, image_api_key=None, image_model=None, image_dimension=None, rerank_endpoint=None, rerank_api_key=None, rerank_model=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         endpoint: &str,
@@ -42,6 +45,9 @@ impl PyHttpEmbedder {
         rerank_endpoint: Option<String>,
         rerank_api_key: Option<String>,
         rerank_model: Option<String>,
+        bm25_k1: Option<f64>,
+        bm25_b: Option<f64>,
+        bm25_avg_len: Option<f64>,
     ) -> PyResult<Self> {
         if endpoint.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -58,6 +64,7 @@ impl PyHttpEmbedder {
                 "embedding dimension must be positive",
             ));
         }
+        validate_bm25(bm25_k1, bm25_b, bm25_avg_len)?;
         Ok(PyHttpEmbedder {
             endpoint: endpoint.to_string(),
             api_key: api_key.unwrap_or_default(),
@@ -74,8 +81,19 @@ impl PyHttpEmbedder {
             rerank_endpoint: rerank_endpoint.filter(|s| !s.trim().is_empty()),
             rerank_api_key,
             rerank_model: rerank_model.filter(|s| !s.trim().is_empty()),
+            bm25_k1,
+            bm25_b,
+            bm25_avg_len,
         })
     }
+}
+
+/// Validate client-side BM25 overrides eagerly so bad values raise
+/// `ValueError` at `HttpEmbedder(...)` construction (`QQL-VALIDATION-CONFIG`).
+fn validate_bm25(k1: Option<f64>, b: Option<f64>, avg_len: Option<f64>) -> PyResult<()> {
+    qql::embedder::Bm25Params::resolve(k1, b, avg_len)
+        .map(|_| ())
+        .map_err(pyqql_common::qql_py_value_error)
 }
 
 /// Full embedder configuration shared by the class and dict paths.
@@ -96,6 +114,9 @@ pub struct ParsedEmbedderConfig {
     pub rerank_endpoint: Option<String>,
     pub rerank_api_key: Option<String>,
     pub rerank_model: Option<String>,
+    pub bm25_k1: Option<f64>,
+    pub bm25_b: Option<f64>,
+    pub bm25_avg_len: Option<f64>,
 }
 
 fn opt_string_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
@@ -122,6 +143,18 @@ fn opt_usize_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<usize> {
     value.extract::<usize>()
 }
 
+/// Optional float key: missing/`None` → unset; anything non-numeric is a
+/// `TypeError` from PyO3's extractor.
+fn opt_f64_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
+    let Some(value) = dict.get_item(key)? else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(value.extract::<f64>()?))
+}
+
 pub fn extract_embedder_config(
     embedder: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<ParsedEmbedderConfig> {
@@ -144,6 +177,9 @@ pub fn extract_embedder_config(
             out.rerank_endpoint = py_emb.rerank_endpoint.clone();
             out.rerank_api_key = py_emb.rerank_api_key.clone();
             out.rerank_model = py_emb.rerank_model.clone();
+            out.bm25_k1 = py_emb.bm25_k1;
+            out.bm25_b = py_emb.bm25_b;
+            out.bm25_avg_len = py_emb.bm25_avg_len;
         } else if let Ok(dict) = emb.cast::<PyDict>() {
             out.endpoint = Some(
                 dict.get_item("endpoint")?
@@ -206,6 +242,11 @@ pub fn extract_embedder_config(
             out.rerank_endpoint = opt_nonempty_string_key(dict, "rerank_endpoint")?;
             out.rerank_api_key = opt_string_key(dict, "rerank_api_key")?;
             out.rerank_model = opt_nonempty_string_key(dict, "rerank_model")?;
+
+            // Optional client-side BM25 document parameters (local sparse path).
+            out.bm25_k1 = opt_f64_key(dict, "bm25_k1")?;
+            out.bm25_b = opt_f64_key(dict, "bm25_b")?;
+            out.bm25_avg_len = opt_f64_key(dict, "bm25_avg_len")?;
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(
                 "embedder must be an HttpEmbedder or dict",
@@ -251,6 +292,12 @@ pub fn create_executor(
         config.rerank_api_key = parsed.rerank_api_key;
         config.rerank_model = parsed.rerank_model;
     }
+
+    // Validate client-side BM25 params once (ValueError before any network).
+    validate_bm25(parsed.bm25_k1, parsed.bm25_b, parsed.bm25_avg_len)?;
+    config.bm25_k1 = parsed.bm25_k1;
+    config.bm25_b = parsed.bm25_b;
+    config.bm25_avg_len = parsed.bm25_avg_len;
 
     let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
         #[cfg(feature = "grpc")]
@@ -304,6 +351,9 @@ pub fn create_executor(
                     rerank_endpoint: config.rerank_endpoint.clone(),
                     rerank_api_key: config.rerank_api_key.clone(),
                     rerank_model: config.rerank_model.clone(),
+                    bm25_k1: config.bm25_k1,
+                    bm25_b: config.bm25_b,
+                    bm25_avg_len: config.bm25_avg_len,
                 })
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)

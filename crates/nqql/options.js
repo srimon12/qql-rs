@@ -13,7 +13,8 @@
  *
  * The embedder sub-object forwards the full HTTP embedder surface the native
  * layer supports: dense (`endpoint`/`apiKey`/`model`/`dimension`), multi
- * (ColBERT), image (CLIP), and rerank (cross-encoder) endpoints.
+ * (ColBERT), image (CLIP), rerank (cross-encoder) endpoints, and the
+ * client-side BM25 document params (`bm25K1`/`bm25B`/`bm25AvgLen`).
  */
 function normalizeClientOptions(options) {
   if (!options) {
@@ -49,6 +50,11 @@ function normalizeClientOptions(options) {
             options.embedder.rerankEndpoint ?? options.embedder.rerank_endpoint,
           rerankApiKey: options.embedder.rerankApiKey ?? options.embedder.rerank_api_key,
           rerankModel: options.embedder.rerankModel ?? options.embedder.rerank_model,
+          // Client-side BM25 document params for the local sparse path
+          // (write-path only; server-side inference is untouched).
+          bm25K1: options.embedder.bm25K1 ?? options.embedder.bm25_k1,
+          bm25B: options.embedder.bm25B ?? options.embedder.bm25_b,
+          bm25AvgLen: options.embedder.bm25AvgLen ?? options.embedder.bm25_avg_len,
         }
       : undefined,
   };

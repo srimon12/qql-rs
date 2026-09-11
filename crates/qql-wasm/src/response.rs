@@ -1,492 +1,358 @@
-//! Strict REST response shaping for the WASM JS boundary.
+//! Strict REST response parsing and canonical shaping for the WASM JS boundary.
 //!
-//! WASM cannot depend on `qql-runtime`, so it re-shapes Qdrant REST results
-//! into the same JSON that the runtime's closed `ExecData` enum serializes.
-//! Extraction is per-operation and strict: each operation reads exactly its
-//! OpenAPI response field, with no envelope fallback chain and no synthesized
-//! fields (in particular, hits carry no `text`).
+//! WASM cannot depend on `qql-runtime`, so this module re-shapes Qdrant REST
+//! results into the same JSON that the runtime's closed `ExecData` enum
+//! serializes. Extraction mirrors `qql-runtime/src/rest_response.rs`: one
+//! OpenAPI shape per operation, and a missing or mistyped field fails closed
+//! with `QQL-BACKEND-ENVELOPE`. There are no envelope fallback chains, no
+//! shape detection, and no synthesized fields (in particular, hits carry no
+//! `text`). Server telemetry stays optional and lenient by contract.
 
+use serde::Serialize;
 use serde_json::{Map, Value};
 
+use qql_core::error::QqlError;
+use qql_plan::{
+    PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey, PlanVectorStruct, PlannedOperation,
+    QuotaConfig,
+};
+
 use super::report::exec_response_with_telemetry;
-use super::telemetry::telemetry_from_envelope;
+use super::schema::parse_collection_info;
+use super::telemetry::{ServerTelemetry, telemetry_from_envelope};
 
-/// Extract named dense/sparse/multivector names from a Qdrant collection `result` object.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-pub(crate) fn vector_names_from_collection_result(
-    result: &serde_json::Value,
-) -> qql_embed::TopologyNames {
-    let params = result.get("config").and_then(|c| c.get("params"));
-    let mut dense = Vec::new();
-    let mut multivector = Vec::new();
-    if let Some(vectors) = params
-        .and_then(|p| p.get("vectors"))
-        .and_then(|v| v.as_object())
-    {
-        if vectors.contains_key("size") && vectors.contains_key("distance") {
-            // Unnamed default dense vector.
-            dense.clear();
-        } else {
-            for (name, cfg) in vectors {
-                if matches!(
-                    name.as_str(),
-                    "size"
-                        | "distance"
-                        | "hnsw_config"
-                        | "quantization_config"
-                        | "on_disk"
-                        | "multivector_config"
-                ) {
-                    continue;
-                }
-                dense.push(name.clone());
-                if cfg.get("multivector_config").is_some() {
-                    multivector.push(name.clone());
-                }
-            }
-            dense.sort();
-            multivector.sort();
-        }
-    }
-    let mut sparse = Vec::new();
-    if let Some(map) = params
-        .and_then(|p| p.get("sparse_vectors"))
-        .and_then(|v| v.as_object())
-    {
-        sparse.extend(map.keys().cloned());
-        sparse.sort();
-    }
-    qql_embed::TopologyNames {
-        dense,
-        sparse,
-        multivector,
+/// Fail-closed envelope error, mirroring the runtime's `QQL-BACKEND-ENVELOPE`.
+pub(crate) fn envelope_err(message: impl Into<String>) -> QqlError {
+    QqlError::backend("QQL-BACKEND-ENVELOPE", message.into(), None)
+}
+
+/// One canonical hit: `{id, score, payload, vector?}` — byte-compatible with
+/// the runtime's `SearchHit` serialization. IDs keep their JSON type (number
+/// or string); `score` rounds through f32 and renders as the shortest
+/// round-trip decimal (`0.95`, not `0.949999988079071`).
+#[derive(Debug, Serialize)]
+struct WasmHit {
+    id: PlanPointId,
+    #[serde(serialize_with = "serialize_score_f32")]
+    score: f32,
+    payload: Option<Map<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vector: Option<PlanVectorStruct>,
+}
+
+/// Serialize an f32 with its shortest round-trip decimal, matching the
+/// runtime's `SearchHit`.
+fn serialize_score_f32<S: serde::Serializer>(
+    score: &f32,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match score.to_string().parse::<f64>() {
+        Ok(value) => serializer.serialize_f64(value),
+        Err(_) => serializer.serialize_f32(*score),
     }
 }
 
-/// One canonical hit: `{id, score, payload, collection?, vector?}` — the JSON
-/// shape of the runtime's `SearchHit`. IDs keep their JSON type (number or
-/// string) and `score` is rounded through `f32` like the typed pipeline.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn ranked_hit(point: &Value) -> Value {
-    let mut hit = Map::new();
-    hit.insert("id".into(), point.get("id").cloned().unwrap_or(Value::Null));
-    let score = point.get("score").and_then(Value::as_f64).unwrap_or(0.0) as f32;
-    hit.insert(
-        "score".into(),
-        score
-            .to_string()
-            .parse::<f64>()
-            .map(Value::from)
-            .unwrap_or_else(|_| Value::from(score as f64)),
-    );
-    hit.insert(
-        "payload".into(),
-        point.get("payload").cloned().unwrap_or(Value::Null),
-    );
-    if let Some(vector) = point.get("vector") {
-        hit.insert("vector".into(), vector.clone());
-    }
-    Value::Object(hit)
+/// Grouped query result, serialized as Qdrant's `{"id": …, "hits": […]}`.
+#[derive(Debug, Serialize)]
+struct WasmGroup {
+    id: PlanGroupId,
+    hits: Vec<WasmHit>,
 }
 
-/// Canonical hit array from an optional point list.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-pub(crate) fn hit_array(points: Option<&Value>) -> Vec<Value> {
-    points
-        .and_then(Value::as_array)
-        .map(|points| points.iter().map(ranked_hit).collect())
-        .unwrap_or_default()
+/// One facet entry, serialized as `{"value": …, "count": n}`.
+#[derive(Debug, Serialize)]
+struct WasmFacetHit {
+    value: PlanFacetValue,
+    count: u64,
 }
 
-/// `result.points` — the `/points/query` and `/points/scroll` envelope.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_points(result: &Value) -> Option<&Value> {
-    result.get("result")?.get("points")
-}
-
-/// `result` — the bare array envelope of `POST /points` (retrieve).
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_records(result: &Value) -> Option<&Value> {
-    result.get("result")
-}
-
-/// `result.groups` — the grouped query envelope, shaped as canonical
-/// `[{"id": …, "hits": [...]}]`.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_groups(result: &Value) -> Vec<Value> {
-    result
-        .get("result")
-        .and_then(|result| result.get("groups"))
-        .and_then(Value::as_array)
-        .map(|groups| {
-            groups
-                .iter()
-                .map(|group| {
-                    let mut shaped = Map::new();
-                    shaped.insert("id".into(), group.get("id").cloned().unwrap_or(Value::Null));
-                    shaped.insert("hits".into(), Value::Array(hit_array(group.get("hits"))));
-                    Value::Object(shaped)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// `result.hits` — the facet envelope, shaped as canonical `[{value, count}]`.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_facets(result: &Value) -> Vec<Value> {
-    result
-        .get("result")
-        .and_then(|result| result.get("hits"))
-        .and_then(Value::as_array)
-        .map(|hits| {
-            hits.iter()
-                .map(|hit| {
-                    serde_json::json!({
-                        "value": hit.get("value").cloned().unwrap_or(Value::Null),
-                        "count": hit.get("count").cloned().unwrap_or(Value::from(0)),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// `result.count` — the count envelope.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_count(result: &Value) -> u64 {
-    result
-        .get("result")
-        .and_then(|result| result.get("count"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
-}
-
-/// `result.collections[*].name` — canonical collection-name strings.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_collection_names(result: &Value) -> Vec<Value> {
-    result
-        .get("result")
-        .and_then(|result| result.get("collections"))
-        .and_then(Value::as_array)
-        .map(|collections| {
-            collections
-                .iter()
-                .filter_map(|entry| entry.get("name").cloned())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// `result.shard_keys[*].key` — canonical `PlanShardKey` values (string or
-/// unsigned number).
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_shard_keys(result: &Value) -> Vec<Value> {
-    match result
-        .get("result")
-        .and_then(|result| result.get("shard_keys"))
-    {
-        Some(Value::Array(entries)) => entries
-            .iter()
-            .filter_map(|entry| entry.get("key").cloned())
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// `result.config` — canonical `QuotaConfig` object.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_quotas(result: &Value) -> Value {
-    result
-        .get("result")
-        .and_then(|result| result.get("config"))
-        .and_then(|config| serde_json::from_value::<qql_plan::QuotaConfig>(config.clone()).ok())
-        .and_then(|config| serde_json::to_value(config).ok())
-        .unwrap_or(Value::Null)
-}
-
-/// `result` — canonical `CollectionInfo` object. Mirrors the runtime's
-/// `backend::schema_from_rest_result` derivation so browser callers read the
-/// same shape as the native SDKs.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn result_collection_info(result: &Value) -> Value {
-    let config = result.get("config");
-    let params = config.and_then(|c| c.get("params"));
-
-    let mut dense_vectors: Vec<String> = Vec::new();
-    let mut vectors: Vec<Value> = Vec::new();
-    if let Some(vectors_map) = params
-        .and_then(|p| p.get("vectors"))
-        .and_then(Value::as_object)
-    {
-        if vectors_map.contains_key("size") && vectors_map.contains_key("distance") {
-            // Unnamed default dense vector.
-            if let Some(spec) = vector_spec(None, &Value::Object(vectors_map.clone())) {
-                vectors.push(spec);
-            }
-        } else {
-            for (name, cfg) in vectors_map {
-                if is_pseudo_vector_key(name) {
-                    continue;
-                }
-                dense_vectors.push(name.clone());
-                if let Some(spec) = vector_spec(Some(name.clone()), cfg) {
-                    vectors.push(spec);
-                }
-            }
-            dense_vectors.sort();
-            // Runtime sorts full specs by name; unnamed specs (only possible
-            // in the single-vector branch) keep insertion order.
-            vectors.sort_by(|a, b| {
-                a.get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .cmp(b.get("name").and_then(Value::as_str).unwrap_or_default())
-            });
-        }
-    }
-
-    let sparse_vectors: Vec<Value> = params
-        .and_then(|p| p.get("sparse_vectors"))
-        .and_then(Value::as_object)
-        .map(|sparse| {
-            let mut specs: Vec<(String, Value)> = sparse
-                .iter()
-                .map(|(name, cfg)| {
-                    let mut spec = Map::new();
-                    spec.insert("name".into(), Value::from(name.clone()));
-                    if let Some(index) = cfg.get("index").filter(|i| i.is_object()) {
-                        spec.insert("index".into(), index.clone());
-                    }
-                    if let Some(modifier) = cfg.get("modifier").and_then(Value::as_str) {
-                        spec.insert("modifier".into(), Value::from(modifier));
-                    }
-                    (name.clone(), Value::Object(spec))
-                })
-                .collect();
-            specs.sort_by(|a, b| a.0.cmp(&b.0));
-            specs.into_iter().map(|(_, spec)| spec).collect()
-        })
-        .unwrap_or_default();
-
-    let mut payload_indexes: Vec<Value> = result
-        .get("payload_schema")
-        .and_then(Value::as_object)
-        .map(|schema| {
-            schema
-                .iter()
-                .map(|(field, meta)| {
-                    let data_type = meta
-                        .get("data_type")
-                        .and_then(Value::as_str)
-                        .or_else(|| meta.get("type").and_then(Value::as_str))
-                        .unwrap_or("keyword")
-                        .to_ascii_lowercase();
-                    let mut index_params = Map::new();
-                    if let Some(params) = meta.get("params").and_then(Value::as_object) {
-                        for (key, value) in params {
-                            if key != "type" {
-                                index_params.insert(key.clone(), value.clone());
-                            }
-                        }
-                    }
-                    let is_tenant = meta
-                        .get("is_tenant")
-                        .and_then(Value::as_bool)
-                        .or_else(|| index_params.get("is_tenant").and_then(Value::as_bool));
-                    let mut spec = Map::new();
-                    spec.insert("field".into(), Value::from(field.clone()));
-                    spec.insert("data_type".into(), Value::from(data_type));
-                    spec.insert("params".into(), Value::Object(index_params));
-                    if let Some(is_tenant) = is_tenant {
-                        spec.insert("is_tenant".into(), Value::from(is_tenant));
-                    }
-                    Value::Object(spec)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    payload_indexes.sort_by(|a, b| {
-        a.get("field")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .cmp(b.get("field").and_then(Value::as_str).unwrap_or_default())
-    });
-
-    let mut collection_params = Map::new();
-    if let Some(params) = params {
-        for key in [
-            "shard_number",
-            "sharding_method",
-            "on_disk_payload",
-            "replication_factor",
-        ] {
-            if let Some(value) = params.get(key)
-                && !value.is_null()
-            {
-                collection_params.insert(key.into(), value.clone());
-            }
-        }
-        if let Some(memory) = params
-            .get("payload")
-            .and_then(|payload| payload.get("memory"))
-            .and_then(Value::as_str)
-        {
-            collection_params.insert("payload_memory".into(), Value::from(memory));
-        }
-    }
-
-    let mut schema = Map::new();
-    schema.insert("dense_vectors".into(), Value::from(dense_vectors));
-    schema.insert("sparse_vectors".into(), Value::Array(sparse_vectors));
-    schema.insert("vectors".into(), Value::Array(vectors));
-    schema.insert("payload_indexes".into(), Value::Array(payload_indexes));
-    schema.insert("params".into(), Value::Object(collection_params));
-    if let Some(hnsw) = config
-        .and_then(|c| c.get("hnsw_config"))
-        .and_then(Value::as_object)
-    {
-        schema.insert("hnsw".into(), Value::Object(filter_keys(hnsw, HNSW_KEYS)));
-    }
-    if let Some(optimizers) = config
-        .and_then(|c| {
-            c.get("optimizer_config")
-                .or_else(|| c.get("optimizers_config"))
-        })
-        .and_then(Value::as_object)
-    {
-        schema.insert(
-            "optimizers".into(),
-            Value::Object(filter_keys(optimizers, OPTIMIZER_KEYS)),
-        );
-    }
-    if let Some(quantization) = config
-        .and_then(|c| c.get("quantization_config"))
-        .filter(|q| !q.is_null())
-    {
-        schema.insert("quantization".into(), quantization.clone());
-    }
-
-    serde_json::json!({
-        "status": result.get("status").and_then(Value::as_str).unwrap_or_default(),
-        "points_count": result.get("points_count").and_then(Value::as_u64).unwrap_or(0),
-        "segments_count": result.get("segments_count").and_then(Value::as_u64).unwrap_or(0),
-        "schema": Value::Object(schema),
+fn to_json<T: Serialize>(value: &T) -> Result<Value, QqlError> {
+    serde_json::to_value(value).map_err(|error| {
+        QqlError::execution(
+            "QQL-SERIALIZE",
+            format!("response shaping failed: {error}"),
+            None,
+        )
     })
 }
 
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-const HNSW_KEYS: &[&str] = &[
-    "m",
-    "ef_construct",
-    "full_scan_threshold",
-    "max_indexing_threads",
-    "on_disk",
-    "payload_m",
-    "inline_storage",
-    "memory",
-];
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-const OPTIMIZER_KEYS: &[&str] = &[
-    "deleted_threshold",
-    "vacuum_min_vector_number",
-    "default_segment_number",
-    "max_segment_size",
-    "memmap_threshold",
-    "indexing_threshold",
-    "flush_interval_sec",
-    "max_optimization_threads",
-    "prevent_unoptimized",
-];
-
-/// Keep only the keys the runtime's DDL re-parsing understands.
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn filter_keys(map: &Map<String, Value>, keys: &[&str]) -> Map<String, Value> {
-    let mut out = Map::new();
-    for key in keys {
-        if let Some(value) = map.get(*key)
-            && !value.is_null()
-        {
-            out.insert((*key).to_string(), value.clone());
+/// Parse one point record into a canonical hit. `score` defaults to `0.0` for
+/// unscored retrieve / scroll records, matching the typed gRPC/edge paths.
+fn parse_hit(value: &Value) -> Result<WasmHit, QqlError> {
+    let record = value
+        .as_object()
+        .ok_or_else(|| envelope_err("point record is not an object"))?;
+    let id = parse_point_id(
+        record
+            .get("id")
+            .ok_or_else(|| envelope_err("point record is missing id"))?,
+    )?;
+    let score = match record.get("score") {
+        None | Some(Value::Null) => 0.0,
+        Some(Value::Number(number)) => number
+            .as_f64()
+            .ok_or_else(|| envelope_err("point score is not a finite number"))?
+            as f32,
+        Some(other) => {
+            return Err(envelope_err(format!(
+                "point score must be a number, got {other}"
+            )));
         }
-    }
-    out
-}
-
-/// Pseudo-keys of the unnamed-vector `vectors` object (never vector names).
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn is_pseudo_vector_key(name: &str) -> bool {
-    matches!(
-        name,
-        "size"
-            | "distance"
-            | "hnsw_config"
-            | "quantization_config"
-            | "multivector_config"
-            | "on_disk"
-            | "datatype"
-    )
-}
-
-/// One canonical `VectorSpec` object (`name` is `null` for the default vector).
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn vector_spec(name: Option<String>, cfg: &Value) -> Option<Value> {
-    let size = cfg.get("size").and_then(Value::as_u64)?;
-    let mut spec = Map::new();
-    spec.insert("name".into(), name.map(Value::from).unwrap_or(Value::Null));
-    spec.insert("size".into(), Value::from(size));
-    spec.insert(
-        "distance".into(),
-        Value::from(
-            cfg.get("distance")
-                .and_then(Value::as_str)
-                .unwrap_or("Cosine"),
+    };
+    let payload = match record.get("payload") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(map)) => Some(map.clone()),
+        Some(other) => {
+            return Err(envelope_err(format!(
+                "point payload must be an object or null, got {other}"
+            )));
+        }
+    };
+    let vector = match record.get("vector") {
+        None | Some(Value::Null) => None,
+        Some(vector) => Some(
+            serde_json::from_value::<PlanVectorStruct>(vector.clone()).map_err(|error| {
+                envelope_err(format!(
+                    "point vector does not match VectorStructOutput: {error}"
+                ))
+            })?,
         ),
-    );
-    if let Some(hnsw) = cfg.get("hnsw_config").filter(|h| h.is_object()) {
-        spec.insert("hnsw".into(), hnsw.clone());
-    }
-    if let Some(quantization) = cfg.get("quantization_config").filter(|q| !q.is_null()) {
-        spec.insert("quantization".into(), quantization.clone());
-    }
-    if let Some(multivector) = cfg.get("multivector_config").filter(|m| m.is_object()) {
-        spec.insert("multivector".into(), multivector.clone());
-    }
-    if let Some(on_disk) = cfg.get("on_disk").and_then(Value::as_bool) {
-        spec.insert("on_disk".into(), Value::from(on_disk));
-    }
-    if let Some(datatype) = cfg.get("datatype").and_then(Value::as_str) {
-        spec.insert("datatype".into(), Value::from(datatype));
-    }
-    if let Some(memory) = cfg.get("memory").and_then(Value::as_str) {
-        spec.insert("memory".into(), Value::from(memory));
-    }
-    Some(Value::Object(spec))
+    };
+    Ok(WasmHit {
+        id,
+        score,
+        payload,
+        vector,
+    })
 }
 
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-pub(crate) fn wasm_success_response(
-    operation: &qql_plan::PlannedOperation,
-    result: serde_json::Value,
-) -> serde_json::Value {
-    use qql_plan::PlannedOperation;
+fn parse_point_id(value: &Value) -> Result<PlanPointId, QqlError> {
+    match value {
+        Value::Number(number) => number
+            .as_u64()
+            .map(PlanPointId::Number)
+            .ok_or_else(|| envelope_err(format!("point id {number} is not an unsigned integer"))),
+        Value::String(id) => Ok(PlanPointId::String(id.clone())),
+        other => Err(envelope_err(format!(
+            "point id must be a string or unsigned integer, got {other}"
+        ))),
+    }
+}
 
-    let telemetry = telemetry_from_envelope(&result);
+/// `result.points` — the `/points/query` and `/points/scroll` envelope.
+fn parse_points(envelope: &Value) -> Result<Vec<WasmHit>, QqlError> {
+    let points = envelope
+        .get("result")
+        .and_then(|result| result.get("points"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("query/scroll response is missing result.points"))?;
+    points.iter().map(parse_hit).collect()
+}
+
+/// `result` — the bare array envelope of `POST /points` (retrieve).
+fn parse_bare_records(envelope: &Value) -> Result<Vec<WasmHit>, QqlError> {
+    let records = envelope
+        .get("result")
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("get points response is missing result as an array"))?;
+    records.iter().map(parse_hit).collect()
+}
+
+/// `result.groups` — the grouped query envelope.
+fn parse_groups(envelope: &Value) -> Result<Vec<WasmGroup>, QqlError> {
+    let groups = envelope
+        .get("result")
+        .and_then(|result| result.get("groups"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("grouped query response is missing result.groups"))?;
+    groups
+        .iter()
+        .map(|group| {
+            let group_id = serde_json::from_value::<PlanGroupId>(
+                group
+                    .get("id")
+                    .cloned()
+                    .ok_or_else(|| envelope_err("group is missing id"))?,
+            )
+            .map_err(|error| envelope_err(format!("group id does not match GroupId: {error}")))?;
+            let hits = group
+                .get("hits")
+                .and_then(Value::as_array)
+                .ok_or_else(|| envelope_err("group is missing hits as an array"))?
+                .iter()
+                .map(parse_hit)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(WasmGroup { id: group_id, hits })
+        })
+        .collect()
+}
+
+/// `result.count` — the count envelope.
+fn parse_count(envelope: &Value) -> Result<u64, QqlError> {
+    envelope
+        .get("result")
+        .and_then(|result| result.get("count"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| envelope_err("count response is missing an unsigned result.count"))
+}
+
+/// `result.hits[*]` — the facet envelope, strict `{value, count}`.
+fn parse_facet(envelope: &Value) -> Result<Vec<WasmFacetHit>, QqlError> {
+    let hits = envelope
+        .get("result")
+        .and_then(|result| result.get("hits"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("facet response is missing result.hits"))?;
+    hits.iter()
+        .map(|hit| {
+            let value = serde_json::from_value::<PlanFacetValue>(
+                hit.get("value")
+                    .cloned()
+                    .ok_or_else(|| envelope_err("facet hit is missing value"))?,
+            )
+            .map_err(|error| {
+                envelope_err(format!("facet value does not match FacetValue: {error}"))
+            })?;
+            let count = hit
+                .get("count")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| envelope_err("facet hit is missing an unsigned count"))?;
+            Ok(WasmFacetHit { value, count })
+        })
+        .collect()
+}
+
+/// `result.collections[*].name` — canonical collection-name strings.
+fn parse_collection_names(envelope: &Value) -> Result<Vec<String>, QqlError> {
+    let collections = envelope
+        .get("result")
+        .and_then(|result| result.get("collections"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("list collections response is missing result.collections"))?;
+    collections
+        .iter()
+        .map(|entry| {
+            entry
+                .get("name")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .ok_or_else(|| envelope_err("collection entry is missing a string name"))
+        })
+        .collect()
+}
+
+/// `result.shard_keys` — canonical `PlanShardKey` values. Nullable when the
+/// collection does not use custom sharding.
+fn parse_shard_keys(envelope: &Value) -> Result<Vec<PlanShardKey>, QqlError> {
+    match envelope
+        .get("result")
+        .and_then(|result| result.get("shard_keys"))
+    {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .map(|entry| {
+                let key = entry
+                    .get("key")
+                    .ok_or_else(|| envelope_err("shard key entry is missing key"))?;
+                match key {
+                    Value::String(keyword) => Ok(PlanShardKey::Keyword(keyword.clone())),
+                    Value::Number(number) => {
+                        number.as_u64().map(PlanShardKey::Number).ok_or_else(|| {
+                            envelope_err(format!("shard key {number} is not an unsigned integer"))
+                        })
+                    }
+                    other => Err(envelope_err(format!(
+                        "shard key must be a string or unsigned integer, got {other}"
+                    ))),
+                }
+            })
+            .collect(),
+        Some(other) => Err(envelope_err(format!(
+            "shard_keys must be an array or null, got {other}"
+        ))),
+    }
+}
+
+/// `result.config` — canonical `QuotaConfig`.
+fn parse_quotas(envelope: &Value) -> Result<QuotaConfig, QqlError> {
+    let config = envelope
+        .get("result")
+        .and_then(|result| result.get("config"))
+        .ok_or_else(|| envelope_err("get quotas response is missing result.config"))?;
+    serde_json::from_value(config.clone())
+        .map_err(|error| envelope_err(format!("quota config is invalid: {error}")))
+}
+
+/// Parse one strict `/points/query/batch` item: each OpenAPI `QueryResponse`
+/// item carries its points at the item's top level (`{"points": […]}`).
+pub(crate) fn parse_query_batch(
+    envelope: &Value,
+) -> Result<Vec<(Value, Option<ServerTelemetry>)>, QqlError> {
+    let items = envelope
+        .get("result")
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("query batch response is missing result as an array"))?;
+    items
+        .iter()
+        .map(|item| {
+            if let Some(message) = qql_plan::batch_item_error(item) {
+                return Err(QqlError::backend("QQL-BACKEND-BATCH", message, None));
+            }
+            let points = item
+                .get("points")
+                .and_then(Value::as_array)
+                .ok_or_else(|| envelope_err("query batch item is missing points as an array"))?;
+            let hits = points
+                .iter()
+                .map(parse_hit)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((to_json(&hits)?, telemetry_from_envelope(item)))
+        })
+        .collect()
+}
+
+/// Parse a strict `/points/batch` (update) envelope and return the item count.
+/// Per-item `UpdateResult`s are status-only, so only `status: "error"` items
+/// fail (`QQL-BACKEND-BATCH`), mirroring the runtime.
+pub(crate) fn parse_update_batch(envelope: &Value) -> Result<usize, QqlError> {
+    let items = envelope
+        .get("result")
+        .and_then(Value::as_array)
+        .ok_or_else(|| envelope_err("update batch response is missing result as an array"))?;
+    items
+        .iter()
+        .try_for_each(|item| match qql_plan::batch_item_error(item) {
+            Some(message) => Err(QqlError::backend("QQL-BACKEND-BATCH", message, None)),
+            None => Ok(()),
+        })?;
+    Ok(items.len())
+}
+
+/// Build the canonical `ExecResponse` JSON for one planned operation.
+///
+/// Every read operation parses exactly its OpenAPI response shape; a missing
+/// or mistyped field returns `QQL-BACKEND-ENVELOPE`. Writes carry no typed
+/// response body (the executor owns upsert counts), matching the runtime.
+pub(crate) fn wasm_success_response(
+    operation: &PlannedOperation,
+    result: &Value,
+) -> Result<Value, QqlError> {
+    let telemetry = telemetry_from_envelope(result);
     let label = operation.operation_label();
     let (message, data) = match operation {
         PlannedOperation::Query { .. } | PlannedOperation::Scroll { .. } => {
-            let hits = hit_array(result_points(&result));
+            let hits = parse_points(result)?;
             let count = hits.len();
-            (format!("Found {count} hits"), Some(Value::Array(hits)))
+            (format!("Found {count} hits"), Some(to_json(&hits)?))
         }
         PlannedOperation::GetPoints { .. } => {
-            let hits = hit_array(result_records(&result));
+            let hits = parse_bare_records(result)?;
             let count = hits.len();
-            (format!("Found {count} hits"), Some(Value::Array(hits)))
+            (format!("Found {count} hits"), Some(to_json(&hits)?))
         }
         PlannedOperation::QueryGroups { request, .. } => {
-            let mut groups = result_groups(&result);
+            let mut groups = parse_groups(result)?;
             // `group_offset` has no wire representation; trim client-side,
             // exactly like the runtime's normalization.
             if let Some(offset) = request.group_offset {
@@ -498,54 +364,363 @@ pub(crate) fn wasm_success_response(
                 }
             }
             let count = groups.len();
+            let mut payload = Map::new();
+            payload.insert("groups".into(), to_json(&groups)?);
             (
                 format!("Found {count} group(s)"),
-                Some(serde_json::json!({"groups": groups})),
+                Some(Value::Object(payload)),
             )
         }
         PlannedOperation::Count { .. } => {
-            let count = result_count(&result);
-            (
-                format!("Count: {count}"),
-                Some(serde_json::json!({"count": count})),
-            )
+            let count = parse_count(result)?;
+            let mut payload = Map::new();
+            payload.insert("count".into(), Value::from(count));
+            (format!("Count: {count}"), Some(Value::Object(payload)))
         }
         PlannedOperation::Facet { .. } => {
-            let hits = result_facets(&result);
+            let hits = parse_facet(result)?;
             let count = hits.len();
+            (format!("Found {count} facet hit(s)"), Some(to_json(&hits)?))
+        }
+        PlannedOperation::Upsert { request, .. } => {
+            let count = request.points.len();
+            let mut payload = Map::new();
+            payload.insert("count".into(), Value::from(count as u64));
             (
-                format!("Found {count} facet hit(s)"),
-                Some(Value::Array(hits)),
+                format!("Upserted {count} point(s)"),
+                Some(Value::Object(payload)),
             )
         }
-        PlannedOperation::Upsert { request, .. } => (
-            format!("Upserted {} point(s)", request.points.len()),
-            Some(serde_json::json!({"count": request.points.len()})),
-        ),
         PlannedOperation::ListCollections => {
-            let names = result_collection_names(&result);
+            let names = parse_collection_names(result)?;
             let count = names.len();
+            let mut payload = Map::new();
+            payload.insert("collections".into(), Value::from(names));
             (
                 format!("Found {count} collection(s)"),
-                Some(serde_json::json!({"collections": names})),
+                Some(Value::Object(payload)),
             )
         }
         PlannedOperation::GetCollection { .. } => {
-            (format!("{label} ok"), Some(result_collection_info(&result)))
+            let info = parse_collection_info(result)?;
+            (format!("{label} ok"), Some(info))
         }
-        PlannedOperation::ListShardKeys { .. } => (
-            "Shard keys listed".to_string(),
-            Some(serde_json::json!({"shard_keys": result_shard_keys(&result)})),
-        ),
-        PlannedOperation::GetQuotas => (
-            "Quota configuration shown".to_string(),
-            Some(result_quotas(&result)),
-        ),
-        PlannedOperation::SetQuotas { request } => (
-            "Quota configuration updated".to_string(),
-            Some(serde_json::to_value(&request.config).unwrap_or(serde_json::Value::Null)),
-        ),
+        PlannedOperation::ListShardKeys { .. } => {
+            let keys = parse_shard_keys(result)?;
+            let mut payload = Map::new();
+            payload.insert("shard_keys".into(), to_json(&keys)?);
+            (
+                "Shard keys listed".to_string(),
+                Some(Value::Object(payload)),
+            )
+        }
+        PlannedOperation::GetQuotas => {
+            let config = parse_quotas(result)?;
+            (
+                "Quota configuration shown".to_string(),
+                Some(to_json(&config)?),
+            )
+        }
+        PlannedOperation::SetQuotas { request } => {
+            // `PUT /quotas` answers a boolean status; the typed result is the
+            // replacement config the caller sent, mirroring the runtime.
+            match result.get("result") {
+                Some(Value::Bool(_)) => (
+                    "Quota configuration updated".to_string(),
+                    Some(to_json(&request.config)?),
+                ),
+                _ => {
+                    return Err(envelope_err(
+                        "set quotas response is missing the boolean result field",
+                    ));
+                }
+            }
+        }
+        PlannedOperation::CrossRerank { .. } => {
+            return Err(QqlError::execution(
+                "QQL-REST-CLIENT-SIDE",
+                "CROSS RERANK is client-side and has no REST response",
+                None,
+            ));
+        }
         _ => (format!("{label} ok"), None),
     };
-    exec_response_with_telemetry(true, label, &message, data, telemetry)
+    Ok(exec_response_with_telemetry(
+        true, label, &message, data, telemetry,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn planned(sql: &str) -> PlannedOperation {
+        qql_plan::plan(&qql_core::parser::Parser::parse(sql).expect("parse")).expect("plan")
+    }
+
+    #[test]
+    fn parses_scored_points_strictly_into_runtime_shape() {
+        let response = wasm_success_response(
+            &planned("SCROLL FROM docs LIMIT 1"),
+            &json!({
+                "result": {"points": [{
+                    "id": 7,
+                    "score": 0.949999988079071,
+                    "payload": {"title": "a"},
+                    "vector": [0.5, 0.25],
+                }]},
+                "status": "ok",
+                "time": 0.125,
+            }),
+        )
+        .expect("strict parse");
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["operation"], "SCROLL");
+        assert_eq!(response["message"], "Found 1 hits");
+        assert_eq!(
+            response["data"],
+            json!([{
+                "id": 7,
+                "score": 0.95,
+                "payload": {"title": "a"},
+                "vector": [0.5, 0.25],
+            }])
+        );
+        assert_eq!(response["telemetry"]["time_s"], 0.125);
+    }
+
+    #[test]
+    fn unscored_records_default_zero_without_fabricated_fields() {
+        let response = wasm_success_response(
+            &planned("QUERY POINTS (1) FROM docs"),
+            &json!({"result": [{"id": "uuid-1"}], "status": "ok"}),
+        )
+        .expect("strict parse");
+        assert_eq!(response["operation"], "GET_POINTS");
+        assert_eq!(
+            response["data"],
+            json!([{"id": "uuid-1", "score": 0.0, "payload": null}])
+        );
+        assert!(response["data"][0].get("text").is_none());
+    }
+
+    #[test]
+    fn malformed_read_shapes_fail_closed() {
+        let scroll = planned("SCROLL FROM docs LIMIT 1");
+        for envelope in [
+            json!({"result": {}, "status": "ok"}),
+            json!({"result": {"points": [{"score": 1.0}]}, "status": "ok"}),
+            json!({"result": {"points": [{"id": -1}]}, "status": "ok"}),
+            json!({"result": {"points": [{"id": 1, "score": "high"}]}, "status": "ok"}),
+            json!({"result": {"points": [{"id": 1, "payload": 4}]}, "status": "ok"}),
+            json!({"result": {"points": [{"id": 1, "vector": {"text": "x"}}]}, "status": "ok"}),
+        ] {
+            let err = wasm_success_response(&scroll, &envelope).unwrap_err();
+            assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+        }
+
+        let err = wasm_success_response(
+            &planned("COUNT FROM docs"),
+            &json!({"result": {}, "status": "ok"}),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+        let err = wasm_success_response(
+            &planned("FACET city FROM docs LIMIT 10"),
+            &json!({"result": {"hits": [{"value": {"nested": 1}, "count": 2}]}, "status": "ok"}),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+        let err = wasm_success_response(
+            &PlannedOperation::ListCollections,
+            &json!({"result": {"collections": [{"name": 3}]}, "status": "ok"}),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+        let err = wasm_success_response(
+            &PlannedOperation::GetQuotas,
+            &json!({"result": {"config": {"enabled": "yes"}}, "status": "ok"}),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+    }
+
+    #[test]
+    fn parses_count_facet_and_groups_canonically() {
+        let count = wasm_success_response(
+            &planned("COUNT FROM docs"),
+            &json!({"result": {"count": 7}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(count["data"], json!({"count": 7}));
+        assert_eq!(count["message"], "Count: 7");
+
+        let facet = wasm_success_response(
+            &planned("FACET city FROM docs LIMIT 10"),
+            &json!({"result": {"hits": [
+                {"value": "NYC", "count": 2},
+                {"value": 7, "count": 1},
+            ]}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(
+            facet["data"],
+            json!([{"value": "NYC", "count": 2}, {"value": 7, "count": 1}])
+        );
+
+        let groups = wasm_success_response(
+            &planned("QUERY TEXT 'x' MODEL 'm' FROM docs USING dense GROUP BY category LIMIT 3"),
+            &json!({"result": {"groups": [
+                {"id": -3, "hits": [{"id": 1, "score": 0.5}]},
+                {"id": "b", "hits": []},
+            ]}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(groups["operation"], "QUERY_GROUPS");
+        assert_eq!(groups["message"], "Found 2 group(s)");
+        assert_eq!(
+            groups["data"],
+            json!({"groups": [
+                {"id": -3, "hits": [{"id": 1, "score": 0.5, "payload": null}]},
+                {"id": "b", "hits": []},
+            ]})
+        );
+        assert_eq!(groups["data"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn group_offset_trims_like_the_runtime() {
+        let groups = wasm_success_response(
+            &planned(
+                "QUERY TEXT 'x' MODEL 'm' FROM docs USING dense GROUP BY category LIMIT 3 OFFSET 1",
+            ),
+            &json!({"result": {"groups": [
+                {"id": 1, "hits": []},
+                {"id": 2, "hits": []},
+            ]}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(groups["data"], json!({"groups": [{"id": 2, "hits": []}]}));
+    }
+
+    #[test]
+    fn parses_collections_shard_keys_and_quotas() {
+        let collections = wasm_success_response(
+            &PlannedOperation::ListCollections,
+            &json!({"result": {"collections": [{"name": "alpha"}, {"name": "beta"}]}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(
+            collections["data"],
+            json!({"collections": ["alpha", "beta"]})
+        );
+
+        let keys = wasm_success_response(
+            &planned("SHOW SHARD KEYS ON COLLECTION docs"),
+            &json!({"result": {"shard_keys": [{"key": "acme"}, {"key": 101}]}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(keys["data"], json!({"shard_keys": ["acme", 101]}));
+
+        let none = wasm_success_response(
+            &planned("SHOW SHARD KEYS ON COLLECTION docs"),
+            &json!({"result": {"shard_keys": null}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(none["data"], json!({"shard_keys": []}));
+
+        let quotas = wasm_success_response(
+            &PlannedOperation::GetQuotas,
+            &json!({
+                "result": {"config": {"enabled": true, "max_resident_memory_percent": 80}},
+                "status": "ok",
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            quotas["data"],
+            json!({"enabled": true, "max_resident_memory_percent": 80})
+        );
+    }
+
+    #[test]
+    fn set_quotas_requires_boolean_result() {
+        let ok = wasm_success_response(
+            &planned("SET QUOTA (enabled = true, max_resident_memory_percent = 80)"),
+            &json!({"result": true, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(
+            ok["data"],
+            json!({"enabled": true, "max_resident_memory_percent": 80})
+        );
+
+        let err = wasm_success_response(
+            &planned("SET QUOTA (enabled = true)"),
+            &json!({"result": {"ok": true}, "status": "ok"}),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+    }
+
+    #[test]
+    fn upsert_reports_request_point_count_and_writes_are_status_only() {
+        let upsert = wasm_success_response(
+            &planned("UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]}"),
+            &json!({"result": {"status": "completed", "operation_id": 0}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(upsert["operation"], "UPSERT");
+        assert_eq!(upsert["message"], "Upserted 1 point(s)");
+        assert_eq!(upsert["data"], json!({"count": 1}));
+
+        let delete = wasm_success_response(
+            &planned("DELETE FROM docs WHERE id = 1"),
+            &json!({"result": {"status": "completed", "operation_id": 1}, "status": "ok"}),
+        )
+        .unwrap();
+        assert_eq!(delete["data"], Value::Null);
+    }
+
+    #[test]
+    fn batch_items_are_strict_and_carry_telemetry() {
+        let parsed = parse_query_batch(&json!({
+            "result": [
+                {"points": [{"id": 1, "score": 0.9}], "time": 0.5},
+                {"points": []},
+            ],
+            "status": "ok",
+        }))
+        .unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0].0,
+            json!([{"id": 1, "score": 0.9, "payload": null}])
+        );
+        assert_eq!(parsed[0].1.as_ref().unwrap().time_s, Some(0.5));
+
+        let err =
+            parse_query_batch(&json!({"result": [{"points": 1}], "status": "ok"})).unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+        let err = parse_query_batch(&json!({
+            "result": [{"status": "error", "error": "point 42 not found"}],
+            "status": "ok",
+        }))
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-BATCH");
+
+        assert_eq!(
+            parse_update_batch(&json!({"result": [{"status": "completed"}, {"status": "acknowledged"}], "status": "ok"}))
+                .unwrap(),
+            2
+        );
+        let err = parse_update_batch(&json!({"result": {"status": "completed"}, "status": "ok"}))
+            .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+    }
 }

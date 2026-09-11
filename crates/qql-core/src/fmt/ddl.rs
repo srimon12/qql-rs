@@ -9,7 +9,8 @@ pub(crate) use super::index_quota::{
 use crate::ast::{
     AlterCollectionStmt, CollectionConfig, CollectionMode, CollectionParamsConfig,
     CreateCollectionStmt, DropCollectionStmt, HnswRuntimeConfig, MultivectorComparator,
-    OptimizersRuntimeConfig, SparseVectorDef, VectorDef, VectorsConfig, escape_string,
+    OptimizersRuntimeConfig, SparseVectorDef, SparseVectorDiff, VectorDef, VectorDiff,
+    VectorsConfig, escape_string,
 };
 use crate::fmt::expr::{render_distance, render_f64, render_name};
 use alloc::format;
@@ -137,7 +138,72 @@ pub(crate) fn render_collection_config_clauses(config: &CollectionConfig) -> Vec
             clauses.push(format!("WITH QUANTIZATION ({})", body));
         }
     }
+    for diff in &config.vector_diffs {
+        clauses.push(render_vector_diff(diff));
+    }
+    for diff in &config.sparse_vector_diffs {
+        clauses.push(render_sparse_vector_diff(diff));
+    }
     clauses
+}
+
+/// `WITH VECTOR <name> (<nested blocks>)` for one dense `ALTER` diff.
+pub(crate) fn render_vector_diff(diff: &VectorDiff) -> String {
+    let mut blocks = Vec::new();
+    if let Some(hnsw) = &diff.hnsw
+        && let Some(body) = render_hnsw_block(hnsw)
+    {
+        blocks.push(format!("HNSW ({})", body));
+    }
+    if let Some(update) = &diff.quantization {
+        if update.disabled {
+            blocks.push("QUANTIZATION (disabled = true)".into());
+        } else if let Some(config) = &update.config
+            && let Some(body) = render_quantization_block(config)
+        {
+            blocks.push(format!("QUANTIZATION ({})", body));
+        }
+    }
+    if let Some(vectors) = &diff.vectors
+        && let Some(body) = render_vectors_options(vectors)
+    {
+        blocks.push(format!("VECTOR ({})", body));
+    }
+    format!(
+        "WITH VECTOR {} ({})",
+        render_name(&diff.name),
+        blocks.join(", ")
+    )
+}
+
+/// `WITH SPARSE <name> (SPARSE (…))` for one sparse `ALTER` diff.
+pub(crate) fn render_sparse_vector_diff(diff: &SparseVectorDiff) -> String {
+    let mut options = Vec::new();
+    if let Some(modifier) = &diff.modifier {
+        options.push(format!(
+            "modifier = '{}'",
+            escape_string(&modifier.to_ascii_lowercase())
+        ));
+    }
+    if let Some(index) = &diff.index {
+        if let Some(value) = index.full_scan_threshold {
+            options.push(format!("full_scan_threshold = {}", value));
+        }
+        if let Some(value) = index.on_disk {
+            options.push(format!("on_disk = {}", value));
+        }
+        if let Some(value) = index.datatype {
+            options.push(format!("datatype = '{}'", value.as_str()));
+        }
+        if let Some(value) = index.memory {
+            options.push(format!("memory = '{}'", value.as_str()));
+        }
+    }
+    format!(
+        "WITH SPARSE {} (SPARSE ({}))",
+        render_name(&diff.name),
+        options.join(", ")
+    )
 }
 
 pub(crate) fn render_collection_mode(mode: &CollectionMode) -> String {

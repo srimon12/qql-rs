@@ -42,6 +42,10 @@ pub struct Client {
     rerank_endpoint: Option<String>,
     rerank_api_key: Option<String>,
     rerank_model: Option<String>,
+    /// Client-side BM25 document parameters for the built-in local sparse
+    /// encoder (used for `TEXT` upserts / sparse `TEXT` inputs; write-path
+    /// only). Defaults to the Qdrant `qdrant/bm25` values.
+    pub(crate) bm25: qql_embed::Bm25Params,
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -69,6 +73,7 @@ impl Client {
             rerank_endpoint: None,
             rerank_api_key: None,
             rerank_model: None,
+            bm25: qql_embed::Bm25Params::default(),
         }
     }
 
@@ -83,6 +88,25 @@ impl Client {
     #[wasm_bindgen(getter, js_name = routeAffinity)]
     pub fn route_affinity(&self) -> Option<String> {
         self.route_affinity.clone()
+    }
+
+    /// Set client-side BM25 document parameters for the built-in local sparse
+    /// encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
+    /// documents upserted after the call are encoded; query weights stay unit
+    /// and server-side inference is untouched. Invalid values throw
+    /// (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+    /// all finite.
+    #[wasm_bindgen(js_name = setBm25Params)]
+    pub fn set_bm25_params(&mut self, k1: f64, b: f64, avg_len: f64) -> Result<(), JsValue> {
+        let params = qql_embed::Bm25Params::new(k1, b, avg_len)
+            .map_err(|e| JsValue::from_str(&format!("{}: {}", e.code, e.message)))?;
+        self.bm25 = params;
+        Ok(())
+    }
+
+    /// Current BM25 document parameters (used by the local sparse encoder).
+    pub(crate) fn bm25_params(&self) -> &qql_embed::Bm25Params {
+        &self.bm25
     }
 
     // ── Embedder configuration ──────────────────────────────────
@@ -718,14 +742,25 @@ impl Client {
         &self,
         collection: &str,
     ) -> Result<qql_embed::TopologyNames, JsValue> {
-        use super::response::vector_names_from_collection_result;
+        use super::schema::vector_names_from_collection_result;
         let path = format!("/collections/{collection}");
         let body = self.send_json("GET", &path, None).await?;
         let result = body
             .get("result")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        Ok(vector_names_from_collection_result(&result))
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                JsValue::from_str(
+                    &serde_json::to_string(&qql_core::error::QqlError::backend(
+                        "QQL-BACKEND-ENVELOPE",
+                        "get collection response is missing a result object",
+                        None,
+                    ))
+                    .unwrap_or_else(|_| {
+                        "get collection response is missing a result object".into()
+                    }),
+                )
+            })?;
+        Ok(vector_names_from_collection_result(result))
     }
     pub(crate) async fn send_json(
         &self,

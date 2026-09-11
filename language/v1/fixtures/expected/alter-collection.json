@@ -10,11 +10,111 @@
           "params": null,
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": {
             "datatype": null,
             "memory": null,
             "on_disk": true
           }
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [
+            {
+              "hnsw": {
+                "ef_construct": null,
+                "full_scan_threshold": null,
+                "inline_storage": null,
+                "m": 32,
+                "max_indexing_threads": null,
+                "memory": null,
+                "on_disk": null,
+                "payload_m": null
+              },
+              "name": "dense",
+              "quantization": {
+                "config": {
+                  "always_ram": true,
+                  "bits": null,
+                  "compression": null,
+                  "encoding": null,
+                  "memory": null,
+                  "qtype": "Scalar",
+                  "quantile": null,
+                  "query_encoding": null
+                },
+                "disabled": false
+              },
+              "vectors": {
+                "datatype": null,
+                "memory": "cold",
+                "on_disk": null
+              }
+            }
+          ],
+          "vectors": null
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [
+            {
+              "hnsw": null,
+              "name": "colbert",
+              "quantization": {
+                "config": null,
+                "disabled": true
+              },
+              "vectors": null
+            }
+          ],
+          "vectors": null
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "sparse_vector_diffs": [
+            {
+              "index": {
+                "datatype": "float16",
+                "full_scan_threshold": 5000,
+                "memory": null,
+                "on_disk": null
+              },
+              "modifier": "idf",
+              "name": "bm25"
+            }
+          ],
+          "vector_diffs": [],
+          "vectors": null
         }
       }
     },
@@ -36,6 +136,8 @@
           "params": null,
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         }
       }
@@ -59,6 +161,8 @@
           "params": null,
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         }
       }
@@ -82,6 +186,8 @@
           },
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         }
       }
@@ -116,6 +222,8 @@
             },
             "disabled": false
           },
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         }
       }
@@ -132,6 +240,8 @@
             "config": null,
             "disabled": true
           },
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         }
       }

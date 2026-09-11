@@ -11,15 +11,17 @@ use super::options::{
 };
 use super::pipeline::split_by_shard;
 use super::schema::{
-    apply_overrides, build_plan, parse_where_filter, quantize_json, restore_optimizers_statement,
+    apply_overrides, build_plan, parse_where_filter, quantize_config, restore_optimizers_statement,
     suppress_indexing,
 };
+use super::validate_endpoints;
 use crate::dump::generate_create_statement;
 
 fn sample_info() -> CollectionInfo {
     CollectionInfo {
         status: "green".into(),
         points_count: 10,
+        indexed_vectors_count: None,
         segments_count: 1,
         schema: CollectionSchema {
             dense_vectors: vec!["dense".into()],
@@ -127,7 +129,7 @@ fn fast_bulk_plan_suppresses_then_restores_indexing() {
 fn scalar_quantize_create_parses() {
     let mut info = sample_info();
     let spec = QuantizeSpec::new(QuantizeKind::Scalar);
-    info.schema.quantization = Some(quantize_json(&spec));
+    info.schema.quantization = Some(quantize_config(&spec));
     let stmt = generate_create_statement("docs", &info);
     assert!(stmt.contains("WITH QUANTIZATION ("));
     assert!(stmt.contains("type = 'scalar'"));
@@ -142,7 +144,7 @@ fn binary_and_turbo_quantize_create_parse() {
         QuantizeKind::Product,
     ] {
         let mut info = sample_info();
-        info.schema.quantization = Some(quantize_json(&QuantizeSpec::new(kind)));
+        info.schema.quantization = Some(quantize_config(&QuantizeSpec::new(kind)));
         let stmt = generate_create_statement("docs", &info);
         assert!(
             stmt.contains(&format!("type = '{}'", kind.as_str())),
@@ -156,14 +158,15 @@ fn binary_and_turbo_quantize_create_parse() {
 #[test]
 fn suppress_indexing_preserves_original() {
     let mut info = sample_info();
-    let mut map = serde_json::Map::new();
-    map.insert("indexing_threshold".into(), json!(20000));
-    info.schema.optimizers = Some(map);
+    info.schema.optimizers = Some(qql_plan::OptimizersConfig {
+        indexing_threshold: Some(20000),
+        ..Default::default()
+    });
     let original = suppress_indexing(&mut info, DEFAULT_BULK_INDEXING_THRESHOLD);
     assert_eq!(original, Some(20000));
     assert_eq!(
-        info.schema.optimizers.as_ref().unwrap()["indexing_threshold"],
-        json!(DEFAULT_BULK_INDEXING_THRESHOLD)
+        info.schema.optimizers.as_ref().unwrap().indexing_threshold,
+        Some(DEFAULT_BULK_INDEXING_THRESHOLD)
     );
     let restore = restore_optimizers_statement("docs", original);
     assert!(restore.contains("indexing_threshold = 20000"));
@@ -406,4 +409,27 @@ fn facet_discovery_sql_parses() {
         "FACET tenant FROM docs WHERE city = 'berlin' LIMIT 10000 EXACT true;",
     )
     .expect("FACET discovery with WHERE");
+}
+
+/// Edge → edge migration is rejected before any executor is built; every
+/// remote/edge combination stays valid.
+#[test]
+fn edge_to_edge_migration_fails_closed() {
+    assert!(validate_endpoints(false, false).is_ok());
+    assert!(
+        validate_endpoints(true, false).is_ok(),
+        "edge → remote publish"
+    );
+    assert!(
+        validate_endpoints(false, true).is_ok(),
+        "remote → edge seed"
+    );
+
+    let error = validate_endpoints(true, true).expect_err("edge → edge must fail closed");
+    assert!(
+        error.contains("edge → edge migration is not supported"),
+        "{error}"
+    );
+    assert!(error.contains("qql edge bootstrap"), "{error}");
+    assert!(error.contains("--target-url"), "{error}");
 }

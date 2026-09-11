@@ -2,10 +2,15 @@
 //!
 //! Module layout: [`params`] (options + bind contracts), [`stmt`] (the `Stmt`
 //! handle), [`functions`] (free parse/compile/bind entry points),
-//! [`report`] (execution envelopes), [`response`] (REST response shaping),
-//! [`telemetry`] (server time and usage), [`client`] (browser transport +
-//! embedders), [`execute`] (execution entry points and batching),
-//! [`analyze`] (execution profiling), [`embed`] (the `qql-embed` adapter).
+//! [`report`] (execution envelopes), [`response`] (strict REST response
+//! shaping), [`schema`] (collection metadata/schema shaping), [`telemetry`]
+//! (server time and usage), [`client`] (browser transport + embedders),
+//! [`execute`] (execution entry points and batching), [`analyze`] (execution
+//! profiling), [`embed`] (the `qql-embed` adapter).
+//!
+//! `report`, `response`, `schema`, and `telemetry` are pure JSON shaping with
+//! no transport or `wasm-bindgen` dependency, so they also compile on the host
+//! under `cargo test -p qql-wasm` for unit coverage.
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 mod analyze;
@@ -19,12 +24,14 @@ mod functions;
 mod params;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 mod pipeline;
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
+#[cfg(any(test, all(feature = "client", target_arch = "wasm32")))]
 mod report;
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
+#[cfg(any(test, all(feature = "client", target_arch = "wasm32")))]
 mod response;
+#[cfg(any(test, all(feature = "client", target_arch = "wasm32")))]
+mod schema;
 mod stmt;
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
+#[cfg(any(test, all(feature = "client", target_arch = "wasm32")))]
 mod telemetry;
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]

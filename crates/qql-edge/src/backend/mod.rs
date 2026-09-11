@@ -18,40 +18,48 @@ pub mod config_builder;
 pub mod conversions;
 pub mod error_map;
 pub mod filter_converter;
+pub mod index_schema;
 pub mod query_converter;
 pub mod unsupported;
 pub mod vector_parser;
 
+mod ops;
+
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use qdrant_edge::{
-    CreateIndex, EdgeConfigBuilder, EdgeShard, FieldIndexOperations, PayloadFieldSchema,
-    PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation, VectorOperations,
-    VectorStructPersisted, WithPayloadInterface, WithVector,
+    CreateIndex, EdgeConfig, EdgeConfigBuilder, EdgeShard, EdgeShardRead, FieldIndexOperations,
+    PointInsertOperations, PointOperations, UpdateOperation, VectorOperations,
+    VectorStructPersisted, WalOptions, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
-use config_builder::build_edge_config;
+use config_builder::{build_edge_config, edge_hnsw_config_over, overlay_optimizers};
 use conversions::{
-    from_edge_facet_hit, from_edge_record_to_hit, from_edge_scored_point_to_hit, to_edge_id,
-    to_edge_ids,
+    edge_hnsw_spec, edge_optimizers_spec, edge_quantization_spec, from_edge_facet_hit,
+    from_edge_group_to_typed, from_edge_record_to_hit, from_edge_scored_point_to_hit,
+    hydrate_edge_groups, to_edge_id, to_edge_ids,
 };
 use error_map::{EdgeOp, edge_err, edge_input_err};
 use filter_converter::convert_edge_filter;
+use index_schema::edge_payload_field_schema;
 use query_converter::{
-    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
-    parse_json_path,
+    convert_group_output, convert_order_by_interface, convert_query_groups_request,
+    convert_query_request, convert_with_payload, convert_with_vector, parse_json_path,
 };
-use unsupported::{EdgeUnsupported, reject_collection_sharding, reject_shard_key};
+use unsupported::{
+    EdgeUnsupported, reject_collection_params, reject_collection_sharding, reject_shard_key,
+    vector_hnsw_diffs,
+};
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
 use qql::client::QdrantOps;
-use qql::executor::{BackendResponse, ExecData, FacetHit, SearchHit};
+use qql::executor::{BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit};
 use qql_core::error::QqlError;
 use qql_plan::UpdateOperation as PlanUpdateOperation;
 use qql_plan::{
@@ -64,8 +72,22 @@ use qql_plan::{
 pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
+    /// Optional WAL segment capacity (bytes) seeding every shard this backend
+    /// opens or creates; a value already persisted in the shard's
+    /// `edge_config.json` wins. `None` keeps each shard's persisted/default
+    /// value (32 MiB for new shards).
+    wal_segment_capacity: Option<usize>,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
     opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+}
+
+/// How `open_shard_inner` treats a missing vs existing collection directory.
+#[derive(Clone, Copy)]
+enum OpenMode {
+    /// Reads and mutations: missing collection is `QQL-EDGE-COLLECTION-NOT-FOUND`.
+    MustExist,
+    /// `CREATE COLLECTION`: existing `segments/` is `QQL-EDGE-COLLECTION-EXISTS`.
+    CreateExclusive,
 }
 
 /// Helper: create a spawn_blocking error with the operation name for context.
@@ -74,11 +96,25 @@ fn spawn_error(operation: &str, error: impl std::fmt::Display) -> QqlError {
         .with_field("operation", operation.to_string())
 }
 
+/// Persisted WAL segment capacity (bytes) from the shard's `edge_config.json`.
+///
+/// `None` covers both "no config file" and "config without WAL options": the
+/// shard has never recorded a capacity, so an env/CLI value may seed one. A
+/// config that exists but cannot be parsed is also `None` here — `EdgeShard::load`
+/// surfaces that error with full context.
+fn persisted_wal_segment_capacity(collection_path: &Path) -> Option<usize> {
+    match EdgeConfig::load(collection_path) {
+        Some(Ok(config)) => config.wal_options.map(|wal| wal.segment_capacity),
+        Some(Err(_)) | None => None,
+    }
+}
+
 impl std::fmt::Debug for EdgeQdrant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EdgeQdrant")
             .field("base_path", &self.base_path)
             .field("on_disk_payload", &self.on_disk_payload)
+            .field("wal_segment_capacity", &self.wal_segment_capacity)
             .finish()
     }
 }
@@ -90,9 +126,25 @@ impl EdgeQdrant {
         Self {
             base_path: base_path.into(),
             on_disk_payload,
+            wal_segment_capacity: None,
             shards: RwLock::new(HashMap::new()),
             opening: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Override the write-ahead-log segment capacity (bytes) for every shard
+    /// this backend creates or opens. qdrant-edge pre-allocates each WAL
+    /// segment to this size, so embedded targets with small disks set it lower
+    /// than the 32 MiB default.
+    ///
+    /// Seed-once: the value is applied when creating a shard or when an
+    /// existing shard has no persisted capacity; a capacity already recorded
+    /// in `edge_config.json` wins, so later opens never ratchet the shard's
+    /// config. `None` (the default) keeps each shard's persisted value, or the
+    /// engine default when creating a new shard.
+    pub fn with_wal_segment_capacity(mut self, capacity: Option<usize>) -> Self {
+        self.wal_segment_capacity = capacity;
+        self
     }
 
     /// Release all open shards. Call before deleting `base_path` so qdrant-edge
@@ -123,22 +175,14 @@ impl EdgeQdrant {
     /// `QQL-EDGE-COLLECTION-NOT-FOUND` instead of materialising a ghost
     /// collection, matching the remote backends' 404 semantics.
     async fn open_shard(&self, name: &str) -> Result<Arc<EdgeShard>, QqlError> {
-        self.open_shard_inner(name, None, false).await
-    }
-
-    async fn open_shard_with_req(
-        &self,
-        name: &str,
-        req: Option<&CreateCollectionRequest>,
-    ) -> Result<Arc<EdgeShard>, QqlError> {
-        self.open_shard_inner(name, req, true).await
+        self.open_shard_inner(name, None, OpenMode::MustExist).await
     }
 
     async fn open_shard_inner(
         &self,
         name: &str,
         req: Option<&CreateCollectionRequest>,
-        create: bool,
+        mode: OpenMode,
     ) -> Result<Arc<EdgeShard>, QqlError> {
         {
             let shards = self.shards.read().await;
@@ -165,13 +209,36 @@ impl EdgeQdrant {
 
         let path = self.collection_path(name);
         let on_disk = self.on_disk_payload;
+        let wal_segment_capacity = self.wal_segment_capacity;
         let collection = name.to_string();
         let config_res = req.map(|r| build_edge_config(r, on_disk));
         let shard = tokio::task::spawn_blocking(move || -> Result<EdgeShard, QqlError> {
             if path.join("segments").exists() {
-                EdgeShard::load(&path, None)
+                if matches!(mode, OpenMode::CreateExclusive) {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE-COLLECTION-EXISTS",
+                        format!("collection '{collection}' already exists"),
+                        None,
+                    )
+                    .with_collection(collection));
+                }
+                // Persisted value wins: the env/CLI capacity only seeds a
+                // shard that never recorded one. Passing an override equal to
+                // the persisted value would still be rewritten by the engine
+                // on every open, and a different value would ratchet the
+                // shard away from its persisted config.
+                let load_config = wal_segment_capacity
+                    .filter(|_| persisted_wal_segment_capacity(&path).is_none())
+                    .map(|capacity| EdgeConfig {
+                        wal_options: Some(WalOptions {
+                            segment_capacity: capacity,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    });
+                EdgeShard::load(&path, load_config)
                     .map_err(|e| edge_err(EdgeOp::Load, Some(&collection), e))
-            } else if create {
+            } else if matches!(mode, OpenMode::CreateExclusive) {
                 std::fs::create_dir_all(&path).map_err(|e| {
                     QqlError::execution(
                         "QQL-EDGE-CREATE-DIR",
@@ -180,10 +247,16 @@ impl EdgeQdrant {
                     )
                 })?;
 
-                let config = match config_res {
+                let mut config = match config_res {
                     Some(c) => c?,
                     None => EdgeConfigBuilder::new().on_disk_payload(on_disk).build(),
                 };
+                if let Some(capacity) = wal_segment_capacity {
+                    config.wal_options = Some(WalOptions {
+                        segment_capacity: capacity,
+                        ..Default::default()
+                    });
+                }
 
                 EdgeShard::new(&path, config)
                     .map_err(|e| edge_err(EdgeOp::Create, Some(&collection), e))
@@ -229,6 +302,63 @@ impl EdgeQdrant {
             .into_iter()
             .map(from_edge_scored_point_to_hit)
             .collect())
+    }
+
+    /// Run a planned grouped query through qdrant-edge's grouping driver.
+    ///
+    /// The driver only requested the `group_by` field for its candidates, so
+    /// the distilled hits are hydrated from a `retrieve` carrying the plan's
+    /// output selectors — the same payload/vector a remote Qdrant returns.
+    /// `group_offset` trimming stays with the executor (`normalize_planned`).
+    async fn execute_edge_query_groups(
+        &self,
+        collection: &str,
+        req: &qql_plan::types::QueryGroupsRequest,
+    ) -> Result<Vec<GroupedSearchResult>, QqlError> {
+        reject_shard_key(req.shard_key.as_ref())?;
+        let shard = self.open_shard(collection).await?;
+        let edge_req = convert_query_groups_request(req)?;
+        let (with_payload, with_vector) = convert_group_output(req)?;
+
+        let mut groups = shard
+            .query_groups(edge_req)
+            .map_err(|e| edge_err(EdgeOp::Query, Some(collection), e))?;
+
+        // The grouping driver always fetches the group_by field. When the
+        // caller asked for neither payload nor vectors, strip that leftover
+        // locally instead of a retrieve that would return empty records.
+        let skip_hydrate = matches!(
+            (&with_payload, &with_vector),
+            (WithPayloadInterface::Bool(false), WithVector::Bool(false))
+        );
+        if skip_hydrate {
+            for group in &mut groups {
+                for hit in &mut group.hits {
+                    hit.payload = None;
+                    hit.vector = None;
+                }
+            }
+        } else {
+            let ids: Vec<qdrant_edge::PointId> = groups
+                .iter()
+                .flat_map(|group| group.hits.iter().map(|hit| hit.id))
+                .collect();
+            if !ids.is_empty() {
+                let records = shard
+                    .retrieve(qdrant_edge::RetrieveRequest {
+                        point_ids: ids,
+                        with_payload: Some(with_payload),
+                        with_vector: Some(with_vector),
+                    })
+                    .map_err(|e| edge_err(EdgeOp::Retrieve, Some(collection), e))?;
+                hydrate_edge_groups(&mut groups, records);
+            }
+        }
+
+        groups
+            .into_iter()
+            .map(from_edge_group_to_typed)
+            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Run a planned points-by-id retrieve: records map straight to
@@ -632,1176 +762,5 @@ impl EdgeQdrant {
     }
 }
 
-#[async_trait]
-impl QdrantOps for EdgeQdrant {
-    async fn close(&self) -> Result<(), QqlError> {
-        EdgeQdrant::close(self).await
-    }
-
-    async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
-        let path = self.base_path.clone();
-        tokio::task::spawn_blocking(move || -> Result<Vec<String>, QqlError> {
-            let mut cols = Vec::new();
-            if !path.exists() {
-                return Ok(cols);
-            }
-            let mut dir = std::fs::read_dir(&path).map_err(|e| {
-                QqlError::execution(
-                    "QQL-EDGE-READ-DIR",
-                    format!("failed to read collections directory: {e}"),
-                    None,
-                )
-            })?;
-            while let Some(entry) = dir.next().transpose().map_err(|e| {
-                QqlError::execution(
-                    "QQL-EDGE-DIR-ENTRY",
-                    format!("failed to read directory entry: {e}"),
-                    None,
-                )
-            })? {
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                    && entry.path().join("segments").is_dir()
-                    && let Some(name) = entry.file_name().to_str()
-                    && !name.starts_with('.')
-                {
-                    cols.push(name.to_string());
-                }
-            }
-            cols.sort();
-            Ok(cols)
-        })
-        .await
-        .map_err(|e| spawn_error("list_collections", e))?
-    }
-
-    async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
-        Ok(self.collection_path(name).join("segments").exists())
-    }
-
-    async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
-        let shard = self.open_shard(name).await?;
-        let info = shard
-            .info()
-            .map_err(|e| edge_err(EdgeOp::Info, Some(name), e))?;
-        let cfg = shard.config();
-        let dense_vectors = cfg
-            .vectors
-            .keys()
-            .filter(|name| !name.is_empty())
-            .cloned()
-            .collect();
-        let vectors = cfg
-            .vectors
-            .iter()
-            .map(|(name, params)| qql::backend::VectorSpec {
-                name: (!name.is_empty()).then(|| name.clone()),
-                size: params.size as u64,
-                distance: match params.distance {
-                    qdrant_edge::Distance::Cosine => "Cosine",
-                    qdrant_edge::Distance::Dot => "Dot",
-                    qdrant_edge::Distance::Euclid => "Euclid",
-                    qdrant_edge::Distance::Manhattan => "Manhattan",
-                }
-                .to_string(),
-                hnsw: None,
-                quantization: None,
-                multivector: params.multivector_config.as_ref().map(|mv| {
-                    let mut map = serde_json::Map::new();
-                    map.insert(
-                        "comparator".into(),
-                        serde_json::Value::String(match mv.comparator {
-                            qdrant_edge::MultiVectorComparator::MaxSim => "max_sim".into(),
-                        }),
-                    );
-                    map
-                }),
-                on_disk: params.on_disk,
-                datatype: params.datatype.map(|dt| {
-                    match dt {
-                        qdrant_edge::VectorStorageDatatype::Float32 => "float32",
-                        qdrant_edge::VectorStorageDatatype::Float16 => "float16",
-                        qdrant_edge::VectorStorageDatatype::Uint8 => "uint8",
-                        qdrant_edge::VectorStorageDatatype::Turbo4 => "turbo4",
-                    }
-                    .to_string()
-                }),
-                // qdrant-edge 0.8 still surfaces `on_disk` rather than
-                // the full memory placement enum on its public config.
-                memory: None,
-            })
-            .collect();
-        let sparse_vectors = cfg
-            .sparse_vectors
-            .keys()
-            .map(|k| qql::backend::SparseVectorSpec {
-                name: k.clone(),
-                index: None,
-                modifier: None,
-            })
-            .collect();
-
-        Ok(CollectionInfo {
-            status: "green".to_string(),
-            points_count: info.points_count as u64,
-            segments_count: info.segments_count as u64,
-            schema: CollectionSchema {
-                dense_vectors,
-                sparse_vectors,
-                vectors,
-                ..Default::default()
-            },
-        })
-    }
-
-    async fn create_collection(
-        &self,
-        collection_name: &str,
-        req: &CreateCollectionRequest,
-    ) -> Result<(), QqlError> {
-        if self.collection_exists(collection_name).await? {
-            return Err(QqlError::execution(
-                "QQL-EDGE-COLLECTION-EXISTS",
-                format!("collection '{collection_name}' already exists"),
-                None,
-            )
-            .with_collection(collection_name.to_string()));
-        }
-        self.open_shard_with_req(collection_name, Some(req)).await?;
-        Ok(())
-    }
-
-    async fn update_collection(
-        &self,
-        _collection_name: &str,
-        _req: &UpdateCollectionRequest,
-    ) -> Result<(), QqlError> {
-        Err(EdgeUnsupported::AlterCollection.error())
-    }
-
-    async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
-        let path = self.collection_path(name);
-        let shard = {
-            let mut shards = self.shards.write().await;
-            shards.remove(name)
-        };
-        {
-            let mut opening = self.opening.lock().await;
-            opening.remove(name);
-        }
-        if let Some(shard) = shard {
-            tokio::task::spawn_blocking(move || drop(shard))
-                .await
-                .map_err(|error| {
-                    QqlError::execution(
-                        "QQL-EDGE-DELETE-COLLECTION-CLOSE",
-                        format!("failed to close collection '{name}' before delete: {error}"),
-                        None,
-                    )
-                    .with_collection(name.to_string())
-                })?;
-        }
-        tokio::task::spawn_blocking(move || {
-            if path.exists() {
-                std::fs::remove_dir_all(&path).map_err(|e| {
-                    QqlError::execution(
-                        "QQL-EDGE-DELETE-COLLECTION",
-                        format!("failed to delete collection directory: {e}"),
-                        None,
-                    )
-                })
-            } else {
-                Ok(())
-            }
-        })
-        .await
-        .map_err(|e| spawn_error("delete_collection", e))?
-    }
-
-    async fn create_field_index(
-        &self,
-        collection_name: &str,
-        req: &CreateIndexRequest,
-    ) -> Result<(), QqlError> {
-        let shard = self.open_shard(collection_name).await?;
-
-        let schema_type = match req.field_schema {
-            qql_plan::IndexFieldType::Keyword => PayloadSchemaType::Keyword,
-            qql_plan::IndexFieldType::Uuid => PayloadSchemaType::Uuid,
-            qql_plan::IndexFieldType::Integer => PayloadSchemaType::Integer,
-            qql_plan::IndexFieldType::Float => PayloadSchemaType::Float,
-            qql_plan::IndexFieldType::Bool => PayloadSchemaType::Bool,
-            qql_plan::IndexFieldType::Geo => PayloadSchemaType::Geo,
-            qql_plan::IndexFieldType::Text => PayloadSchemaType::Text,
-            qql_plan::IndexFieldType::Datetime => PayloadSchemaType::Datetime,
-        };
-
-        let field_schema = Some(PayloadFieldSchema::FieldType(schema_type));
-        let field_name: qdrant_edge::JsonPath = serde_json::from_value(serde_json::Value::String(
-            req.field_name.clone(),
-        ))
-        .map_err(|e| {
-            QqlError::execution(
-                "QQL-EDGE-FIELD-NAME",
-                format!("invalid field name: {e}"),
-                None,
-            )
-            .with_collection(collection_name.to_string())
-            .with_field_name(req.field_name.clone())
-        })?;
-
-        let create_index = CreateIndex {
-            field_name,
-            field_schema,
-        };
-
-        let op =
-            UpdateOperation::FieldIndexOperation(FieldIndexOperations::CreateIndex(create_index));
-
-        shard
-            .update(op)
-            .map_err(|e| edge_err(EdgeOp::CreateIndex, Some(collection_name), e))
-    }
-
-    async fn delete_field_index(
-        &self,
-        collection_name: &str,
-        field_name: &str,
-    ) -> Result<(), QqlError> {
-        let shard = self.open_shard(collection_name).await?;
-        let field_name_json: qdrant_edge::JsonPath = serde_json::from_value(
-            serde_json::Value::String(field_name.to_string()),
-        )
-        .map_err(|e| {
-            QqlError::execution(
-                "QQL-EDGE-FIELD-NAME",
-                format!("invalid field name: {e}"),
-                None,
-            )
-            .with_collection(collection_name.to_string())
-            .with_field_name(field_name.to_string())
-        })?;
-        let op = UpdateOperation::FieldIndexOperation(FieldIndexOperations::DeleteIndex(
-            field_name_json,
-        ));
-        shard
-            .update(op)
-            .map_err(|e| edge_err(EdgeOp::DropIndex, Some(collection_name), e))
-    }
-
-    async fn execute_planned(
-        &self,
-        op: &qql_plan::PlannedOperation,
-    ) -> Result<BackendResponse, QqlError> {
-        reject_shard_key(op.shard_key())?;
-        use qql_plan::PlannedOperation::*;
-        let data = match op {
-            // Reads: qdrant-edge values map straight to `ExecData`.
-            Query {
-                collection,
-                request,
-            } => ExecData::Hits(self.execute_edge_query(collection, request).await?),
-            QueryGroups { .. } => return Err(EdgeUnsupported::GroupBy.error()),
-            GetPoints {
-                collection,
-                request,
-            } => ExecData::Hits(self.execute_edge_points(collection, request).await?),
-            Scroll {
-                collection,
-                request,
-            } => ExecData::Hits(self.execute_edge_scroll(collection, request).await?),
-            Count {
-                collection,
-                request,
-            } => ExecData::Count(self.execute_edge_count(collection, request).await?),
-            Facet {
-                collection,
-                request,
-            } => ExecData::Facet(self.execute_edge_facet(collection, request).await?),
-            // Writes: status-only. The executor owns the upsert count/message.
-            Upsert {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_upsert(collection, request).await?;
-                ExecData::Mutation { affected: None }
-            }
-            Delete {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_delete(collection, request).await?;
-                ExecData::Mutation { affected: None }
-            }
-            UpdatePayload {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_update_payload(collection, request)
-                    .await?;
-                ExecData::Mutation { affected: None }
-            }
-            ClearPayload {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_clear_payload(collection, request).await?;
-                ExecData::Mutation { affected: None }
-            }
-            DeletePayload {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_delete_payload(collection, request)
-                    .await?;
-                ExecData::Mutation { affected: None }
-            }
-            UpdateVectors {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_update_vectors(collection, request)
-                    .await?;
-                ExecData::Mutation { affected: None }
-            }
-            DeleteVectors {
-                collection,
-                request,
-                ..
-            } => {
-                self.execute_edge_delete_vectors(collection, request)
-                    .await?;
-                ExecData::Mutation { affected: None }
-            }
-            // DDL: status-only. Collection params/sharding stay fail-closed.
-            CreateCollection {
-                collection,
-                request,
-            } => {
-                reject_collection_sharding(
-                    request.shard_number,
-                    request.sharding_method,
-                    request.shard_keys.as_deref(),
-                )?;
-                if request.params.is_some() {
-                    return Err(EdgeUnsupported::CollectionParams.error());
-                }
-                self.create_collection(collection, request).await?;
-                ExecData::Mutation { affected: None }
-            }
-            UpdateCollection { .. } => return Err(EdgeUnsupported::AlterCollection.error()),
-            DropCollection { collection } => {
-                self.delete_collection(collection).await?;
-                ExecData::Mutation { affected: None }
-            }
-            CreateIndex {
-                collection,
-                request,
-                ..
-            } => {
-                self.create_field_index(collection, request).await?;
-                ExecData::Mutation { affected: None }
-            }
-            DropIndex { collection, field } => {
-                self.delete_field_index(collection, field).await?;
-                ExecData::Mutation { affected: None }
-            }
-            CreateShardKey { .. } | DropShardKey { .. } | ListShardKeys { .. } => {
-                return Err(EdgeUnsupported::ShardKeyDdl.error());
-            }
-            // Collection metadata maps straight onto the typed variants.
-            ListCollections => ExecData::Collections(self.list_collections().await?),
-            GetCollection { collection } => {
-                ExecData::Collection(self.get_collection_info(collection).await?)
-            }
-            CrossRerank { .. } => {
-                return Err(EdgeUnsupported::Route {
-                    path_hint: "CROSS RERANK",
-                }
-                .error());
-            }
-            GetQuotas | SetQuotas { .. } => return Err(EdgeUnsupported::Quota.error()),
-        };
-        Ok(BackendResponse {
-            data,
-            telemetry: None,
-        })
-    }
-
-    async fn optimize_collection(&self, collection: &str) -> Result<bool, QqlError> {
-        let shard = self.open_shard(collection).await?;
-        tokio::task::spawn_blocking(move || shard.optimize())
-            .await
-            .map_err(|e| spawn_error("optimize", e))?
-            .map_err(|e| edge_err(EdgeOp::Optimize, Some(collection), e))
-    }
-
-    async fn execute_query_batch(
-        &self,
-        collection: &str,
-        batch: &QueryBatchRequest,
-    ) -> Result<Vec<BackendResponse>, QqlError> {
-        for request in &batch.searches {
-            reject_shard_key(request.shard_key.as_ref())?;
-        }
-        let mut results = Vec::with_capacity(batch.searches.len());
-        for req in &batch.searches {
-            results.push(BackendResponse {
-                data: ExecData::Hits(self.execute_edge_query(collection, req).await?),
-                telemetry: None,
-            });
-        }
-        Ok(results)
-    }
-
-    async fn execute_update_batch(
-        &self,
-        collection: &str,
-        batch: &UpdateBatchRequest,
-    ) -> Result<Vec<BackendResponse>, QqlError> {
-        let mut results = Vec::with_capacity(batch.operations.len());
-        for op in &batch.operations {
-            match op {
-                PlanUpdateOperation::Upsert { upsert } => {
-                    self.execute_edge_upsert(collection, upsert).await?;
-                }
-                PlanUpdateOperation::Delete { delete } => {
-                    self.execute_edge_delete(collection, delete).await?;
-                }
-                PlanUpdateOperation::SetPayload { set_payload } => {
-                    self.execute_edge_update_payload(collection, set_payload)
-                        .await?;
-                }
-                PlanUpdateOperation::ClearPayload { clear_payload } => {
-                    self.execute_edge_clear_payload(collection, clear_payload)
-                        .await?;
-                }
-                PlanUpdateOperation::DeletePayload { delete_payload } => {
-                    self.execute_edge_delete_payload(collection, delete_payload)
-                        .await?;
-                }
-                PlanUpdateOperation::UpdateVectors { update_vectors } => {
-                    self.execute_edge_update_vectors(collection, update_vectors)
-                        .await?;
-                }
-                PlanUpdateOperation::DeleteVectors { delete_vectors } => {
-                    self.execute_edge_delete_vectors(collection, delete_vectors)
-                        .await?;
-                }
-            }
-            results.push(BackendResponse {
-                data: ExecData::Mutation { affected: None },
-                telemetry: None,
-            });
-        }
-        Ok(results)
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use qql::executor::{Executor, OnError};
-    use qql_core::parser::Parser;
-    use qql_plan::{
-        PlanFacetValue, PlanPointId, PlanVectorStruct, PlanVectorValue, PlannedOperation, plan,
-    };
-    use serde_json::json;
-
-    fn plan_one(qql: &str) -> PlannedOperation {
-        let statement = Parser::parse(qql).unwrap_or_else(|error| panic!("parse '{qql}': {error}"));
-        plan(&statement).unwrap_or_else(|error| panic!("plan '{qql}': {error}"))
-    }
-
-    fn temp_dir(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("qql-edge-{tag}-{}", std::process::id()))
-    }
-
-    async fn seed_docs(backend: &EdgeQdrant) {
-        backend
-            .execute_planned(&plan_one(
-                "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-            ))
-            .await
-            .expect("create collection");
-        backend
-            .execute_planned(&plan_one(
-                "CREATE INDEX ON COLLECTION docs FOR city TYPE keyword",
-            ))
-            .await
-            .expect("create facet index");
-        for qql in [
-            "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}, city: 'NYC', price: 10}",
-            "UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}, city: 'NYC', price: 30}",
-            "UPSERT INTO docs VALUES {id: 3, vector: {dense: [0.0, 0.0, 1.0]}, city: 'SF', price: 20}",
-        ] {
-            backend
-                .execute_planned(&plan_one(qql))
-                .await
-                .unwrap_or_else(|error| panic!("seed '{qql}': {error}"));
-        }
-    }
-
-    /// `execute_planned` answers every read with typed `ExecData` built
-    /// straight from qdrant-edge results (no JSON envelope, no telemetry).
-    #[test]
-    fn typed_reads_and_facet_return_exec_data() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("typed-reads");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            seed_docs(&backend).await;
-
-            // Query → Hits with score, payload, and vector mapped directly.
-            let query = plan_one(
-                "QUERY [1.0, 0.0, 0.0] FROM docs USING dense WITH PAYLOAD true WITH VECTOR true LIMIT 5",
-            );
-            let response = backend.execute_planned(&query).await.expect("typed query");
-            assert!(
-                response.telemetry.is_none(),
-                "in-process edge has no telemetry"
-            );
-            let ExecData::Hits(hits) = &response.data else {
-                panic!("expected typed hits, got {:?}", response.data);
-            };
-            assert_eq!(hits.len(), 3);
-            assert_eq!(hits[0].id, PlanPointId::Number(1));
-            assert!((hits[0].score - 1.0).abs() < 1e-6);
-            assert_eq!(
-                hits[0].payload.as_ref().and_then(|p| p.get("city")),
-                Some(&json!("NYC"))
-            );
-            assert_eq!(
-                hits[0].vector,
-                Some(PlanVectorStruct::Named(std::collections::BTreeMap::from(
-                    [(
-                        "dense".to_string(),
-                        PlanVectorValue::Dense(vec![1.0, 0.0, 0.0])
-                    )]
-                ))),
-                "WITH VECTOR true must map the vector"
-            );
-            assert!(hits[0].collection.is_none());
-
-            // GetPoints → Hits with score 0.0 (no similarity search).
-            let points = plan_one("QUERY POINTS (1, 2) FROM docs WITH PAYLOAD true");
-            let response = backend
-                .execute_planned(&points)
-                .await
-                .expect("typed points");
-            let ExecData::Hits(hits) = &response.data else {
-                panic!("expected typed hits, got {:?}", response.data);
-            };
-            assert_eq!(hits.len(), 2);
-            assert!(hits.iter().all(|hit| hit.score == 0.0));
-
-            // Scroll → Hits; `next_page_offset` is intentionally not carried.
-            let scroll = plan_one("SCROLL FROM docs LIMIT 2");
-            let response = backend
-                .execute_planned(&scroll)
-                .await
-                .expect("typed scroll");
-            let ExecData::Hits(hits) = &response.data else {
-                panic!("expected typed hits, got {:?}", response.data);
-            };
-            assert_eq!(hits.len(), 2);
-            assert!(hits.iter().all(|hit| hit.score == 0.0));
-
-            // Count → Count.
-            let count = plan_one("COUNT FROM docs WHERE city = 'NYC'");
-            let response = backend
-                .execute_planned(&count)
-                .await
-                .expect("typed count");
-            assert_eq!(response.data, ExecData::Count(2));
-
-            // Facet → Facet (previously rejected as unsupported offline).
-            let facet = plan_one("FACET city FROM docs");
-            let response = backend
-                .execute_planned(&facet)
-                .await
-                .expect("typed facet");
-            assert_eq!(
-                response.data,
-                ExecData::Facet(vec![
-                    FacetHit {
-                        value: PlanFacetValue::Keyword("NYC".into()),
-                        count: 2,
-                    },
-                    FacetHit {
-                        value: PlanFacetValue::Keyword("SF".into()),
-                        count: 1,
-                    },
-                ])
-            );
-
-            // Mutations answer typed, status-only data too.
-            let upsert = plan_one(
-                "UPSERT INTO docs VALUES {id: 4, vector: {dense: [0.5, 0.5, 0.5]}}",
-            );
-            let response = backend
-                .execute_planned(&upsert)
-                .await
-                .expect("typed upsert");
-            assert_eq!(response.data, ExecData::Mutation { affected: None });
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// Every write and DDL op answers `execute_planned` with a status-only
-    /// typed `ExecData::Mutation` — no JSON envelope, no `Raw`.
-    #[test]
-    fn typed_mutations_and_ddl_return_exec_data() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("typed-mutations");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            backend
-                .execute_planned(&plan_one(
-                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-                ))
-                .await
-                .expect("create collection");
-
-            let cases = [
-                "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}, city: 'NYC'}",
-                "UPDATE docs SET PAYLOAD = {price: 10} WHERE id = 1",
-                "UPDATE docs SET VECTOR dense = [0.0, 1.0, 0.0] WHERE id = 1",
-                "DELETE VECTOR dense FROM docs WHERE id = 1",
-                "DELETE PAYLOAD city FROM docs WHERE id = 1",
-                "CLEAR PAYLOAD FROM docs WHERE id = 1",
-                "DELETE FROM docs WHERE id = 1",
-                "CREATE INDEX ON COLLECTION docs FOR city TYPE keyword",
-                "DROP INDEX ON COLLECTION docs FOR city",
-            ];
-            for qql in cases {
-                let response = backend
-                    .execute_planned(&plan_one(qql))
-                    .await
-                    .unwrap_or_else(|error| panic!("{qql}: {error}"));
-                assert_eq!(
-                    response.data,
-                    ExecData::Mutation { affected: None },
-                    "{qql} must answer status-only typed mutation data"
-                );
-                assert!(response.telemetry.is_none());
-            }
-
-            let response = backend
-                .execute_planned(&plan_one("DROP COLLECTION docs"))
-                .await
-                .expect("drop collection");
-            assert_eq!(response.data, ExecData::Mutation { affected: None });
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// `execute_update_batch` answers typed status-only mutations directly —
-    /// no JSON, no envelope parsing — one response per operation, in order.
-    #[test]
-    fn typed_update_batch_returns_mutations() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("typed-update-batch");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-
-            let ops = vec![
-                plan_one("CREATE COLLECTION docs (dense VECTOR(3, COSINE))"),
-                plan_one("UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}}"),
-            ];
-            for op in &ops {
-                backend.execute_planned(op).await.expect("setup op");
-            }
-
-            let mutations = vec![
-                plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}}"),
-                plan_one("UPDATE docs SET PAYLOAD = {city: 'NYC'} WHERE id = 2"),
-                plan_one("DELETE FROM docs WHERE id = 2"),
-            ];
-            let (collection, _labels, batch) =
-                qql_plan::build_update_batch(&mutations).expect("update batch");
-            assert_eq!(collection, "docs");
-
-            let responses = backend
-                .execute_update_batch(&collection, &batch)
-                .await
-                .expect("typed update batch");
-            assert_eq!(responses.len(), mutations.len());
-            for response in &responses {
-                assert_eq!(response.data, ExecData::Mutation { affected: None });
-                assert!(response.telemetry.is_none());
-                // The executor owns upsert counts; the backend never reports one.
-                assert!(response.data.count().is_none());
-            }
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// `SHOW` metadata answers through the typed variants: collection lists
-    /// via `Collections`, collection metadata via `Collection`.
-    #[test]
-    fn show_metadata_returns_typed_variants() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("typed-metadata");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            backend
-                .execute_planned(&plan_one(
-                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-                ))
-                .await
-                .expect("create collection");
-
-            for qql in [
-                "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}}",
-                "QUERY POINTS (1) FROM docs",
-                "COUNT FROM docs",
-                "DELETE FROM docs WHERE id = 1",
-            ] {
-                let response = backend
-                    .execute_planned(&plan_one(qql))
-                    .await
-                    .unwrap_or_else(|error| panic!("{qql}: {error}"));
-                assert!(
-                    matches!(
-                        response.data,
-                        ExecData::Hits(_) | ExecData::Count(_) | ExecData::Mutation { .. }
-                    ),
-                    "{qql} must answer a typed variant: {:?}",
-                    response.data
-                );
-            }
-
-            let collections = backend
-                .execute_planned(&plan_one("SHOW COLLECTIONS"))
-                .await
-                .expect("show collections");
-            assert_eq!(
-                collections.data.collections(),
-                Some(["docs".to_string()].as_slice())
-            );
-
-            let collection = backend
-                .execute_planned(&plan_one("SHOW COLLECTION docs"))
-                .await
-                .expect("show collection");
-            // The typed loop above deleted the only point.
-            let info = collection.data.collection().expect("typed collection info");
-            assert_eq!(info.points_count, 0);
-            assert_eq!(info.schema.vectors.len(), 1);
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// `optimize_collection` runs the qdrant-edge optimizers. With 1000 points
-    /// and 25% deleted the vacuum optimizer fires; a second call is a no-op,
-    /// proving the returned flag and idempotence.
-    #[test]
-    fn optimize_collection_runs_optimizers_and_is_idempotent() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("optimize");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            backend
-                .execute_planned(&plan_one("CREATE COLLECTION docs (dense VECTOR(1, DOT))"))
-                .await
-                .expect("create collection");
-
-            // qdrant-edge only vacuums shards with at least 1000 vectors.
-            let points = (1..=1000)
-                .map(|id| format!("{{id: {id}, vector: {{dense: [{id}.0]}}}}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            backend
-                .execute_planned(&plan_one(&format!("UPSERT INTO docs VALUES {points}")))
-                .await
-                .expect("bulk upsert");
-
-            // Delete 250/1000 = 25%, above the default 20% vacuum threshold.
-            let deleted = (1..=250).map(PlanPointId::Number).collect();
-            backend
-                .execute_planned(&PlannedOperation::Delete {
-                    collection: "docs".to_string(),
-                    request: qql_plan::types::DeleteRequest {
-                        points: Some(deleted),
-                        filter: None,
-                        shard_key: None,
-                    },
-                    wait: false,
-                })
-                .await
-                .expect("bulk delete");
-
-            let optimized = backend.optimize_collection("docs").await.expect("optimize");
-            assert!(
-                optimized,
-                "25% deletion on 1000 points must trigger the vacuum optimizer"
-            );
-            let optimized_again = backend
-                .optimize_collection("docs")
-                .await
-                .expect("second optimize");
-            assert!(
-                !optimized_again,
-                "a second optimize call must be a no-op (idempotent)"
-            );
-
-            let count = backend
-                .execute_planned(&plan_one("COUNT FROM docs"))
-                .await
-                .expect("count after optimize");
-            assert_eq!(count.data, ExecData::Count(750));
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// Filter lowering is shared: a filtered COUNT answers through the typed
-    /// path with the direct (non-serde) lowering, proving the typed filter
-    /// converter is wired into query execution.
-    #[test]
-    fn typed_count_uses_direct_filter_lowering() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("typed-filter");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            seed_docs(&backend).await;
-
-            let count = plan_one("COUNT FROM docs WHERE price >= 20");
-            let response = backend.execute_planned(&count).await.expect("typed count");
-            assert_eq!(response.data, ExecData::Count(2));
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// FACET used to be rejected offline. Driving the full executor proves
-    /// dispatch selects the typed edge path and FACET succeeds end to end.
-    #[test]
-    fn executor_facet_succeeds_end_to_end() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("executor-facet");
-            let _ = std::fs::remove_dir_all(&dir);
-            let executor = Executor::new(Box::new(EdgeQdrant::new(&dir, false)), None);
-
-            let report = executor
-                .execute(
-                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-                    OnError::Stop,
-                )
-                .await
-                .expect("create collection");
-            assert!(report.ok, "create failed: {report:?}");
-
-            for qql in [
-                "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}, city: 'NYC'}",
-                "UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}, city: 'NYC'}",
-                "UPSERT INTO docs VALUES {id: 3, vector: {dense: [0.0, 0.0, 1.0]}, city: 'SF'}",
-            ] {
-                let report = executor.execute(qql, OnError::Stop).await.expect("upsert");
-                assert!(report.ok, "upsert failed: {report:?}");
-            }
-
-            let report = executor
-                .execute(
-                    "CREATE INDEX ON COLLECTION docs FOR city TYPE keyword",
-                    OnError::Stop,
-                )
-                .await
-                .expect("create index");
-            assert!(report.ok, "create index failed: {report:?}");
-
-            let report = executor
-                .execute("FACET city FROM docs LIMIT 10", OnError::Stop)
-                .await
-                .expect("facet run");
-            assert!(report.ok, "FACET must succeed offline now: {report:?}");
-            let response = report.first().expect("facet response");
-            assert!(
-                matches!(response.data.as_ref(), Some(ExecData::Facet(_))),
-                "expected typed facet data, got {:?}",
-                response.data
-            );
-            let entries = response.facet().expect("facet entries");
-            assert_eq!(entries.len(), 2, "facet entries: {entries:?}");
-            assert!(entries.contains(&(PlanFacetValue::Keyword("NYC".into()), 2)));
-            assert!(entries.contains(&(PlanFacetValue::Keyword("SF".into()), 1)));
-
-            executor.close().await.expect("close edge executor");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// A read against a nonexistent collection keeps the typed not-found code
-    /// (no ghost collection, no generic engine error).
-    #[test]
-    fn missing_collection_reports_typed_not_found() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("missing-collection");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-
-            let error = backend
-                .execute_planned(&plan_one("SHOW COLLECTION never_created"))
-                .await
-                .expect_err("missing collection must fail");
-            assert_eq!(error.code, "QQL-EDGE-COLLECTION-NOT-FOUND");
-            assert_eq!(error.field("collection"), Some("never_created"));
-
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// A wrong-dimension upsert is rejected by the engine and keeps its precise
-    /// category instead of collapsing into a generic library error.
-    #[test]
-    fn engine_dimension_mismatch_reports_dimension_code() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("engine-dimension");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            backend
-                .execute_planned(&plan_one(
-                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-                ))
-                .await
-                .expect("create collection");
-
-            let error = backend
-                .execute_planned(&plan_one(
-                    "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 2.0]}}",
-                ))
-                .await
-                .expect_err("dimension mismatch must fail");
-            assert_eq!(error.code, "QQL-EDGE-DIMENSION");
-            assert_eq!(error.field("operation"), Some("upsert"));
-            assert_eq!(error.field("collection"), Some("docs"));
-            assert!(
-                error.message.contains("Vector dimension error"),
-                "engine cause lost: {}",
-                error.message
-            );
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// Non-UUID string point IDs are rejected before the engine call, with the
-    /// dedicated id-conversion code.
-    #[test]
-    fn invalid_string_point_id_reports_code() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("invalid-point-id");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            backend
-                .execute_planned(&plan_one(
-                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-                ))
-                .await
-                .expect("create collection");
-
-            let error = backend
-                .execute_planned(&plan_one("QUERY POINTS ('doc-1') FROM docs"))
-                .await
-                .expect_err("non-UUID string id must fail");
-            assert_eq!(error.code, "QQL-EDGE-INVALID-POINT-ID");
-            assert!(
-                error.message.contains("doc-1"),
-                "id lost from message: {}",
-                error.message
-            );
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// A corrupted shard config makes `EdgeShard::load` fail; the failure must
-    /// surface as the engine-storage code with the crate's own cause text.
-    #[test]
-    fn corrupted_shard_load_reports_storage_code() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("corrupt-shard");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            backend
-                .execute_planned(&plan_one(
-                    "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
-                ))
-                .await
-                .expect("create collection");
-            backend.close().await.expect("close edge backend");
-
-            // Corrupt the persisted shard config so the next load fails inside
-            // qdrant-edge (`ServiceError` from the JSON read).
-            std::fs::write(dir.join("docs").join("edge_config.json"), b"{ not json")
-                .expect("corrupt config");
-
-            let error = backend
-                .execute_planned(&plan_one("SHOW COLLECTION docs"))
-                .await
-                .expect_err("corrupt shard must fail to load");
-            assert_eq!(error.code, "QQL-EDGE-STORAGE");
-            assert_eq!(error.field("operation"), Some("load"));
-            assert_eq!(error.field("collection"), Some("docs"));
-            assert!(
-                error.message.contains("qdrant-edge load failed:"),
-                "operation context lost: {}",
-                error.message
-            );
-
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// An I/O failure creating the collection directory (base path is a file)
-    /// reports the dedicated storage-path code.
-    #[test]
-    fn create_directory_io_failure_reports_code() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let base = temp_dir("create-dir-io");
-            let _ = std::fs::remove_dir_all(&base);
-            std::fs::write(&base, b"not a directory").expect("seed file");
-            let backend = EdgeQdrant::new(&base, false);
-
-            let error = backend
-                .execute_planned(&plan_one(
-                    "CREATE COLLECTION docs (dense VECTOR(1, COSINE))",
-                ))
-                .await
-                .expect_err("create_dir_all over a file must fail");
-            assert_eq!(error.code, "QQL-EDGE-CREATE-DIR");
-
-            let _ = std::fs::remove_file(&base);
-        });
-    }
-
-    /// `GROUP BY` is still rejected by qql-edge, but the message must say it is
-    /// not exposed yet — qdrant-edge's `query_groups` does exist.
-    #[test]
-    fn group_by_rejection_names_the_edge_gap() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("group-by-gap");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            seed_docs(&backend).await;
-
-            let error = backend
-                .execute_planned(&plan_one(
-                    "QUERY [1.0, 0.0, 0.0] FROM docs USING dense GROUP BY city LIMIT 10",
-                ))
-                .await
-                .expect_err("GROUP BY must stay rejected");
-            assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-GROUP-BY");
-            assert!(
-                error.message.contains("does not yet expose"),
-                "stale capability claim: {}",
-                error.message
-            );
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-
-    /// `PARAMS (acorn = …)` executes on edge: qdrant-edge 0.8 models ACORN as
-    /// a first-class `SearchParams` field, so the query must reach the engine.
-    #[test]
-    fn acorn_params_execute_on_edge() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = temp_dir("acorn");
-            let _ = std::fs::remove_dir_all(&dir);
-            let backend = EdgeQdrant::new(&dir, false);
-            seed_docs(&backend).await;
-
-            let query = plan_one(
-                "QUERY [1.0, 0.0, 0.0] FROM docs USING dense WHERE city = 'NYC' \
-                 PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5",
-            );
-            let response = backend
-                .execute_planned(&query)
-                .await
-                .expect("ACORN query must execute offline");
-            let ExecData::Hits(hits) = &response.data else {
-                panic!("expected typed hits, got {:?}", response.data);
-            };
-            assert_eq!(hits.len(), 2);
-
-            backend.close().await.expect("close edge backend");
-            let _ = std::fs::remove_dir_all(dir);
-        });
-    }
-}
+mod tests;

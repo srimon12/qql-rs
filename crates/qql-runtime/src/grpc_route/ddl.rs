@@ -10,8 +10,9 @@ use qql_core::ast::{VectorDatatype, VectorDistance};
 use qql_core::error::QqlError;
 use qql_plan::types::{
     CreateIndexRequest, DenseVectorParams, IndexFieldType, IndexOptions, SparseModifier,
-    SparseVectorParams,
+    SparseVectorParams, SparseVectorParamsDiff, VectorParamsDiff,
 };
+use std::collections::BTreeMap;
 
 use crate::grpc::memory::memory_to_proto;
 use crate::qdrant_grpc::qdrant;
@@ -39,8 +40,8 @@ pub(crate) fn hnsw_config_from_plan(cfg: &qql_plan::HnswConfig) -> qdrant::HnswC
         max_indexing_threads: cfg.max_indexing_threads,
         on_disk: cfg.on_disk,
         payload_m: cfg.payload_m,
+        inline_storage: cfg.inline_storage,
         memory: cfg.memory.map(memory_to_proto),
-        ..Default::default()
     }
 }
 
@@ -224,19 +225,87 @@ pub(crate) fn vector_params(params: &DenseVectorParams) -> qdrant::VectorParams 
 
 pub(crate) fn sparse_vector_params(params: &SparseVectorParams) -> qdrant::SparseVectorParams {
     qdrant::SparseVectorParams {
-        index: params
-            .index
+        index: params.index.as_ref().map(sparse_index_config),
+        modifier: Some(sparse_modifier_to_proto(params.modifier)),
+    }
+}
+
+/// Convert one typed sparse index config into proto `SparseIndexConfig`.
+fn sparse_index_config(index: &qql_plan::SparseIndexParams) -> qdrant::SparseIndexConfig {
+    qdrant::SparseIndexConfig {
+        full_scan_threshold: index.full_scan_threshold,
+        on_disk: index.on_disk,
+        datatype: index.datatype.map(datatype_to_proto),
+        memory: index.memory.map(memory_to_proto),
+    }
+}
+
+/// Proto `Modifier` enum value for a typed sparse modifier.
+fn sparse_modifier_to_proto(modifier: SparseModifier) -> i32 {
+    match modifier {
+        SparseModifier::Idf => qdrant::Modifier::Idf as i32,
+        SparseModifier::None => qdrant::Modifier::None as i32,
+    }
+}
+
+/// Convert a typed per-vector dense patch into proto `VectorParamsDiff`.
+pub(crate) fn vector_params_diff(params: &VectorParamsDiff) -> qdrant::VectorParamsDiff {
+    qdrant::VectorParamsDiff {
+        hnsw_config: params.hnsw_config.as_ref().map(hnsw_config_from_plan),
+        quantization_config: params
+            .quantization_config
             .as_ref()
-            .map(|index| qdrant::SparseIndexConfig {
-                full_scan_threshold: index.full_scan_threshold,
-                on_disk: index.on_disk,
-                datatype: index.datatype.map(datatype_to_proto),
-                memory: index.memory.map(memory_to_proto),
-            }),
-        modifier: Some(match params.modifier {
-            SparseModifier::Idf => qdrant::Modifier::Idf as i32,
-            SparseModifier::None => qdrant::Modifier::None as i32,
-        }),
+            .and_then(quantization_config_diff),
+        on_disk: params.on_disk,
+        memory: params.memory.map(memory_to_proto),
+    }
+}
+
+/// Convert the name-keyed dense diff map into proto `VectorsConfigDiff`.
+///
+/// A lone empty-string entry addresses the default unnamed vector and uses the
+/// bare `params` variant (mirroring create's single `VectorParams`); every
+/// other map uses `params_map`.
+pub(crate) fn vectors_config_diff(
+    diffs: &BTreeMap<String, VectorParamsDiff>,
+) -> qdrant::VectorsConfigDiff {
+    use qdrant::vectors_config_diff::Config;
+    if let Some((name, params)) = diffs.first_key_value()
+        && diffs.len() == 1
+        && name.is_empty()
+    {
+        return qdrant::VectorsConfigDiff {
+            config: Some(Config::Params(vector_params_diff(params))),
+        };
+    }
+    qdrant::VectorsConfigDiff {
+        config: Some(Config::ParamsMap(qdrant::VectorParamsDiffMap {
+            map: diffs
+                .iter()
+                .map(|(name, params)| (name.clone(), vector_params_diff(params)))
+                .collect(),
+        })),
+    }
+}
+
+/// Convert the sparse diff map into proto `SparseVectorConfig` (always named;
+/// Qdrant has no unnamed sparse vector).
+pub(crate) fn sparse_vectors_config_diff(
+    diffs: &BTreeMap<String, SparseVectorParamsDiff>,
+) -> qdrant::SparseVectorConfig {
+    qdrant::SparseVectorConfig {
+        map: diffs
+            .iter()
+            .map(|(name, params)| {
+                (
+                    name.clone(),
+                    qdrant::SparseVectorParams {
+                        index: params.index.as_ref().map(sparse_index_config),
+                        modifier: params.modifier.map(sparse_modifier_to_proto),
+                    },
+                )
+            })
+            .collect(),
     }
 }
 

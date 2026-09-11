@@ -1,11 +1,13 @@
 //! Collection schema generation (`CREATE COLLECTION` statement builder).
 
 use qql::backend::{CollectionInfo, VectorSpec};
+use qql_plan::types::MemoryPlacement;
+use qql_plan::{HnswConfig, MaxOptimizationThreads, OptimizersConfig};
 use serde_json::Value;
 
 use super::escape::{escape_string, format_ident};
 use super::indexes::format_index_option;
-use super::quant::format_quantization_spec;
+use super::quant::{format_quantization_config, format_quantization_spec};
 
 pub const HNSW_KEYS: &[&str] = &[
     "m",
@@ -16,18 +18,6 @@ pub const HNSW_KEYS: &[&str] = &[
     "payload_m",
     "inline_storage",
     "memory",
-];
-
-pub const OPTIMIZER_KEYS: &[&str] = &[
-    "deleted_threshold",
-    "vacuum_min_vector_number",
-    "default_segment_number",
-    "max_segment_size",
-    "memmap_threshold",
-    "indexing_threshold",
-    "flush_interval_sec",
-    "max_optimization_threads",
-    "prevent_unoptimized",
 ];
 
 pub const SPARSE_INDEX_KEYS: &[&str] = &["full_scan_threshold", "on_disk", "datatype", "memory"];
@@ -73,24 +63,108 @@ pub fn generate_create_statement(collection: &str, info: &CollectionInfo) -> Str
     }
 
     if let Some(ref hnsw) = info.schema.hnsw
-        && let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS)
+        && let Some(block) = format_hnsw_block(hnsw)
     {
         stmt.push_str(&block);
     }
 
-    if let Some(ref opts_map) = info.schema.optimizers
-        && let Some(block) = format_config_block("OPTIMIZERS", opts_map, OPTIMIZER_KEYS)
+    if let Some(ref opts) = info.schema.optimizers
+        && let Some(block) = format_optimizers_block(opts)
     {
         stmt.push_str(&block);
     }
 
-    if let Some(ref quant) = info.schema.quantization
-        && let Some(quant_str) = format_quantization_spec(quant)
-    {
-        stmt.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
+    if let Some(ref quant) = info.schema.quantization {
+        stmt.push_str(&format!(
+            " WITH QUANTIZATION ({})",
+            format_quantization_config(quant)
+        ));
     }
 
     stmt
+}
+
+/// `WITH HNSW (…)` from the typed collection-level config.
+fn format_hnsw_block(config: &HnswConfig) -> Option<String> {
+    let mut opts = Vec::new();
+    push_u64(&mut opts, "m", config.m);
+    push_u64(&mut opts, "ef_construct", config.ef_construct);
+    push_u64(&mut opts, "full_scan_threshold", config.full_scan_threshold);
+    push_u64(
+        &mut opts,
+        "max_indexing_threads",
+        config.max_indexing_threads,
+    );
+    push_bool(&mut opts, "on_disk", config.on_disk);
+    push_u64(&mut opts, "payload_m", config.payload_m);
+    push_bool(&mut opts, "inline_storage", config.inline_storage);
+    push_memory(&mut opts, "memory", config.memory);
+    finish_block("HNSW", opts)
+}
+
+/// `WITH OPTIMIZERS (…)` from the typed collection-level config.
+fn format_optimizers_block(config: &OptimizersConfig) -> Option<String> {
+    let mut opts = Vec::new();
+    if let Some(value) = config.deleted_threshold
+        && let Some(number) = serde_json::Number::from_f64(value)
+    {
+        opts.push(format!("deleted_threshold = {number}"));
+    }
+    push_u64(
+        &mut opts,
+        "vacuum_min_vector_number",
+        config.vacuum_min_vector_number,
+    );
+    push_u64(
+        &mut opts,
+        "default_segment_number",
+        config.default_segment_number,
+    );
+    push_u64(&mut opts, "max_segment_size", config.max_segment_size);
+    push_u64(&mut opts, "memmap_threshold", config.memmap_threshold);
+    push_u64(&mut opts, "indexing_threshold", config.indexing_threshold);
+    push_u64(&mut opts, "flush_interval_sec", config.flush_interval_sec);
+    if let Some(threads) = config.max_optimization_threads {
+        opts.push(match threads {
+            MaxOptimizationThreads::Auto => "max_optimization_threads = 'auto'".to_string(),
+            MaxOptimizationThreads::Threads(count) => {
+                format!("max_optimization_threads = {count}")
+            }
+        });
+    }
+    push_bool(&mut opts, "prevent_unoptimized", config.prevent_unoptimized);
+    finish_block("OPTIMIZERS", opts)
+}
+
+/// Emit `key = N`, skipping Qdrant's `0`-means-auto keys.
+fn push_u64(opts: &mut Vec<String>, key: &str, value: Option<u64>) {
+    let Some(value) = value else {
+        return;
+    };
+    if POSITIVE_ONLY_KEYS.contains(&key) && value == 0 {
+        return;
+    }
+    opts.push(format!("{key} = {value}"));
+}
+
+fn push_bool(opts: &mut Vec<String>, key: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        opts.push(format!("{key} = {value}"));
+    }
+}
+
+fn push_memory(opts: &mut Vec<String>, key: &str, value: Option<MemoryPlacement>) {
+    if let Some(value) = value {
+        opts.push(format!("{key} = '{}'", value.as_str()));
+    }
+}
+
+fn finish_block(keyword: &str, opts: Vec<String>) -> Option<String> {
+    if opts.is_empty() {
+        None
+    } else {
+        Some(format!(" WITH {} ({})", keyword, opts.join(", ")))
+    }
 }
 
 fn is_auto_zero(val: &Value) -> bool {

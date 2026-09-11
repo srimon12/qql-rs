@@ -29,6 +29,8 @@
           },
           "quantization": null,
           "quantization_update": null,
+          "sparse_vector_diffs": [],
+          "vector_diffs": [],
           "vectors": null
         },
         "mode": {

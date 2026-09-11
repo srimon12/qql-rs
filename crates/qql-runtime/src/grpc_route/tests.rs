@@ -1,6 +1,9 @@
 //! gRPC converter tests (moved from `grpc_route.rs` unchanged).
 
-use super::ddl::{hnsw_config_from_plan, quantization_config_from_plan, vector_params};
+use super::ddl::{
+    hnsw_config_from_plan, quantization_config_from_plan, sparse_vectors_config_diff,
+    vector_params, vectors_config_diff,
+};
 use super::filter::to_match;
 use super::query::{
     plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
@@ -44,6 +47,82 @@ fn dense_vector_params_propagates_datatype() {
 
     let none = vector_params(&dense_params(None));
     assert_eq!(none.datatype, None);
+}
+
+/// `ALTER COLLECTION` per-vector diffs convert directly into the typed
+/// `UpdateCollection.vectors_config` oneof without a JSON hop.
+#[test]
+fn grpc_update_collection_converts_named_vector_diffs() {
+    let stmt = Parser::parse(
+        "ALTER COLLECTION docs \
+         WITH VECTOR dense (HNSW (m = 32, inline_storage = true), QUANTIZATION (type = 'scalar', quantile = 0.99), VECTOR (memory = 'cold')) \
+         WITH VECTOR colbert (QUANTIZATION (disabled = true)) \
+         WITH SPARSE bm25 (SPARSE (modifier = 'idf', full_scan_threshold = 5000, datatype = 'float16'));",
+    )
+    .unwrap();
+    let qql_plan::PlannedOperation::UpdateCollection { request, .. } =
+        qql_plan::plan(&stmt).unwrap()
+    else {
+        panic!("expected UpdateCollection");
+    };
+
+    let proto = vectors_config_diff(request.vectors.as_ref().expect("vector diffs"));
+    let Some(qdrant::vectors_config_diff::Config::ParamsMap(map)) = proto.config else {
+        panic!("named diffs must use the params_map variant");
+    };
+    let dense = map.map.get("dense").expect("dense entry");
+    assert_eq!(dense.hnsw_config.as_ref().and_then(|h| h.m), Some(32));
+    assert_eq!(
+        dense.hnsw_config.as_ref().and_then(|h| h.inline_storage),
+        Some(true),
+        "inline_storage must survive the typed → proto conversion"
+    );
+    assert_eq!(dense.memory, Some(qdrant::Memory::Cold as i32));
+    match dense
+        .quantization_config
+        .as_ref()
+        .and_then(|q| q.quantization.as_ref())
+    {
+        Some(qdrant::quantization_config_diff::Quantization::Scalar(scalar)) => {
+            assert_eq!(scalar.quantile, Some(0.99));
+        }
+        other => panic!("expected scalar quantization, got {other:?}"),
+    }
+
+    let colbert = map.map.get("colbert").expect("colbert entry");
+    assert!(matches!(
+        colbert
+            .quantization_config
+            .as_ref()
+            .and_then(|q| q.quantization.as_ref()),
+        Some(qdrant::quantization_config_diff::Quantization::Disabled(_))
+    ));
+
+    let sparse = sparse_vectors_config_diff(request.sparse_vectors.as_ref().expect("sparse diffs"));
+    let bm25 = sparse.map.get("bm25").expect("bm25 entry");
+    assert_eq!(bm25.modifier, Some(qdrant::Modifier::Idf as i32));
+    let index = bm25.index.as_ref().expect("sparse index");
+    assert_eq!(index.full_scan_threshold, Some(5000));
+    assert_eq!(index.datatype, Some(qdrant::Datatype::Float16 as i32));
+}
+
+/// The unnamed/default-vector diff uses the bare `params` oneof variant, the
+/// same addressing create uses for a single unnamed vector.
+#[test]
+fn grpc_update_collection_default_vector_uses_params_variant() {
+    let stmt = Parser::parse("ALTER COLLECTION docs WITH VECTOR (on_disk = true);").unwrap();
+    let qql_plan::PlannedOperation::UpdateCollection { request, .. } =
+        qql_plan::plan(&stmt).unwrap()
+    else {
+        panic!("expected UpdateCollection");
+    };
+    let proto = vectors_config_diff(request.vectors.as_ref().expect("vector diffs"));
+    let Some(qdrant::vectors_config_diff::Config::Params(params)) = proto.config else {
+        panic!("default vector diff must use the bare params variant");
+    };
+    assert_eq!(params.on_disk, Some(true));
+    assert!(params.hnsw_config.is_none());
+    assert!(params.quantization_config.is_none());
 }
 
 #[test]

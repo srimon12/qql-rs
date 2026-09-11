@@ -5,9 +5,10 @@ Node N-API bindings for **local** QQL: qdrant-edge + FastEmbed, no remote Qdrant
 ## Proposition
 
 Same language as `@veristamp/nqql`, executed in-process (qdrant-edge **0.8**).
-Cluster features (`GROUP BY`, `SHARD`, **`SHOW QUOTAS` / `SET QUOTA`**, …)
-return explicit `QQL-EDGE-UNSUPPORTED-*` errors. Sparse `PARAMS (idf = …)` and
-ACORN search params are supported offline.
+Cluster features (custom `SHARD`, `GROUP BY … LOOKUP FROM`, **`SHOW QUOTAS` /
+`SET QUOTA`**, …) return explicit `QQL-EDGE-UNSUPPORTED-*` errors. Sparse
+`PARAMS (idf = …)`, ACORN search params, `GROUP BY`, and HNSW/optimizer
+`ALTER COLLECTION` are supported offline.
 
 ## Install
 
@@ -43,6 +44,20 @@ await client.close();
 console.log(version, listEmbeddingModels().length);
 ```
 
+### WAL footprint
+
+qdrant-edge pre-allocates each write-ahead-log segment (default 32 MiB), which
+dominates the on-disk footprint of small embedded shards. Pass whole MiB to
+`walSegmentMb` to shrink it; the resolved capacity persists in the shard's
+`edge_config.json`:
+
+```javascript
+const client = localExecutor("./qql-data", { walSegmentMb: 8 });
+```
+
+When unset, the 32 MiB engine default applies. Zero, negative, fractional, or
+overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
+
 ## API
 
 | Export | Role |
@@ -57,7 +72,8 @@ console.log(version, listEmbeddingModels().length);
 | `compileQuery` / `explain` / `execute` | Plan / run (`options.params` same as `bind`) |
 | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration + pull-driven WHATWG stream |
 
-Quotas, custom sharding, and `GROUP BY` require remote Qdrant. Offline sparse
+Quotas and custom sharding require remote Qdrant; `GROUP BY` runs offline
+(including `SIZE` / `LIMIT` / `OFFSET`, but not `LOOKUP FROM`). Offline sparse
 IDF works: `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.
 
 ## Docs

@@ -489,7 +489,25 @@ collection_config = {
 
 alter_collection = {
     ^"ALTER" ~ ^"COLLECTION" ~ collection
-    ~ collection_config+
+    ~ alter_collection_config+
+}
+
+// ALTER accepts the collection-wide blocks plus per-vector diffs. The named
+// dense form nests `HNSW` / `QUANTIZATION` / `VECTOR` diffs (the wire
+// `VectorParamsDiff` has no datatype field); the sparse form wraps one
+// `SPARSE` / `INDEX` block. The unnamed `WITH VECTOR (…)` default-vector form
+// is the plain `collection_config` alternative.
+alter_collection_config = {
+    collection_config
+    | ^"WITH" ~ ^"VECTOR" ~ vector_name
+      ~ "(" ~ vector_diff_block ~ ("," ~ vector_diff_block)* ~ ")"
+    | ^"WITH" ~ ^"SPARSE" ~ vector_name
+      ~ "(" ~ (^"SPARSE" | ^"INDEX") ~ config_block ~ ")"
+}
+vector_diff_block = {
+    ^"HNSW" ~ config_block
+    | ^"QUANTIZATION" ~ config_block
+    | ^"VECTOR" ~ config_block
 }
 drop_collection = { ^"DROP" ~ ^"COLLECTION" ~ collection }
 

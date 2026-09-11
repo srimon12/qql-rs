@@ -91,6 +91,21 @@ Single dense model per client: a `MODEL 'name'` clause other than empty or
 configured model (same rule on the sparse leg: non-default sparse models are
 rejected with `QQL-EMBEDDING-SPARSE`, otherwise local BM25 runs in-browser).
 
+### Local BM25 tuning
+
+Sparse `TEXT` inputs (and the sparse leg of `HYBRID`) are encoded locally with
+wire-compatible BM25. Tune the **document** side before upserting:
+
+```js
+client.setBm25Params(2.0, 0.5, 8.0); // k1, b, avg_len — throws on invalid values
+```
+
+Defaults are Qdrant's `1.2 / 0.75 / 256`. Client-side, write-path only: query
+weights stay unit, server-side inference is untouched, and vectors already
+written keep their weights — re-ingest to apply. Invalid values throw the
+`QQL-VALIDATION-CONFIG` error (`k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`, all
+finite).
+
 ### JS Function Embedder
 
 For Transformers.js, custom providers, or in-browser models:
@@ -170,6 +185,22 @@ Every execution path returns a plain `ExecutionReport` object with `ok`,
 with the [`dx.js` helpers](#10-typed-dx-layer-dxjs) (`hits()` / `facet()` /
 `count()` / `ScoredPoint`, plus the `executeHits(client, query, options)`
 one-shot).
+
+## 3a. Strict, canonical responses
+
+Response shaping matches the native SDKs' typed `ExecData` report: each
+operation reads exactly its Qdrant OpenAPI response field — `result.points`
+for `QUERY` / `SCROLL`, the bare `result` array for `QUERY POINTS`,
+`result.groups` for `GROUP BY`, `result.count`, facet `result.hits`,
+`result.collections`, `result.shard_keys`, `result.config`, and the
+`CollectionInfo` object — and emits the same JSON shapes
+(`[{id, score, payload, vector?}]` with no separate `text`, `{"groups": [...]}`,
+`{"count": n}`, `{"collections": [...]}`, `{"shard_keys": [...]}`, quota
+config). A missing or mistyped field fails the statement with
+`QQL-BACKEND-ENVELOPE` (JSON error string with `.code` / `.kind`, readable via
+`buildError`) instead of silently returning an empty result. There are no
+fallback shapes. Server telemetry (`time`, `usage`) remains optional and
+lenient: absent or misshapen telemetry never fails a successful response.
 
 ---
 

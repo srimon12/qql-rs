@@ -1,195 +1,296 @@
 //! Client-side telemetry for the WASM transport: server `time` and `usage`
 //! extraction plus report-level aggregation.
 //!
-//! Mirrors `qql-runtime` telemetry leniently: absent or misshapen halves
-//! become `None`, never an error. Shapes match the Rust `ServerTelemetry`
-//! JSON (`{"time_s": ..., "usage": {"hardware": ..., "inference": ...}}`)
-//! so `dx.js`, Python, and Node read the same contract.
+//! Mirrors the runtime's typed [`ServerTelemetry`] contract field-for-field so
+//! the JSON `dx.js`, Python, and Node read is identical. Extraction reads
+//! exactly the envelope's `time` (seconds, float) and `usage` (object) keys;
+//! absent or misshapen telemetry degrades to `None` and never fails a
+//! successful response — telemetry is the one lenient extraction, matching
+//! `qql-runtime`.
 
-/// Extract server telemetry from a Qdrant REST envelope.
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+/// Qdrant hardware counters (`HardwareUsage`: seven uint fields).
 ///
-/// Reads `time` (seconds, float) and `usage` (object) leniently. Returns
-/// `None` when the envelope carries neither half.
-pub(crate) fn telemetry_from_envelope(envelope: &serde_json::Value) -> Option<serde_json::Value> {
-    let time_s = envelope.get("time").and_then(|t| t.as_f64());
-    let usage = envelope
-        .get("usage")
-        .and_then(|u| if u.is_object() { Some(u.clone()) } else { None });
-    match (time_s, usage) {
-        (None, None) => None,
-        (time, use_) => {
-            let mut obj = serde_json::Map::new();
-            if let Some(t) = time {
-                obj.insert("time_s".to_string(), serde_json::Value::from(t));
-            }
-            if let Some(u) = use_ {
-                // Keep only the known sections; a misshapen section is dropped
-                // while a good one survives.
-                if let Some(filtered) = filter_usage(&u) {
-                    obj.insert("usage".to_string(), filtered);
-                }
-            }
-            if obj.is_empty() {
-                None
-            } else {
-                Some(serde_json::Value::Object(obj))
-            }
+/// Field-level `#[serde(default)]` keeps parsing total: a counter the server
+/// omits reads as zero. A structurally wrong `hardware` value (non-object,
+/// float counters) voids just this section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct HardwareUsage {
+    #[serde(default)]
+    pub(crate) cpu: u64,
+    #[serde(default)]
+    pub(crate) payload_io_read: u64,
+    #[serde(default)]
+    pub(crate) payload_io_write: u64,
+    #[serde(default)]
+    pub(crate) payload_index_io_read: u64,
+    #[serde(default)]
+    pub(crate) payload_index_io_write: u64,
+    #[serde(default)]
+    pub(crate) vector_io_read: u64,
+    #[serde(default)]
+    pub(crate) vector_io_write: u64,
+}
+
+impl HardwareUsage {
+    /// Element-wise sum (saturating) for report-level totals.
+    fn saturating_add(&self, other: &Self) -> Self {
+        Self {
+            cpu: self.cpu.saturating_add(other.cpu),
+            payload_io_read: self.payload_io_read.saturating_add(other.payload_io_read),
+            payload_io_write: self.payload_io_write.saturating_add(other.payload_io_write),
+            payload_index_io_read: self
+                .payload_index_io_read
+                .saturating_add(other.payload_index_io_read),
+            payload_index_io_write: self
+                .payload_index_io_write
+                .saturating_add(other.payload_index_io_write),
+            vector_io_read: self.vector_io_read.saturating_add(other.vector_io_read),
+            vector_io_write: self.vector_io_write.saturating_add(other.vector_io_write),
         }
     }
 }
 
-/// Keep the `hardware` and `inference` sections when they parse; drop a bad
-/// section while keeping a good one. Returns `None` when neither survives.
-fn filter_usage(usage: &serde_json::Value) -> Option<serde_json::Value> {
-    let obj = usage.as_object()?;
-    let mut out = serde_json::Map::new();
-    if let Some(h) = obj.get("hardware")
-        && h.is_object()
-    {
-        out.insert("hardware".to_string(), h.clone());
-    }
-    if let Some(i) = obj.get("inference")
-        && i.is_object()
-    {
-        out.insert("inference".to_string(), i.clone());
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(serde_json::Value::Object(out))
-    }
+/// Per-model inference token spend (`ModelUsage{tokens}`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ModelUsage {
+    #[serde(default)]
+    pub(crate) tokens: u64,
 }
 
-/// Aggregate per-response telemetry into report-level totals: server times
-/// summed, hardware counters summed, per-model tokens summed. `None` when
-/// there is nothing to aggregate.
-pub(crate) fn aggregate_telemetry(results: &[serde_json::Value]) -> Option<serde_json::Value> {
-    let mut time_sum: Option<f64> = None;
-    let mut usage_acc: Option<serde_json::Value> = None;
-    let mut any = false;
-    for res in results {
-        let Some(tel) = res.get("telemetry") else {
-            continue;
+/// Inference usage: token spend keyed by model name.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct InferenceUsage {
+    /// Token spend per model (`models` map; empty when the server sent none).
+    #[serde(default)]
+    pub(crate) models: BTreeMap<String, ModelUsage>,
+}
+
+/// The `usage` half of server telemetry: optional hardware counters plus
+/// optional per-model inference spend.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ServerUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) hardware: Option<HardwareUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) inference: Option<InferenceUsage>,
+}
+
+impl ServerUsage {
+    /// Lenient parse of a REST `usage` value (`null` / missing / misshapen →
+    /// `None`). Each section parses independently: a bad `hardware` section
+    /// does not void a good `inference` section.
+    fn from_json(value: &serde_json::Value) -> Option<Self> {
+        let obj = value.as_object()?;
+        let hardware = obj
+            .get("hardware")
+            .and_then(|h| serde_json::from_value(h.clone()).ok());
+        let inference = obj
+            .get("inference")
+            .and_then(|i| serde_json::from_value(i.clone()).ok());
+        if hardware.is_none() && inference.is_none() {
+            return None;
+        }
+        Some(Self {
+            hardware,
+            inference,
+        })
+    }
+
+    /// Merge two usage reports for report-level totals: counters summed
+    /// (saturating), per-model tokens summed.
+    fn merge(&self, other: &Self) -> Self {
+        let hardware = match (&self.hardware, &other.hardware) {
+            (Some(a), Some(b)) => Some(a.saturating_add(b)),
+            (Some(a), None) => Some(a.clone()),
+            (None, Some(b)) => Some(b.clone()),
+            (None, None) => None,
         };
-        let has_time = tel.get("time_s").and_then(|t| t.as_f64()).is_some();
-        let has_usage = tel.get("usage").is_some();
-        if !has_time && !has_usage {
-            continue;
+        let inference = match (&self.inference, &other.inference) {
+            (Some(a), Some(b)) => {
+                let mut models = a.models.clone();
+                for (name, usage) in &b.models {
+                    models
+                        .entry(name.clone())
+                        .and_modify(|entry| {
+                            entry.tokens = entry.tokens.saturating_add(usage.tokens);
+                        })
+                        .or_insert_with(|| usage.clone());
+                }
+                Some(InferenceUsage { models })
+            }
+            (Some(a), None) => Some(a.clone()),
+            (None, Some(b)) => Some(b.clone()),
+            (None, None) => None,
+        };
+        Self {
+            hardware,
+            inference,
         }
-        any = true;
-        if let Some(t) = tel.get("time_s").and_then(|t| t.as_f64()) {
-            time_sum = Some(time_sum.unwrap_or(0.0) + t);
-        }
-        if let Some(u) = tel.get("usage") {
-            usage_acc = Some(match usage_acc {
-                Some(acc) => merge_usage(&acc, u),
-                None => u.clone(),
-            });
-        }
-    }
-    if !any {
-        return None;
-    }
-    let mut obj = serde_json::Map::new();
-    if let Some(t) = time_sum {
-        obj.insert("time_s".to_string(), serde_json::Value::from(t));
-    }
-    if let Some(u) = usage_acc {
-        obj.insert("usage".to_string(), u);
-    }
-    if obj.is_empty() {
-        None
-    } else {
-        Some(serde_json::Value::Object(obj))
     }
 }
 
-/// Merge two `usage` objects: hardware counters summed, per-model tokens summed.
-fn merge_usage(a: &serde_json::Value, b: &serde_json::Value) -> serde_json::Value {
-    let mut out = serde_json::Map::new();
-    let a_obj = a.as_object();
-    let b_obj = b.as_object();
-    if let Some(h) = merge_hardware(
-        a_obj.and_then(|o| o.get("hardware")),
-        b_obj.and_then(|o| o.get("hardware")),
-    ) {
-        out.insert("hardware".to_string(), h);
-    }
-    if let Some(i) = merge_inference(
-        a_obj.and_then(|o| o.get("inference")),
-        b_obj.and_then(|o| o.get("inference")),
-    ) {
-        out.insert("inference".to_string(), i);
-    }
-    serde_json::Value::Object(out)
+/// Server telemetry for one response: Qdrant's `time` (seconds, float) plus
+/// the hardware/inference `usage` object. Both halves are optional — routes
+/// that do not report them yield `None`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ServerTelemetry {
+    /// Seconds the server spent processing the request, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) time_s: Option<f64>,
+    /// Hardware/inference usage, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<ServerUsage>,
 }
 
-fn merge_hardware(
-    a: Option<&serde_json::Value>,
-    b: Option<&serde_json::Value>,
-) -> Option<serde_json::Value> {
-    const FIELDS: [&str; 7] = [
-        "cpu",
-        "payload_io_read",
-        "payload_io_write",
-        "payload_index_io_read",
-        "payload_index_io_write",
-        "vector_io_read",
-        "vector_io_write",
-    ];
-    let (Some(a), Some(b)) = (a, b) else {
-        return a.cloned().or_else(|| b.cloned());
-    };
-    let (Some(ao), Some(bo)) = (a.as_object(), b.as_object()) else {
-        return a
-            .as_object()
-            .map(|_| a.clone())
-            .or_else(|| b.clone().into());
-    };
-    let mut out = serde_json::Map::new();
-    for field in FIELDS {
-        let av = ao.get(field).and_then(|v| v.as_u64()).unwrap_or(0);
-        let bv = bo.get(field).and_then(|v| v.as_u64()).unwrap_or(0);
-        out.insert(
-            field.to_string(),
-            serde_json::Value::from(av.saturating_add(bv)),
-        );
+impl ServerTelemetry {
+    /// Extract from a backend response envelope. Lenient by contract: absent
+    /// or misshapen `time`/`usage` becomes `None`, never an error.
+    pub(crate) fn from_envelope(value: &serde_json::Value) -> Self {
+        Self {
+            time_s: value.get("time").and_then(|t| t.as_f64()),
+            usage: value.get("usage").and_then(ServerUsage::from_json),
+        }
     }
-    Some(serde_json::Value::Object(out))
+
+    /// `None` when the envelope carried neither half (keeps per-response
+    /// telemetry exactly `None` where the backend sent nothing); `Some`
+    /// otherwise, even if only one half is present.
+    fn from_envelope_opt(value: &serde_json::Value) -> Option<Self> {
+        let telemetry = Self::from_envelope(value);
+        if telemetry.time_s.is_none() && telemetry.usage.is_none() {
+            None
+        } else {
+            Some(telemetry)
+        }
+    }
+
+    /// Aggregate per-response telemetry into report-level totals: server
+    /// times summed (absent when no response reported one), usage merged.
+    /// `None` when there is nothing to aggregate.
+    fn aggregate<'a>(items: impl Iterator<Item = &'a ServerTelemetry>) -> Option<Self> {
+        let mut time_s: Option<f64> = None;
+        let mut usage: Option<ServerUsage> = None;
+        let mut any = false;
+        for item in items {
+            any = true;
+            if let Some(t) = item.time_s {
+                time_s = Some(time_s.unwrap_or(0.0) + t);
+            }
+            if let Some(u) = &item.usage {
+                usage = Some(match usage {
+                    Some(acc) => acc.merge(u),
+                    None => u.clone(),
+                });
+            }
+        }
+        if !any || (time_s.is_none() && usage.is_none()) {
+            return None;
+        }
+        Some(Self { time_s, usage })
+    }
 }
 
-fn merge_inference(
-    a: Option<&serde_json::Value>,
-    b: Option<&serde_json::Value>,
-) -> Option<serde_json::Value> {
-    let (Some(a), Some(b)) = (a, b) else {
-        return a.cloned().or_else(|| b.cloned());
-    };
-    let (Some(ao), Some(bo)) = (a.as_object(), b.as_object()) else {
-        return a
-            .as_object()
-            .map(|_| a.clone())
-            .or_else(|| b.clone().into());
-    };
-    let empty = serde_json::Map::new();
-    let a_models = ao
-        .get("models")
-        .and_then(|m| m.as_object())
-        .unwrap_or(&empty);
-    let b_models = bo
-        .get("models")
-        .and_then(|m| m.as_object())
-        .unwrap_or(&empty);
-    let mut models = serde_json::Map::new();
-    for (name, val) in a_models.iter().chain(b_models.iter()) {
-        let tokens = val.get("tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-        let entry = models
-            .entry(name.clone())
-            .or_insert_with(|| serde_json::json!({"tokens": 0}));
-        let current = entry.get("tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-        *entry = serde_json::json!({"tokens": current.saturating_add(tokens)});
+/// Extract the optional telemetry half of a REST envelope.
+pub(crate) fn telemetry_from_envelope(envelope: &serde_json::Value) -> Option<ServerTelemetry> {
+    ServerTelemetry::from_envelope_opt(envelope)
+}
+
+/// Aggregate the per-response `telemetry` values of a report's results.
+/// Entries without telemetry (or with `null`) are skipped.
+pub(crate) fn aggregate_telemetry(results: &[serde_json::Value]) -> Option<ServerTelemetry> {
+    let parsed: Vec<ServerTelemetry> = results
+        .iter()
+        .filter_map(|result| result.get("telemetry"))
+        .filter(|telemetry| !telemetry.is_null())
+        .filter_map(|telemetry| serde_json::from_value(telemetry.clone()).ok())
+        .collect();
+    ServerTelemetry::aggregate(parsed.iter())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_time_and_usage_strictly() {
+        let telemetry = telemetry_from_envelope(&json!({
+            "result": {},
+            "time": 0.125,
+            "usage": {
+                "hardware": {"cpu": 7, "vector_io_read": 3},
+                "inference": {"models": {"bge": {"tokens": 42}}},
+            },
+        }))
+        .expect("telemetry");
+        assert_eq!(telemetry.time_s, Some(0.125));
+        // Typed serialization drops keys the runtime's types do not model.
+        let value = serde_json::to_value(&telemetry).unwrap();
+        assert_eq!(value["time_s"], 0.125);
+        assert_eq!(value["usage"]["hardware"]["cpu"], 7);
+        let usage = telemetry.usage.expect("usage");
+        let hardware = usage.hardware.expect("hardware");
+        assert_eq!(hardware.cpu, 7);
+        assert_eq!(hardware.vector_io_read, 3);
+        // Omitted counters default to zero, like the runtime.
+        assert_eq!(hardware.payload_io_write, 0);
+        let inference = usage.inference.expect("inference");
+        assert_eq!(inference.models["bge"].tokens, 42);
     }
-    let mut out = serde_json::Map::new();
-    out.insert("models".to_string(), serde_json::Value::Object(models));
-    Some(serde_json::Value::Object(out))
+
+    #[test]
+    fn absent_or_misshapen_telemetry_is_none() {
+        assert!(telemetry_from_envelope(&json!({"result": {}})).is_none());
+        assert!(telemetry_from_envelope(&json!({"time": "soon"})).is_none());
+        // A malformed `usage` section voids only itself.
+        let telemetry = telemetry_from_envelope(&json!({
+            "time": 1.5,
+            "usage": {"hardware": {"cpu": 1.5}, "inference": {"models": {}}},
+        }))
+        .expect("time survives");
+        assert_eq!(telemetry.time_s, Some(1.5));
+        let usage = telemetry.usage.expect("inference survives");
+        assert!(usage.hardware.is_none());
+        assert_eq!(usage.inference.unwrap().models.len(), 0);
+    }
+
+    #[test]
+    fn aggregates_results_into_report_totals() {
+        let results = vec![
+            json!({
+                "telemetry": {
+                    "time_s": 1.0,
+                    "usage": {
+                        "hardware": {"cpu": 2, "vector_io_read": 5},
+                        "inference": {"models": {"a": {"tokens": 3}}},
+                    },
+                },
+            }),
+            json!({"telemetry": null}),
+            json!({}),
+            json!({
+                "telemetry": {
+                    "time_s": 2.5,
+                    "usage": {
+                        "hardware": {"cpu": 4, "vector_io_read": 1},
+                        "inference": {"models": {"a": {"tokens": 4}, "b": {"tokens": 9}}},
+                    },
+                },
+            }),
+        ];
+        let aggregated = aggregate_telemetry(&results).expect("aggregated");
+        assert_eq!(aggregated.time_s, Some(3.5));
+        let usage = aggregated.usage.expect("usage");
+        let hardware = usage.hardware.expect("hardware");
+        assert_eq!(hardware.cpu, 6);
+        assert_eq!(hardware.vector_io_read, 6);
+        let models = usage.inference.expect("models").models;
+        assert_eq!(models["a"].tokens, 7);
+        assert_eq!(models["b"].tokens, 9);
+        assert!(aggregate_telemetry(&[json!({})]).is_none());
+    }
 }

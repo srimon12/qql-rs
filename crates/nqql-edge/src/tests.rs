@@ -45,6 +45,54 @@ fn standalone_local_opts_no_sparse_model_is_none() {
     assert!(lo.sparse_model.is_none());
 }
 
+#[test]
+fn standalone_local_opts_forwards_bm25_params() {
+    let camel = serde_json::json!({ "bm25K1": 2.0, "bm25B": 0.5, "bm25AvgLen": 8 });
+    let lo = standalone_local_opts(Some(&camel));
+    assert_eq!(lo.bm25_k1, Some(2.0));
+    assert_eq!(lo.bm25_b, Some(0.5));
+    assert_eq!(lo.bm25_avg_len, Some(8.0));
+
+    let snake = serde_json::json!({ "bm25_k1": 1.5, "bm25_b": 0.25, "bm25_avg_len": 16 });
+    let lo = standalone_local_opts(Some(&snake));
+    assert_eq!(lo.bm25_k1, Some(1.5));
+    assert_eq!(lo.bm25_b, Some(0.25));
+    assert_eq!(lo.bm25_avg_len, Some(16.0));
+
+    // Malformed values must not silently fall back to defaults.
+    let bad = serde_json::json!({ "bm25K1": "nope" });
+    let lo = standalone_local_opts(Some(&bad));
+    assert!(lo.bm25_k1.expect("Some(NaN)").is_nan());
+}
+
+#[test]
+fn wal_segment_mb_converts_to_bytes() {
+    assert_eq!(wal_segment_capacity(None).unwrap(), None);
+    assert_eq!(wal_segment_capacity(Some(1.0)).unwrap(), Some(1 << 20));
+    assert_eq!(wal_segment_capacity(Some(4.0)).unwrap(), Some(4 << 20));
+}
+
+#[test]
+fn wal_segment_mb_rejects_invalid_values() {
+    for bad in [0.0, -1.0, 1.5, f64::NAN, f64::INFINITY, 1e30] {
+        let err = wal_segment_capacity(Some(bad))
+            .expect_err(&format!("walSegmentMb={bad} must fail closed"));
+        assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "walSegmentMb={bad}");
+    }
+}
+
+#[test]
+fn local_executor_options_carry_wal_segment_mb() {
+    // The napi option struct stays constructible and its MiB field lowers
+    // through the shared helper before `qql_edge::LocalExecutorOptions`.
+    let opts = LocalExecutorOptions {
+        wal_segment_mb: Some(8.0),
+        ..Default::default()
+    };
+    let capacity = wal_segment_capacity(opts.wal_segment_mb).expect("8 MiB is valid");
+    assert_eq!(capacity, Some(8 << 20));
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  Default-feature HTTP embedding coverage (Finding 1 + Finding 3
 //  of docs/audits/review-adapters-website.json): prove the native
@@ -178,6 +226,9 @@ fn http_executor_native_symbol_constructs_client() {
         "mock".to_string(),
         4,
         Some(false),
+        None,
+        None,
+        None,
     )
     .expect("http_executor must construct a client");
 

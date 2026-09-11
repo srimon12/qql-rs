@@ -34,6 +34,30 @@ Sparse defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical
 token IDs via qdrant-edge); set `sparse_model` for real SPLADE/BGE-M3
 sparse inference.
 
+### Tuning the local BM25 encoder
+
+`LocalExecutorOptions { bm25_k1, bm25_b, bm25_avg_len, .. }` (and the
+`FastEmbedderOptions` equivalents) tune the **document-side** local BM25
+encoder used when no `sparse_model` is configured. Defaults stay
+`1.2 / 0.75 / 256` (Qdrant `qdrant/bm25`). It is a client-side, write-path-only
+knob: query weights stay unit, server-side inference is untouched, and vectors
+already written keep their weights — re-ingest to apply. Invalid values fail
+closed with `QQL-VALIDATION-CONFIG`. Same knobs on `HttpEmbedderOptions` for
+the edge HTTP executor (dense via HTTP, sparse still local).
+
+```rust
+// Title-heavy corpus: average title is ~8 tokens, not 256.
+let mut exec = local_executor_with_options(
+    "/tmp/qql-titles",
+    LocalExecutorOptions {
+        bm25_avg_len: Some(8.0),
+        ..Default::default()
+    },
+)?;
+// CREATE COLLECTION titles (sparse SPARSE);
+// UPSERT INTO titles VALUES {id: 1, text: 'a short title'};  // uses avg_len=8
+```
+
 ```rust
 // Offline CLIP text + vision
 let mut clip = local_executor_with_options(
@@ -84,6 +108,24 @@ executor.close().await?; // flush before deleting the data directory
 using `qdrant-edge`'s in-memory HNSW index. Collection data persists to disk at the
 configured `base_path`.
 
+### Storage options
+
+- **WAL segment capacity**: qdrant-edge pre-allocates each WAL segment to 32 MiB by
+  default, which dominates the on-disk footprint of small shards. Set
+  `LocalExecutorOptions::wal_segment_capacity` (bytes) or
+  `EdgeQdrant::with_wal_segment_capacity(Some(bytes))` to shrink it; the resolved
+  value persists in `edge_config.json`, so later loads without the knob keep it.
+  The Python (`local_executor(..., wal_segment_mb=N)`) and Node
+  (`localExecutor(dir, { walSegmentMb: N })`) edge SDKs expose the same knob in
+  whole MiB; qdrant-edge 0.8's own Python binding cannot set it.
+- **Snapshot seeding**: `qql_edge::{unpack_snapshot, inspect_shard}` wrap the
+  engine's snapshot API (unpack into a directory, then load and count) so callers
+  never unpack or merge archives by hand.
+- **Per-vector config**: `CREATE COLLECTION` passes through per-vector `on_disk` /
+  `datatype` / quantization / HNSW and sparse index options; the 1.19 `memory`
+  tiers map onto the engine's RAM/mmap switch (`pinned` → RAM, `cached`/`cold` →
+  mmap).
+
 ### Supported operations
 
 The supported point, mutation, collection, index, query, and batch operations
@@ -124,7 +166,7 @@ Intel Mac users should disable default features and use `http-embedding` or
   sample, formula, relevance-feedback, and order-by queries; point-reference
   and text inputs that cannot be embedded locally are rejected
 - Model-based sparse inference, multivector, and `CROSS RERANK` require the matching models to be opted in
-- Sparse (`sparse_model`) defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical token IDs via qdrant-edge); opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference
+- Sparse (`sparse_model`) defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical token IDs via qdrant-edge); opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference. The local BM25 document encoder is tunable via `bm25_k1` / `bm25_b` / `bm25_avg_len` (client-side, write-path only; invalid values fail closed with `QQL-VALIDATION-CONFIG`)
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
 - Route affinity is a remote-client transport feature (`RestQdrant` /
@@ -137,10 +179,16 @@ Intel Mac users should disable default features and use `http-embedding` or
 |---------|------|
 | `PARAMS (idf = 'global' \| WHERE <filter>)` | **Supported** (qdrant-edge 0.8) |
 | `PARAMS (acorn = …, max_selectivity = …)` | **Supported** (qdrant-edge 0.8 wires ACORN into HNSW search) |
+| `QUERY … GROUP BY field [SIZE n] [LIMIT/OFFSET]` | **Supported** (qdrant-edge grouping driver; hits hydrated per output selector) |
+| `ALTER COLLECTION … WITH HNSW / WITH OPTIMIZERS` / `WITH VECTOR <name> (HNSW (…))` | **Supported** (persisted via `set_hnsw_config` / `set_optimizers_config` / `set_vector_hnsw_config`; the per-vector diff merges over the vector's effective config and pins the merged block) |
+| `CREATE COLLECTION … WITH PARAMS (on_disk_payload = …)` | **Supported** (persisted on the shard config) |
+| Per-vector `WITH VECTOR` / `WITH HNSW` / `WITH QUANTIZATION` / `WITH SPARSE` | **Supported** — lowered onto `EdgeVectorParams` / `EdgeSparseVectorParams`; sparse storage is always mmap, its `on_disk` selects the index placement |
+| `memory = 'pinned'\|'cached'\|'cold'` on vectors/sparse | **Mapped** to the engine's RAM/mmap switch (`pinned` → RAM, `cached`/`cold` → mmap; qdrant-edge 0.8 has no memory tiers) |
+| `datatype` on dense/sparse | **Supported** (`float32`/`float16`/`uint8`; `turbo4` is dense-only and fails closed on sparse) |
+| Background optimization | **None** — call `optimize_collection` / `qql edge optimize`; `prevent_unoptimized` hides deferred points until then |
 | `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
-| `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
 | `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
-| `SHARD` / `GROUP BY` / timeout / consistency | Still unsupported (table below) |
+| `SHARD` / `GROUP BY … LOOKUP FROM` / timeout / consistency | Still unsupported (table below) |
 
 ```sql
 -- Sparse IDF corpus works offline (edge 0.8+)
@@ -148,10 +196,17 @@ QUERY TEXT 'search' FROM docs USING sparse
   PARAMS (idf = 'global')
   LIMIT 10;
 
-QUERY TEXT 'search' FROM docs USING sparse
-  WHERE tenant_id = 'acme'
-  PARAMS (idf = WHERE tenant_id = 'acme')
-  LIMIT 10;
+-- Grouped search with per-group size and client-side group offset
+QUERY TEXT 'search' FROM docs USING dense
+  GROUP BY district SIZE 3
+  LIMIT 10 OFFSET 5;
+
+-- Collection tuning the engine persists
+ALTER COLLECTION docs WITH HNSW (m = 32)
+  WITH OPTIMIZERS (indexing_threshold = 500);
+
+-- Per-vector HNSW diff (other per-vector fields fail closed)
+ALTER COLLECTION docs WITH VECTOR dense (HNSW (ef_construct = 200));
 
 -- Quotas always fail-loud offline
 SHOW QUOTAS;  -- QQL-EDGE-UNSUPPORTED-QUOTA
@@ -168,15 +223,20 @@ Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
 
 | Code | Feature |
 |---|---|
-| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups |
+| `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` (no lookup collection) |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE`/`DROP SHARD KEY` |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
-| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, …) |
+| `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` |
+| `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` |
+| `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | per-vector `ALTER COLLECTION … WITH VECTOR <name>` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`) |
+| `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | per-sparse-vector `ALTER COLLECTION … WITH SPARSE <name>` |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | create-time `WITH PARAMS` other than `on_disk_payload` |
+| `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the engine excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = …)` |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = …)` |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` (use `best_score` / `sum_scores`) |
+| `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formulas (no engine `Expression` variants) |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id query inputs without embedded vectors |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | unmapped REST projection |
 

@@ -245,3 +245,120 @@ fn test_wire_compat_with_qdrant_server_bm25() {
         );
     }
 }
+
+#[test]
+fn test_bm25_params_default_is_byte_identical_to_legacy_defaults() {
+    let text = "Recipe for baking chocolate chip cookies";
+    let legacy = sparse::embed_document(text);
+    let explicit = sparse::embed_document_with(
+        text,
+        sparse::DEFAULT_K1,
+        sparse::DEFAULT_B,
+        sparse::DEFAULT_AVGDL,
+    );
+    let params = sparse::embed_document_with_params(text, &sparse::Bm25Params::default());
+
+    assert_eq!(legacy, explicit, "unset params must not change output");
+    assert_eq!(
+        legacy, params,
+        "Bm25Params::default must equal legacy defaults"
+    );
+
+    let resolved = sparse::Bm25Params::resolve(None, None, None).expect("defaults are valid");
+    assert_eq!(resolved, sparse::Bm25Params::default());
+    assert_eq!(resolved.k1(), sparse::DEFAULT_K1);
+    assert_eq!(resolved.b(), sparse::DEFAULT_B);
+    assert_eq!(resolved.avg_len(), sparse::DEFAULT_AVGDL);
+}
+
+#[test]
+fn test_bm25_params_non_default_changes_document_weights() {
+    // dl=4, avg_len=4 → denom_scale = k1*(1 - b + b*1) = k1 = 2.0.
+    // tf(cat)=2 → 2*(2+1)/(2+2) = 1.5; tf=1 → 3/3 = 1.0.
+    let params = sparse::Bm25Params::new(2.0, 0.5, 4.0).expect("valid");
+    let v = sparse::embed_document_with_params("cat sat mat cat", &params);
+    assert_eq!(v.indices.len(), 3);
+
+    let cat_idx = sparse::token_id("cat");
+    for (idx, &value) in v.indices.iter().zip(&v.values) {
+        let want = if *idx == cat_idx { 1.5f32 } else { 1.0f32 };
+        assert!(
+            (value - want).abs() < 1e-6,
+            "index {idx}: got {value}, want {want}"
+        );
+    }
+
+    // Same text under Qdrant defaults must differ (different k1/b/avg_len).
+    let default = sparse::embed_document("cat sat mat cat");
+    assert_ne!(v.values, default.values);
+}
+
+#[test]
+fn test_bm25_params_avg_len_only_shifts_docs_off_the_average() {
+    // `b` cancels when doc_len == avg_len: denom_scale = k1*(1 - b + b*1) = k1
+    // for any b, so weights are identical across b values on that document.
+    let b_zero = sparse::Bm25Params::new(1.2, 0.0, 3.0).expect("valid");
+    let b_full = sparse::Bm25Params::new(1.2, 1.0, 3.0).expect("valid");
+    let doc = sparse::embed_document_with_params("foo bar baz", &b_zero);
+    let same = sparse::embed_document_with_params("foo bar baz", &b_full);
+    assert_eq!(doc, same, "doc_len == avg_len must cancel b");
+
+    // Longer docs saturate less when avg_len is small.
+    let short_avg = sparse::Bm25Params::new(1.2, 0.75, 3.0).expect("valid");
+    let long_avg = sparse::Bm25Params::new(1.2, 0.75, 30.0).expect("valid");
+    let long = "foo bar baz qux quux corge grault garply waldo fred plugh xyzzy";
+    let short_avg_vec = sparse::embed_document_with_params(long, &short_avg);
+    let long_avg_vec = sparse::embed_document_with_params(long, &long_avg);
+    assert_ne!(short_avg_vec.values, long_avg_vec.values);
+    assert!(
+        short_avg_vec.values[0] < long_avg_vec.values[0],
+        "small avg_len must downweight a long doc more"
+    );
+}
+
+#[test]
+fn test_bm25_params_validation_fail_closed() {
+    let rejected = [
+        (0.0, 0.75, 256.0),
+        (-1.0, 0.75, 256.0),
+        (f64::NAN, 0.75, 256.0),
+        (f64::INFINITY, 0.75, 256.0),
+        (f64::NEG_INFINITY, 0.75, 256.0),
+        (1.2, -0.1, 256.0),
+        (1.2, 1.1, 256.0),
+        (1.2, f64::NAN, 256.0),
+        (1.2, f64::INFINITY, 256.0),
+        (1.2, -f64::INFINITY, 256.0),
+        (1.2, 0.75, 0.0),
+        (1.2, 0.75, -1.0),
+        (1.2, 0.75, f64::NAN),
+        (1.2, 0.75, f64::INFINITY),
+        (1.2, 0.75, f64::NEG_INFINITY),
+    ];
+    for (k1, b, avg_len) in rejected {
+        let err = sparse::Bm25Params::new(k1, b, avg_len)
+            .expect_err(&format!("({k1}, {b}, {avg_len}) must fail closed"));
+        assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "({k1}, {b}, {avg_len})");
+    }
+
+    // Valid boundaries: b = 0 / 1 are accepted, any positive finite k1/avg_len.
+    for (k1, b, avg_len) in [(0.0001, 0.0, 0.5), (100.0, 1.0, 1e9), (1.2, 0.75, 256.0)] {
+        sparse::Bm25Params::new(k1, b, avg_len)
+            .unwrap_or_else(|e| panic!("({k1}, {b}, {avg_len}) must be valid: {e}"));
+    }
+}
+
+#[test]
+fn test_bm25_params_resolve_applies_per_field_overrides() {
+    let params = sparse::Bm25Params::resolve(Some(3.0), None, Some(8.0)).expect("valid");
+    assert_eq!(params.k1(), 3.0);
+    assert_eq!(params.b(), sparse::DEFAULT_B);
+    assert_eq!(params.avg_len(), 8.0);
+
+    let err = sparse::Bm25Params::resolve(Some(-1.0), None, None).expect_err("k1 <= 0 rejected");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+    let err = sparse::Bm25Params::resolve(None, Some(2.0), None).expect_err("b > 1 rejected");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+    let err = sparse::Bm25Params::resolve(None, None, Some(f64::NAN)).expect_err("NaN rejected");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+}
