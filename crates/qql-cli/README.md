@@ -146,19 +146,19 @@ LIMIT 10;
 
 ## Recorder (`qql record`, opt-in)
 
-Zero-code-change capture for migration: move Qdrant off its port, point the
-app at the recorder, change nothing else. Every request is forwarded to
-`--target` byte-identically (status, headers, body — auth included); bodied
-requests under `/collections/` are appended as wrapped
+Zero-code-change capture for migration: Qdrant keeps its address, point the
+app at the recorder instead, change nothing else. Every request is forwarded
+to `--target` byte-identically (status, headers, body — auth included);
+bodied requests under `/collections/` are appended as wrapped
 `{"method","path","body"}` JSONL for later `qql convert` use.
 
 ```bash
 cargo build -p qql-cli --features record
-# Qdrant moved to :6334 (e.g. docker -p 6334:6333), app still uses :6333:
-qql record --listen 127.0.0.1:6333 --target http://127.0.0.1:6334 \
+# Qdrant stays on :6333, the app now points at the recorder on :6334:
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
   --out capture.jsonl --qql-out capture.qql
 # ... run the app ...
-qql convert capture.jsonl        # replay/migrate later
+qql convert --collection docs capture.jsonl   # replay/migrate later
 ```
 
 Bare `qql record` uses those defaults. Notes: query strings are forwarded

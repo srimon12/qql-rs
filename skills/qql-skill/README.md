@@ -4,7 +4,7 @@ Packaged guidance for coding agents that author QQL and call SDKs.
 
 ## Proposition
 
-- **Language:** one SQL-like grammar for Qdrant retrieval, hybrid, multivector, mutations, DDL (Qdrant **1.19** / QQL **1.5** surface: quotas, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = 'global' | WHERE <filter>)`).
+- **Language:** one SQL-like grammar for Qdrant retrieval, hybrid, multivector, mutations, DDL (Qdrant **1.19** / QQL **1.7** surface: placeholders, `WAIT`, typed shard keys, quotas, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = 'global' | WHERE <filter>)`).
 - **Plan IR:** transport-neutral `PlannedOperation` — gRPC and REST are first-class projections (quotas REST-only).
 - **Isolation:** `inject_filter` on the AST (fail-closed).
 - **Routing:** `SHARD '…'` in QQL or `stmt.shard_key` — never inside `Filter`; no `inject_shard_key`.
@@ -16,7 +16,7 @@ Packaged guidance for coding agents that author QQL and call SDKs.
 | Path | Role |
 |------|------|
 | [SKILL.md](SKILL.md) | Intent map + compact grammar (load first) |
-| [references/](references/) | Deep dives: examples, multitenancy, SDKs, install, gaps |
+| [references/](references/) | Deep dives: examples, multitenancy, SDKs, install, gaps, convert/capture |
 | [scripts/](scripts/) | Runnable demos (`demo_*.py`) |
 
 ## Human product docs

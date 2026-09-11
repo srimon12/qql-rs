@@ -26,6 +26,7 @@ Human docs (product-facing): [`docs/`](../../docs/). This skill is for agents wr
 | [qql-multitenancy.md](references/qql-multitenancy.md) | `SHARD KEY` DDL vs `SHARD` routing vs `inject_filter` |
 | [inject-filter.md](references/inject-filter.md) | Fail-closed tenant / policy injection |
 | [qql-gaps.md](references/qql-gaps.md) | Open vs closed — **do not invent open syntax** |
+| [convert-capture.md](references/convert-capture.md) | `qql convert` / `qql record`: REST JSON → QQL, zero-code capture |
 | [qql-install.md](references/qql-install.md) | Install pyqql / nqql / CLI / edge |
 | [python-sdk.md](references/python-sdk.md) | `pyqql` |
 | [node-sdk.md](references/node-sdk.md) | `@veristamp/nqql` |
@@ -317,7 +318,8 @@ qql [repl | connect]                         Interactive REPL (multiline, \f fmt
 qql exec <query> [--json] [--quiet]          Execute a single QQL query
 qql execute <file.qql> [--stop-on-error]     Execute statements from file
 qql explain <query> [--json] [--quiet]       Show hierarchical ASCII tree execution plan
-qql convert [file.json]                       Convert REST JSON to QQL
+qql convert [file.json] [--collection <name>]  Convert REST JSON to QQL
+qql record [--listen A] [--target B] [--out f] Record live traffic + QQL (feature: record)
 qql fmt [file.qql] [--check] [--write]        Format QQL source into canonical form
 qql dump <collection> <output.qql> [options]  Dump collection to QQL script
 qql doctor [--json] [--quiet]                 Check Qdrant connection health & model hosts

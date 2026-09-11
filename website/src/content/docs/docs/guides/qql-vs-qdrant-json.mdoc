@@ -239,3 +239,21 @@ QQL enables AI agents to generate standard SQL-like syntax that is:
 1. **Token-efficient**: Uses a fraction of the prompt context window.
 2. **Deterministic**: Parsed into a typed AST before network transmission.
 3. **Safe**: Applications can intercept agent-generated queries and apply `inject_filter` before execution.
+
+---
+
+## 8. Converting existing JSON traffic
+
+You do not have to translate the left column by hand. `qql record` proxies a
+live application and captures the JSON it sends; `qql convert` turns each
+captured request into the QQL on the right. Both directions share one
+contract — Qdrant's OpenAPI request schemas in, QQL's typed AST and formatter
+out — so the generated statements are ordinary QQL that can be checked,
+diffed, and executed.
+
+{% terminal title="Capture and convert" %}
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.jsonl
+qql convert --collection docs capture.jsonl
+{% /terminal %}
+
+Full walkthrough: [Operations > Convert REST JSON](/docs/operations/convert/).

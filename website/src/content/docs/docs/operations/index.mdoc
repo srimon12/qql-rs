@@ -1,6 +1,6 @@
 ---
 title: "Operations"
-description: "Choose between dump and restore, live migration, and native snapshots for backup and cluster moves."
+description: "Choose between dump and restore, live migration, REST-to-QQL conversion, and native snapshots for backup and cluster moves."
 sidebar:
   order: 0
 ---
@@ -12,6 +12,7 @@ Qdrant itself. Pick the path that matches the job.
 |---|---|---|
 | Back up one collection to a reviewable file, or carry it to another cluster by hand | [Dump and restore](/docs/operations/backup-restore/) | Schema plus points as a `.qql` script |
 | Copy schema plus points to another cluster or collection, reshape shards or quantization in flight, then cut traffic over | [Cluster migration](/docs/operations/cluster-migration/) | Schema plus points over scroll and upsert |
+| Move an existing REST integration to QQL, or see what an SDK call looks like as a statement | [Convert REST JSON](/docs/operations/convert/) | One request (or a captured session) as QQL |
 | Disaster recovery on identical versions, or an identical-version clone | Qdrant native snapshot | Raw segment files, byte for byte |
 
 Rules of thumb:
@@ -19,6 +20,9 @@ Rules of thumb:
 - Use dump when you want a file you can read, diff, edit, and replay with
   `qql execute`. Use migrate when you want the tool to drive both ends and
   verify counts for you.
+- Use [convert](/docs/operations/convert/) when the starting point is an
+  existing application rather than a data copy: `qql record` captures what it
+  sends, `qql convert` turns that into QQL.
 - Use a native snapshot when the source and target run the same minor
   version, keep the same shard count, and need the fastest possible restore.
   Snapshots cannot change versions, shard counts, or quantization. Migrate

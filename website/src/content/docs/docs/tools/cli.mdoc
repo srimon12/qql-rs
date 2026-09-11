@@ -31,7 +31,8 @@ the `grpc` feature. Otherwise the REST transport is used.
 | `qql exec "<query>"` | Execute one statement or an inline semicolon-delimited script (`--json` for JSON output, `-q`/`--quiet`; `--param key=value` / `--params-file params.json` bind `:name` / `?` on the AST) |
 | `qql execute file.qql` | Execute a script file (`--stop-on-error`; prints a JSON summary `{ok, command, path, succeeded, failed, message}`) |
 | `qql explain "<query>"` | Show the hierarchical execution plan tree without a backend (ASCII tree; JSON with `--json`; accepts the same `--param` / `--params-file` bindings) |
-| `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file) |
+| `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file; `--collection` names the collection for bare bodies — see Operations > [Convert REST JSON](/docs/operations/convert/)) |
+| `qql record` | Transparent REST recorder: proxy a live app, forward requests unchanged, append wrapped JSONL + converted QQL (opt-in `--features record` build) |
 | `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
 | `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; see Operations > [Dump and restore](/docs/operations/backup-restore/)) |
 | `qql migrate <collection>` | Copy schema + points to another cluster or collection (see below) |
@@ -220,29 +221,27 @@ qql> \q
 ## Converting REST JSON to QQL
 
 `qql convert` reads a Qdrant REST JSON payload from a file, or from stdin when
-no file is given, and prints the equivalent QQL statements.
-
-It accepts a wrapped request `{method, path, body}`:
-
-| Request | QQL |
-|---|---|
-| `PUT /collections/{name}` | `CREATE COLLECTION` |
-| `PUT /collections/{name}/points` | `UPSERT` |
-| `POST /collections/{name}/points/query` | `QUERY FORMULA` or CTE query |
-| `POST /collections/{name}/points/search` | `QUERY` |
-| `POST /collections/{name}/points/recommend` | `QUERY RECOMMEND` |
-| `POST /collections/{name}/points/discover` | discover query |
-| `POST /collections/{name}/points/scroll` | `SCROLL` |
-| `POST /collections/{name}/points/delete` | `DELETE` |
-| `POST /collections/{name}/points/payload` | payload mutation |
-| `PUT /collections/{name}/index` | `CREATE INDEX` |
-
-A bare REST body is auto-detected from its structure (`prefetch` + `query`,
-`searches`, `points`, `vector`, `positive`, `target`, `ids`, `vectors_config`,
-`field_name`, `filter`). Qdrant filters translate `must` → `AND`,
-`should` → `OR`, and `must_not` → `NOT`.
+no file is given, and prints the equivalent canonical QQL statements. It
+accepts a wrapped request `{method, path, body}` — the collection is derived
+from the path — or a bare body with `--collection <name>`.
 
 {% terminal title="Convert a search request" %}
 qql convert search.json
-cat search.json | qql convert
+cat search.json | qql convert --collection docs
 {% /terminal %}
+
+To capture what a live application actually sends, run `qql record` (requires
+a build with `--features record`): it proxies Qdrant unchanged and writes a
+wrapped JSONL capture plus an optional converted QQL file.
+
+{% terminal title="Record live traffic, then convert" %}
+cargo build --release -p qql-cli --features record
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
+  --out capture.jsonl --qql-out capture.qql
+qql convert --collection docs capture.jsonl
+{% /terminal %}
+
+The converter decodes JSON into the typed AST and renders it with the same
+formatter as `qql fmt`, so output always re-parses, and covers every
+statement route the runtime plans. The full coverage table, guarantees, and
+limits live in [Operations > Convert REST JSON](/docs/operations/convert/).
