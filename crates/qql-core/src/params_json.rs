@@ -506,11 +506,11 @@ mod tests {
         }
         assert_eq!(
             crate::fmt::format_stmt(&stmts[0]),
-            "QUERY VECTOR [0.1] FROM docs WHERE x = 1 LIMIT 5"
+            "QUERY [0.1] FROM docs WHERE x = 1 LIMIT 5"
         );
         assert_eq!(
             crate::fmt::format_stmt(&stmts[1]),
-            "QUERY VECTOR [0.2] FROM docs WHERE y = 'k'"
+            "QUERY [0.2] FROM docs WHERE y = 'k'"
         );
     }
 
@@ -529,7 +529,7 @@ mod tests {
         bind_stmt_with_values(&mut stmt, &params).unwrap();
         assert_eq!(
             crate::fmt::format_stmt(&stmt),
-            "QUERY VECTOR [0.1] FROM docs WHERE x = 1 AND y = 2"
+            "QUERY [0.1] FROM docs WHERE x = 1 AND y = 2"
         );
     }
 
@@ -544,7 +544,7 @@ mod tests {
         bind_stmt_with_values(&mut stmt, &params).unwrap();
         assert_eq!(
             crate::fmt::format_stmt(&stmt),
-            "QUERY VECTOR [0.5] FROM docs USING dense LIMIT 7"
+            "QUERY [0.5] FROM docs USING dense LIMIT 7"
         );
 
         let mut stmt = Parser::parse("QUERY [0.1] FROM docs").unwrap();
@@ -569,7 +569,7 @@ mod tests {
         }
         assert_eq!(
             crate::fmt::format_stmt(&stmts[1]),
-            "QUERY VECTOR [0.2] FROM docs WHERE y = 2"
+            "QUERY [0.2] FROM docs WHERE y = 2"
         );
         let err = plan_value_params(&params, 3).unwrap_err();
         assert_eq!(err.code, "QQL-BIND-BATCH-LENGTH");
@@ -606,7 +606,7 @@ mod tests {
         bind_stmt_with_values(&mut stmt, &params).unwrap();
         assert_eq!(
             crate::fmt::format_stmt(&stmt),
-            "QUERY VECTOR [0.1, 0.2] FROM docs USING dense"
+            "QUERY [0.1, 0.2] FROM docs USING dense"
         );
     }
 

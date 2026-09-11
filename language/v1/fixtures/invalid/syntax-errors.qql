@@ -163,3 +163,19 @@ ALTER COLLECTION docs WITH VECTOR dense (VECTOR (datatype = 'float16'));
 -- @case alter-vector-diff-duplicate-name
 -- @error QQL-VALIDATION-CONFIG
 ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16)) WITH VECTOR dense (HNSW (m = 32));
+
+-- @case recommend-empty-example-list
+-- @error QQL-PARSE-POINT-IDS
+QUERY RECOMMEND POSITIVE () FROM docs LIMIT 5;
+
+-- @case recommend-trailing-comma
+-- @error QQL-PARSE-QUERY-INPUT
+QUERY RECOMMEND POSITIVE (1,) FROM docs LIMIT 5;
+
+-- @case recommend-empty-negative-list
+-- @error QQL-PARSE-POINT-IDS
+QUERY RECOMMEND POSITIVE (1) NEGATIVE () FROM docs LIMIT 5;
+
+-- @case recommend-empty-vector-example
+-- @error QQL-VALIDATION-VECTOR
+QUERY RECOMMEND POSITIVE (VECTOR []) FROM docs LIMIT 5;

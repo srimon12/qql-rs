@@ -166,7 +166,7 @@ its `USING` and `PREFETCH` pipeline in the canonical AST.
 |---|---|
 | nearest | A bare string is equivalent to `TEXT string`; `POINT id` means similarity by point. |
 | points | Direct retrieval; only `SHARD`, payload/vector selectors, and no paging/filter/scoring clauses are allowed. |
-| recommend | `POSITIVE` is non-empty; `NEGATIVE` is optional; strategy is one of the three grammar values. |
+| recommend | `POSITIVE` is non-empty; `NEGATIVE` is optional; each example is a full `query-input` where bare strings and integers stay point IDs; strategy is one of the three grammar values. |
 | context/discover | Every positive/negative/target item is a full `query-input`; point IDs require `POINT`. |
 | order/sample | Do not accept `USING` or `PREFETCH`. |
 | fusion | Requires at least one `PREFETCH`. |

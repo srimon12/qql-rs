@@ -191,6 +191,43 @@
         "expression": {
           "Nearest": {
             "input": {
+              "Vector": {
+                "Dense": [
+                  0.4,
+                  0.5,
+                  0.6
+                ]
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
               "Point": {
                 "Number": 42
               }

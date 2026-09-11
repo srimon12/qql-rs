@@ -274,6 +274,9 @@ pub(crate) fn render_query_input(input: &QueryInput, allow_bare: bool) -> String
             }
             out
         }
+        // Compact spellings are accepted only where `allow_bare` is set; the
+        // parser reads `[…]` / `{…}` back as the same vector input.
+        QueryInput::Vector(value) if allow_bare => render_vector_value(value),
         QueryInput::Vector(value) => format!("VECTOR {}", render_vector_value(value)),
         QueryInput::Point(point) => format!("POINT {}", render_point_id(point)),
         QueryInput::Param(name, _) => format!(":{}", name),
@@ -284,7 +287,9 @@ pub(crate) fn render_query_input(input: &QueryInput, allow_bare: bool) -> String
 pub(crate) fn render_recommend_input(input: &QueryInput) -> String {
     match input {
         QueryInput::Point(point) => render_point_id(point),
-        other => render_query_input(other, true),
+        // Explicit spellings only: a bare string in this list is a point ID,
+        // so text examples must keep their `TEXT '…'` prefix to round-trip.
+        other => render_query_input(other, false),
     }
 }
 

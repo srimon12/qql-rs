@@ -29,3 +29,14 @@ LIMIT 10;
 -- With score threshold
 QUERY RECOMMEND POSITIVE (1) FROM products SCORE THRESHOLD 0.8 LIMIT 10;
 
+-- Full query-input examples: VECTOR, bare vector literal, TEXT, POINT
+QUERY RECOMMEND POSITIVE (VECTOR [0.1, 0.2]) NEGATIVE (VECTOR [0.3, 0.4])
+FROM products
+USING dense
+LIMIT 10;
+QUERY RECOMMEND POSITIVE ([0.5, 0.6]) FROM products USING dense LIMIT 10;
+QUERY RECOMMEND POSITIVE (TEXT 'hello' MODEL 'e5', POINT 7) NEGATIVE (2)
+FROM products
+USING dense
+LIMIT 10;
+
