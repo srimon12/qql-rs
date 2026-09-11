@@ -125,7 +125,9 @@ impl Client {
         let dispatch_ms = now_ms() - dispatch_start;
         let decode_start = now_ms();
         let telemetry = telemetry_from_envelope(&envelope);
-        let mut resp = wasm_success_response(&planned, envelope);
+        let mut resp = wasm_success_response(&planned, &envelope).map_err(|error| {
+            JsValue::from_str(&serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
+        })?;
         // Ensure the key exists (null when absent) so JS readers never branch
         // on key presence.
         if resp.get("telemetry").is_none()
@@ -136,13 +138,8 @@ impl Client {
         let decode_ms = now_ms() - decode_start;
         let total_ms = now_ms() - total_start;
         let (server_time_s, usage) = match telemetry {
-            Some(tel) => (
-                tel.get("time_s")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-                tel.get("usage").cloned().unwrap_or(serde_json::Value::Null),
-            ),
-            None => (serde_json::Value::Null, serde_json::Value::Null),
+            Some(tel) => (tel.time_s, tel.usage),
+            None => (None, None),
         };
         let report = serde_json::json!({
             "ok": true,

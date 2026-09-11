@@ -84,6 +84,11 @@ client.free();
 | `execute` / `executeStmt` | REST execute → `ExecutionReport` (`options.params` same as `bind`) |
 | `compile` / `explain` | Offline helpers |
 
+Response shaping is strict and canonical: read operations parse exactly their
+Qdrant OpenAPI response field and emit the same JSON shapes as the native SDKs'
+typed reports; a missing or mistyped field fails with `QQL-BACKEND-ENVELOPE`
+(no fallback shapes). Server telemetry stays optional and lenient.
+
 ## Features
 
 | Feature | Default | Role |

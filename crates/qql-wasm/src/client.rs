@@ -742,14 +742,25 @@ impl Client {
         &self,
         collection: &str,
     ) -> Result<qql_embed::TopologyNames, JsValue> {
-        use super::response::vector_names_from_collection_result;
+        use super::schema::vector_names_from_collection_result;
         let path = format!("/collections/{collection}");
         let body = self.send_json("GET", &path, None).await?;
         let result = body
             .get("result")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        Ok(vector_names_from_collection_result(&result))
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                JsValue::from_str(
+                    &serde_json::to_string(&qql_core::error::QqlError::backend(
+                        "QQL-BACKEND-ENVELOPE",
+                        "get collection response is missing a result object",
+                        None,
+                    ))
+                    .unwrap_or_else(|_| {
+                        "get collection response is missing a result object".into()
+                    }),
+                )
+            })?;
+        Ok(vector_names_from_collection_result(result))
     }
     pub(crate) async fn send_json(
         &self,

@@ -186,6 +186,22 @@ with the [`dx.js` helpers](#10-typed-dx-layer-dxjs) (`hits()` / `facet()` /
 `count()` / `ScoredPoint`, plus the `executeHits(client, query, options)`
 one-shot).
 
+## 3a. Strict, canonical responses
+
+Response shaping matches the native SDKs' typed `ExecData` report: each
+operation reads exactly its Qdrant OpenAPI response field — `result.points`
+for `QUERY` / `SCROLL`, the bare `result` array for `QUERY POINTS`,
+`result.groups` for `GROUP BY`, `result.count`, facet `result.hits`,
+`result.collections`, `result.shard_keys`, `result.config`, and the
+`CollectionInfo` object — and emits the same JSON shapes
+(`[{id, score, payload, vector?}]` with no separate `text`, `{"groups": [...]}`,
+`{"count": n}`, `{"collections": [...]}`, `{"shard_keys": [...]}`, quota
+config). A missing or mistyped field fails the statement with
+`QQL-BACKEND-ENVELOPE` (JSON error string with `.code` / `.kind`, readable via
+`buildError`) instead of silently returning an empty result. There are no
+fallback shapes. Server telemetry (`time`, `usage`) remains optional and
+lenient: absent or misshapen telemetry never fails a successful response.
+
 ---
 
 ## 3b. Bulk ingest

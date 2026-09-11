@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 
 use super::client::Client;
 use super::params::WasmOnError;
-use super::report::{WasmReport, exec_response};
-use super::response::{hit_array, wasm_success_response};
+use super::report::{WasmReport, exec_response, exec_response_with_telemetry};
+use super::response::{parse_query_batch, parse_update_batch, wasm_success_response};
 
 #[wasm_bindgen]
 impl Client {
@@ -119,7 +119,9 @@ impl Client {
         let result = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;
-        Ok(wasm_success_response(operation, result))
+        wasm_success_response(operation, &result).map_err(|error| {
+            JsValue::from_str(&serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
+        })
     }
     pub(crate) async fn dispatch_or_collect(
         &self,
@@ -146,8 +148,7 @@ impl Client {
         results: &mut Vec<serde_json::Value>,
     ) -> Result<(), JsValue> {
         use qql_plan::{
-            PlannedOperation, batch_item_error, build_query_batch, build_update_batch,
-            verify_batch_cardinality,
+            PlannedOperation, build_query_batch, build_update_batch, verify_batch_cardinality,
         };
 
         if operations.is_empty() {
@@ -166,15 +167,36 @@ impl Client {
                 let body = serde_json::to_value(&batch)
                     .map_err(|error| JsValue::from_str(&error.to_string()))?;
                 match self.send_json("POST", &path, Some(body)).await {
-                    Ok(response) => {
-                        let values = response
-                            .get("result")
-                            .and_then(serde_json::Value::as_array)
-                            .cloned()
-                            .unwrap_or_default();
-                        if let Err(err) = verify_batch_cardinality("query", expected, values.len())
-                        {
-                            let error = JsValue::from_str(&err.to_string());
+                    Ok(response) => match parse_query_batch(&response) {
+                        Ok(items) => {
+                            if let Err(err) =
+                                verify_batch_cardinality("query", expected, items.len())
+                            {
+                                let error = JsValue::from_str(&err.to_string());
+                                if on_error == WasmOnError::Stop {
+                                    return Err(error);
+                                }
+                                for operation in operations {
+                                    self.dispatch_or_collect(operation, on_error, results)
+                                        .await?;
+                                }
+                            } else {
+                                for (hits, telemetry) in items {
+                                    let count = hits.as_array().map_or(0, Vec::len);
+                                    results.push(exec_response_with_telemetry(
+                                        true,
+                                        "QUERY",
+                                        &format!("Found {count} hits"),
+                                        Some(hits),
+                                        telemetry,
+                                    ));
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            let error = JsValue::from_str(
+                                &serde_json::to_string(&err).unwrap_or_else(|_| err.to_string()),
+                            );
                             if on_error == WasmOnError::Stop {
                                 return Err(error);
                             }
@@ -182,23 +204,8 @@ impl Client {
                                 self.dispatch_or_collect(operation, on_error, results)
                                     .await?;
                             }
-                        } else {
-                            for value in values {
-                                if let Some(msg) = batch_item_error(&value) {
-                                    results.push(exec_response(false, "QUERY", &msg, None));
-                                    continue;
-                                }
-                                let hits = hit_array(value.get("points"));
-                                let count = hits.len();
-                                results.push(exec_response(
-                                    true,
-                                    "QUERY",
-                                    &format!("Found {count} hits"),
-                                    Some(serde_json::Value::Array(hits)),
-                                ));
-                            }
                         }
-                    }
+                    },
                     Err(error) => {
                         if on_error == WasmOnError::Stop {
                             return Err(error);
@@ -218,15 +225,43 @@ impl Client {
                 let body = serde_json::to_value(&batch)
                     .map_err(|error| JsValue::from_str(&error.to_string()))?;
                 match self.send_json("POST", &path, Some(body)).await {
-                    Ok(response) => {
-                        let values = response
-                            .get("result")
-                            .and_then(serde_json::Value::as_array)
-                            .cloned()
-                            .unwrap_or_default();
-                        if let Err(err) = verify_batch_cardinality("update", expected, values.len())
-                        {
-                            let error = JsValue::from_str(&err.to_string());
+                    Ok(response) => match parse_update_batch(&response) {
+                        Ok(received) => {
+                            if let Err(err) = verify_batch_cardinality("update", expected, received)
+                            {
+                                let error = JsValue::from_str(&err.to_string());
+                                if on_error == WasmOnError::Stop {
+                                    return Err(error);
+                                }
+                                for operation in operations {
+                                    self.dispatch_or_collect(operation, on_error, results)
+                                        .await?;
+                                }
+                            } else {
+                                for (label, operation) in labels.iter().zip(operations.iter()) {
+                                    // Same normalization as single dispatch:
+                                    // upserts report their request point count,
+                                    // other writes are status-only (`null`).
+                                    let data = match operation {
+                                        PlannedOperation::Upsert { request, .. } => {
+                                            Some(serde_json::json!({"count": request.points.len()}))
+                                        }
+                                        _ => None,
+                                    };
+                                    let message = match operation {
+                                        PlannedOperation::Upsert { request, .. } => {
+                                            format!("Upserted {} point(s)", request.points.len())
+                                        }
+                                        _ => format!("{label} ok"),
+                                    };
+                                    results.push(exec_response(true, label, &message, data));
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            let error = JsValue::from_str(
+                                &serde_json::to_string(&err).unwrap_or_else(|_| err.to_string()),
+                            );
                             if on_error == WasmOnError::Stop {
                                 return Err(error);
                             }
@@ -234,33 +269,8 @@ impl Client {
                                 self.dispatch_or_collect(operation, on_error, results)
                                     .await?;
                             }
-                        } else {
-                            for ((value, label), operation) in
-                                values.into_iter().zip(labels.iter()).zip(operations.iter())
-                            {
-                                if let Some(msg) = batch_item_error(&value) {
-                                    results.push(exec_response(false, label, &msg, None));
-                                    continue;
-                                }
-                                // Same normalization as single dispatch:
-                                // upserts report their request point count,
-                                // other writes are status-only (`null`).
-                                let data = match operation {
-                                    PlannedOperation::Upsert { request, .. } => {
-                                        Some(serde_json::json!({"count": request.points.len()}))
-                                    }
-                                    _ => None,
-                                };
-                                let message = match operation {
-                                    PlannedOperation::Upsert { request, .. } => {
-                                        format!("Upserted {} point(s)", request.points.len())
-                                    }
-                                    _ => format!("{label} ok"),
-                                };
-                                results.push(exec_response(true, label, &message, data));
-                            }
                         }
-                    }
+                    },
                     Err(error) => {
                         if on_error == WasmOnError::Stop {
                             return Err(error);
