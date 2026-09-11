@@ -100,14 +100,7 @@ across query inputs, point IDs, scalars, and clauses (`SHARD`, `LIMIT`,
 SDK binders before planning — see [Parameter
 binding](/docs/language/queries/#parameter-binding--prepared-queries).
 
-QQL 1.7 (unreleased) also folds in trailing `WAIT true | false` durability on
-`UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`,
-`UPDATE … VECTOR`, `UPDATE … PAYLOAD`, and `CREATE INDEX` (after `SHARD`);
-typed shard keys (`SHARD 101`, `CREATE`/`DROP SHARD KEY 101` keep numeric form
-to the wire); and `ALTER COLLECTION` per-vector diffs (`WITH VECTOR <name>
-(HNSW … | QUANTIZATION … | VECTOR …)`, unnamed `WITH VECTOR (…)` for the
-default vector, `WITH SPARSE <name> (SPARSE … | INDEX …)`) — see
-[Collections & indexes](/docs/language/collections-indexes/).
+QQL 1.7 also adds trailing `WAIT true | false` on UPSERT, DELETE, CLEAR/DELETE PAYLOAD, DELETE VECTOR, UPDATE VECTOR/PAYLOAD and CREATE INDEX (after `SHARD`), typed shard keys end-to-end (`SHARD 101`, numeric `CREATE`/`DROP SHARD KEY`), and `ALTER COLLECTION` per-vector diffs (`WITH VECTOR [name] (...)`, `WITH SPARSE name (...)`) — see [Collections & indexes](/docs/language/collections-indexes/).
 
 - Within one major version, every program valid in an earlier minor release
   must stay valid with the same meaning and canonical AST. A minor release may
