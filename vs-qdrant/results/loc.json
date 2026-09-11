@@ -1,14 +1,14 @@
 {
   "python": {
     "official": {
-      "code_lines": 170,
-      "total_lines": 207
+      "code_lines": 171,
+      "total_lines": 208
     },
     "qql": {
       "code_lines": 134,
       "total_lines": 172
     },
-    "ratio": 0.79
+    "ratio": 0.78
   },
   "node": {
     "official": {
