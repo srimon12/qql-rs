@@ -108,5 +108,15 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
+{% aside type="note" title="Backend parity: gRPC and edge" %}
+Formulas are plan-owned (`PlanFormula`) and convert directly to protobuf /
+edge expressions with no JSON round-trip. `CASE WHEN` conditions and datetime
+`TARGET = "…Z"` inference (payload field infers `datetime_key`) apply on gRPC
+as well as REST. On edge, `$score` resolves to the reserved score variable
+(not a payload field named `score`), and `MAX` / `MIN` / `ACOSH` fail closed
+with `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` (qdrant-edge 0.8 has no such
+`Expression` variants) — use remote Qdrant for those functions.
+{% /aside %}
+
 Keep formula inputs indexed and measurable before adding them to a production
 ranking path.

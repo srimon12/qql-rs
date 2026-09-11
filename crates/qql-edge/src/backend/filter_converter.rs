@@ -416,6 +416,7 @@ mod tests {
 
     /// `HasIdCondition` stores IDs in a hash set, so serialization order is not
     /// stable. Sort `has_id` arrays before comparing so parity checks semantics.
+    /// Test-only parity helper; production lowering never touches `Value`.
     fn normalize_has_id(value: &mut serde_json::Value) {
         match value {
             serde_json::Value::Object(map) => {

@@ -58,6 +58,29 @@ let route = to_rest_route(&op)?;   // fallible REST projection
 typed formula trees — stay typed until a transport boundary.
 `MemoryPlacement` / `VectorDatatype` re-exported from `qql-core`.
 
+### Typed formula (`PlanFormula` → proto / edge)
+
+`qql-plan/src/formula_types.rs` owns the formula tree. REST serializes the
+OpenAPI `Expression` straight from it; gRPC converts it directly via
+`plan_formula_to_grpc` (`PlanFormula` → `qdrant::Expression`) with no JSON
+round-trip (`CASE` conditions and datetime `TARGET` inference apply on gRPC
+too). Edge maps `$score` to the reserved score variable and fails closed on
+`MAX` / `MIN` / `ACOSH` (`QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`).
+
+### Typed DDL IR (no JSON-as-IR)
+
+Collection / index / quantization / optimizer configs are plan-owned typed
+structs (`DenseVectorParams`, `SparseVectorParams`, `CollectionParams`,
+`MaxOptimizationThreads`, `IndexOptions`, … in `ddl_types` / `index_types` /
+`quantization`). REST serializes them to exact OpenAPI bodies (`ddl_rest`);
+gRPC converts them directly to protobuf. Invalid tokenizer or field-type
+values fail at plan time (`QQL-PLAN-INDEX-TYPE`, `QQL-PLAN-INDEX-OPTION`);
+out-of-range DDL integers fail closed on gRPC (`QQL-GRPC-DDL-RANGE`).
+Per-vector `ALTER COLLECTION … WITH VECTOR <name>` / `WITH SPARSE <name>`
+diffs lower onto typed PATCH `vectors` / `sparse_vectors` maps
+(`QQL-PARSE-VECTOR-DIFF` / `QQL-PLAN-VECTOR-DIFF` for `datatype` and
+duplicates).
+
 ### Qdrant 1.19 lowering notes
 
 | Surface | Plan behavior |

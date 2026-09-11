@@ -5,28 +5,27 @@ use qdrant_edge::{VectorInternal, VectorStructInternal};
 use qql_core::error::QqlError;
 use qql_plan::{PlanPointVectors, PlanVectorValue};
 
-pub trait ToEdgeVector {
-    fn to_edge_vector(self) -> Result<VectorStructInternal, QqlError>;
-}
-
-impl ToEdgeVector for PlanPointVectors {
-    fn to_edge_vector(self) -> Result<VectorStructInternal, QqlError> {
-        match self {
-            PlanPointVectors::Unnamed(v) => plan_vector_to_edge(v, None),
-            PlanPointVectors::Named(entries) => {
-                let mut map = HashMap::with_capacity(entries.len());
-                for (name, v) in entries {
-                    map.insert(name, plan_vector_value_internal(v)?);
-                }
-                Ok(VectorStructInternal::Named(map))
+/// Convert planned point vectors into the edge engine's vector struct.
+///
+/// Free function, not a trait: `PlanPointVectors` is the only source type and
+/// the edge backend is the only caller, so a trait would add indirection
+/// without abstraction.
+pub fn plan_vectors_to_edge(vectors: PlanPointVectors) -> Result<VectorStructInternal, QqlError> {
+    match vectors {
+        PlanPointVectors::Unnamed(v) => plan_vector_to_edge(v, None),
+        PlanPointVectors::Named(entries) => {
+            let mut map = HashMap::with_capacity(entries.len());
+            for (name, v) in entries {
+                map.insert(name, plan_vector_value_internal(v)?);
             }
-            PlanPointVectors::Param(name) => Err(err(format!(
-                "unbound parameter ':{name}' reached edge vector parsing"
-            ))),
-            PlanPointVectors::PositionalParam(idx) => Err(err(format!(
-                "unbound positional parameter ?{idx} reached edge vector parsing"
-            ))),
+            Ok(VectorStructInternal::Named(map))
         }
+        PlanPointVectors::Param(name) => Err(err(format!(
+            "unbound parameter ':{name}' reached edge vector parsing"
+        ))),
+        PlanPointVectors::PositionalParam(idx) => Err(err(format!(
+            "unbound positional parameter ?{idx} reached edge vector parsing"
+        ))),
     }
 }
 

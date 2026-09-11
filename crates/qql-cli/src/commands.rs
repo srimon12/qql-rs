@@ -757,7 +757,7 @@ pub(crate) fn executor_for(
 #[cfg(feature = "edge")]
 fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
     let config = crate::config::EdgeConfig::load()?.apply_environment();
-    let wal_segment_capacity = wal_segment_capacity_bytes(config.wal_segment_mb)?;
+    let wal_segment_capacity = qql_edge::wal_segment_capacity_bytes(config.wal_segment_mb)?;
     match config.embedder.as_str() {
         "fastembed" => {
             let is_tty = std::io::stdout().is_terminal();
@@ -952,30 +952,6 @@ pub fn handle_configure_edge(
     Ok(())
 }
 
-/// Convert the CLI's MiB WAL knob to the byte capacity qdrant-edge expects.
-///
-/// `None` keeps the engine default; a zero or overflowing value fails closed
-/// instead of silently producing a nonsensical WAL capacity.
-#[cfg(feature = "edge")]
-pub(crate) fn wal_segment_capacity_bytes(
-    mb: Option<u64>,
-) -> Result<Option<usize>, Box<dyn std::error::Error>> {
-    match mb {
-        None => Ok(None),
-        Some(0) => Err(
-            "wal_segment_mb must be greater than zero; omit it for the qdrant-edge 32 MiB default"
-                .into(),
-        ),
-        Some(mb) => {
-            let bytes = usize::try_from(mb)
-                .ok()
-                .and_then(|mb| mb.checked_mul(1024 * 1024))
-                .ok_or("wal_segment_mb is too large for this platform")?;
-            Ok(Some(bytes))
-        }
-    }
-}
-
 /// Per-collection indexing counters for the doctor / check readout.
 #[derive(serde::Serialize)]
 struct IndexingState {
@@ -1063,7 +1039,7 @@ async fn edge_optimize_inner(
     use qql::client::QdrantOps;
 
     let config = crate::config::EdgeConfig::load()?.apply_environment();
-    let wal_segment_capacity = wal_segment_capacity_bytes(config.wal_segment_mb)?;
+    let wal_segment_capacity = qql_edge::wal_segment_capacity_bytes(config.wal_segment_mb)?;
     let backend = qql_edge::EdgeQdrant::new(config.data_dir, config.on_disk_payload)
         .with_wal_segment_capacity(wal_segment_capacity);
 

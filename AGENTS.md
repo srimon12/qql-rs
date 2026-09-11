@@ -98,7 +98,7 @@ builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
 
 * **`qql-embed`**: Shared embedding layer. Wide host-agnostic `Embedder` trait (dense/sparse/multi/image/rerank plus batch variants; reject-by-default for opt-in modalities). Local BM25 is wire-compatible with Qdrant's `qdrant/bm25` (murmur3-32 token IDs, word tokenizer, English stopwords + snowball stemming; queries embed unit weights, documents tf saturation) except murmur3-collision counting, which has no cross-impl contract. `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags) and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense, batch dense by model). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). Unknown names with an already-declared `AS` kind are kept for offline / empty mock schemas. No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
 
-* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (11 required methods plus a defaulted `close()`) and optional `Embedder`. Calls `prepare_statement` (**schema vector resolution first**, then embeddings, then upsert schema prep) → `plan()` → batch classification / dispatch. DDL flows through `plan()` → REST projection → `execute_route()` or `execute_grpc_route()`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
+* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (11 required methods, defaulted `close()` plus the `change_aliases` / `optimize_collection` extension hooks, which reject by default) and optional `Embedder`. Calls `prepare_statement` (**schema vector resolution first**, then embeddings, then upsert schema prep) → `plan()` → batch classification / dispatch. DDL flows through `plan()` → REST projection → `execute_route()` or `execute_grpc_route()`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
 
 * **`qql-edge`**: In-process vector search using qdrant-edge + optional fastembed-rs. Zero network. Implements `QdrantOps` with batch methods fanning out to individual routes (no native edge batch RPC). Uses `qdrant-edge` 0.8.x. Engine failures map per `OperationError` variant to stable `QQL-EDGE-*` codes (`backend/error_map.rs`); `QQL-EDGE-LIB` no longer exists.
 
@@ -112,8 +112,8 @@ builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
 The following old abstractions have been permanently removed — do NOT reintroduce them:
 
 - `offline.rs` / `CompiledQuery` — replaced by `qql_plan::plan::plan()` + `PlannedOperation`
-- `filter_conv/` — replaced by `qql_plan::filter::lower_filter()`
-- `pipeline/` module — replaced by `qql_plan::types`
+- `filter_conv/` (in `qql-runtime`) — replaced by `qql_plan::filter::lower_filter()`. Unrelated and current: `qql-edge/src/backend/filter_converter.rs` (edge-local proto conversion) and `qql-core/src/parser/query/pipeline.rs` (query USING/prefetch wiring).
+- `pipeline/` module (in `qql-runtime`) — replaced by `qql_plan::types`
 - `QdrantCoreOps` / `QdrantAdminOps` dual-trait — merged into single `QdrantOps`
 - `QueryMode`, `QueryType`, `SearchWith`, `SelectStmt` — replaced by `QueryExpr` enum (13 variants)
 - `qdrant-client` crate dependency — replaced by raw `tonic` 0.14
@@ -127,7 +127,7 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest survives only as a test-only harness in `qql-conformance` (dev-dependency that compiles `language/v1/grammar.pest` and gates the fixture corpus), never in `qql-core`. `qql-grammar-gen` instead derives keyword tables, TextMate/TS artifacts, and the generated pest copy from `grammar.pest`
 - `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
 - `CollectionSchema` (client.rs) — removed duplicate; backend schema is the only source
-- `QdrantOps::execute_planned_typed` and the JSON-returning `QdrantOps::execute_planned` — replaced by the single typed `execute_planned -> BackendResponse`. `BackendResponse::from_envelope` is gone; the old shared envelope parser (`envelope.rs` / `parse_backend_response`) is gone too, replaced by the strict per-operation parser in `crate::rest_response`
+- `QdrantOps::execute_planned_typed` and the JSON-returning `QdrantOps::execute_planned` — replaced by the single typed `execute_planned -> BackendResponse`. `BackendResponse::from_envelope` is gone; the old shared envelope parser (`envelope.rs` / `parse_backend_response`) is gone too, replaced by the strict per-operation parser in `crate::rest_response`. Unrelated and current: `ServerTelemetry::from_envelope[_opt]` (telemetry-only extraction, also mirrored in `qql-wasm/src/telemetry.rs`).
 - `ExecData::Raw` / `as_raw()` — removed; every response shape has a typed variant (`Hits`, `Groups`, `Count`, `Facet`, `Mutation`, `Collections`, `Collection`, `ShardKeys`, `Quotas`) and no JSON passthrough remains
 
 ### Current QueryExpr Variants (13 total)
@@ -150,7 +150,7 @@ pub struct Span { start: usize, end: usize }
 
 Error kind is explicit — never inferred from position. No `runtime` constructor.
 
-### QdrantOps Trait (11 required methods + defaulted `close()`)
+### QdrantOps Trait (11 required + 2 defaulted extensions + `close()`)
 
 ```rust
 pub trait QdrantOps: Send + Sync {
@@ -172,12 +172,16 @@ pub trait QdrantOps: Send + Sync {
     // Batch methods: one typed response per item, in order
     async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest) -> Result<Vec<BackendResponse>, QqlError>;
     async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest) -> Result<Vec<BackendResponse>, QqlError>;
+
+    // Extension hooks (default: reject — only capable backends override)
+    async fn change_aliases(&self, actions: &[AliasAction]) -> Result<(), QqlError>;
+    async fn optimize_collection(&self, collection: &str) -> Result<bool, QqlError>;
 }
 ```
 
 Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON, and the strict per-operation parser (`crate::rest_response::parse_planned`) decodes the OpenAPI response shape into `BackendResponse`, failing `QQL-BACKEND-ENVELOPE` on any missing or mistyped field. gRPC and edge convert proto / `qdrant-edge` values straight into typed `BackendResponse` for every operation — reads, mutations, and DDL alike; no JSON response builders or `TODO(R2/R3)` fallback arms remain.
 
-### Statement → Endpoint Matrix (25 REST routes)
+### Statement → Endpoint Matrix (26 REST routes: 25 statements + 1 helper)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -206,6 +210,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `SHOW COLLECTION` | `/collections/{c}` | GET |
 | `SHOW QUOTAS` | `/quotas` | GET |
 | `SET QUOTA` | `/quotas` | PUT |
+| *(helper, no QQL statement)* `change_aliases` | `/collections/aliases` | POST |
 
 `QUERY CROSS RERANK` is client-side (no Qdrant route). Shard-key ops execute via `execute_planned`.
 

@@ -209,7 +209,10 @@ parity — long vectors collapse to `[0.1, 0.2, ... (384 dims)]`).
 
 Vector params accept plain arrays **or** `Float32Array` / `Float64Array`
 (one memcpy, no per-element walk — prefer typed arrays for bulk ingest);
-integer typed arrays bind as integer lists (sparse `indices`). Raw
+integer typed arrays bind as integer lists (sparse `indices`). A plain
+`number[]` of 32+ elements also binds as a packed `F32Array` with one copy;
+shorter lists and nested shapes keep exact list semantics, and payload values
+are never repacked. Raw
 `Buffer`/`ArrayBuffer` without a float view fail closed — wrap them first
 (`new Float64Array(buf)`). Multivectors accept nested lists or the flat
 `{data: [...], dim: N}` form. Whole-point upsert params work the same way:
@@ -309,9 +312,12 @@ const client = new Client({ url: "http://localhost:6333" });
 const report = await client.execute("QUERY TEXT 'neural search' FROM docs LIMIT 5");
 for (const hit of report.hits()) {
   console.log(hit.id);        // number (e.g. 42) or UUID string
-  console.log(hit.score);     // number
+  console.log(hit.score);     // number (shortest f32 round-trip)
   console.log(hit.payload);   // object (null when absent)
-  console.log(hit.text);      // top-level text shortcut (null when absent)
+  console.log(hit.text);      // derived from payload.text (null when absent/non-string); the typed hit has no separate text field
+  console.log(hit.collection);// cross-collection source, else null
+  console.log(hit.vector);    // dense / sparse / multi-dense / named vectors when WITH VECTOR, else null
+  // hit.shard_key is a legacy passthrough, always null on the typed path.
   console.log(hit.get("title", "n/a")); // payload access with optional default
 }
 
@@ -336,13 +342,16 @@ console.log(countReport.count());
 const pointReport = await client.execute("QUERY POINTS (1, 2, 3) FROM docs");
 console.log(pointReport.points());
 
-// 6. Grouped queries -> groups() returns [{ group_id, hits }]
+// 6. Grouped queries -> groups() returns [{ id, hits: ScoredPoint[] }]
 const grouped = await client.execute(
   "QUERY TEXT 'neural search' FROM docs GROUP BY category LIMIT 5"
 );
 for (const group of grouped.groups()) {
-  console.log(group.group_id, group.hits.map((h) => h.id));
+  console.log(group.id, group.hits.map((h) => h.id));
 }
+
+// 7. IDs shortcut: ids() maps hits()/points() to [hit.id, ...]
+console.log(grouped.ids(-1)); // last statement's hit ids
 ```
 
 ---

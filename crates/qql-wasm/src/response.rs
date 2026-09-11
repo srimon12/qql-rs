@@ -7,6 +7,9 @@
 //! with `QQL-BACKEND-ENVELOPE`. There are no envelope fallback chains, no
 //! shape detection, and no synthesized fields (in particular, hits carry no
 //! `text`). Server telemetry stays optional and lenient by contract.
+//!
+//! `qql-runtime/src/rest_response.rs` is the canonical parser: mirror every
+//! shape change there here so the two never diverge.
 
 use serde::Serialize;
 use serde_json::{Map, Value};

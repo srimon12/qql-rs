@@ -199,7 +199,10 @@ spelling. `QUERY VECTOR :vec` now parses to the same statement (since
 and array-likes with `tolist()` (numpy arrays) bind directly.
 1-D C-contiguous float buffers (numpy `float32`/`float64`, `array.array`,
 memoryviews) bind as packed `f32` vectors with a single copy — prefer them
-over lists for bulk ingest; anything else keeps the `tolist()` path.
+over lists for bulk ingest; anything else keeps the `tolist()` path. A plain
+`list[float]` of 32+ elements also binds as a packed `F32Array` with one copy
+instead of a per-element walk; shorter lists and nested shapes keep exact list
+semantics, and payload values are never repacked.
 Whole-point upsert params: `UPSERT INTO c VALUES :rows` binds a point dict
 (`{id, vector, …payload}`) or a list of them (splicing N points) — the same
 shape as inline rows, so bulk ingest is data, not text. Pair with a prepared
@@ -391,7 +394,7 @@ print(bind(vec_query, {"vec": [0.1] * 384}, truncate_vectors=True))
 
 ## 8. Typed Result Accessors & `ExecutionReport`
 
-`client.execute()` returns an `ExecutionReport` (subclass of `dict` that retains full backward compatibility with `report["results"]` and `report["ok"]`).
+`client.execute()` returns a native typed `ExecutionReport` (PyO3 class with dict-style `[]` / `.get()` access and report-level `ok` / `results` / `succeeded` / `failed` / `telemetry`).
 
 ```python
 from pyqql import Client, ScoredPoint
@@ -401,13 +404,16 @@ client = Client("http://localhost:6333")
 # 1. Accessing hits with .hits() -> List[ScoredPoint]
 report = client.execute("QUERY TEXT 'neural search' FROM docs LIMIT 5")
 for hit in report.hits():
-    # hit is a ScoredPoint dataclass:
+    # hit is a native ScoredPoint (id, score, payload, text, collection, vector):
     print(hit.id)         # int (e.g. 42) or str (UUID) -- numeric IDs are preserved as ints!
-    print(hit.score)      # float, e.g. 0.892
+    print(hit.score)      # float, e.g. 0.892 (shortest f32 round-trip)
     print(hit.payload)    # dict with document payload
-    print(hit.text)       # shortcut for hit.payload.get("text")
+    print(hit.text)       # derived from hit.payload.get("text"), None when absent/non-string
+    print(hit.collection) # source collection for cross-collection ops, else None
+    print(hit.vector)     # dense / sparse / multi-dense / named vectors when WITH VECTOR, else None
     print(hit["title"])   # dict-like subscript access to hit.payload
     print(hit.get("url")) # dict-like get() with optional default
+    print(hit.without_payload()) # copy with payload stripped
 
 # 2. Shortcut: execute_hits() returns List[ScoredPoint] directly
 hits = client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5")
@@ -425,11 +431,36 @@ print("Total matches:", report.count())
 report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
 points = report.points()
 
-# 6. Grouped queries -> .groups() returns [{group_id, hits}]
+# 6. Grouped queries -> .groups() returns [{id, hits: [ScoredPoint, ...]}]
 report = client.execute("QUERY TEXT 'neural search' FROM docs GROUP BY category LIMIT 5")
 for group in report.groups():
-    print(group["group_id"], [h.id for h in group["hits"]])
+    print(group["id"], [h.id for h in group["hits"]])
+
+# 7. Collection / shard / quota metadata accessors (per statement index)
+print(report.ids())          # [hit.id, ...] for point operations
+print(report.collections())  # SHOW COLLECTIONS -> [name, ...]
+print(report.collection())   # SHOW COLLECTION -> CollectionInfo dict (status, points_count, ...)
+print(report.shard_keys())   # SHOW SHARD KEYS -> [str | int, ...]
+print(report.quotas())       # quota config dict or None
+
+# 8. Offline reports for tests/mocks (no dict hydration):
+# ExecutionReport({...}) is replaced by ExecutionReport.from_results([...]).
+offline = ExecutionReport.from_results([
+    {"operation": "QUERY", "hits": [{"id": 1, "score": 0.95}]},
+    {"operation": "COUNT", "count": 42},
+])
 ```
+
+| `from_results` spec key | Meaning |
+|---|---|
+| `hits` | list of `{id, score?, payload?, collection?, vector?}` |
+| `groups` | list of `{id, hits}` |
+| `count` | int COUNT result (or a mutation's affected count) |
+| `facet` | list of `{value, count}` |
+| `collections` | list of collection names |
+| `collection` | collection-info dict (`status`, `points_count`, …) |
+| `shard_keys` | list of strings or non-negative ints |
+| `quotas` | quota-config dict (`enabled`, `max_disk_usage_percent`, …) |
 
 ---
 

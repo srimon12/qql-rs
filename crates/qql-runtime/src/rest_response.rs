@@ -36,6 +36,7 @@ pub(crate) fn parse_planned(
     op: &PlannedOperation,
     envelope: Value,
 ) -> Result<BackendResponse, QqlError> {
+    // Telemetry only (lenient); the data path below is strict.
     let telemetry = ServerTelemetry::from_envelope_opt(&envelope);
     let data = match op {
         PlannedOperation::Query { .. } | PlannedOperation::Scroll { .. } => {
@@ -113,6 +114,7 @@ pub(crate) fn parse_query_batch(envelope: &Value) -> Result<Vec<BackendResponse>
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(BackendResponse {
                 data: ExecData::Hits(hits),
+                // Telemetry only (lenient); the hits above are strict.
                 telemetry: ServerTelemetry::from_envelope_opt(item),
             })
         })

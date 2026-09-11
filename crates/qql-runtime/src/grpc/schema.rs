@@ -375,6 +375,14 @@ fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<Quantiz
     }
 }
 
+/// Proto `HnswConfigDiff` → per-vector HNSW override map.
+///
+/// Sanctioned JSON exception (not response-IR): [`VectorSpec::hnsw`] is
+/// deliberately `serde_json::Map` (see `crate::backend` "Deliberate JSON") —
+/// per-vector config fragments Qdrant owns and dump re-emits verbatim — so
+/// the gRPC projection fills that JSON-typed field directly. Typed request
+/// configs still lower via `hnsw_diff_to_spec`; this map only feeds schema
+/// metadata, never a query/response envelope.
 fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
     if let Some(v) = diff.m {
@@ -403,6 +411,12 @@ fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, se
 
 /// Convert protobuf quantization into the nested REST-shaped JSON that dump
 /// understands (`{ "scalar": {...} }`, `{ "turbo": {...} }`, …).
+///
+/// Sanctioned JSON exception (not response-IR): [`VectorSpec::quantization`]
+/// is deliberately `serde_json::Value` (see `crate::backend` "Deliberate
+/// JSON") so REST, gRPC, and edge share one dump shape. Typed DDL configs
+/// still lower via `quantization_config_to_spec`; this JSON only feeds schema
+/// metadata, never a query/response envelope.
 fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_json::Value> {
     use qdrant::quantization_config::Quantization;
     match &q.quantization {

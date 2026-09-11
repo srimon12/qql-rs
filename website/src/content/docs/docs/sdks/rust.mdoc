@@ -153,8 +153,16 @@ For the managed equivalent, see Python `Client.scroll_cursor` and Node
 twins) runs one statement and returns the static plan plus measured client
 phase timings and honest server telemetry. Every `ExecResponse` also carries
 `telemetry: Option<ServerTelemetry>` (`time_s` + hardware/inference `usage`,
-`None` where the route reports nothing), and typed result accessors read
-from a cached typed representation — no JSON round-trip on the gRPC leg:
+`None` where the route reports nothing), and typed result accessors
+(`hits()`, `points()`, `ids()`, `facet()`, `count()`, `groups()`,
+`collections()`, `collection()`, `shard_keys()`, `quotas()`) read
+from a cached typed representation — no JSON round-trip on the gRPC leg.
+The response model is closed (`ExecData` has no raw passthrough; the legacy
+`*_json` accessors are removed) and REST responses are parsed strictly per
+operation, failing closed with `QQL-BACKEND-ENVELOPE` on a missing or
+mistyped field. `SearchHit` carries `id`, `score`, `payload`, `collection`,
+and `vector` only — no `text`, `version`, or `shard_key`; derive text from
+`payload["text"]`:
 
 ```rust
 let analysis = executor.explain_analyze(

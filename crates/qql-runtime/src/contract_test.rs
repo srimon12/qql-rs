@@ -87,6 +87,10 @@ mod tests {
                 "QUERY DISCOVER TARGET POINT 42 CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2) FROM docs USING dense LIMIT 10;",
             ),
             (
+                "relevance feedback",
+                "QUERY RELEVANCE FEEDBACK TARGET POINT 42 FEEDBACK ((POINT 43, 0.5), (POINT 44, -0.2)) STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.5) FROM docs USING dense LIMIT 10;",
+            ),
+            (
                 "order_by",
                 "QUERY ORDER BY created_at DESC FROM docs LIMIT 10;",
             ),
@@ -285,8 +289,16 @@ mod tests {
                 "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE body MATCH ANY ('hello', 'world');",
             ),
             (
+                "match prefix",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE title MATCH PREFIX 'Comp';",
+            ),
+            (
                 "has vector",
                 "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE HAS_VECTOR 'dense';",
+            ),
+            (
+                "slice",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE SLICE (4, 1);",
             ),
             (
                 "values count",
@@ -472,6 +484,68 @@ mod tests {
             },
             other => panic!("expected Nearest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rest_grpc_relevance_feedback_parity() {
+        let stmt = Parser::parse(
+            "QUERY RELEVANCE FEEDBACK TARGET POINT 42 FEEDBACK ((POINT 43, 0.5), (POINT 44, -0.2)) STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.5) FROM docs USING dense LIMIT 10;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+
+        // REST projection carries the typed feedback shape.
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        let rf = &body["query"]["relevance_feedback"];
+        assert!(
+            rf.is_object(),
+            "REST relevance_feedback missing: {}",
+            body["query"]
+        );
+        assert_eq!(rf["feedback"].as_array().map(Vec::len), Some(2));
+        assert_eq!(rf["strategy"]["naive"]["a"], 1.0);
+
+        // gRPC conversion carries target + both items + strategy.
+        let grpc = test_api::to_query_points(request, collection).unwrap();
+        use qdrant::query::Variant as Qv;
+        let Some(Qv::RelevanceFeedback(fb)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref())
+        else {
+            panic!("expected RelevanceFeedback, got {:?}", grpc.query);
+        };
+        assert!(fb.target.is_some(), "feedback target must convert");
+        assert_eq!(fb.feedback.len(), 2, "both feedback items must convert");
+        assert!(fb.strategy.is_some(), "naive strategy must convert");
+    }
+
+    #[test]
+    fn match_except_filter_contract_matches_openapi() {
+        // `MatchValue::Except` has no QQL surface syntax (there is no
+        // `MATCH EXCEPT` keyword in `qql-core`), so it is covered at the
+        // typed level: serialize the plan type and validate the REST shape.
+        // The gRPC half is covered by
+        // `grpc_exact_list_match_is_homogeneous_and_fallible`.
+        let Some(openapi) = openapi_or_skip() else {
+            return;
+        };
+        use qql_plan::{FieldCondition, FilterClause, MatchValue};
+        let clause = FilterClause::Field(Box::new(FieldCondition {
+            key: "tag".into(),
+            r#match: Some(MatchValue::Except {
+                except: vec![serde_json::json!("a"), serde_json::json!("b")],
+            }),
+            ..Default::default()
+        }));
+        let filter = serde_json::json!({
+            "must": [serde_json::to_value(&clause).expect("except clause serializes")],
+        });
+        validate_ref(&openapi, "Filter", &filter);
     }
 
     #[test]

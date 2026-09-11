@@ -55,7 +55,7 @@ use unsupported::{
     EdgeUnsupported, reject_collection_params, reject_collection_sharding, reject_shard_key,
     vector_hnsw_diffs,
 };
-use vector_parser::ToEdgeVector;
+use vector_parser::plan_vectors_to_edge;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
 use qql::client::QdrantOps;
@@ -453,19 +453,19 @@ impl EdgeQdrant {
         let mut parsed_points = Vec::with_capacity(req.points.len());
         for p in &req.points {
             let id = to_edge_id(p.id.clone())?;
-            let vector_struct = p
-                .vector
-                .as_ref()
-                .ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-EDGE-MISSING-VECTOR",
-                        "upsert point missing vector",
-                        None,
-                    )
-                    .with_collection(collection_name.clone())
-                })?
-                .clone()
-                .to_edge_vector()?;
+            let vector_struct = plan_vectors_to_edge(
+                p.vector
+                    .as_ref()
+                    .ok_or_else(|| {
+                        QqlError::execution(
+                            "QQL-EDGE-MISSING-VECTOR",
+                            "upsert point missing vector",
+                            None,
+                        )
+                        .with_collection(collection_name.clone())
+                    })?
+                    .clone(),
+            )?;
             let payload_val = Value::Object(p.payload.clone().unwrap_or_default());
             let ps = qdrant_edge::PointStruct::new(id, vector_struct, payload_val);
             let psp: qdrant_edge::PointStructPersisted = ps.into();
@@ -649,7 +649,7 @@ impl EdgeQdrant {
         let mut pvps = Vec::with_capacity(req.points.len());
         for pt in &req.points {
             let id = to_edge_id(pt.id.clone())?;
-            let vector_struct = pt.vector.clone().to_edge_vector()?;
+            let vector_struct = plan_vectors_to_edge(pt.vector.clone())?;
             pvps.push(qdrant_edge::PointVectorsPersisted {
                 id,
                 vector: VectorStructPersisted::from(vector_struct),

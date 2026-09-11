@@ -223,11 +223,14 @@ the feature, the reason, and a remediation hint.
 | `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` (no lookup collection) |
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` |
+| `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR (<name>)` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`); qdrant-edge exposes `set_vector_hnsw_config` only |
+| `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE (<name>)`; qdrant-edge has no sparse vector config setter |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | create-time `WITH PARAMS` other than `on_disk_payload` |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the engine excludes |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id-only inputs (need materialized vectors) |
+| `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formula functions; qdrant-edge 0.8 has no such `Expression` variants |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | any other unmapped projection |
 | `QQL-EDGE-INVALID-POINT-ID` | non-integer, non-UUID string point IDs |
 
@@ -248,11 +251,15 @@ exactly what edge refuses to do.
 
 {% aside type="note" title="Shards, quotas, and cluster admin need remote Qdrant" %}
 Custom `SHARD` routing, shard-key administration, `GROUP BY … LOOKUP FROM`,
-`ALTER COLLECTION … WITH PARAMS` / `QUANTIZATION`, create-time `WITH PARAMS`
-beyond `on_disk_payload`, and `SHOW QUOTAS` / `SET QUOTA` are cluster or
+`ALTER COLLECTION … WITH PARAMS` / `QUANTIZATION`, per-vector fields other
+than `HNSW` (`QQL-EDGE-UNSUPPORTED-VECTOR-DIFF`), per-sparse-vector diffs
+(`QQL-EDGE-UNSUPPORTED-SPARSE-DIFF`), create-time `WITH PARAMS`
+beyond `on_disk_payload`, `MAX` / `MIN` / `ACOSH` formulas
+(`QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`), and `SHOW QUOTAS` / `SET QUOTA` are cluster or
 REST-only features. Edge keeps the whole language surface and rejects at
 execution — switch to REST (or gRPC where supported) for those workloads.
-`GROUP BY`, `ALTER COLLECTION … WITH HNSW` / `WITH OPTIMIZERS`, per-query
+`GROUP BY`, `ALTER COLLECTION … WITH HNSW` / `WITH OPTIMIZERS` (including
+per-vector `HNSW`), per-query
 sparse `idf`, and ACORN params **are** supported offline.
 {% /aside %}
 

@@ -26,6 +26,14 @@
 //! # }
 //! ```
 //!
+//! ## JSON scope ("envelope removal")
+//!
+//! Responses are fully typed (`ExecData`, no JSON envelope). `serde_json::Value`
+//! remains only where the engine API requires it: point payloads
+//! (`PointStruct::new`), typed-spec introspection maps, the `turbo`
+//! quantization builder map, and formula `DEFAULTS` (edge formulas are JSON).
+//! `Value`-based parity helpers are test-only (`#[cfg(test)]`).
+//!
 //! [fastembed-rs]: https://crates.io/crates/fastembed
 //! [qdrant-edge]: https://crates.io/crates/qdrant-edge
 

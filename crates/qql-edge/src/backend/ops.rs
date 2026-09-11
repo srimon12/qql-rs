@@ -64,10 +64,14 @@ impl QdrantOps for EdgeQdrant {
             .filter(|name| !name.is_empty())
             .cloned()
             .collect();
+        // Collection name for fail-closed introspection errors below; the
+        // vector closure shadows `name` with the vector name.
+        let collection = name;
         let vectors = cfg
             .vectors
             .iter()
-            .map(|(name, params)| qql::backend::VectorSpec {
+            .map(|(name, params)| -> Result<_, QqlError> {
+                Ok(qql::backend::VectorSpec {
                 name: (!name.is_empty()).then(|| name.clone()),
                 size: params.size as u64,
                 distance: match params.distance {
@@ -79,12 +83,37 @@ impl QdrantOps for EdgeQdrant {
                 .to_string(),
                 hnsw: params
                     .hnsw_config
-                    .and_then(|hnsw| serde_json::to_value(hnsw).ok())
-                    .and_then(|value| value.as_object().cloned()),
+                    .map(|hnsw| {
+                        let value = serde_json::to_value(hnsw).map_err(|error| {
+                            info_config_error(
+                                collection,
+                                format!(
+                                    "failed to serialize HNSW config for collection info: {error}"
+                                ),
+                            )
+                        })?;
+                        value.as_object().cloned().ok_or_else(|| {
+                            info_config_error(
+                                collection,
+                                "HNSW config serialized to a non-object for collection info",
+                            )
+                        })
+                    })
+                    .transpose()?,
                 quantization: params
                     .quantization_config
                     .as_ref()
-                    .and_then(|quant| serde_json::to_value(quant).ok()),
+                    .map(|quant| {
+                        serde_json::to_value(quant).map_err(|error| {
+                            info_config_error(
+                                collection,
+                                format!(
+                                    "failed to serialize quantization config for collection info: {error}"
+                                ),
+                            )
+                        })
+                    })
+                    .transpose()?,
                 multivector: params.multivector_config.as_ref().map(|mv| {
                     let mut map = serde_json::Map::new();
                     map.insert(
@@ -106,12 +135,16 @@ impl QdrantOps for EdgeQdrant {
                     .to_string()
                 }),
                 memory: None,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QqlError>>()?;
         let sparse_vectors = cfg
             .sparse_vectors
             .iter()
             .map(|(name, params)| {
+                // Engine-boundary JSON, not an envelope: `SparseVectorSpec::index`
+                // is typed as an optional JSON map, so this map feeds the typed
+                // constructor directly.
                 let mut index = serde_json::Map::new();
                 if let Some(threshold) = params.full_scan_threshold {
                     index.insert(
@@ -554,4 +587,14 @@ impl QdrantOps for EdgeQdrant {
         }
         Ok(results)
     }
+}
+
+/// Fail-closed `QQL-EDGE-CONFIG` for collection-info introspection.
+///
+/// Engine config types always serialize in practice, but a serialization
+/// failure must surface — never silently drop the HNSW/quantization block
+/// (the old `.ok()` path reported `None`, i.e. "no HNSW configured").
+fn info_config_error(collection: &str, detail: impl Into<String>) -> QqlError {
+    QqlError::execution("QQL-EDGE-CONFIG", detail.into(), None)
+        .with_collection(collection.to_string())
 }
