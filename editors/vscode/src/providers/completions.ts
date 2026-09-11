@@ -90,8 +90,8 @@ const SNIPPETS: QqlSnippet[] = [
   {
     label: "UPSERT INTO",
     insertText:
-      "UPSERT INTO ${1:collection} VALUES\n  {id: ${2:1}, text: '${3:document}'}\n  USING DENSE MODEL '${4:all-MiniLM-L6-v2}';",
-    detail: "Upsert points with auto-embedding",
+      "UPSERT INTO ${1:collection} VALUES\n  {id: ${2:1}, text: '${3:document}'}\n  USING DENSE MODEL '${4:all-MiniLM-L6-v2}'\n  WAIT ${5|true,false|};",
+    detail: "Upsert points with auto-embedding (durable with WAIT)",
   },
   {
     label: "CREATE COLLECTION",
@@ -113,8 +113,8 @@ const SNIPPETS: QqlSnippet[] = [
   {
     label: "CREATE INDEX",
     insertText:
-      "CREATE INDEX ON COLLECTION ${1:collection}\n  FOR ${2:field}\n  TYPE ${3|keyword,integer,float,geo,text,bool,datetime,uuid|}\n  WITH (${4});",
-    detail: "Create a payload index",
+      "CREATE INDEX ON COLLECTION ${1:collection}\n  FOR ${2:field}\n  TYPE ${3|keyword,integer,float,geo,text,bool,datetime,uuid|}\n  WITH (${4})\n  WAIT ${5|true,false|};",
+    detail: "Create a payload index (durable with WAIT)",
   },
   {
     label: "SCROLL",
@@ -134,8 +134,9 @@ const SNIPPETS: QqlSnippet[] = [
   },
   {
     label: "DELETE",
-    insertText: "DELETE FROM ${1:collection} WHERE ${2:status} = '${3:archived}';",
-    detail: "Delete points by filter",
+    insertText:
+      "DELETE FROM ${1:collection} WHERE ${2:status} = '${3:archived}' WAIT ${4|true,false|};",
+    detail: "Delete points by filter (durable with WAIT)",
   },
   {
     label: "DELETE PAYLOAD",
@@ -202,6 +203,41 @@ const SNIPPETS: QqlSnippet[] = [
       "WITH ${1:candidates} AS (QUERY TEXT '${2:search}' FROM ${3:collection} USING ${4:dense} LIMIT 100)\nQUERY FORMULA (score * GAUSS_DECAY(GEO_DISTANCE(${5:48.8566}, ${6:2.3522}, location), 0.0, ${7:5000.0}, 0.5))\n  DEFAULTS (location = {lat: ${5:48.8566}, lon: ${6:2.3522}})\n  FROM ${3:collection}\n  PREFETCH (${1:candidates})\n  LIMIT ${8:10};",
     detail: "Geo-distance Gaussian decay scoring",
   },
+  {
+    label: "ALTER VECTOR DIFF",
+    insertText:
+      "ALTER COLLECTION ${1:collection}\n  WITH VECTOR ${2:dense} (HNSW (m = ${3:32}), QUANTIZATION (type = '${4:scalar}'));",
+    detail: "Per-vector ALTER diff (HNSW / QUANTIZATION / VECTOR)",
+  },
+  {
+    label: "ALTER SPARSE DIFF",
+    insertText:
+      "ALTER COLLECTION ${1:collection}\n  WITH SPARSE ${2:bm25} (SPARSE (modifier = '${3:idf}', full_scan_threshold = ${4:5000}));",
+    detail: "Per-sparse-vector ALTER diff",
+  },
+  {
+    label: "ALTER HNSW",
+    insertText: "ALTER COLLECTION ${1:collection} WITH HNSW (m = ${2:32});",
+    detail: "Patch collection HNSW params",
+  },
+  {
+    label: "SHARD NUMERIC",
+    insertText:
+      "QUERY TEXT '${1:search}'\n  FROM ${2:collection} USING ${3:dense}\n  WHERE ${4:tenant_id} = '${5:acme}'\n  SHARD ${6:101}\n  LIMIT ${7:10};",
+    detail: "Typed shard routing to a numeric partition",
+  },
+  {
+    label: "QUERY WITH PARAMS",
+    insertText:
+      '-- qql-params: {"q": "${1:search term}", "limit": ${2:10}}\nQUERY TEXT :q\n  FROM ${3:collection} USING ${4:dense}\n  LIMIT :limit;',
+    detail: "Placeholder query with a qql-params header",
+  },
+  {
+    label: "CREATE SHARD KEY NUMERIC",
+    insertText:
+      "CREATE SHARD KEY ${1:101} ON COLLECTION ${2:collection} WITH (shards_number = ${3:2});",
+    detail: "Create a numeric shard key for multi-tenancy",
+  },
 ];
 
 // Contextual follow-ups after a keyword
@@ -253,15 +289,25 @@ const AFTER: Record<
   CROSS: [{ label: "RERANK" }],
   CREATE: [{ label: "COLLECTION" }, { label: "INDEX" }, { label: "SHARD" }],
   DROP: [{ label: "COLLECTION" }, { label: "INDEX" }, { label: "SHARD" }],
-  SHOW: [{ label: "COLLECTIONS" }, { label: "COLLECTION" }, { label: "SHARD" }],
+  SHOW: [
+    { label: "COLLECTIONS" },
+    { label: "COLLECTION" },
+    { label: "SHARD" },
+    { label: "QUOTAS" },
+  ],
   ALTER: [{ label: "COLLECTION" }],
+  SET: [{ label: "QUOTA" }],
+  WAIT: [{ label: "true" }, { label: "false" }],
   DELETE: [{ label: "FROM" }, { label: "PAYLOAD" }, { label: "VECTOR" }],
   CLEAR: [{ label: "PAYLOAD" }],
   UPDATE: [{ label: "VECTOR" }, { label: "PAYLOAD" }],
   WITH: [
     { label: "PAYLOAD", detail: "Projection" },
-    { label: "VECTOR", detail: "Return vectors" },
+    { label: "VECTOR", detail: "Return vectors / per-vector diff" },
+    { label: "SPARSE", detail: "Per-sparse-vector diff" },
     { label: "HNSW", detail: "DDL HNSW config" },
+    { label: "QUANTIZATION", detail: "DDL quantization config" },
+    { label: "OPTIMIZERS", detail: "DDL optimizer config" },
     { label: "PARAMS", detail: "DDL / request params" },
     { label: "MULTIVECTOR", detail: "ColBERT shape" },
   ],
@@ -281,12 +327,14 @@ const STATEMENT_STARTERS = [
   "WITH",
   "SCROLL",
   "COUNT",
+  "FACET",
   "UPSERT",
   "DELETE",
   "CREATE",
   "DROP",
   "ALTER",
   "SHOW",
+  "SET",
   "CLEAR",
   "UPDATE",
 ];
@@ -322,6 +370,7 @@ const CLAUSE_KEYWORDS = [
   "LOOKUP",
   "SIZE",
   "FIELD",
+  "WAIT",
 ];
 
 // ── Completion Provider ──────────────────────────────────────────

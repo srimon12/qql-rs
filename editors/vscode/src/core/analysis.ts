@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { getDocumentParams } from "./params";
 import { extractStatementSpans } from "./statements";
 import type { StatementSpan, WasmAnalyzeResult } from "./types";
 import { analyzeQql, isWasmReady } from "./wasm";
@@ -80,7 +81,9 @@ export class AnalysisService implements vscode.Disposable {
     const source = document.getText();
 
     try {
-      const result = analyzeQql(source);
+      // Header (`-- qql-params:`) wins, else the `qql.params` setting.
+      // analyzeQql only re-analyzes bound text when raw fails with QQL-BIND-*.
+      const result = analyzeQql(source, getDocumentParams(document));
       const statements = extractStatementSpans(source, result);
       const analysis: DocumentAnalysis = {
         uri: key,

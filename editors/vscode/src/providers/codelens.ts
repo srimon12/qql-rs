@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { AnalysisService, DocumentAnalysis } from "../core/analysis";
+import { describeParamsSource } from "../core/params";
 import { byteOffsetToPosition } from "../core/positions";
 
 /**
@@ -72,6 +73,7 @@ export class QqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
     if (analysis.statements.length === 0) return [];
 
     const lenses: vscode.CodeLens[] = [];
+    const paramsSource = describeParamsSource(document);
 
     for (const stmt of analysis.statements) {
       const pos = byteOffsetToPosition(document, stmt.start);
@@ -83,7 +85,10 @@ export class QqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
           title: "$(info) Explain",
           command: "qql.explainStatement",
           arguments: args,
-          tooltip: "Show the execution plan for this statement",
+          tooltip:
+            paramsSource != null
+              ? `Show the execution plan for this statement (params: ${paramsSource})`
+              : "Show the execution plan for this statement",
         })
       );
 

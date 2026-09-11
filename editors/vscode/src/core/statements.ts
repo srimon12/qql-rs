@@ -6,12 +6,14 @@ const STATEMENT_STARTERS = new Set([
   "QUERY",
   "SCROLL",
   "COUNT",
+  "FACET",
   "UPSERT",
   "DELETE",
   "CREATE",
   "DROP",
   "ALTER",
   "SHOW",
+  "SET",
   "CLEAR",
   "UPDATE",
   "WITH",
@@ -35,6 +37,7 @@ export function extractStatementSpans(source: string, result: WasmAnalyzeResult)
   let pendingCreate = false;
   let pendingDrop = false;
   let pendingShow = false;
+  let pendingSet = false;
   let pendingDelete = false;
   let pendingClear = false;
   let pendingUpdate = false;
@@ -60,7 +63,7 @@ export function extractStatementSpans(source: string, result: WasmAnalyzeResult)
     });
     stmtStart = null;
     stmtKind = "STATEMENT";
-    pendingCreate = pendingDrop = pendingShow = pendingDelete = false;
+    pendingCreate = pendingDrop = pendingShow = pendingSet = pendingDelete = false;
     pendingClear = pendingUpdate = pendingAlter = false;
   };
 
@@ -87,6 +90,7 @@ export function extractStatementSpans(source: string, result: WasmAnalyzeResult)
       pendingCreate = kind === "CREATE";
       pendingDrop = kind === "DROP";
       pendingShow = kind === "SHOW";
+      pendingSet = kind === "SET";
       pendingDelete = kind === "DELETE";
       pendingClear = kind === "CLEAR";
       pendingUpdate = kind === "UPDATE";
@@ -94,7 +98,7 @@ export function extractStatementSpans(source: string, result: WasmAnalyzeResult)
       continue;
     }
 
-    // Refine multi-word starters: CREATE COLLECTION / CREATE INDEX / CREATE SHARD KEY
+    // Refine multi-word starters: CREATE COLLECTION / SHOW QUOTAS / SET QUOTA / …
     if (depth === 0 && stmtStart !== null) {
       if (pendingCreate) {
         if (kind === "COLLECTION") stmtKind = "CREATE COLLECTION";
@@ -110,7 +114,11 @@ export function extractStatementSpans(source: string, result: WasmAnalyzeResult)
         if (kind === "COLLECTIONS") stmtKind = "SHOW COLLECTIONS";
         else if (kind === "COLLECTION") stmtKind = "SHOW COLLECTION";
         else if (kind === "SHARD") stmtKind = "SHOW SHARD KEYS";
+        else if (kind === "QUOTAS") stmtKind = "SHOW QUOTAS";
         pendingShow = false;
+      } else if (pendingSet) {
+        if (kind === "QUOTA") stmtKind = "SET QUOTA";
+        pendingSet = false;
       } else if (pendingDelete) {
         if (kind === "PAYLOAD") stmtKind = "DELETE PAYLOAD";
         else if (kind === "VECTOR") stmtKind = "DELETE VECTOR";
@@ -331,9 +339,14 @@ function fallbackSplit(source: string, result: WasmAnalyzeResult): StatementSpan
 
 function guessKind(text: string): string {
   const m = text.match(
-    /^\s*(WITH|QUERY|SCROLL|COUNT|UPSERT|DELETE|CREATE|DROP|ALTER|SHOW|CLEAR|UPDATE)\b/i
+    /^\s*(WITH|QUERY|SCROLL|COUNT|FACET|UPSERT|DELETE|CREATE|DROP|ALTER|SHOW|SET|CLEAR|UPDATE)\b\s*([A-Za-z_]*)/i
   );
-  return m ? m[1].toUpperCase() : "STATEMENT";
+  if (!m) return "STATEMENT";
+  const starter = m[1].toUpperCase();
+  const next = (m[2] ?? "").toUpperCase();
+  if (starter === "SET" && next === "QUOTA") return "SET QUOTA";
+  if (starter === "SHOW" && next === "QUOTAS") return "SHOW QUOTAS";
+  return starter;
 }
 
 /** Find the statement that contains a given byte offset. */

@@ -219,12 +219,15 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   ALTER: {
     title: "ALTER COLLECTION",
     category: "DDL",
-    summary: "Patch collection params (HNSW, optimizers, quantization, …).",
+    summary:
+      "Patch collection params. Whole-collection: `WITH HNSW (…)`, `WITH OPTIMIZERS (…)`, `WITH QUANTIZATION (…)`, `WITH PARAMS (…)`. Per-vector diffs: `WITH VECTOR [name] (HNSW (…) | QUANTIZATION (…) | VECTOR (…))` and `WITH SPARSE name (SPARSE (…) | INDEX (…))`.",
+    example:
+      "ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32), QUANTIZATION (type = 'scalar'));",
   },
   SHOW: {
     title: "SHOW",
     category: "DDL",
-    summary: "`SHOW COLLECTIONS`, `SHOW COLLECTION name`, `SHOW SHARD KEYS`.",
+    summary: "`SHOW COLLECTIONS`, `SHOW COLLECTION name`, `SHOW SHARD KEYS`, `SHOW QUOTAS`.",
   },
   VECTOR: {
     title: "VECTOR",
@@ -235,7 +238,9 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   SPARSE: {
     title: "SPARSE",
     category: "DDL / mode",
-    summary: "Sparse (BM25-style) vector column or retrieval leg.",
+    summary:
+      "Sparse (BM25-style) vector column or retrieval leg. Per-vector alter: `WITH SPARSE name (SPARSE (…) | INDEX (…))`. Local BM25 document tuning (`k1`, `b`, `avg_len`) lives in the SDKs (`setBm25Params`, write-path only) — not in QQL.",
+    example: "ALTER COLLECTION docs WITH SPARSE bm25 (SPARSE (modifier = 'idf'));",
   },
   MULTIVECTOR: {
     title: "MULTIVECTOR",
@@ -292,8 +297,46 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     title: "SHARD",
     category: "Multi-tenancy",
     summary:
-      "`SHARD 'key'` routes a request to a custom shard. Also used in `CREATE/DROP SHARD KEY`.",
+      "Route a request to a shard partition: `SHARD 'key'` (keyword) or `SHARD 101` (numeric — hashes differently). Binds like any placeholder (`SHARD :tenant`). Also used in `CREATE/DROP SHARD KEY` (quoted or numeric keys).",
     example: "QUERY TEXT 'q' FROM tenants SHARD 'acme' USING dense LIMIT 10;",
+  },
+  WAIT: {
+    title: "WAIT",
+    category: "Durability",
+    summary:
+      "Trailing durability clause on mutations and `CREATE INDEX`: `WAIT true` waits for consensus, `WAIT false` returns immediately. A repeated `WAIT` is rejected (`QQL-PARSE-DUPLICATE-CLAUSE`).",
+    example: "DELETE FROM docs WHERE status = 'archived' WAIT true;",
+  },
+  SET: {
+    title: "SET QUOTA",
+    category: "Statement",
+    summary: "Replace the cluster quota config (full PUT). Optional trailing `WAIT true|false`.",
+    example: "SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;",
+  },
+  QUOTA: {
+    title: "QUOTA",
+    category: "Statement",
+    summary: "Cluster quota config keyword — see `SET QUOTA`.",
+    example: "SET QUOTA (enabled = true) WAIT true;",
+  },
+  QUOTAS: {
+    title: "SHOW QUOTAS",
+    category: "Statement",
+    summary: "Show cluster resource quotas.",
+    example: "SHOW QUOTAS;",
+  },
+  QUANTIZATION: {
+    title: "QUANTIZATION",
+    category: "DDL",
+    summary:
+      "Quantization config on create/alter: `WITH QUANTIZATION (type = 'scalar', …)` or per-vector inside `WITH VECTOR name (…)`.",
+    example: "ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);",
+  },
+  OPTIMIZERS: {
+    title: "OPTIMIZERS",
+    category: "DDL",
+    summary: "Optimizer config on alter: `WITH OPTIMIZERS (max_segment_size = 500000, …)`.",
+    example: "ALTER COLLECTION docs WITH OPTIMIZERS (max_segment_size = 500000);",
   },
   MATCH: {
     title: "MATCH",
