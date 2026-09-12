@@ -115,7 +115,7 @@ Public crate surface. REST projection lives in `routing`; `plan` re-exports
 
 ## Docs
 
-- [AGENTS.md](../../AGENTS.md) pipeline · [Syntax](../../docs/syntax.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
+- [AGENTS.md](https://github.com/srimon12/qql-rs/blob/main/AGENTS.md) pipeline · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md)
 
 ## Test
 

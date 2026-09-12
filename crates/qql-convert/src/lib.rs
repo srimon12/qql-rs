@@ -1,6 +1,6 @@
 //! Qdrant REST JSON to QQL statement converter.
 //!
-//! Three input shapes are accepted:
+//! Five input shapes are accepted:
 //!
 //! 1. **Wrapped request** — `{"method", "path", "query"?, "body"?}`; the
 //!    collection is derived from the path. `query` recovers `wait` /
@@ -10,6 +10,13 @@
 //! 3. **JSONL capture** — one wrapped request or bare body per line, as
 //!    written by `qql record`. A failing line reports its 1-based number via
 //!    [`ConvertError::InvalidLine`].
+//! 4. **HTTP snippet** — a `METHOD /path` line plus a JSON body, as shown in
+//!    docs and blogs (full URLs and an `HTTP/x` suffix are accepted).
+//! 5. **`curl` command** — a pasted invocation (`-X`, `-d`, `--header`, …,
+//!    multi-line continuations, several commands). Shell-dynamic constructs
+//!    (`$VAR`, `@file`, pipes) fail closed; see [`snippet`].
+//!
+//! Markdown fences around any of the above are stripped as paste noise.
 //!
 //! Conversion is contract-driven and AST-based:
 //!
@@ -29,6 +36,8 @@ mod decode;
 mod endpoint;
 mod json;
 mod request;
+mod shell;
+mod snippet;
 
 pub use convert::{convert, convert_stmts};
 use std::fmt;

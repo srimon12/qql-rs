@@ -130,4 +130,4 @@ await client.execute(
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [WASM skill](../../skills/qql-skill/references/wasm-sdk.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [WASM skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/wasm-sdk.md)

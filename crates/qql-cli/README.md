@@ -205,4 +205,4 @@ LIMIT 10;
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [Install skill](../../skills/qql-skill/references/qql-install.md) · [Gaps](../../skills/qql-skill/references/qql-gaps.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Install skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-install.md) · [Gaps](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-gaps.md)

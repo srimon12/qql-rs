@@ -331,7 +331,7 @@ class TestDxImprovements(unittest.TestCase):
         # Bulk ingest lives on the client next to execute — one `:rows`
         # template prepared once, no hand-rolled batch loops. Offline:
         # surface parity only (live chunking is covered by Rust mock
-        # tests + the vs-qdrant harness, no Qdrant server in CI).
+        # tests + integration tests, no Qdrant server in CI).
         self.assertTrue(callable(sdk.Client.upsert_many))
 
 

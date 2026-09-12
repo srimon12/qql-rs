@@ -17,7 +17,7 @@ HNSW/optimizer `ALTER COLLECTION` are supported offline.
 pip install pyqql-edge
 ```
 
-Python 3.8+. Wheels: Linux x64, macOS arm64, Windows x64 (not macOS Intel — ONNX).
+Python 3.10+. Wheels: Linux x64, macOS arm64, Windows x64 (not macOS Intel — ONNX).
 
 ## Quick start
 
@@ -85,4 +85,4 @@ qdrant-edge 0.8's own Python binding does not expose this knob.
 
 ## Docs
 
-- [qql-edge](../qql-edge/README.md) · [Gaps](../../skills/qql-skill/references/qql-gaps.md) · [Syntax](../../docs/syntax.md)
+- [qql-edge](https://github.com/srimon12/qql-rs/blob/main/crates/qql-edge/README.md) · [Gaps](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-gaps.md) · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)

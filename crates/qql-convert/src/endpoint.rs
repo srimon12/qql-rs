@@ -109,7 +109,10 @@ pub(crate) fn parse(method: &str, path: &str) -> Result<EndpointMatch, ConvertEr
     let collection_of = |parts: &[&str]| -> Result<Option<String>, ConvertError> {
         match parts.get(1) {
             None | Some(&"") => Err(unsupported()),
-            Some(name) => Ok(Some((*name).to_string())),
+            Some(name) => {
+                reject_template_collection(name)?;
+                Ok(Some((*name).to_string()))
+            }
         }
     };
 
@@ -182,4 +185,24 @@ pub(crate) fn parse(method: &str, path: &str) -> Result<EndpointMatch, ConvertEr
         collection,
         field: None,
     })
+}
+
+/// Collections pasted from docs often carry template markers
+/// (`<your-collection>`, `{collection_name}`, `$COLLECTION`). Emitting them
+/// would produce QQL that cannot re-parse, so reject them here — one check for
+/// the wrapped, snippet, and curl paths alike (bare `--collection` values go
+/// through [`crate::convert`] which calls this too).
+pub(crate) fn reject_template_collection(name: &str) -> Result<(), ConvertError> {
+    if name
+        .chars()
+        .any(|c| matches!(c, '<' | '>' | '{' | '}' | '$') || c.is_whitespace())
+    {
+        return Err(ConvertError::InvalidField {
+            path: "collection".to_string(),
+            detail: format!(
+                "looks like a placeholder (`{name}`) — replace it with the real collection name"
+            ),
+        });
+    }
+    Ok(())
 }
