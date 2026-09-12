@@ -13,6 +13,8 @@ pub const DEFAULT_WORKERS: usize = 2;
 pub const DEFAULT_BULK_INDEXING_THRESHOLD: u64 = 2_000_000;
 /// Qdrant default `indexing_threshold` (20 MB) restored after bulk load.
 pub const DEFAULT_INDEXING_THRESHOLD: u64 = 20_000;
+/// Default pause between ingest windows (ms). Zero means no throttle.
+pub const DEFAULT_BATCH_DELAY_MS: u64 = 0;
 
 /// What to do when `--shard-key-field` is missing on a point.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,10 +168,18 @@ pub struct MigrateOptions {
     pub wait: bool,
     /// Drop the target collection before creating it.
     pub recreate: bool,
+    /// Pause between ingest windows (ms) to spare a loaded cluster.
+    pub batch_delay_ms: u64,
 }
 
 impl MigrateOptions {
     /// Identity of schema-affecting options. Resume refuses a mismatched checkpoint.
+    ///
+    /// Tuning flags (`batch_size`, `workers`, `wait`, `recreate`, `verify`,
+    /// `checkpoint_path`, `batch_delay_ms`) are intentionally excluded: they change speed or
+    /// durability, not what the target must contain. `cutover_alias` is also
+    /// excluded: the alias swap reads the current flags when the Cutover
+    /// phase runs, so adding or dropping `--cutover` across a resume is safe.
     pub fn fingerprint(&self) -> String {
         let quant = self
             .quantize
@@ -177,7 +187,7 @@ impl MigrateOptions {
             .map(|q| q.kind.as_str())
             .unwrap_or("-");
         format!(
-            "to={},shards={:?},repl={:?},method={:?},quant={},shard_key={:?},shard_field={:?},missing={:?},bulk={},cutover={:?},where={:?},fast_bulk={}",
+            "to={},shards={:?},repl={:?},method={:?},quant={},shard_key={:?},shard_field={:?},missing={:?},bulk={},where={:?},fast_bulk={}",
             self.target_collection,
             self.shard_number,
             self.replication_factor,
@@ -187,7 +197,6 @@ impl MigrateOptions {
             self.shard_key_field,
             self.missing_shard_key,
             self.bulk_indexing_threshold,
-            self.cutover_alias,
             self.where_clause,
             self.fast_bulk,
         )

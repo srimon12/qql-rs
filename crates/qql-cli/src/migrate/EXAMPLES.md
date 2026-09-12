@@ -26,7 +26,8 @@ Source collections (untouched):
 ```
 
 Live: **8317 / 8317 verified in 1.784 s** (~4.7k points/s), 65 batches.
-`indexing_threshold` restored to the source value (`10000`).
+`indexing_threshold` restored to the source value (`10000` on this collection;
+the default is `20000` when the source sets none).
 
 ## Faster ingest (`WAIT false`)
 
@@ -82,7 +83,10 @@ collection you still need).
 ```
 
 Injects `WITH QUANTIZATION (type = 'scalar', always_ram = true, quantile = 0.99)`
-on CREATE. Other values: `--quantize binary|product|turbo`.
+on CREATE. Other values: `--quantize binary|product|turbo`. Per-family
+defaults are `binary` (`one_bit`), `product` (`x16`), `turbo` (`bits = 2`);
+all default to `always_ram = true` (pass `--no-always-ram` to keep quantized
+vectors on disk).
 
 ## Reshard / tenant split (clustered Qdrant only)
 
@@ -100,7 +104,10 @@ stay numeric shard keys (`SHARD 101`), strings stay keywords (`SHARD 'acme'`).
 Keys are discovered with `FACET <field> … LIMIT 10000 EXACT true`, falling back
 to a payload-only scroll when FACET truncates or the field is unindexed; an
 existing index on the field is promoted with `is_tenant = true`. Use
-`--shard-key <literal>` instead when every point shares one key.
+`--shard-key <literal>` instead when every point shares one key. Only
+non-empty strings and non-negative integers become shard keys. Bool, float,
+empty, and null values are ignored during discovery; at ingest they follow
+`--on-missing-shard-key` (`error` by default, or `skip`, or `default=<key>`).
 
 On **standalone** Qdrant this fails in the schema phase (~15 ms) with:
 
@@ -126,15 +133,26 @@ Do not wait for ingest — `CREATE SHARD KEY` is unimplemented there.
 Re-run the **same** command. Checkpoint files live at:
 
 ```
-.qql-migrate/<source_url>__<source>__<target_url>__<target>.json
+.qql-migrate/<source_url>__<source>__<target_url>__<target>__<hash>.json
 ```
 
+Segments are sanitized and a hash of the full endpoint identity is appended,
+so URLs that sanitize identically still map to different files.
+
 `--restart` discards the checkpoint. `--resume` errors if none exists.
+Tuning flags (`--workers`, `--batch-size`, `--no-wait`, `--recreate`,
+`--no-verify`, `--batch-delay-ms`) can change across a resume. They affect
+speed and durability, not what the target must contain. Schema-affecting
+flags (`--shard-number`, `--where`, `--quantize`, shard keys) must stay the
+same. `--cutover` can be added or dropped across a resume. The alias swap
+reads the current flags when the Cutover phase runs.
 
 ## JSON output
 
-Add `--json` for scripting. Fields: `written`, `source_count`, `target_count`,
-`verified`, `resumed`, `create`, `indexes`, `restore_optimizers`.
+Add `--json` for scripting. Fields: `ok`, `operation`, `source`, `target`,
+`written`, `skipped`, `batches`, `source_count`, `target_count`, `verified`,
+`resumed`, `dry_run`, `cutover_alias`, `source_dropped`, `create`, `indexes`,
+`shard_keys`, `restore_optimizers`.
 
 ## End-to-end sharded demo
 

@@ -146,14 +146,43 @@ pub fn remove(path: &str) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// Endpoint identity for checkpoint compare. Trailing slashes and host case
+/// do not change where a migration points.
+pub fn normalize_endpoint(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_string()
+}
+
+fn same_endpoint(a: &str, b: &str) -> bool {
+    normalize_endpoint(a).eq_ignore_ascii_case(&normalize_endpoint(b))
+}
+
+fn path_hash(source_url: &str, source: &str, target_url: &str, target: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for part in [source_url, source, target_url, target] {
+        for byte in part.bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{:08x}", (hash >> 32) ^ (hash & 0xffff_ffff))
+}
+
 /// Default checkpoint path includes both cluster identities to avoid collisions.
 pub fn default_path(source_url: &str, source: &str, target_url: &str, target: &str) -> String {
     format!(
-        ".qql-migrate/{}__{}__{}__{}.json",
-        sanitize(source_url),
+        ".qql-migrate/{}__{}__{}__{}__{}.json",
+        sanitize(&normalize_endpoint(source_url)),
         sanitize(source),
-        sanitize(target_url),
-        sanitize(target)
+        sanitize(&normalize_endpoint(target_url)),
+        sanitize(target),
+        path_hash(
+            &normalize_endpoint(source_url),
+            source,
+            &normalize_endpoint(target_url),
+            target
+        )
     )
 }
 
@@ -185,7 +214,9 @@ pub fn compatible(cp: &Checkpoint, opts: &MigrateOptions) -> Result<(), Box<dyn 
         )
         .into());
     }
-    if cp.source_url != opts.source_url || cp.target_url != opts.target_url {
+    if !same_endpoint(&cp.source_url, &opts.source_url)
+        || !same_endpoint(&cp.target_url, &opts.target_url)
+    {
         return Err(format!(
             "checkpoint clusters do not match this run (stored '{}→{}', current '{}→{}'); pass --restart or a different --checkpoint",
             cp.source_url, cp.target_url, opts.source_url, opts.target_url

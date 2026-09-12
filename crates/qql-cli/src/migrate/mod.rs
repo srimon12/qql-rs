@@ -36,8 +36,8 @@ use schema::build_plan;
 
 pub use checkpoint::default_path as default_checkpoint_path;
 pub use options::{
-    DEFAULT_BATCH_SIZE, DEFAULT_BULK_INDEXING_THRESHOLD, DEFAULT_WORKERS, MigrateOptions,
-    MigrateProgress, MigrateStats, MissingShardKey, QuantizeKind, QuantizeSpec,
+    DEFAULT_BATCH_DELAY_MS, DEFAULT_BATCH_SIZE, DEFAULT_BULK_INDEXING_THRESHOLD, DEFAULT_WORKERS,
+    MigrateOptions, MigrateProgress, MigrateStats, MissingShardKey, QuantizeKind, QuantizeSpec,
 };
 
 /// Fail closed for an edge → edge migration before any executor is built.
@@ -93,10 +93,11 @@ pub async fn migrate_collection(
     };
     let discovered = discover::discover_shard_keys(source, &opts, filter.clone()).await?;
     if !discovered.is_empty() {
-        plan.shard_keys = discovered
-            .iter()
-            .map(|k| discover::create_shard_key_sql(&opts.target_collection, k))
-            .collect();
+        plan.shard_keys = discover::merge_shard_key_statements(
+            plan.shard_keys,
+            &opts.target_collection,
+            &discovered,
+        );
     }
     let source_count = verify::exact_count(
         source,
@@ -177,9 +178,12 @@ pub async fn migrate_collection(
             checkpoint.original_indexing_threshold,
         )
         .await;
-        if let Err(err) = restored {
+        if let Err(restore_err) = restored {
+            if let Err(ingest_err) = &ingest {
+                return Err(combine_ingest_restore_errors(ingest_err, &restore_err).into());
+            }
             if ingest.is_ok() {
-                return Err(err);
+                return Err(restore_err);
             }
         } else {
             checkpoint.phase = Phase::Verify;
@@ -279,7 +283,18 @@ fn validate_options(opts: &MigrateOptions) -> Result<(), Box<dyn Error>> {
 }
 
 fn same_backend(opts: &MigrateOptions) -> bool {
-    opts.source_url == opts.target_url
+    let source = checkpoint::normalize_endpoint(&opts.source_url);
+    let target = checkpoint::normalize_endpoint(&opts.target_url);
+    source.eq_ignore_ascii_case(&target)
+}
+
+/// Both ingest and optimizer restore failed. Keep both messages so the
+/// operator sees the root cause first and the follow-on damage second.
+fn combine_ingest_restore_errors(
+    ingest_err: &dyn std::fmt::Display,
+    restore_err: &dyn std::fmt::Display,
+) -> String {
+    format!("{ingest_err}; optimizer restore also failed: {restore_err}")
 }
 
 fn load_or_init(

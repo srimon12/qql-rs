@@ -169,4 +169,15 @@ mod tests {
         circuit.on_success();
         assert!(!circuit.is_open());
     }
+
+    #[test]
+    fn backoff_stays_within_cap() {
+        assert!(super::backoff(0) <= std::time::Duration::from_millis(100));
+        for attempt in 0..8 {
+            assert!(
+                super::backoff(attempt) <= std::time::Duration::from_secs(10),
+                "attempt {attempt} exceeds the 10s cap"
+            );
+        }
+    }
 }
