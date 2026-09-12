@@ -27,6 +27,27 @@ QUERY 'chair' FROM catalog USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 
+## Batch independent operations
+
+`BATCH { ... }` runs homogeneous same-collection members as one Qdrant batch
+RPC. Members are full statements: all queries or all mutations. Query batches
+carry shared read opts in `PARAMS`; mutation batches carry `WAIT`.
+
+{% qqlExample title="One RPC for same-collection members" %}
+```sql
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; };
+
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority);
+
+BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false;
+```
+{% /qqlExample %}
+
+Empty blocks, nested blocks, mixed families, mixed collections, DDL, `SHOW`,
+`COUNT`, `SCROLL`, `FACET`, and `SET QUOTA` members fail closed. `WAIT false`
+sends `?wait=false` explicitly. Edge fans out per member instead of sending a
+native batch RPC.
+
 ## Use the right host API
 
 | API | Contract |

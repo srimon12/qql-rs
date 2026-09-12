@@ -28,7 +28,7 @@ missing** features that already ship.
 | `SHOW QUOTAS` / `SET QUOTA` | **No** — `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST `/quotas` only) |
 | `PARAMS (idf = …)` | **Yes** on qdrant-edge **0.8+** (per-query sparse IDF corpus) |
 | `PARAMS (acorn = …, max_selectivity = …)` | **Yes** on qdrant-edge **0.8+** |
-| Batch query/update | Fan-out only (not one native batch RPC) |
+| Batch query/update | `BATCH { <stmt>; ... }` is one native batch RPC on remote Qdrant (queries share `PARAMS`, mutations share `WAIT`); edge fans out per member |
 | `PARAMS (timeout / consistency)` | Rejected fail-loud (`QQL-EDGE-UNSUPPORTED-TIMEOUT` / `…-CONSISTENCY`) |
 | Route affinity (`X-Qdrant-Route-Affinity`) | **N/A** — single-node process; no replica pin |
 
@@ -86,7 +86,18 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
 | Grouped pagination (OFFSET with GROUP BY) | `GROUP BY … OFFSET N` → maps to `group_offset` |
 | MMR with sparse vectors | `USING … AS SPARSE` with MMR is supported |
-| Filter `min_should` | Conjunction threshold on compound filters |
+| Filter `min_should` | `WHERE MIN SHOULD 2 (a = 1, b = 2)` — at least n operands hold (`min_count >= 1`) |
+| Filter token and except match | `field MATCH TOKENS 'text'` (any token) and `field MATCH EXCEPT ('a', 'b')` (none of the values) |
+| Scroll ordering and payload | `SCROLL ... ORDER BY <key> [ASC\|DESC] [START FROM <value>]` and `SCROLL ... WITH PAYLOAD false\|INCLUDE (...)\|EXCLUDE (...)` |
+| Order paging origin | `QUERY ORDER BY <field> [ASC\|DESC] START FROM <value>` and the same `START FROM` on `SCROLL ... ORDER BY` (integer, float, datetime string, or placeholder) |
+| Group lookup selectors | `GROUP BY ... LOOKUP FROM <coll> [WITH PAYLOAD ...] [WITH VECTOR ...]`; prefetch `LOOKUP FROM <coll> [VECTOR <name>] [SHARD <key>]` |
+| Conditional upsert | `UPSERT ... UPDATE FILTER <filter>` and `UPDATE MODE insert_only\|update_only\|upsert` (either order, each at most once) |
+| Nested payload write | `UPDATE ... SET PAYLOAD = {...} KEY '<path>'` merges at that path; `OVERWRITE` replaces the full payload and runs only inside `BATCH` (`QQL-REST-OVERWRITE-BATCH-ONLY` alone) |
+| Inference options and objects | `TEXT\|IMAGE ... OPTIONS {...}` and `OBJECT {...} [MODEL '...'] [OPTIONS {...}]`; per-point `vector: {text\|image\|object: ..., model: '...', options: {...}}` |
+| Collection blocks | `WITH WAL (...)` (create only), `WITH STRICT_MODE (...)`, `WITH METADATA (...)`; shard `WITH (placement = [1, 2], initial_state = 'Active')`; create-time `read_fan_out_factor` / `read_fan_out_delay_ms` (applied with a follow-up PATCH) |
+| Text index stopwords | `stopwords = 'english'`, `stopwords = ['the']`, or `stopwords = {languages: [...], custom: [...]}` (unknown languages fail at plan) |
+| Large integers and datetimes | Bare digits above `i64::MAX` parse as unsigned (up to `u64::MAX`); formula datetimes render canonical uppercase `DATETIME(...)` / `DATETIME_KEY(...)` while lowercase still parses |
+| Explicit wait | `WAIT false` sends `?wait=false` on mutation routes and batch blocks, never an omitted param |
 | Request-level shard routing | QQL `SHARD '…'` / `SHARD 101` or `stmt.shard_key` → REST `shard_key` / gRPC `ShardKeySelector` (never inside Filter) |
 | Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
 | Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |

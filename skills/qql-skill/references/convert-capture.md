@@ -36,11 +36,12 @@ echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
 
 - Output is produced by the same formatter as `qql fmt`; every emitted
   statement re-parses and is canonical.
-- Coverage follows the statement → endpoint matrix (the 25 statement routes):
+- Coverage follows the statement → endpoint matrix (the 26 statement routes plus the alias helper):
   query/groups, points, scroll, count, facet, upsert, delete, payload and
-  vector mutations, collection/index/shard/quota DDL.
+  vector mutations, collection/index/shard/quota DDL, and `BATCH` query/mutation blocks.
 - Filters: `must` → `AND`, `should` → `OR`, `must_not` → `NOT`; `match`,
-  `range`, geo (`GEO_BBOX` / `GEO_RADIUS` / `GEO_POLYGON`), `has_id`,
+  `match_text_any` → `MATCH TOKENS`, `match_except` → `MATCH EXCEPT`,
+  `min_should` → `MIN SHOULD`, `range`, geo (`GEO_BBOX` / `GEO_RADIUS` / `GEO_POLYGON`), `has_id`,
   `is_empty`, `is_null` are typed predicates.
 - Fields QQL cannot represent fail with a typed `ConvertError`
   (`UnsupportedEndpoint`, `UndecodableBody`, `InvalidField`, `InvalidJson`,

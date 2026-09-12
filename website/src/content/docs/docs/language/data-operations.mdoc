@@ -22,6 +22,23 @@ one unnamed vector or as an object of arbitrary named vectors.
 | Dense | `[0.1, 0.2, 0.3]` |
 | Sparse | `{indices: [1, 9], values: [0.4, 0.7]}` |
 | Multivector | `[[0.1, 0.2], [0.3, 0.4]]` |
+| Inference document | `{text: 'hello', model: 'm', options: {temperature: 0.5}}` |
+| Inference image | `{image: 'https://x/y.jpg', model: 'c'}` |
+| Inference object | `{object: {a: 1}, model: 'm'}` |
+
+A `vector` dict with a string `text`/`image` key or an `object` key is
+server-side inference input, not a named vector. Only `model` and `options`
+may accompany it. A dict with a numeric `text` value stays a named vector.
+
+{% qqlExample title="Per-point inference vectors" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: {text: 'hello', model: 'm'}};
+
+UPSERT INTO docs VALUES {id: 1, vector: {dense: {text: 'hello', model: 'm'}, sparse: {indices: [1], values: [0.5]}}};
+
+UPDATE docs SET VECTOR dense = {text: 'hello', model: 'm'} WHERE id = 1;
+```
+{% /qqlExample %}
 
 {% qqlExample title="Payload with a named dense vector" %}
 ```sql
@@ -48,6 +65,22 @@ When `ON FIELD` is omitted, the default payload text field resolves in the
 deterministic priority order `text`, `body`, `content`, `title`,
 `description`, `name`, `summary`, `document`.
 
+## Guard an upsert write
+
+`UPDATE FILTER` restricts the write to matching points. `UPDATE MODE` picks
+`insert_only`, `update_only`, or explicit `upsert`. The guards commute and
+each appears at most once.
+
+{% qqlExample title="Conditional upserts" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active';
+
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;
+
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active' UPDATE MODE update_only;
+```
+{% /qqlExample %}
+
 ## Bulk ingest with `VALUES :rows`
 
 A whole-point placeholder binds one point dict — or a list of them, splicing
@@ -72,10 +105,12 @@ each chunk with no re-parse.
 ## Update only what changed
 
 There are two `UPDATE` forms. The payload form sets `PAYLOAD` under any
-`WHERE` filter:
+`WHERE` filter, with an optional nested `KEY` path and an optional full
+replace:
 
 ```text
 UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE <filter>;
+UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
 ```
 
 The vector form replaces vectors on existing points. Compact `WHERE id =`
@@ -97,6 +132,8 @@ accident.
 ```sql
 UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE id = 42;
 
+UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
+
 UPDATE docs SET VECTOR dense = [0.2, 0.3, 0.4] WHERE id = 42;
 
 UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2]}, {id: 2, vector: {dense: [0.3, 0.4]}};
@@ -106,6 +143,16 @@ DELETE PAYLOAD draft_notes FROM docs WHERE status = 'published';
 DELETE VECTOR dense FROM docs WHERE id = 42;
 
 DELETE FROM docs WHERE status = 'expired';
+```
+{% /qqlExample %}
+
+`KEY` merges at that nested path. `OVERWRITE` replaces the full payload and
+runs only inside a `BATCH` block — a lone `OVERWRITE` fails closed with
+`QQL-REST-OVERWRITE-BATCH-ONLY` because `POST /points/payload` is merge-only:
+
+{% qqlExample title="Full payload replace inside a batch" %}
+```sql
+BATCH { UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1; UPDATE docs SET PAYLOAD = {b: 2} WHERE id = 2; };
 ```
 {% /qqlExample %}
 
@@ -124,11 +171,18 @@ cardinality and accepts the same filter vocabulary.
 ```sql
 SCROLL FROM docs WHERE status = 'published' WITH VECTOR false LIMIT 100;
 
+SCROLL FROM docs ORDER BY created_at DESC LIMIT 10;
+
+SCROLL FROM docs WHERE status = 'active' AFTER 7 ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' SHARD 'acme' WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 10;
+
 COUNT FROM docs WHERE status = 'published' WITH (exact = true);
 ```
 {% /qqlExample %}
 
-Use `SCROLL ... AFTER point_id` to continue from a cursor. Use `COUNT` without
+Use `SCROLL ... AFTER point_id` to continue from a cursor. `ORDER BY` takes
+`ASC` or `DESC` with an optional `START FROM` origin (integer, float,
+datetime string, or placeholder). `WITH PAYLOAD` takes `false`, `INCLUDE
+(...)`, or `EXCLUDE (...)`. Use `COUNT` without
 `exact = true` when an approximate answer is sufficient for a large collection.
 
 ## In-database faceting (FACET)

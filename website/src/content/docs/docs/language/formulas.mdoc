@@ -60,8 +60,8 @@ candidate score when no `DEFAULTS` entry overrides it.
 | `GEO_DISTANCE` | `GEO_DISTANCE(lat, lon, field)` or `GEO_DISTANCE({lat: ..., lon: ...}, field)` |
 | `MATCH` / `MATCH_ANY` | `MATCH(field, value)` or `MATCH_ANY(field, list)` |
 | `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY` | `NAME(field, TARGET = n, SCALE = n, ...)` or positional |
-| `datetime` | `datetime('2026-01-01')` — literal timestamp |
-| `datetime_key` | `datetime_key('published_at')` — payload timestamp field |
+| `datetime` | `DATETIME('2026-01-01')` — literal timestamp (canonical uppercase; lowercase still parses) |
+| `datetime_key` | `DATETIME_KEY('published_at')` — payload timestamp field |
 
 ## Clamp and shape scores
 

@@ -33,6 +33,21 @@ QUERY POINTS (1, 2, 'point-a') FROM docs;
 ```
 {% /qqlExample %}
 
+`TEXT` and `IMAGE` accept an optional `MODEL` and an opaque `OPTIONS` dict
+that passes through to the inference service. `OBJECT` is the custom inference
+payload with the same options. Parenthesized `OBJECT ({...})` parses but
+formats to the bare object.
+
+{% qqlExample title="Inference options and object input" %}
+```sql
+QUERY TEXT 'hi' MODEL 'm' OPTIONS {temperature: 0.5} FROM docs USING dense LIMIT 1;
+
+QUERY IMAGE 'https://x/y.jpg' MODEL 'clip' OPTIONS {size: 512} FROM docs USING img LIMIT 1;
+
+QUERY OBJECT {a: 1} MODEL 'm' OPTIONS {k: true} FROM docs USING dense LIMIT 5;
+```
+{% /qqlExample %}
+
 {% aside type="tip" title="Payloads included by default" %}
 In QQL, `QUERY` includes point payloads by default (`WITH PAYLOAD true`). You only need `WITH PAYLOAD false` when you explicitly want to strip payload data to minimize network transfer bandwidth.
 {% /aside %}
@@ -138,6 +153,25 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
+`LOOKUP FROM` on `GROUP BY` carries payload and vector selectors for the
+joined group data. Prefetch `LOOKUP FROM` additionally routes one leg with an
+optional vector and shard key.
+
+{% qqlExample title="Lookup selectors and prefetch routing" %}
+```sql
+QUERY 'news'
+FROM docs
+GROUP BY topic SIZE 5 LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense)
+LIMIT 20;
+
+WITH a AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 50)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (a LOOKUP FROM docs2 VECTOR dense SHARD 'acme')
+LIMIT 10;
+```
+{% /qqlExample %}
+
 ## Context, discover, and relevance feedback
 
 `QUERY CONTEXT` pairs positive and negative inputs that define a region;
@@ -173,11 +207,15 @@ LIMIT 10;
 
 `QUERY ORDER BY` sorts by a payload field (`ASC` or `DESC`), and
 `QUERY SAMPLE RANDOM` draws a random page. Neither expression accepts `USING`
-or `PREFETCH` — there is no similarity input to resolve.
+or `PREFETCH` — there is no similarity input to resolve. `ORDER BY` accepts an
+optional `START FROM` paging origin: an integer, float, datetime string, or
+placeholder that resumes ordering from that payload value.
 
 {% qqlExample title="Ordered and random access" %}
 ```sql
 QUERY ORDER BY price ASC FROM products WHERE category = 'electronics' LIMIT 10;
+
+QUERY ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 20;
 
 QUERY SAMPLE RANDOM FROM docs WITH VECTOR false LIMIT 10;
 ```

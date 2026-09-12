@@ -64,14 +64,21 @@ individual dense vectors (`WITH HNSW`, `WITH VECTOR`, `WITH QUANTIZATION`,
 | `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage`, `memory` (`cold`/`cached`/`pinned`) |
 | `VECTOR` | `on_disk`, `memory` (`cold`/`cached`/`pinned`), `datatype` (`float32`/`float16`/`uint8`/`turbo4`) |
 | `OPTIMIZERS` | `deleted_threshold`, `vacuum_min_vector_number`, `default_segment_number`, `max_segment_size`, `memmap_threshold`, `indexing_threshold`, `flush_interval_sec`, `max_optimization_threads`, `prevent_unoptimized` |
-| `PARAMS` | `replication_factor`, `write_consistency_factor`, `on_disk_payload`, `payload_memory` (`cold`/`cached` only), `shard_number`, `sharding_method`, `shard_keys` |
+| `PARAMS` | `replication_factor`, `write_consistency_factor`, `on_disk_payload`, `payload_memory` (`cold`/`cached` only), `shard_number`, `sharding_method`, `shard_keys`, `read_fan_out_factor`, `read_fan_out_delay_ms` |
 | `QUANTIZATION` | `type` (`scalar`/`binary`/`product`/`turbo`), `disabled`, `always_ram`, `quantile`, `bits`, `compression`, `encoding`, `query_encoding`, `memory` |
+| `WAL` | `wal_capacity_mb`, `wal_segments_ahead`, `wal_retain_closed` (create only) |
+| `STRICT_MODE` | `enabled`, `max_query_limit`, `max_timeout`, `search_allow_exact`, `search_max_oversampling`, and the remaining `StrictModeConfig` keys |
+| `METADATA` | Free-form string keys with any JSON value |
 | `MULTIVECTOR` | `comparator` (`max_sim`) |
 | sparse `INDEX`/`SPARSE` | `modifier`, `full_scan_threshold`, `on_disk`, `datatype` (`float32`/`float16`/`uint8`; not `turbo4`), `memory` |
 
-`read_fan_out_factor` and `read_fan_out_delay_ms` are `ALTER`-only PARAMS
-keys, and `QUANTIZATION (disabled = true)` is an ALTER form. `ALTER COLLECTION`
-applies any of the `HNSW`, `VECTOR`, `OPTIMIZERS`, `PARAMS`, or `QUANTIZATION`
+`read_fan_out_factor` and `read_fan_out_delay_ms` parse on `CREATE` and
+`ALTER`: create-time values apply with a follow-up `PATCH`, since the create
+wire shape carries no fan-out fields.
+`QUANTIZATION (disabled = true)` is an ALTER form. `WITH WAL` is create-only.
+`ALTER COLLECTION`
+applies any of the `HNSW`, `VECTOR`, `OPTIMIZERS`, `PARAMS`, `QUANTIZATION`,
+`STRICT_MODE`, or `METADATA`
 blocks to an existing collection.
 
 ### Alter one vector
@@ -150,6 +157,20 @@ ALTER COLLECTION sec10k WITH QUANTIZATION (type = 'scalar');
 ```
 {% /qqlExample %}
 
+{% qqlExample title="WAL, strict mode, and metadata" %}
+```sql
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32, wal_segments_ahead = 2, wal_retain_closed = 1);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team', version = 3);
+
+ALTER COLLECTION docs WITH STRICT_MODE (enabled = false);
+
+ALTER COLLECTION docs WITH METADATA (owner = 'team');
+```
+{% /qqlExample %}
+
 ## Index the filter paths you use
 
 Create payload indexes for fields used frequently in filters, tenant predicates,
@@ -164,6 +185,10 @@ CREATE INDEX ON COLLECTION research FOR tenant_id TYPE keyword WITH (is_tenant =
 CREATE INDEX ON COLLECTION research FOR title TYPE keyword WITH (prefix = true, memory = 'cached');
 
 CREATE INDEX ON COLLECTION research FOR content TYPE text WITH (tokenizer = 'multilingual', lowercase = true, phrase_matching = true);
+
+CREATE INDEX ON COLLECTION research FOR body TYPE text WITH (stopwords = 'english');
+
+CREATE INDEX ON COLLECTION research FOR body TYPE text WITH (stopwords = {languages: ['english'], custom: ['foo']});
 ```
 {% /qqlExample %}
 
@@ -176,8 +201,11 @@ CREATE INDEX ON COLLECTION research FOR content TYPE text WITH (tokenizer = 'mul
 | `min_token_len`, `max_token_len` | non-negative integer |
 | `tokenizer` | string |
 | `stemmer` | string |
-| `stopwords` | string list |
+| `stopwords` | string list, bare language name, or `{languages, custom}` set |
 | `memory` | `'cold'`, `'cached'`, or `'pinned'` |
+
+A bare language (`stopwords = 'english'`) plans to the `languages` set.
+Unknown languages fail at plan; unknown set keys fail at parse.
 
 `prefix = true` enables keyword prefix matching for `WHERE field MATCH PREFIX`
 (Qdrant 1.19+). `DROP INDEX ON COLLECTION research FOR field` removes an index.
@@ -228,11 +256,15 @@ tenant predicate your service must enforce.
 ```sql
 CREATE SHARD KEY 'acme' ON COLLECTION research WITH (shards_number = 2);
 
+CREATE SHARD KEY 'acme' ON COLLECTION research WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');
+
 SHOW SHARD KEYS ON COLLECTION research;
 
 DROP SHARD KEY 'acme' ON COLLECTION research;
 ```
 {% /qqlExample %}
+
+`placement` is a peer-id list. `initial_state` is a replica-state string.
 
 {% aside type="note" title="Remote-backend capability" %}
 Shard-key DDL and cluster quotas are Qdrant remote capabilities. The in-process

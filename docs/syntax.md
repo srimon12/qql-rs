@@ -17,7 +17,7 @@ script       = [ statement, { ";", statement }, [ ";" ] ] ;
 statement    = query | scroll | upsert | update | delete | ddl | count
              | clear-payload | delete-payload | delete-vectors
              | create-shard-key | drop-shard-key | show-shard-keys
-             | drop-index | show | show-quotas | set-quota | facet ;
+             | drop-index | show | show-quotas | set-quota | facet | batch ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -42,7 +42,9 @@ query-tail   = [ "USING", hybrid-using | vector-target ],
                [ "SCORE", "THRESHOLD", param | number ],
                [ "GROUP", "BY", field,
                    [ "SIZE", positive-integer ],
-                   [ "LOOKUP", "FROM", collection, [ "VECTOR", vector-name ] ] ],
+                   [ "LOOKUP", "FROM", collection,
+                     [ "WITH", "PAYLOAD", payload-selector ],
+                     [ "WITH", "VECTOR", vector-selector ] ] ],
                [ "WITH", "PAYLOAD", payload-selector ],
                [ "WITH", "VECTOR", vector-selector ],
                [ "LIMIT", param | positive-integer ],
@@ -126,9 +128,20 @@ conventional defaults, **not reserved**. Kind never comes from name spelling
 
 | Form | Embed path | Result |
 |---|---|---|
-| `TEXT '…' [MODEL '…']` or bare `'…'` | dense / sparse / multi by `USING` | vector |
-| `IMAGE 'path-or-url' [MODEL '…']` | **image / CLIP vision** → always single dense | `Dense` |
+| `TEXT '…' [MODEL '…'] [OPTIONS {...}]` or bare `'…'` | dense / sparse / multi by `USING` | vector |
+| `IMAGE 'path-or-url' [MODEL '…'] [OPTIONS {...}]` | **image / CLIP vision** → always single dense | `Dense` |
+| `OBJECT {...} [MODEL '…'] [OPTIONS {...}]` | custom inference payload, passed through to the backend inference service | as-is |
 | `VECTOR …` / `POINT …` | none | as-is |
+
+```sql
+QUERY TEXT 'hi' MODEL 'm' OPTIONS {temperature: 0.5} FROM docs USING dense LIMIT 1;
+
+QUERY IMAGE 'https://x/y.jpg' MODEL 'clip' OPTIONS {size: 512} FROM docs USING img LIMIT 1;
+
+QUERY OBJECT {a: 1} MODEL 'm' OPTIONS {k: true} FROM docs USING dense LIMIT 5;
+```
+
+`OPTIONS` is an opaque dict. It passes through as-is, including absent (no empty object on the wire). `OBJECT ({...})` with parentheses parses but formats to the bare object.
 
 CLIP dual-encoder: use dense CLIP **text** model for `TEXT` queries and CLIP **vision**
 for `IMAGE` / `USING IMAGE` upserts into the **same** dense named vector space (e.g. 512-d).
@@ -167,8 +180,9 @@ points       = "POINTS", "(", point-id, { ",", point-id }, ")" ;
 nearest      = [ "NEAREST" ], query-input ;
 point-id     = unsigned-integer | string | param ;
 param        = ":", identifier | "?" ;
-query-input  = "TEXT", ( param | string ), [ "MODEL", string ]
-             | "IMAGE", ( param | string ), [ "MODEL", string ]
+query-input  = "TEXT", ( param | string ), [ "MODEL", string ], [ "OPTIONS", object ]
+             | "IMAGE", ( param | string ), [ "MODEL", string ], [ "OPTIONS", object ]
+             | "OBJECT", object, [ "MODEL", string ], [ "OPTIONS", object ]
              | "VECTOR", ( param | vector-value )
              | "POINT", point-id
              | param
@@ -182,7 +196,8 @@ discover     = "DISCOVER", "TARGET", query-input, "CONTEXT", context-pairs ;
 context-pairs = "(", "POSITIVE", query-input, "NEGATIVE", query-input,
                 { ",", "POSITIVE", query-input, "NEGATIVE", query-input }, ")" ;
 
-order-query  = "ORDER", "BY", field, [ "ASC" | "DESC" ] ;
+order-query  = "ORDER", "BY", field, [ "ASC" | "DESC" ],
+               [ "START", "FROM", param | string | number ] ;
 sample       = "SAMPLE", "RANDOM" ;
 fusion       = "FUSION", ( "RRF" | "DBSF" ) ;
 formula      = "FORMULA", formula-expr, [ "DEFAULTS", config-block ] ;
@@ -231,7 +246,18 @@ count, fused with RRF or DBSF.
 
 `GROUP BY` uses Qdrant’s query/groups API. **`OFFSET` is now valid with
 `GROUP BY`** (maps to Qdrant's `group_offset`). Page groups with `LIMIT`
-and `OFFSET`, or constrain group keys with `WHERE`.
+and `OFFSET`, or constrain group keys with `WHERE`. `LOOKUP FROM` carries
+optional selectors: `GROUP BY topic SIZE 5 LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense)`.
+
+`ORDER BY` takes an optional paging origin. `START FROM` resumes ordering
+from that payload value (integer, float, datetime string, or placeholder).
+`SCROLL ... ORDER BY` takes the same origin.
+
+```sql
+QUERY ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 20;
+
+SCROLL FROM docs ORDER BY score DESC START FROM 100 LIMIT 10;
+```
 
 **Hybrid shorthand** has two equivalent surface forms that lower to the same
 `QueryExpr::Hybrid` AST (and the same dense+sparse fusion plan):
@@ -288,6 +314,14 @@ The formula parser also supports `CASE WHEN ... THEN ... ELSE ... END` syntax an
 ```sql
 QUERY FORMULA CASE WHEN tags MATCH ANY ('premium') THEN score * 2 ELSE score END
 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+```
+
+Datetime constructors format canonical uppercase. Lowercase still parses.
+
+```sql
+QUERY FORMULA DATETIME('2024-01-01T00:00:00Z') FROM docs LIMIT 1;
+
+QUERY FORMULA DATETIME_KEY('published_at') FROM docs LIMIT 1;
 ```
 
 ### Search params
@@ -427,7 +461,8 @@ LIMIT 10;
 prefetch     = ( cte-name | cte-query ),
                [ "WHERE", filter ],
                [ "SCORE", "THRESHOLD", number ],
-               [ "LOOKUP", "FROM", collection, [ "VECTOR", vector-name ] ] ;
+               [ "LOOKUP", "FROM", collection,
+                 [ "VECTOR", vector-name ], [ "SHARD", shard-key ] ] ;
 ```
 
 CTE references are case-insensitive. Prefetch-level `WHERE` and `SCORE THRESHOLD` override the underlying CTE/query values when set.
@@ -450,8 +485,12 @@ Keys in payload objects, configuration blocks, formula defaults, and search para
 upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
                [ embedding-options ],
+               [ embed-directive, { ",", embed-directive } ],
+               [ upsert-guard ],
                [ "SHARD", param | string | non-negative-integer ],
                [ "WAIT", boolean ] ;
+upsert-guard = "UPDATE", "FILTER", filter
+             | "UPDATE", "MODE", ( "insert_only" | "update_only" | "upsert" ) ;
 embedding-options = ( dense-embed | sparse-embed | hybrid-embed ) ;
 dense-embed  = "USING",
                ( "DENSE", [ "MODEL", string ], [ "VECTOR", vector-name ]
@@ -464,7 +503,10 @@ hybrid-embed = "USING", "HYBRID",
                [ "SPARSE", [ "MODEL", string ], [ "VECTOR", vector-name ] ] ;
 scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
+               [ "ORDER", "BY", field, [ "ASC" | "DESC" ],
+                 [ "START", "FROM", param | string | number ] ],
                [ "SHARD", param | string | non-negative-integer ],
+               [ "WITH", "PAYLOAD", payload-selector ],
                [ "WITH", "VECTOR", [ vector-selector ] ],
                "LIMIT", param | positive-integer ;
 count        = "COUNT", "FROM", collection,
@@ -492,7 +534,8 @@ delete-vectors = "DELETE", "VECTOR", name, { ",", name },
 update       = "UPDATE", collection, "SET",
                ( "VECTOR", [ vector-name ], "=", vector-value,
                  "WHERE", "id", "=", point-id, [ "SHARD", param | string | non-negative-integer ]
-               | "PAYLOAD", "=", object, "WHERE", filter,
+               | "PAYLOAD", "=", object, [ "KEY", string ], [ "OVERWRITE" ],
+                 "WHERE", filter,
                  [ "SHARD", param | string | non-negative-integer ] ),
                [ "WAIT", boolean ] ;
 
@@ -503,11 +546,11 @@ sparse-vector = "{", "indices", ":", integer-list, ",",
 multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
 ```
 
-Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
+Every upsert point requires an unsigned integer or string `id`. Bare digits above `i64::MAX` parse as unsigned (up to `u64::MAX`). Its optional `vector` may be one unnamed vector value or an object of named vector values. A `vector` dict with a string `text`/`image` key or an `object` key is server-side inference input (`{text: '…', model: '…', options: {...}}`), not a named vector. All other object entries remain arbitrary payload values. `UPDATE FILTER` and `UPDATE MODE insert_only|update_only|upsert` commute and each appears at most once. `UPDATE ... KEY '<path>'` merges at that nested path. `OVERWRITE` replaces the full payload and runs only inside `BATCH` (`QQL-REST-OVERWRITE-BATCH-ONLY` alone).
 
 `SHARD '<key>'` on QUERY, SCROLL, COUNT, FACET, UPSERT, DELETE, CLEAR PAYLOAD, DELETE PAYLOAD, DELETE VECTOR, UPDATE … VECTOR, or UPDATE … PAYLOAD routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node. Shard keys are typed end-to-end: `SHARD 101`, `CREATE/DROP SHARD KEY 101`, and integer `shard_keys` entries keep numeric form to the wire (keyword and number keys hash differently), and `SHARD :tenant` binds like any placeholder. Trailing commas in objects, lists, and `PARAMS` / config blocks are rejected (`QQL-PARSE-TRAILING-COMMA`). Empty `PARAMS ()` and `ALTER COLLECTION` without a `WITH` clause are rejected.
 
-Appending `WAIT true` (or `WAIT false`) to UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, DELETE PAYLOAD, UPDATE … VECTOR, UPDATE … PAYLOAD, or CREATE INDEX asks the server to wait for write durability (REST `?wait=`, gRPC `wait` field).
+Appending `WAIT true` (or `WAIT false`) to UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, DELETE PAYLOAD, UPDATE … VECTOR, UPDATE … PAYLOAD, or CREATE INDEX asks the server to wait for write durability (REST `?wait=`, gRPC `wait` field). `WAIT false` sends `?wait=false` explicitly. It never means omit the param.
 
 ### Embed directive (fine-grained embedding control)
 
@@ -520,12 +563,13 @@ upsert       = "UPSERT", "INTO", collection, "VALUES",
                [ "WAIT", boolean ] ;
 embed-directive = "EMBED", field, "INTO", vector-name,
                   [ "USING",
-                    ( ( "DENSE" | "SPARSE" ), [ "MODEL", string ]
+                    ( ( "DENSE" | "SPARSE" | "MULTIVECTOR" | "MULTI" | "IMAGE" ),
+                      [ "MODEL", string ]
                     | "MODEL", string ) ] ;
 ```
 
 The `EMBED` directive maps a specific payload field to a named vector. Its
-default role is dense; `USING SPARSE` selects sparse embedding, while
+default role is dense; `USING SPARSE` selects sparse embedding, `USING MULTI` or `USING MULTIVECTOR` selects a multivector bag, `USING IMAGE` selects image embedding, while
 `USING MODEL '<name>'` is shorthand for a dense model. Multiple directives
 within one `EMBED` clause are comma-separated:
 ```sql
@@ -562,7 +606,10 @@ drop-index      = "DROP", "INDEX", "ON", "COLLECTION", name,
 
 create-shard-key = "CREATE", "SHARD", "KEY", param | string | non-negative-integer,
                    "ON", "COLLECTION", name,
-                   [ "WITH", config-block ] ;
+                   [ "WITH", "(", shard-key-option, { ",", shard-key-option }, ")" ] ;
+shard-key-option = ( "shards_number" | "replication_factor" ), "=", positive-integer
+                 | "placement", "=", "[", positive-integer, { ",", positive-integer }, "]"
+                 | "initial_state", "=", string ;
 
 drop-shard-key  = "DROP", "SHARD", "KEY", param | string | non-negative-integer,
                   "ON", "COLLECTION", name ;
@@ -584,7 +631,9 @@ vector-def    = name, "VECTOR", "(", size, ",", distance, ")"
 sparse-def    = name, "SPARSE", [ "WITH", "SPARSE", config-block ] ;
 collection-vector-def = vector-def | sparse-def ;
 config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZATION"
-                         | "VECTOR" ), config-block ;
+                         | "VECTOR" | "WAL" | "STRICT_MODE" | "METADATA" ), config-block ;
+batch         = "BATCH", "{", [ statement, { ";", statement }, [ ";" ] ], "}",
+                [ "WAIT", boolean ], [ "PARAMS", search-params ] ;
 ```
 
 ### Cluster quotas (Qdrant ≥ 1.19, REST only)
@@ -703,8 +752,46 @@ WITH PARAMS (
 | `shard_number` | integer | Total shard count |
 | `sharding_method` | string | `'auto'` or `'custom'` |
 | `shard_keys` | string / integer list | Tenant identifiers for custom sharding (integers route to numeric partitions) |
-| `read_fan_out_factor` | integer | Read fan-out factor |
-| `read_fan_out_delay_ms` | integer | Read fan-out delay |
+| `read_fan_out_factor` | integer | Read fan-out factor (create values apply with a follow-up PATCH) |
+| `read_fan_out_delay_ms` | integer | Read fan-out delay (create values apply with a follow-up PATCH) |
+
+### WAL, strict mode, and metadata blocks
+
+```sql
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32, wal_segments_ahead = 2, wal_retain_closed = 1);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team', version = 3);
+
+ALTER COLLECTION docs WITH STRICT_MODE (enabled = false);
+
+ALTER COLLECTION docs WITH METADATA (owner = 'team');
+```
+
+`WITH WAL` is create-only. `WITH STRICT_MODE` and `WITH METADATA` work on create and alter. Unknown keys fail closed at parse. Bad value shapes fail at plan.
+
+### Shard key placement
+
+```sql
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');
+```
+
+`placement` is a peer-id list. `initial_state` is a replica-state string. Counts stay positive integers.
+
+### Batch blocks
+
+Members are full statements sharing one collection and one family (all queries or all mutations). Query batches carry shared read opts. Mutation batches carry durability.
+
+```sql
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; };
+
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority);
+
+BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false;
+```
+
+Empty blocks, nested blocks, mixed families, mixed collections, DDL, `SHOW`, `COUNT`, `SCROLL`, `FACET`, and `SET QUOTA` members fail closed. Edge fans out per member. Remote Qdrant sends one native batch RPC.
 
 ### DDL Examples
 
@@ -799,7 +886,7 @@ alongside the legacy `on_disk` boolean where applicable.
 | `integer` | `lookup`, `range`, `is_principal`, `on_disk`, `enable_hnsw` |
 | `float` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `geo` | `on_disk`, `enable_hnsw` |
-| `text` | `tokenizer` (word/prefix/whitespace/multilingual), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords`, `phrase_matching`, `ascii_folding`, `stemmer` (e.g. `'english'`) |
+| `text` | `tokenizer` (word/prefix/whitespace/multilingual), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords` (list, bare language, or `{languages, custom}` set), `phrase_matching`, `ascii_folding`, `stemmer` (e.g. `'english'`) |
 | `bool` | `on_disk`, `enable_hnsw` |
 | `datetime` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `uuid` | `is_tenant`, `on_disk`, `enable_hnsw` |
@@ -808,6 +895,13 @@ alongside the legacy `on_disk` boolean where applicable.
 -- Keyword prefix index for MATCH PREFIX filters
 CREATE INDEX ON COLLECTION docs FOR title TYPE keyword
   WITH (prefix = true, memory = 'cached');
+
+-- Text stopwords: list, bare language, or language plus custom set
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = ['the', 'a']);
+
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = 'english');
+
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = {languages: ['english'], custom: ['foo']});
 
 QUERY TEXT 'search' FROM docs USING dense
 WHERE title MATCH PREFIX 'Comp'

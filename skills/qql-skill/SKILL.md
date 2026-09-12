@@ -61,16 +61,26 @@ Translate user intent directly into QQL syntax:
 - Vector array literal search -> `QUERY [0.1, 0.2, ...] FROM <collection> USING dense LIMIT <n>` (implicit vector literal, `VECTOR` keyword optional)
 - Formula / Score shaping -> `QUERY FORMULA score + 0.3 * EXP_DECAY(published_at, TARGET = "2024-01-01T00:00:00Z", SCALE = 630720000) FROM <collection> USING dense LIMIT <n>`
 - In-database faceting (aggregations) -> `FACET <field> FROM <collection> [WHERE <filter>] [LIMIT <n>] [EXACT true]`
-- Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection>`
-- Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
+- Single-RPC batch -> `BATCH { <stmt>; ... } [WAIT true|false] [PARAMS (timeout = <n>, consistency = majority)]` (members share one collection and one family, all queries or all mutations)
+- At-least-N filter -> `WHERE MIN SHOULD <n> (<filter>, ...)` (at least n operands hold, n >= 1)
+- Token and except match -> `WHERE <field> MATCH TOKENS '<text>'`, `WHERE <field> MATCH EXCEPT (<v>, ...)`
+- Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection> [WITH PAYLOAD ...] [WITH VECTOR ...]`
+- Prefetch lookup routing -> `PREFETCH (c LOOKUP FROM <coll> [VECTOR <name>] [SHARD <key>])`
+- Browse points -> `SCROLL FROM <collection> [AFTER <id>] [ORDER BY <key> [ASC|DESC] [START FROM <value>]] [WITH PAYLOAD ...] LIMIT <n>`
 - Point payload default -> `QUERY` includes point payloads by default (`WITH PAYLOAD true`). Use `WITH PAYLOAD false` to explicitly omit payloads.
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
+- Conditional upsert -> `UPSERT INTO <collection> VALUES {...} [UPDATE FILTER <filter>] [UPDATE MODE insert_only|update_only|upsert]`
+- Nested payload write -> `UPDATE <collection> SET PAYLOAD = {...} [KEY '<path>'] [OVERWRITE] WHERE <filter>` (`OVERWRITE` alone runs only inside `BATCH`)
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
 - Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
 - Delete payload keys -> `DELETE PAYLOAD <key1, key2> FROM <collection> WHERE <filter>`
 - Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
 - Count points -> `COUNT FROM <collection> WHERE <filter>` (or `COUNT FROM <collection> WITH (exact = true)` for exact count)
-- Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M)]`
+- Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M, placement = [1, 2], initial_state = 'Active')]`
+- Collection blocks -> `WITH WAL (...)` (create only), `WITH STRICT_MODE (...)`, `WITH METADATA (...)`
+- Text index stopwords -> `WITH (stopwords = 'english')` or `WITH (stopwords = {languages: [...], custom: [...]})`
+- Inference input -> `QUERY TEXT '…' [MODEL '…'] [OPTIONS {...}]`, `QUERY IMAGE '…' [MODEL '…'] [OPTIONS {...}]`, `QUERY OBJECT {...} [MODEL '…'] [OPTIONS {...}]`; per-point `vector: {text|image|object: ..., model: '…', options: {...}}`
+- Large integers -> bare digits above `i64::MAX` parse as unsigned (up to `u64::MAX`); formula datetimes render canonical uppercase `DATETIME(...)` / `DATETIME_KEY(...)` (lowercase still parses)
 - Drop shard key -> `DROP SHARD KEY '<key>' ON COLLECTION <name>`
 - Show shard keys -> `SHOW SHARD KEYS ON COLLECTION <name>`
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
@@ -122,8 +132,19 @@ SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
 
 -- Shard key lifecycle for multi-tenant custom sharding
 CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');
 SHOW SHARD KEYS ON COLLECTION docs;
 DROP SHARD KEY 'acme' ON COLLECTION docs;
+
+-- Collection WAL / strict mode / metadata blocks
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32);
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team');
+
+-- Single-RPC batch blocks (one collection, one family)
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; };
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority);
+BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false;
 
 DROP COLLECTION docs;
 ```
@@ -155,6 +176,14 @@ UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2]}, {id: 2, vector: {dens
 -- Update payload metadata
 UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE category = 'tech';
 
+-- Nested path write and full replace (OVERWRITE alone runs only inside BATCH)
+UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
+BATCH { UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1; UPDATE docs SET PAYLOAD = {b: 2} WHERE id = 2; };
+
+-- Conditional upsert guards (either order, each at most once)
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active';
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;
+
 -- Delete points
 DELETE FROM docs WHERE category = 'obsolete';
 
@@ -177,14 +206,14 @@ QUERY <expression>
 FROM <collection>
 [USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
  | USING <vector_name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
-[PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>], ...)]
+[PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>] [LOOKUP FROM <collection> [VECTOR <vector>] [SHARD <key>]], ...)]
 [WHERE <filter_expression>]
 [SHARD '<tenant_key>']
 [PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
          indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>,
          idf = 'global' | WHERE <filter>)]
 [SCORE THRESHOLD <number>]
-[GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
+[GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection> [WITH PAYLOAD ...] [WITH VECTOR ...]]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]
 [WITH VECTOR [true | false | (...)]]
 [LIMIT <n>]
@@ -201,6 +230,9 @@ FROM <collection>
 - `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
 - `idf` is a search param for sparse IDF corpus scoping (remote + edge 0.8+).
 - Edge supports `GROUP BY` offline (qdrant-edge grouping driver); `LOOKUP FROM` stays remote-only.
+- `OVERWRITE` without `BATCH` fails closed (`QQL-REST-OVERWRITE-BATCH-ONLY`); a single merge write omits it.
+- `WAIT false` sends `?wait=false` explicitly on mutation routes and batch blocks. It never means omit the param.
+- `ORDER BY ... START FROM <value>` resumes ordering from that payload value (integer, float, datetime string, or placeholder).
 - Edge / gRPC have **no** quotas (`SHOW QUOTAS` / `SET QUOTA` are REST-only).
 - Dynamic shard: write `SHARD 'tenant'` in QQL, or set `stmt.shard_key = tenant` after parse (no `$bind` syntax).
 - Route affinity is **not** QQL syntax — a client transport option: Rust `with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity` (see [rust-sdk.md](references/rust-sdk.md)).
@@ -253,7 +285,8 @@ Supports standard comparison operators and predicates:
 - Range: `BETWEEN <min> AND <max>`
 - Sets: `IN ('a', 'b')`, `NOT IN ('c', 'd')`
 - Null/Empty: `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`
-- Text Match: `MATCH 'term'`, `MATCH ANY ('term1', 'term2')`, `MATCH PHRASE 'exact phrase'`
+- Text Match: `MATCH 'term'`, `MATCH ANY ('term1', 'term2')`, `MATCH PHRASE 'exact phrase'`, `MATCH TOKENS 'text'` (any token), `MATCH EXCEPT ('a', 'b')` (none of the values)
+- At-least-N: `MIN SHOULD 2 (a = 1, b = 2)` (at least n operands hold, n >= 1)
 - Keyword prefix: `title MATCH PREFIX 'Comp'` (pair with keyword index `prefix = true`)
 - Deterministic slice: `SLICE (total, index)` e.g. `WHERE SLICE (4, 1)` — hash buckets over point IDs
 - Array / Vector: `HAS_VECTOR 'dense'`, `tags VALUES_COUNT >= 2`

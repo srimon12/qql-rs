@@ -46,7 +46,7 @@ Qdrant" hint.
 | WAL capacity tuning | yes | Rust (`LocalExecutorOptions::wal_segment_capacity`), CLI (`--wal-segment-mb`), Python (`wal_segment_mb`), Node (`walSegmentMb`); qdrant-edge 0.8's own Python binding cannot set it |
 | `CREATE/DROP INDEX` | yes | keyword (incl. `prefix`), integer, float, bool, geo, text, datetime, uuid |
 | `SHOW COLLECTIONS` / `SHOW COLLECTION` | yes | |
-| Query/update batching | partial | fan-out, not a native batch RPC |
+| Query/update batching | partial | `BATCH { ... }` fans out, not a native batch RPC |
 | `GROUP BY` | yes | qdrant-edge grouping driver; `LIMIT`/`OFFSET` map to groups/`group_offset` |
 | `GROUP BY … LOOKUP FROM` | no | `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` (no lookup collection) |
 | `SHARD` routing / custom sharding | no | `QQL-EDGE-UNSUPPORTED-SHARD` |
@@ -190,7 +190,8 @@ OFFSET 20;
 
 ### Batching is fan-out
 
-`execute` with a list of statements or a semicolon-delimited string is
+`execute` with a list of statements, a semicolon-delimited string, or a
+`BATCH { ... }` block is
 executed statement-by-statement against the edge backend. There is no native
 batch RPC — results are returned per operation with cardinality matching the
 input.
