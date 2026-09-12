@@ -23,11 +23,15 @@ import { updateDiagnostics } from "../providers/diagnostics";
 /** Single reusable output channel — avoids opening dozens of untitled docs. */
 let output: vscode.OutputChannel | undefined;
 
-function getOutput(): vscode.OutputChannel {
+export function getQqlOutput(): vscode.OutputChannel {
   if (!output) {
     output = vscode.window.createOutputChannel("QQL");
   }
   return output;
+}
+
+function getOutput(): vscode.OutputChannel {
+  return getQqlOutput();
 }
 
 function showInOutput(title: string, body: string): void {

@@ -10,7 +10,7 @@ import { QqlFoldingRangeProvider } from "./providers/folding";
 import { QqlFormattingProvider } from "./providers/formatting";
 import { QqlHoverProvider } from "./providers/hover";
 import { QqlDocumentSymbolProvider } from "./providers/symbols";
-import { registerCommands } from "./ui/commands";
+import { getQqlOutput, registerCommands } from "./ui/commands";
 import { QqlStatusBar } from "./ui/statusBar";
 
 const QQL_SELECTOR: vscode.DocumentSelector = { language: "qql" };
@@ -27,7 +27,12 @@ export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("qql");
   const debounceMs = config.get<number>("diagnostics.debounceMs") ?? 300;
 
-  const analysis = new AnalysisService(debounceMs);
+  const output = getQqlOutput();
+  const analysis = new AnalysisService(debounceMs, (message, err) => {
+    output.appendLine(message);
+    if (err instanceof Error && err.stack) output.appendLine(err.stack);
+    else output.appendLine(String(err));
+  });
   const diagnosticCollection = createDiagnosticCollection();
   const codeLensProvider = new QqlCodeLensProvider(analysis);
   const statusBar = new QqlStatusBar(analysis);

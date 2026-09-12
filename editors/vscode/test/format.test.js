@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Corpus-driven contract tests for the checked-in WASM bundle.
  *
@@ -66,13 +64,13 @@ function invalidCases(source) {
       assert.strictEqual(
         current.expectedError,
         null,
-        `case '${current.name}' has multiple @error markers`,
+        `case '${current.name}' has multiple @error markers`
       );
       current.expectedError = trimmed.slice("-- @error ".length).trim();
       continue;
     }
     if (current) {
-      current.source += line + "\n";
+      current.source += `${line}\n`;
     } else if (trimmed !== "" && !trimmed.startsWith("--")) {
       assert.fail("invalid fixtures must use `-- @case <name>` markers");
     }
@@ -95,11 +93,11 @@ test("canonical-format goldens exist for every valid fixture", () => {
   for (const fixture of validFixtures) {
     const golden = path.join(
       formattedDir,
-      path.relative(validDir, fixture).replace(/\.qql$/, ".txt"),
+      path.relative(validDir, fixture).replace(/\.qql$/, ".txt")
     );
     assert.ok(
       fs.existsSync(golden),
-      `missing canonical-format golden for ${path.basename(fixture)}; run cargo run -p qql-conformance -- generate`,
+      `missing canonical-format golden for ${path.basename(fixture)}; run cargo run -p qql-conformance -- generate`
     );
   }
 });
@@ -110,7 +108,7 @@ test("bundled WASM format matches the canonical golden of every fixture", () => 
     const source = fs.readFileSync(fixture, "utf8");
     const golden = fs.readFileSync(
       path.join(formattedDir, path.relative(validDir, fixture).replace(/\.qql$/, ".txt")),
-      "utf8",
+      "utf8"
     );
     let formatted;
     try {
@@ -122,7 +120,7 @@ test("bundled WASM format matches the canonical golden of every fixture", () => 
       mismatch++;
       // Show the first divergent fixture instead of 40 diffs.
       assert.fail(
-        `${path.basename(fixture)}: bundled WASM format diverges from the canonical golden — the checked-in wasm/ bundle is stale; rebuild with wasm-pack build crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm`,
+        `${path.basename(fixture)}: bundled WASM format diverges from the canonical golden — the checked-in wasm/ bundle is stale; rebuild with wasm-pack build crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm`
       );
     }
   }
@@ -140,14 +138,14 @@ test("bundled WASM rejects every invalid case with the expected error code", () 
       assert.strictEqual(
         analysis.valid,
         false,
-        `${path.basename(fixture)} [${testCase.name}]: bundled WASM accepted an invalid program`,
+        `${path.basename(fixture)} [${testCase.name}]: bundled WASM accepted an invalid program`
       );
       assert.ok(analysis.error, `${path.basename(fixture)} [${testCase.name}]: no error reported`);
       if (testCase.expectedError) {
         assert.strictEqual(
           analysis.error.code,
           testCase.expectedError,
-          `${path.basename(fixture)} [${testCase.name}]: expected error ${testCase.expectedError}, got ${analysis.error.code}`,
+          `${path.basename(fixture)} [${testCase.name}]: expected error ${testCase.expectedError}, got ${analysis.error.code}`
         );
       }
       checked++;
@@ -165,7 +163,7 @@ test("bundled WASM exposes formatQuery", () => {
 test("formatQuery normalizes whitespace and keyword casing", () => {
   assert.strictEqual(
     wasm.formatQuery("  QUERY   'hello'   from docs  LIMIT 10 ;"),
-    "QUERY 'hello' FROM docs LIMIT 10;\n",
+    "QUERY 'hello' FROM docs LIMIT 10;\n"
   );
 });
 

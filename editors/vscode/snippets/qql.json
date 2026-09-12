@@ -64,9 +64,7 @@
   },
   "Count exact": {
     "prefix": ["qcount"],
-    "body": [
-      "COUNT FROM ${1:collection} WHERE ${2:active} = true WITH (exact = true);"
-    ],
+    "body": ["COUNT FROM ${1:collection} WHERE ${2:active} = true WITH (exact = true);"],
     "description": "Exact point count"
   },
   "Facet count": {
@@ -98,9 +96,7 @@
   },
   "Alter HNSW": {
     "prefix": ["qalterhnsw"],
-    "body": [
-      "ALTER COLLECTION ${1:collection} WITH HNSW (m = ${2:32});"
-    ],
+    "body": ["ALTER COLLECTION ${1:collection} WITH HNSW (m = ${2:32});"],
     "description": "Patch collection HNSW params"
   },
   "Shard numeric routing": {
@@ -143,9 +139,7 @@
   },
   "Show quotas": {
     "prefix": ["qquota", "qshowquota"],
-    "body": [
-      "SHOW QUOTAS;"
-    ],
+    "body": ["SHOW QUOTAS;"],
     "description": "Show cluster resource quotas"
   },
   "Set quota": {

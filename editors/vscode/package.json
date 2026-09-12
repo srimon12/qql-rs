@@ -22,8 +22,7 @@
   "categories": [
     "Programming Languages",
     "Linters",
-    "Snippets",
-    "Other"
+    "Snippets"
   ],
   "keywords": [
     "qql",
@@ -42,6 +41,19 @@
     "onLanguage:qql"
   ],
   "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "QQL linting, completions, and explain work on untrusted files without executing them; only qql.run performs network requests on explicit user invocation."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "The bundled WASM parser is loaded from the extension install directory on disk."
+    }
+  },
   "contributes": {
     "languages": [
       {
@@ -158,6 +170,11 @@
         "title": "Re-analyze Document",
         "category": "QQL",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "qql.noop",
+        "title": "No-op (label-only CodeLens anchor)",
+        "category": "QQL"
       }
     ],
     "menus": {
@@ -363,23 +380,25 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run check && npm run compile",
+    "vscode:prepublish": "npm test && npm run check && npm run compile",
+    "precompile": "node -e \"require('node:fs').rmSync('out',{recursive:true,force:true})\"",
     "compile": "tsc -p tsconfig.json",
     "watch": "tsc --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "biome check src package.json tsconfig.json biome.json",
-    "lint:fix": "biome check --write src package.json tsconfig.json biome.json",
-    "format": "biome format --write src package.json tsconfig.json biome.json",
+    "lint": "biome check src test snippets package.json tsconfig.json biome.json language-configuration.json",
+    "lint:fix": "biome check --write src test snippets package.json tsconfig.json biome.json language-configuration.json",
+    "format": "biome format --write src test snippets package.json tsconfig.json biome.json language-configuration.json",
     "check": "npm run typecheck && npm run lint",
     "fix": "npm run lint:fix && npm run typecheck",
-    "test": "node --test",
+    "test": "node --test \"test/*.test.js\"",
+    "build:wasm": "wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ./wasm",
     "package": "npx @vscode/vsce package",
     "publish": "npx @vscode/vsce publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",
     "@types/node": "^26.5.1",
-    "@types/vscode": "^1.137.0",
+    "@types/vscode": "1.85.0",
     "@vscode/vsce": "^3.0.0",
     "typescript": "^7.0.2"
   },

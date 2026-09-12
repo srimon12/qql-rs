@@ -285,6 +285,68 @@ QUERY TEXT :q
     insertText: `CREATE SHARD KEY \${1:101} ON COLLECTION \${2:collection} WITH (shards_number = \${3:2});`,
     detail: "Create a numeric shard key for multi-tenancy",
   },
+  {
+    label: "SHOW QUOTAS",
+    insertText: `SHOW QUOTAS;`,
+    detail: "Show cluster resource quotas",
+  },
+  {
+    label: "SET QUOTA",
+    insertText: `SET QUOTA (
+  enabled = \${1|true,false|},
+  max_resident_memory_percent = \${2:80},
+  max_disk_usage_percent = \${3:90},
+  release_margin_percent = \${4:5}
+) WAIT \${5|true,false|};`,
+    detail: "Replace cluster quota config (full PUT)",
+  },
+  {
+    label: "MATCH PREFIX FILTER",
+    insertText: `QUERY TEXT '\${1:search}' FROM \${2:collection}
+  WHERE \${3:title} MATCH PREFIX '\${4:prefix}'
+  LIMIT \${5:10};`,
+    detail: "Keyword/text MATCH PREFIX filter",
+  },
+  {
+    label: "SLICE FILTER",
+    insertText: `QUERY TEXT '\${1:search}' FROM \${2:collection}
+  WHERE SLICE (\${3:4}, \${4:0})
+  LIMIT \${5:10};`,
+    detail: "Deterministic SLICE sampling filter",
+  },
+  {
+    label: "CREATE COLLECTION MEMORY",
+    insertText: `CREATE COLLECTION \${1:collection} (
+  \${2:dense} VECTOR(\${3:384}, \${4|COSINE,DOT,EUCLID,MANHATTAN|})
+    WITH VECTOR (memory = '\${5|cached,cold,pinned|}', datatype = '\${6|float32,float16,uint8,turbo4|}')
+) WITH HNSW (memory = '\${7|cold,cached,pinned|}')
+  WITH PARAMS (payload_memory = '\${8|cold,cached|}');`,
+    detail: "Create collection with memory placement + datatype",
+  },
+  {
+    label: "CREATE INDEX PREFIX",
+    insertText: `CREATE INDEX ON COLLECTION \${1:collection} FOR \${2:field} TYPE keyword
+  WITH (prefix = true, is_tenant = \${3|true,false|});`,
+    detail: "Keyword index with prefix matching enabled",
+  },
+  {
+    label: "IDF SEARCH PARAM",
+    insertText: `QUERY TEXT '\${1:search}' FROM \${2:collection}
+  USING sparse
+  PARAMS (idf = 'global')
+  LIMIT \${3:10};`,
+    detail: "Collection-wide sparse IDF corpus",
+  },
+  {
+    label: "IDF PER-TENANT CORPUS",
+    insertText: `QUERY TEXT '\${1:search}' FROM \${2:collection}
+  USING sparse
+  WHERE tenant_id = '\${3:acme}'
+  SHARD '\${3:acme}'
+  PARAMS (idf = WHERE tenant_id = '\${3:acme}')
+  LIMIT \${4:10};`,
+    detail: "Tenant-scoped sparse IDF: WHERE + SHARD + PARAMS idf",
+  },
 ];
 
 // Contextual follow-ups after a keyword
