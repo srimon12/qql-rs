@@ -107,7 +107,7 @@ pub(crate) fn render_vector_value(value: &VectorValue) -> String {
                 .join(", ")
         ),
         VectorValue::Param(name, _) => format!(":{}", name),
-        VectorValue::PositionalParam(idx, _) => format!("?{}", idx + 1),
+        VectorValue::PositionalParam(..) => "?".to_string(),
     }
 }
 

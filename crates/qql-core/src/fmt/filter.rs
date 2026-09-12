@@ -164,7 +164,9 @@ fn render_filter_predicate(filter: &FilterExpr) -> String {
             out.push('}');
             out
         }
-        _ => render_filter(filter),
+        FilterExpr::And { .. } | FilterExpr::Or { .. } | FilterExpr::Not { .. } => {
+            render_filter(filter)
+        }
     }
 }
 

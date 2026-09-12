@@ -4,7 +4,7 @@
 //! [`crate::record`] proxies to it. Covers: byte-identical responses
 //! (status/headers/body), wrapped-JSONL validity, `--qql-out` conversion that
 //! parses, search + upsert bodies, GET-without-body passthrough, query-string
-//! preservation, and `# ERROR` comments for unconvertible endpoints.
+//! preservation, and `-- ERROR` comments for unconvertible endpoints.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -222,8 +222,8 @@ async fn proxies_byte_identically_and_captures_search_upsert() {
     assert_eq!(lines[2]["method"], "GET");
     assert_eq!(lines[2]["path"], "/collections/docs");
 
-    // --qql-out converted at record time. `# ERROR` lines are capture
-    // annotations, so the rest must parse as one whole script (not
+    // --qql-out converted at record time. `-- ERROR` lines are valid QQL
+    // comments, so the whole capture must parse as one script (not
     // line-by-line: emitted statements may span lines).
     let qql = std::fs::read_to_string(&rec.qql_out).expect("read qql-out");
     let stmts = script_statements(&qql);
@@ -239,11 +239,11 @@ async fn proxies_byte_identically_and_captures_search_upsert() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Parse a `--qql-out` capture as a script, skipping `# ERROR` annotations.
+/// Parse a `--qql-out` capture as a script, skipping `-- ERROR` annotations.
 fn script_statements(capture: &str) -> Vec<String> {
     let script: String = capture
         .lines()
-        .filter(|line| !line.starts_with("# ERROR "))
+        .filter(|line| !line.starts_with("-- ERROR "))
         .collect::<Vec<_>>()
         .join("\n");
     crate::script::split_statements(&script).expect("qql-out parses as a script")
@@ -316,12 +316,12 @@ async fn unconvertible_endpoints_record_jsonl_and_error_comment() {
     assert_eq!(lines[0]["method"], "POST");
     assert_eq!(lines[0]["path"], "/collections/docs/aliases");
 
-    // ... while --qql-out holds a `# ERROR <file:line> <error>` comment that
+    // ... while --qql-out holds a `-- ERROR <file:line> <error>` comment that
     // never broke forwarding.
     let qql = std::fs::read_to_string(&rec.qql_out).expect("read qql-out");
     let errors: Vec<&str> = qql
         .lines()
-        .filter(|line| line.starts_with("# ERROR "))
+        .filter(|line| line.starts_with("-- ERROR "))
         .collect();
     assert_eq!(errors.len(), 1, "{qql:?}");
     assert!(errors[0].contains(":1 "), "line number: {}", errors[0]);

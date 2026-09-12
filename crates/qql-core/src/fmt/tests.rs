@@ -121,3 +121,49 @@ fn test_shard_key_forms_roundtrip() {
         "numeric key must not be quoted, got: {numeric}"
     );
 }
+
+#[test]
+fn test_create_collection_mode_survives_explicit_vectors() {
+    for input in [
+        "CREATE COLLECTION docs USING DENSE MODEL 'm' (v VECTOR(4, COSINE));",
+        "CREATE COLLECTION docs HYBRID DENSE VECTOR d SPARSE VECTOR s (v VECTOR(4, COSINE));",
+    ] {
+        let formatted = format(input).unwrap();
+        let twice = format(&formatted).unwrap();
+        assert_eq!(formatted, twice, "not idempotent: {input}");
+        assert!(
+            formatted.contains("USING DENSE MODEL") || formatted.contains("HYBRID"),
+            "mode lost for {input}: {formatted}"
+        );
+    }
+}
+
+#[test]
+fn test_vector_placeholders_emit_bare_question() {
+    let stmt = Parser::parse("QUERY VECTOR ? FROM docs LIMIT 1;").unwrap();
+    let formatted = format_stmt(&stmt);
+    assert!(
+        !formatted.contains("?1"),
+        "numbered placeholder: {formatted}"
+    );
+    let reparsed = Parser::parse(&formatted).unwrap_or_else(|e| panic!("reparse {formatted}: {e}"));
+    assert_eq!(format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn test_formula_string_variable_roundtrips_quoted() {
+    let stmt = Parser::parse("QUERY FORMULA 'hello world' + 1.0 FROM docs LIMIT 1;")
+        .unwrap_or_else(|e| panic!("parse formula string var: {e}"));
+    let formatted = format_stmt(&stmt);
+    assert!(
+        formatted.contains("'hello world'"),
+        "string variable lost quoting: {formatted}"
+    );
+    let reparsed = Parser::parse(&formatted).unwrap_or_else(|e| panic!("reparse {formatted}: {e}"));
+    assert_eq!(format_stmt(&reparsed), formatted);
+    let dt = format_stmt(
+        &Parser::parse("QUERY FORMULA DATETIME('2024-01-01T00:00:00Z') FROM docs LIMIT 1;")
+            .unwrap(),
+    );
+    assert!(dt.contains("DATETIME("), "datetime must be canonical: {dt}");
+}

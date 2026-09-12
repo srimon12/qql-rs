@@ -468,7 +468,7 @@ mod tests {
         bind_stmt_with_params(&mut stmt, &json!({"now": "2024-01-01T00:00:00Z"})).unwrap();
         let rendered = crate::fmt::format_stmt(&stmt);
         assert!(
-            rendered.contains("TARGET = datetime('2024-01-01T00:00:00Z')"),
+            rendered.contains("TARGET = DATETIME('2024-01-01T00:00:00Z')"),
             "bound target must render as an inline datetime, got: {rendered}"
         );
         assert!(

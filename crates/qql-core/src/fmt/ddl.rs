@@ -22,7 +22,7 @@ pub(crate) fn render_create_collection(statement: &CreateCollectionStmt) -> Stri
     let has_vectors = !statement.vectors.is_empty() || !statement.sparse_vectors.is_empty();
     let mode = render_collection_mode(&statement.mode);
     let mut out = format!("CREATE COLLECTION {}", render_name(&statement.collection));
-    if !mode.is_empty() && (!has_vectors || statement.vectors.is_empty()) {
+    if !mode.is_empty() {
         let _ = write!(out, " {}", mode);
     }
     let mut defs = Vec::new();

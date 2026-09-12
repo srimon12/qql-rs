@@ -85,6 +85,7 @@ pub(crate) fn endpoint(
             body, ctx,
         )?))],
         Endpoint::DropCollection => {
+            reject_body(body)?;
             ctx.opts.reject_wait()?;
             ctx.opts.reject_read()?;
             vec![Stmt::DropCollection(Box::new(
@@ -95,6 +96,7 @@ pub(crate) fn endpoint(
         }
         Endpoint::CreateIndex => vec![Stmt::CreateIndex(Box::new(index::create_index(body, ctx)?))],
         Endpoint::DropIndex => {
+            reject_body(body)?;
             ctx.opts.reject_wait()?;
             ctx.opts.reject_read()?;
             let field = matched.field.clone().ok_or_else(|| {
@@ -114,27 +116,48 @@ pub(crate) fn endpoint(
             )?))]
         }
         Endpoint::ShowShardKeys => {
+            reject_body(body)?;
             ctx.opts.reject_wait()?;
             ctx.opts.reject_read()?;
             vec![Stmt::ShowShardKeys(ctx.collection.to_string())]
         }
         Endpoint::ShowCollections => {
+            reject_body(body)?;
             ctx.opts.reject_wait()?;
             ctx.opts.reject_read()?;
             vec![Stmt::ShowCollections]
         }
         Endpoint::ShowCollection => {
+            reject_body(body)?;
             ctx.opts.reject_wait()?;
             ctx.opts.reject_read()?;
             vec![Stmt::ShowCollection(ctx.collection.to_string())]
         }
         Endpoint::ShowQuotas => {
+            reject_body(body)?;
             ctx.opts.reject_wait()?;
             ctx.opts.reject_read()?;
             vec![Stmt::ShowQuotas]
         }
         Endpoint::SetQuota => vec![Stmt::SetQuota(Box::new(ddl::set_quota(body, ctx)?))],
     })
+}
+
+/// Bodyless routes carry no JSON body. `None`, `null`, and `{}` are accepted
+/// for tolerance with recorders and tests. Any other body fails closed so a
+/// wrapped `DELETE` with a payload cannot silently drop data.
+fn reject_body(body: &Value) -> Result<(), ConvertError> {
+    match body {
+        Value::Null => Ok(()),
+        Value::Object(obj) if obj.is_empty() => Ok(()),
+        other => Err(crate::json::invalid(
+            "body",
+            format!(
+                "bodyless endpoint must not carry a body, got {}",
+                crate::json::type_name(other)
+            ),
+        )),
+    }
 }
 
 /// Human-readable operation name for diagnostics.
