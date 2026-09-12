@@ -63,8 +63,8 @@ FROM docs
 LIMIT 10;
 
 -- Datetime in formula
-QUERY FORMULA datetime('2026-01-01') DEFAULTS (score = 0.0) FROM docs LIMIT 10;
-QUERY FORMULA datetime_key('published_at') DEFAULTS (score = 0.0)
+QUERY FORMULA DATETIME('2026-01-01') DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA DATETIME_KEY('published_at') DEFAULTS (score = 0.0)
 FROM docs
 LIMIT 10;
 

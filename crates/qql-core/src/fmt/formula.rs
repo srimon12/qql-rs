@@ -28,7 +28,10 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
         FormulaExpr::Variable { name } => {
             if name.starts_with('?') {
                 "?".to_string()
-            } else if name.starts_with(':') || is_simple_ident(name) {
+            } else if name.starts_with(':')
+                || is_simple_ident(name)
+                || (name.starts_with('$') && name.len() > 1 && is_simple_ident(&name[1..]))
+            {
                 name.clone()
             } else {
                 format!("'{}'", escape_string(name))
