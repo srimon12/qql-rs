@@ -301,7 +301,7 @@ policy bypass.
 
 Dedicated reference guides for each host SDK live under `skills/qql-skill/references/`:
 
-- **[`qql-examples.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/qql-examples.md)**: Pure QQL query examples (` ```sql ` code blocks strictly).
+- **[`qql-query.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/qql-query.md)** & **[`skills/qql-skill/examples/`](file:///data/codebases/qql-rs/skills/qql-skill/examples/)**: Pure QQL query syntax, reference manuals, and tested example scripts.
 - **[`python-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/python-sdk.md)**: Python `pyqql` PyO3 client and AST functions.
 - **[`node-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/node-sdk.md)**: Node.js `nqql` N-API client and `parseJson` usage.
 - **[`wasm-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/wasm-sdk.md)**: WebAssembly `qql-wasm` browser & edge client.

@@ -202,19 +202,6 @@ impl Client {
                     .join("&"),
             );
         }
-        let response = match self.send_json(&route_method, &path, body).await {
-            Ok(response) => response,
-            Err(error) => {
-                if on_error == WasmOnError::Stop {
-                    return Err(error);
-                }
-                for operation in operations {
-                    self.dispatch_or_collect(operation, on_error, results)
-                        .await?;
-                }
-                return Ok(());
-            }
-        };
         async fn retry_members(
             client: &Client,
             operations: Vec<PlannedOperation>,
@@ -228,6 +215,16 @@ impl Client {
             }
             Ok(())
         }
+        let response = match self.send_json(&route_method, &path, body).await {
+            Ok(response) => response,
+            Err(error) => {
+                if on_error == WasmOnError::Stop {
+                    return Err(error);
+                }
+                retry_members(self, operations, on_error, results).await?;
+                return Ok(());
+            }
+        };
         match key {
             qql_plan::BatchKey::Query(_) => match parse_query_batch(&response) {
                 Ok(items) => {
