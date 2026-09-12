@@ -252,7 +252,7 @@ struct MigrateArgs {
     /// Restrict the source scroll (`city = 'berlin'`)
     #[arg(long = "where")]
     where_clause: Option<String>,
-    /// Checkpoint file (default `.qql-migrate/<src>__<dst>.json`)
+    /// Checkpoint file (default `.qql-migrate/<urls>__<collections>__<hash>.json`)
     #[arg(long)]
     checkpoint: Option<String>,
     /// Resume from an existing checkpoint
@@ -276,6 +276,9 @@ struct MigrateArgs {
     /// DROP the target collection before creating it
     #[arg(long)]
     recreate: bool,
+    /// Pause between ingest windows in milliseconds (throttles a loaded cluster)
+    #[arg(long, default_value_t = migrate::DEFAULT_BATCH_DELAY_MS)]
+    batch_delay_ms: u64,
     /// Output as JSON
     #[arg(long)]
     json: bool,
@@ -703,6 +706,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 verify: !args.no_verify,
                 wait: !args.no_wait,
                 recreate: args.recreate,
+                batch_delay_ms: args.batch_delay_ms,
             };
             let progress_fn = |p: migrate::MigrateProgress| {
                 eprint!(

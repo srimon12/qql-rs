@@ -48,7 +48,7 @@ pub async fn stream_points(
     let mut prepared: HashMap<String, qql::executor::PreparedStatement> = HashMap::new();
     let mut created_keys: HashSet<String> = HashSet::new();
     for key in precreated {
-        created_keys.insert(shard_cache_key(Some(key), opts.wait));
+        created_keys.insert(shard_cache_key(Some(key)));
     }
 
     let cap = opts.workers.max(1).saturating_mul(2);
@@ -98,6 +98,9 @@ pub async fn stream_points(
                     batches: checkpoint.batches,
                     source_count: checkpoint.source_count,
                 });
+            }
+            if opts.batch_delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(opts.batch_delay_ms)).await;
             }
         }
         Ok::<(), Box<dyn Error>>(())
@@ -171,7 +174,7 @@ async fn upsert_window(
         groups.extend(part);
     }
     for group in &groups {
-        let cache = shard_cache_key(group.shard_key.as_ref(), opts.wait);
+        let cache = shard_cache_key(group.shard_key.as_ref());
         if let Some(ref key) = group.shard_key
             && created_keys.insert(cache.clone())
         {
@@ -190,7 +193,7 @@ async fn upsert_window(
             prepared.insert(cache, stmt);
         }
     }
-    upsert_groups(target, prepared, groups, opts.wait, opts.workers, circuit).await?;
+    upsert_groups(target, prepared, groups, opts.workers, circuit).await?;
     Ok(missing)
 }
 
@@ -203,16 +206,16 @@ fn upsert_template(collection: &str, shard_key: Option<&ShardKey>, wait: bool) -
     sql
 }
 
-fn shard_cache_key(shard_key: Option<&ShardKey>, wait: bool) -> String {
+pub(crate) fn shard_cache_key(shard_key: Option<&ShardKey>) -> String {
     match shard_key {
-        Some(ShardKey::Keyword(s)) => format!("k:{s}|{wait}"),
-        Some(ShardKey::Number(n)) => format!("n:{n}|{wait}"),
+        Some(ShardKey::Keyword(s)) => format!("k:{s}"),
+        Some(ShardKey::Number(n)) => format!("n:{n}"),
         // Placeholders never occur in migrate-built statements (keys come
         // from record fields); include them deterministically so the match
         // stays exhaustive without panicking.
-        Some(ShardKey::Param(name, _)) => format!("p:{name}|{wait}"),
-        Some(ShardKey::PositionalParam(idx, _)) => format!("q:{idx}|{wait}"),
-        None => format!("|{wait}"),
+        Some(ShardKey::Param(name, _)) => format!("p:{name}"),
+        Some(ShardKey::PositionalParam(idx, _)) => format!("q:{idx}"),
+        None => String::new(),
     }
 }
 
@@ -302,7 +305,6 @@ async fn upsert_groups(
     target: &Executor,
     prepared: &HashMap<String, qql::executor::PreparedStatement>,
     mut groups: Vec<IngestBatch>,
-    wait: bool,
     workers: usize,
     circuit: &Circuit,
 ) -> Result<(), Box<dyn Error>> {
@@ -313,7 +315,7 @@ async fn upsert_groups(
         let futs: Vec<UpsertFut<'_>> = chunk
             .into_iter()
             .map(|group| {
-                let fut = upsert_one(target, prepared, group, wait, circuit);
+                let fut = upsert_one(target, prepared, group, circuit);
                 Box::pin(fut) as UpsertFut<'_>
             })
             .collect();
@@ -342,10 +344,9 @@ async fn upsert_one(
     target: &Executor,
     prepared: &HashMap<String, qql::executor::PreparedStatement>,
     group: IngestBatch,
-    wait: bool,
     circuit: &Circuit,
 ) -> Result<(), Box<dyn Error>> {
-    let key = shard_cache_key(group.shard_key.as_ref(), wait);
+    let key = shard_cache_key(group.shard_key.as_ref());
     let stmt = prepared
         .get(&key)
         .ok_or_else(|| format!("missing prepared upsert template for shard key '{key}'"))?;

@@ -28,6 +28,23 @@ pub fn create_shard_key_sql(collection: &str, key: &ShardKey) -> String {
     )
 }
 
+/// Merge discovered keys into an existing plan without duplicates.
+/// Existing statements are kept in order; new keys append after them.
+pub fn merge_shard_key_statements(
+    mut existing: Vec<String>,
+    collection: &str,
+    discovered: &[ShardKey],
+) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = existing.iter().cloned().collect();
+    for key in discovered {
+        let stmt = create_shard_key_sql(collection, key);
+        if seen.insert(stmt.clone()) {
+            existing.push(stmt);
+        }
+    }
+    existing
+}
+
 /// Unique shard keys the target must have before ingest.
 ///
 /// `--shard-key` is a single literal. `--shard-key-field` is FACET, then a
@@ -165,7 +182,7 @@ pub(crate) fn json_to_shard_key(value: &Value) -> Option<ShardKey> {
 }
 
 /// Typed FACET value → shard key. Bool facet values are not shard keys.
-fn facet_value_to_shard_key(value: &qql::PlanFacetValue) -> Option<ShardKey> {
+pub(crate) fn facet_value_to_shard_key(value: &qql::PlanFacetValue) -> Option<ShardKey> {
     match value {
         qql::PlanFacetValue::Keyword(text) if !text.is_empty() => {
             Some(ShardKey::Keyword(text.clone()))

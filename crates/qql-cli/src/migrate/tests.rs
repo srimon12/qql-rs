@@ -84,6 +84,7 @@ fn base_opts() -> MigrateOptions {
         verify: true,
         wait: true,
         recreate: false,
+        batch_delay_ms: 0,
     }
 }
 
@@ -215,12 +216,35 @@ fn checkpoint_roundtrip_and_fingerprint() {
 #[test]
 fn default_checkpoint_path_includes_cluster_identity() {
     let path = checkpoint::default_path("http://old:6333", "docs", "http://new:6334", "docs");
-    assert_eq!(
-        path,
-        ".qql-migrate/http___old_6333__docs__http___new_6334__docs.json"
+    assert!(
+        path.starts_with(".qql-migrate/http___old_6333__docs__http___new_6334__docs__"),
+        "{path}"
     );
+    assert!(path.ends_with(".json"), "{path}");
     let other = checkpoint::default_path("http://staging:6333", "docs", "http://prod:6334", "docs");
     assert_ne!(path, other);
+    let slashed = checkpoint::default_path("http://old:6333/", "docs", "http://new:6334/", "docs");
+    assert_eq!(path, slashed, "trailing slashes map to the same file");
+}
+
+#[test]
+fn default_checkpoint_path_disambiguates_sanitize_collisions() {
+    let a = checkpoint::default_path("http://old:6333", "docs", "http://new:6334", "docs");
+    let b = checkpoint::default_path("http://old/6333", "docs", "http://new/6334", "docs");
+    assert_ne!(a, b, "inputs that sanitize identically must still differ");
+}
+
+#[test]
+fn checkpoint_urls_ignore_trailing_slash_and_host_case() {
+    let opts = base_opts();
+    let mut cp = Checkpoint::new(&opts, 1);
+    let mut slashed = opts.clone();
+    slashed.source_url = format!("{}/", opts.source_url);
+    slashed.target_url = opts.target_url.to_ascii_uppercase();
+    checkpoint::compatible(&cp, &slashed)
+        .expect("same endpoints with slash/case differences resume");
+    cp.source_url = "http://other:6333".into();
+    checkpoint::compatible(&cp, &opts).expect_err("different host must not resume");
 }
 
 #[test]
@@ -279,9 +303,34 @@ fn fingerprint_ignores_workers_and_batch() {
     let mut b = base_opts();
     b.workers = 8;
     b.batch_size = 64;
+    b.wait = false;
+    b.recreate = true;
+    b.verify = false;
+    b.checkpoint_path = ".qql-migrate/other.json".into();
+    b.cutover_alias = Some("docs".into());
     assert_eq!(a.fingerprint(), b.fingerprint());
     b.quantize = Some(QuantizeSpec::new(QuantizeKind::Scalar));
     assert_ne!(a.fingerprint(), b.fingerprint());
+}
+
+#[test]
+fn fingerprint_gates_schema_affecting_options_only() {
+    let a = base_opts();
+    for mutate in [
+        (|o: &mut MigrateOptions| o.shard_number = Some(12)) as fn(&mut MigrateOptions),
+        (|o: &mut MigrateOptions| o.where_clause = Some("city = 'x'".into())),
+        (|o: &mut MigrateOptions| o.fast_bulk = false),
+        (|o: &mut MigrateOptions| o.bulk_indexing_threshold = 1),
+    ] {
+        let mut b = base_opts();
+        mutate(&mut b);
+        assert_ne!(a.fingerprint(), b.fingerprint());
+    }
+    let loaded = Checkpoint::new(&a, 1);
+    let mut cutover_changed = base_opts();
+    cutover_changed.cutover_alias = Some("docs".into());
+    checkpoint::compatible(&loaded, &cutover_changed)
+        .expect("cutover change must not break resume");
 }
 
 #[test]
@@ -386,8 +435,76 @@ fn json_to_shard_key_keyword_and_number() {
         json_to_shard_key(&json!(101)),
         Some(qql_core::ast::ShardKey::Number(101))
     );
+    assert_eq!(
+        json_to_shard_key(&json!(0)),
+        Some(qql_core::ast::ShardKey::Number(0)),
+        "zero is a valid non-negative shard key"
+    );
     assert_eq!(json_to_shard_key(&json!("")), None);
     assert_eq!(json_to_shard_key(&json!(-1)), None);
+    assert_eq!(json_to_shard_key(&json!(1.5)), None, "floats are ignored");
+    assert_eq!(json_to_shard_key(&json!(true)), None, "bools are ignored");
+    assert_eq!(json_to_shard_key(&json!(null)), None, "nulls are ignored");
+}
+
+#[test]
+fn facet_bool_and_negative_values_are_not_shard_keys() {
+    use super::discover::facet_value_to_shard_key;
+    assert!(facet_value_to_shard_key(&qql::PlanFacetValue::Bool(true)).is_none());
+    assert!(facet_value_to_shard_key(&qql::PlanFacetValue::Integer(-1)).is_none());
+    assert!(facet_value_to_shard_key(&qql::PlanFacetValue::Keyword(String::new())).is_none());
+    assert_eq!(
+        facet_value_to_shard_key(&qql::PlanFacetValue::Integer(0)),
+        Some(qql_core::ast::ShardKey::Number(0))
+    );
+}
+
+#[test]
+fn merge_shard_key_statements_dedups_and_appends() {
+    use super::discover::{create_shard_key_sql, merge_shard_key_statements};
+    let acme = qql_core::ast::ShardKey::Keyword("acme".into());
+    let globex = qql_core::ast::ShardKey::Keyword("globex".into());
+    let existing = vec![create_shard_key_sql("docs", &acme)];
+    let merged = merge_shard_key_statements(existing, "docs", &[acme.clone(), globex.clone()]);
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0], create_shard_key_sql("docs", &acme));
+    assert_eq!(merged[1], create_shard_key_sql("docs", &globex));
+}
+
+#[test]
+fn shard_cache_key_is_stable_per_key() {
+    use super::pipeline::shard_cache_key;
+    let acme = qql_core::ast::ShardKey::Keyword("acme".into());
+    assert_eq!(shard_cache_key(Some(&acme)), "k:acme");
+    assert_eq!(
+        shard_cache_key(Some(&qql_core::ast::ShardKey::Number(101))),
+        "n:101"
+    );
+    assert_ne!(
+        shard_cache_key(Some(&acme)),
+        shard_cache_key(Some(&qql_core::ast::ShardKey::Number(101)))
+    );
+    assert_eq!(shard_cache_key(None), String::new());
+}
+
+#[test]
+fn batch_delay_is_tuning_not_identity() {
+    let a = base_opts();
+    let mut b = base_opts();
+    b.batch_delay_ms = 250;
+    assert_eq!(a.fingerprint(), b.fingerprint());
+    assert_eq!(base_opts().batch_delay_ms, 0);
+}
+
+#[test]
+fn combined_ingest_restore_error_keeps_both_causes() {
+    let msg = super::combine_ingest_restore_errors(
+        &"migration interrupted (Ctrl+C); optimizer threshold will be restored; resume with the same command",
+        &"connection refused",
+    );
+    assert!(msg.contains("migration interrupted"), "{msg}");
+    assert!(msg.contains("optimizer restore also failed"), "{msg}");
+    assert!(msg.contains("connection refused"), "{msg}");
 }
 
 #[test]

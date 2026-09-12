@@ -47,8 +47,9 @@ Cross cluster:
 The command prints `written` / `source_count` / `verified`. Default verify is
 exact `COUNT … WITH (exact = true)`.
 
-Crash recovery: a checkpoint is written under `.qql-migrate/` (includes both
-URLs). Re-run the same command to resume; `--restart` starts over.
+Crash recovery: a checkpoint is written under `.qql-migrate/` (file name carries
+both URLs plus a hash). Re-run the same command to resume; `--restart` starts
+over. Tuning flags may change across a resume. Schema flags must not.
 
 ## Flags you will actually use
 
@@ -60,7 +61,9 @@ URLs). Re-run the same command to resume; `--restart` starts over.
 | `--quantize scalar` | Inject quantization on CREATE |
 | `--where "neighbourhood_group = 'Mitte'"` | Filtered copy |
 | `--cutover docs` | Point alias `docs` at the new collection |
-| `--no-wait` | Faster ingest; verify polls until counts match |
+| `--on-missing-shard-key skip` | Skip points missing the shard field (`error` aborts) |
+| `--no-wait` | Faster ingest; verify polls up to 2s until counts match |
+| `--batch-delay-ms 50` | Pause between ingest windows for a loaded cluster |
 | `--bulk-threshold-kb` | Cap unindexed RAM during bulk load (default 2 000 000) |
 
 `--shard-key` / `--shard-key-field` need **Qdrant distributed mode**. Standalone

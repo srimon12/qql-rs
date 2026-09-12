@@ -17,7 +17,7 @@ use qql_plan::{
 use serde_json::Value;
 
 use super::checkpoint::Checkpoint;
-use super::discover::create_shard_key_sql;
+use super::discover::merge_shard_key_statements;
 use super::options::{
     DEFAULT_INDEXING_THRESHOLD, MigrateOptions, MigratePlan, QuantizeKind, QuantizeSpec,
 };
@@ -276,10 +276,8 @@ pub async fn prepare_target(
 
     let mut plan = plan;
     if !discovered_keys.is_empty() {
-        plan.shard_keys = discovered_keys
-            .iter()
-            .map(|k| create_shard_key_sql(&opts.target_collection, k))
-            .collect();
+        plan.shard_keys =
+            merge_shard_key_statements(plan.shard_keys, &opts.target_collection, discovered_keys);
     }
     for stmt in &plan.shard_keys {
         ensure_shard_key(target, stmt).await?;

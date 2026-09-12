@@ -28,11 +28,12 @@ Proves, in order:
 
 Prerequisites: multi-node Qdrant on :6333/:7333/:8333, a built ``qql``
 binary (``cargo build -p qql-cli``), corpus files under vs-qdrant/data/,
-and stdlib-only python3 (no extra dependencies).
+and stdlib-only python3 (no extra dependencies). Count assertions
+(EXPECT_* below) are tied to that corpus snapshot.
 
 Usage:
     python3 berlin_shard_migration.py [--url URL] [--qql BIN] [--batch N]
-        [--workers N] [--skip-ingest] [--skip-migrate] [--clean]
+        [--workers N] [--data-dir DIR] [--skip-ingest] [--skip-migrate] [--clean]
 """
 
 from __future__ import annotations
@@ -51,6 +52,12 @@ ROOT = MIGRATE_DIR.parents[3]
 DATA = ROOT / "vs-qdrant" / "data"
 DIM = 384
 POINTS = 8000
+# Snapshot-tied expectations for vs-qdrant/data. A corpus refresh changes
+# these in one place instead of across every verify step.
+EXPECT_DISTRICTS = 12
+EXPECT_MITTE = 621
+EXPECT_CHEAP = 4198
+EXPECT_TOP_ID = 1
 
 SRC = "vsq_berlin_src"
 DST = "vsq_berlin_dst"
@@ -217,14 +224,14 @@ def verify_source(qql: Qql, tmp: Path) -> None:
     say("3/7 VERIFY source reads (all via qql exec)")
     if qql.count(SRC) != POINTS:
         raise Fail("src count drifted")
-    if qql.count(SRC, "price < 150.0") != 4198:
-        raise Fail("filtered COUNT price<150 drifted (want 4198)")
+    if qql.count(SRC, "price < 150.0") != EXPECT_CHEAP:
+        raise Fail(f"filtered COUNT price<150 drifted (want {EXPECT_CHEAP})")
     vecs = write_query_vectors(tmp)
     top = qql.exec(f"QUERY :dv FROM {SRC} USING dense LIMIT 3;", str(vecs["dense"]))["results"][0][
         "data"
     ]
-    if top[0]["id"] != 1:
-        raise Fail(f"doc-0 vector must return id 1 top-1, got {top[0]['id']}")
+    if top[0]["id"] != EXPECT_TOP_ID:
+        raise Fail(f"doc-0 vector must return id {EXPECT_TOP_ID} top-1, got {top[0]['id']}")
     qql.exec(f"QUERY :sv FROM {SRC} USING bm25 LIMIT 3;", str(vecs["sparse"]))
     qql.exec(
         f"WITH d AS (QUERY :dv FROM {SRC} USING dense PARAMS (hnsw_ef = 128) LIMIT 50), "
@@ -241,11 +248,11 @@ def verify_source(qql: Qql, tmp: Path) -> None:
 
 
 def dry_run(qql: Qql) -> None:
-    say("4/7 DRY-RUN migrate (plan only — expect 12 shard keys)")
+    say(f"4/7 DRY-RUN migrate (plan only — expect {EXPECT_DISTRICTS} shard keys)")
     proc = qql.run("migrate", SRC, "--to", DST, "--shard-key-field", SHARD_FIELD, "--dry-run")
     print(proc.stdout)
-    if proc.stdout.count("CREATE SHARD KEY") != 12:
-        raise Fail("dry-run should discover 12 shard keys")
+    if proc.stdout.count("CREATE SHARD KEY") != EXPECT_DISTRICTS:
+        raise Fail(f"dry-run should discover {EXPECT_DISTRICTS} shard keys")
 
 
 def migrate(qql: Qql, batch: int, workers: int) -> None:
@@ -275,12 +282,12 @@ def verify_target(qql: Qql, tmp: Path) -> None:
     keys = qql.exec(f"SHOW SHARD KEYS ON COLLECTION {DST};")["results"][0]["data"][
         "shard_keys"
     ]
-    if len(keys) != 12:
-        raise Fail(f"want 12 shard keys, got {len(keys)}")
-    ok("12 shard keys: " + ", ".join(sorted(str(k) for k in keys)))
-    if qql.count(DST, shard="Mitte") != 621:
-        raise Fail("SHARD Mitte count drifted (want 621)")
-    ok("COUNT SHARD 'Mitte' = 621")
+    if len(keys) != EXPECT_DISTRICTS:
+        raise Fail(f"want {EXPECT_DISTRICTS} shard keys, got {len(keys)}")
+    ok(f"{EXPECT_DISTRICTS} shard keys: " + ", ".join(sorted(str(k) for k in keys)))
+    if qql.count(DST, shard="Mitte") != EXPECT_MITTE:
+        raise Fail(f"SHARD Mitte count drifted (want {EXPECT_MITTE})")
+    ok(f"COUNT SHARD 'Mitte' = {EXPECT_MITTE}")
     vecs = write_query_vectors(tmp)
     qql.exec(f"SCROLL FROM {DST} SHARD 'Mitte' LIMIT 3;")
     qql.exec(f"FACET district FROM {DST} SHARD 'Mitte' LIMIT 5 EXACT true;")
@@ -291,7 +298,7 @@ def verify_target(qql: Qql, tmp: Path) -> None:
         f"WHERE district = 'Mitte' SHARD 'Mitte' WAIT true;",
         quiet=True,
     )
-    if qql.count(DST, "rating = 4.5") < 621:
+    if qql.count(DST, "rating = 4.5") < EXPECT_MITTE:
         raise Fail("post-UPDATE float-equality COUNT failed")
     ok("UPDATE … SHARD 'Mitte' ok (float = filter works)")
     src_top = [
@@ -316,7 +323,7 @@ def dump_round_trip(qql: Qql, batch: int, tmp: Path) -> None:
     dump_file = tmp / "dst.qql"
     qql.run("dump", DST, str(dump_file), "--batch-size", str(batch), live=True)
     script = dump_file.read_text()
-    if script.count("CREATE SHARD KEY") != 12 or "SHARD '" not in script:
+    if script.count("CREATE SHARD KEY") != EXPECT_DISTRICTS or "SHARD '" not in script:
         raise Fail("dump must emit CREATE SHARD KEY + SHARD-routed UPSERTs")
     replay_file = tmp / "rst.qql"
     replay_file.write_text(script.replace(DST, RST))
@@ -341,10 +348,14 @@ def main() -> int:
     parser.add_argument("--qql", default=None)
     parser.add_argument("--batch", type=int, default=128)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--data-dir", default=None)
     parser.add_argument("--skip-ingest", action="store_true")
     parser.add_argument("--skip-migrate", action="store_true")
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
+    if args.data_dir:
+        global DATA
+        DATA = Path(args.data_dir)
 
     try:
         qql = Qql(newest_qql(args.qql), args.url)
@@ -369,7 +380,7 @@ def main() -> int:
             verify_target(qql, tmp)
             dump_round_trip(qql, 500, tmp)
         print()
-        ok(f"MIGRATION COMPLETE: {SRC} (auto) -> {DST} (custom, 12 shard keys, turbo-1.5)")
+        ok(f"MIGRATION COMPLETE: {SRC} (auto) -> {DST} (custom, {EXPECT_DISTRICTS} shard keys, turbo-1.5)")
         return 0
     except Fail as err:
         print(f"FAIL {err}", file=sys.stderr)
