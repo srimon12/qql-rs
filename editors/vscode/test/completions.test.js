@@ -35,17 +35,29 @@ test("snippet insertText values are well-formed", () => {
   // visible "\n" into the user's document instead of a newline.
   assert.doesNotMatch(completions, /\\\\n/, "found literal \\\\n in providers/completions.ts");
 
-  // The QUERY IMAGE snippet must use a real \n escape before "  FROM".
+  // The QUERY IMAGE snippet must break the line before "  FROM" with a real
+  // newline: a \n escape inside a regular string, or a literal line break
+  // inside a template literal. (A literal backslash-n in the inserted value
+  // is guarded by the check above.)
   assert.match(
     completions,
-    /QUERY IMAGE '\$\{1:[^']*}' MODEL '\$\{2:clip-vit\}'\\n  FROM \$\{3:collection\}/,
-    "QUERY IMAGE snippet must break lines with \\n escapes",
+    /QUERY IMAGE '[^\n]*' MODEL '[^\n]*'(?:\\n|\r?\n)  FROM/,
+    "QUERY IMAGE snippet must break lines with a real newline",
   );
 
-  // Every insertText line must terminate its string cleanly (no trailing
-  // dangling backslash) and every snippet entry must carry a detail.
+  // Every insertText fragment must terminate its string cleanly: "..." fragments
+  // must not end in a dangling backslash, and `...` template fragments must not
+  // end a line in a backslash (an accidental line continuation that would eat
+  // the newline). Every snippet entry must carry a detail.
   for (const m of completions.matchAll(/insertText: "([^"]*)"(?:\s*\+|\s*,)/g)) {
     assert.doesNotMatch(m[1], /\\$/, "insertText fragment must not end in a backslash");
+  }
+  for (const m of completions.matchAll(/insertText: `([^`]*)`,/g)) {
+    assert.doesNotMatch(
+      m[1],
+      /\\(?:\r?\n|$)/,
+      "template insertText must not end lines in a backslash",
+    );
   }
   const snippetsEnd = completions.indexOf("// Contextual follow-ups");
   const snippetBlock = completions.slice(0, snippetsEnd);

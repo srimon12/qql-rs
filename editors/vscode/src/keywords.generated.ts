@@ -176,8 +176,4 @@ export const QQL_KEYWORDS = [
   "WHERE",
   "WITH",
 ] as const;
-export const QQL_CONSTANTS = new Set([
-  "FALSE",
-  "NULL",
-  "TRUE",
-]);
+export const QQL_CONSTANTS = new Set(["FALSE", "NULL", "TRUE"]);

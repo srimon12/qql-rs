@@ -561,7 +561,8 @@ function applyToStatements(
   }
   const rewritten = spans.map((span) => rewrite(span.source));
   void editor.edit((builder) => {
-    spans.forEach((span, i) => {
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
       builder.replace(
         new vscode.Range(
           byteOffsetToPosition(document, span.start),
@@ -569,6 +570,6 @@ function applyToStatements(
         ),
         rewritten[i]
       );
-    });
+    }
   });
 }
