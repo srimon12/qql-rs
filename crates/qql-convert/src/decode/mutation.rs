@@ -29,8 +29,15 @@ pub(crate) fn upsert(body: &Value, ctx: DecodeCtx<'_>) -> Result<UpsertStmt, Con
             "update_mode",
         ],
     )?;
-    reject_update_guards(obj, path)?;
     let shard_key = vector::shard_key_field(obj, path)?;
+    let update_filter = match obj.get("update_filter").filter(|v| !v.is_null()) {
+        None => None,
+        Some(value) => filter::filter_opt(value, &child(path, "update_filter"))?,
+    };
+    let update_mode = match obj.get("update_mode").filter(|v| !v.is_null()) {
+        None => None,
+        Some(value) => Some(update_mode_value(value, &child(path, "update_mode"))?),
+    };
     let points = if let Some(batch) = obj.get("batch") {
         decode_batch(batch, &child(path, "batch"))?
     } else {
@@ -53,22 +60,35 @@ pub(crate) fn upsert(body: &Value, ctx: DecodeCtx<'_>) -> Result<UpsertStmt, Con
         points,
         embedding: None,
         embed: Vec::new(),
+        update_filter,
+        update_mode,
         shard_key,
         wait: ctx.opts.wait,
     })
 }
 
-/// Reject `update_filter` / `update_mode`, which have no QQL representation.
-fn reject_update_guards(obj: &json::Obj, path: &str) -> Result<(), ConvertError> {
-    for key in ["update_filter", "update_mode"] {
-        if obj.contains_key(key) {
-            return Err(invalid(
-                child(path, key),
-                format!("{key} has no QQL representation"),
-            ));
-        }
+/// Decode an OpenAPI `UpdateMode` string into `UpsertUpdateMode`.
+fn update_mode_value(
+    value: &Value,
+    path: &str,
+) -> Result<qql_core::ast::UpsertUpdateMode, ConvertError> {
+    use qql_core::ast::UpsertUpdateMode;
+    match value.as_str() {
+        Some("insert_only") => Ok(UpsertUpdateMode::InsertOnly),
+        Some("update_only") => Ok(UpsertUpdateMode::UpdateOnly),
+        Some("upsert") => Ok(UpsertUpdateMode::Upsert),
+        Some(other) => Err(invalid(
+            path,
+            format!("unknown update_mode '{other}' (expected insert_only, update_only, or upsert)"),
+        )),
+        None => Err(invalid(
+            path,
+            format!(
+                "expected update_mode string, got {}",
+                json::type_name(value)
+            ),
+        )),
     }
-    Ok(())
 }
 
 /// Decode a `Batch` (`{ids, vectors, payloads?}`) into inline points.
@@ -266,12 +286,10 @@ pub(crate) fn update_payload(
         path,
         &["payload", "points", "filter", "shard_key", "key"],
     )?;
-    if obj.contains_key("key") {
-        return Err(invalid(
-            child(path, "key"),
-            "path-scoped SetPayload (`key`) has no QQL representation",
-        ));
-    }
+    let key = match obj.get("key").filter(|v| !v.is_null()) {
+        None => None,
+        Some(value) => Some(json::string_at(value, &child(path, "key"))?.to_string()),
+    };
     let payload = decode_payload(
         json::required(obj, "payload", path)?,
         &child(path, "payload"),
@@ -280,6 +298,8 @@ pub(crate) fn update_payload(
         collection: ctx.collection.to_string(),
         selector: selector(obj, path)?,
         payload,
+        key,
+        overwrite: false,
         shard_key: vector::shard_key_field(obj, path)?,
         wait: ctx.opts.wait,
     })

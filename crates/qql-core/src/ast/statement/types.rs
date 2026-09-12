@@ -1,5 +1,6 @@
 //! Primitive types, identifiers, vectors, and selectors for QQL statements.
 
+use crate::ast::Value;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -259,6 +260,46 @@ pub enum VectorValue {
     },
     /// Multivector bag of dense vectors (ColBERT-style MaxSim).
     MultiDense(Vec<Vec<f32>>),
+    /// Per-point document inference (`{text: '…', model: '…'}`, OpenAPI `Document`).
+    /// Passed through to the backend inference service; never executed locally.
+    Document {
+        /// Document text to embed.
+        text: String,
+        /// Embedding model; `None` serializes as `""` pending executor resolution.
+        model: Option<String>,
+        /// Opaque inference options, passed to the model as-is.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Vec::is_empty")
+        )]
+        options: Vec<(String, Value)>,
+    },
+    /// Per-point image inference (`{image: '…', model: '…'}`, OpenAPI `Image`).
+    Image {
+        /// Image URL or base64 payload.
+        source: String,
+        /// Image embedding model; `None` serializes as `""` pending resolution.
+        model: Option<String>,
+        /// Opaque inference options, passed to the model as-is.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Vec::is_empty")
+        )]
+        options: Vec<(String, Value)>,
+    },
+    /// Per-point custom inference (`{object: …, model: '…'}`, OpenAPI `InferenceObject`).
+    Object {
+        /// Arbitrary model input (usually an object).
+        object: alloc::boxed::Box<Value>,
+        /// Embedding model; `None` serializes as `""` pending resolution.
+        model: Option<String>,
+        /// Opaque inference options, passed to the model as-is.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Vec::is_empty")
+        )]
+        options: Vec<(String, Value)>,
+    },
     /// Parameter placeholder (`:name`).
     Param(
         String,

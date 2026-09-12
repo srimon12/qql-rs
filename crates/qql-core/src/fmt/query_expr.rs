@@ -3,7 +3,7 @@
 use super::query::render_query_body_inner;
 use crate::ast::{
     ContextPair, FusionMethod, OrderDirection, Prefetch, PrefetchSource, QueryExpr, QueryInput,
-    RecommendStrategy, SearchParams, VectorKind, VectorTarget, escape_string,
+    RecommendStrategy, SearchParams, Value, VectorKind, VectorTarget, escape_string,
 };
 use crate::fmt::expr::{
     render_f64, render_name, render_placeholder, render_point_id, render_read_consistency,
@@ -85,14 +85,24 @@ pub(crate) fn render_query_expr(expression: &QueryExpr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        QueryExpr::OrderBy { field, direction } => format!(
-            "ORDER BY {} {}",
-            render_name(field),
-            match direction {
-                OrderDirection::Asc => "ASC",
-                OrderDirection::Desc => "DESC",
+        QueryExpr::OrderBy {
+            field,
+            direction,
+            start_from,
+        } => {
+            let mut out = format!(
+                "ORDER BY {} {}",
+                render_name(field),
+                match direction {
+                    OrderDirection::Asc => "ASC",
+                    OrderDirection::Desc => "DESC",
+                }
+            );
+            if let Some(value) = start_from {
+                let _ = write!(out, " START FROM {}", render_value(value));
             }
-        ),
+            out
+        }
         QueryExpr::SampleRandom => "SAMPLE RANDOM".into(),
         QueryExpr::Fusion { method, .. } => format!("FUSION {}", render_fusion_method(*method)),
         QueryExpr::Formula {
@@ -234,6 +244,9 @@ pub(crate) fn render_prefetch(prefetch: &Prefetch) -> String {
         if let Some(vector) = &lookup.vector {
             let _ = write!(out, " VECTOR {}", render_name(vector));
         }
+        if let Some(shard) = &lookup.shard_key {
+            let _ = write!(out, " SHARD {shard}");
+        }
     }
     out
 }
@@ -244,7 +257,8 @@ pub(crate) fn render_query_input(input: &QueryInput, allow_bare: bool) -> String
             text,
             model: None,
             text_param,
-        } if allow_bare => {
+            options,
+        } if allow_bare && options.is_empty() => {
             if let Some(param) = text_param {
                 render_placeholder(param).to_string()
             } else {
@@ -255,6 +269,7 @@ pub(crate) fn render_query_input(input: &QueryInput, allow_bare: bool) -> String
             text,
             model,
             text_param,
+            options,
         } => {
             let rendered_text = if let Some(param) = text_param {
                 render_placeholder(param).to_string()
@@ -265,13 +280,31 @@ pub(crate) fn render_query_input(input: &QueryInput, allow_bare: bool) -> String
             if let Some(model) = model {
                 let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
+            out.push_str(&render_inference_options(options));
             out
         }
-        QueryInput::Image { source, model } => {
+        QueryInput::Image {
+            source,
+            model,
+            options,
+        } => {
             let mut out = format!("IMAGE '{}'", escape_string(source));
             if let Some(model) = model {
                 let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
+            out.push_str(&render_inference_options(options));
+            out
+        }
+        QueryInput::Object {
+            object,
+            model,
+            options,
+        } => {
+            let mut out = format!("OBJECT {}", render_value(object));
+            if let Some(model) = model {
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
+            }
+            out.push_str(&render_inference_options(options));
             out
         }
         // Compact spellings are accepted only where `allow_bare` is set; the
@@ -291,6 +324,18 @@ pub(crate) fn render_recommend_input(input: &QueryInput) -> String {
         // so text examples must keep their `TEXT '…'` prefix to round-trip.
         other => render_query_input(other, false),
     }
+}
+
+/// Render a trailing `OPTIONS {k: v, …}` clause; empty when no options are set.
+pub(crate) fn render_inference_options(options: &[(String, Value)]) -> String {
+    if options.is_empty() {
+        return String::new();
+    }
+    let items: Vec<String> = options
+        .iter()
+        .map(|(key, value)| format!("{}: {}", render_name(key), render_value(value)))
+        .collect();
+    format!(" OPTIONS {{{}}}", items.join(", "))
 }
 
 pub(crate) fn render_context_pair(pair: &ContextPair) -> String {

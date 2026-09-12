@@ -742,7 +742,7 @@ fn image_query_input_parses() {
     match stmt {
         Stmt::Query(q) => match &q.expression {
             QueryExpr::Nearest {
-                input: QueryInput::Image { source, model },
+                input: QueryInput::Image { source, model, .. },
                 using: Some(u),
                 ..
             } => {
@@ -1180,4 +1180,73 @@ fn payload_mutation_filter_params_are_collected_for_prepared() {
             assert!(named.contains(key), "{qql} missing :{key}");
         }
     }
+}
+
+#[test]
+fn batch_block_parses_and_roundtrips_fmt() {
+    for source in [
+        "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; }",
+        "BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false",
+        "BATCH { QUERY [0.1] FROM docs LIMIT 1; } PARAMS (timeout = 30, consistency = majority)",
+    ] {
+        let stmt = Parser::parse(source).unwrap_or_else(|e| panic!("parse {source}: {e}"));
+        let formatted = crate::fmt::format_stmt(&stmt);
+        let reparsed =
+            Parser::parse(&formatted).unwrap_or_else(|e| panic!("reparse {formatted}: {e}"));
+        assert_eq!(
+            crate::fmt::format_stmt(&reparsed),
+            formatted,
+            "not canonical: {source}"
+        );
+    }
+}
+
+#[test]
+fn batch_block_rejects_bad_members() {
+    for (source, code) in [
+        ("BATCH { }", "QQL-VALIDATION-BATCH-EMPTY"),
+        (
+            "BATCH { BATCH { QUERY [0.1] FROM docs LIMIT 1; }; }",
+            "QQL-VALIDATION-BATCH-MEMBER",
+        ),
+        ("BATCH { SHOW COLLECTIONS; }", "QQL-VALIDATION-BATCH-MEMBER"),
+        (
+            "BATCH { CREATE COLLECTION docs; }",
+            "QQL-VALIDATION-BATCH-MEMBER",
+        ),
+        ("BATCH { COUNT FROM docs; }", "QQL-VALIDATION-BATCH-MEMBER"),
+        (
+            "BATCH { SCROLL FROM docs LIMIT 1; }",
+            "QQL-VALIDATION-BATCH-MEMBER",
+        ),
+    ] {
+        let err = Parser::parse(source).expect_err("must fail");
+        assert_eq!(err.code, code, "{source}");
+    }
+}
+
+#[test]
+fn batch_block_binds_and_injects_into_members() {
+    use crate::ast::ComparisonOp;
+    use crate::ast::Value;
+    use crate::params::collect_statement_params;
+    let mut stmt = Parser::parse(
+        "BATCH { QUERY [0.1] FROM docs WHERE tenant = :t LIMIT 1; DELETE FROM docs WHERE id = :i; }",
+    )
+    .unwrap();
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("t") && named.contains("i"));
+    crate::ast::inject_filter(
+        &mut stmt,
+        "tenant",
+        ComparisonOp::Eq,
+        Value::Str("acme".to_string()),
+    )
+    .unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert_eq!(
+        formatted.matches("tenant = 'acme'").count(),
+        2,
+        "{formatted}"
+    );
 }

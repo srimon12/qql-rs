@@ -7,6 +7,7 @@ use crate::ast::{
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::fmt::Write;
 
 pub(crate) fn render_placeholder(param: &str) -> &str {
     if param.starts_with('?') { "?" } else { param }
@@ -108,13 +109,68 @@ pub(crate) fn render_vector_value(value: &VectorValue) -> String {
         ),
         VectorValue::Param(name, _) => format!(":{}", name),
         VectorValue::PositionalParam(..) => "?".to_string(),
+        VectorValue::Document {
+            text,
+            model,
+            options,
+        } => {
+            let mut out = format!("{{text: '{}'", escape_string(text));
+            if let Some(model) = model {
+                let _ = write!(out, ", model: '{}'", escape_string(model));
+            }
+            if !options.is_empty() {
+                let _ = write!(out, ", options: {}", render_options_dict(options));
+            }
+            out.push('}');
+            out
+        }
+        VectorValue::Image {
+            source,
+            model,
+            options,
+        } => {
+            let mut out = format!("{{image: '{}'", escape_string(source));
+            if let Some(model) = model {
+                let _ = write!(out, ", model: '{}'", escape_string(model));
+            }
+            if !options.is_empty() {
+                let _ = write!(out, ", options: {}", render_options_dict(options));
+            }
+            out.push('}');
+            out
+        }
+        VectorValue::Object {
+            object,
+            model,
+            options,
+        } => {
+            let mut out = format!("{{object: {}", render_value(object));
+            if let Some(model) = model {
+                let _ = write!(out, ", model: '{}'", escape_string(model));
+            }
+            if !options.is_empty() {
+                let _ = write!(out, ", options: {}", render_options_dict(options));
+            }
+            out.push('}');
+            out
+        }
     }
+}
+
+/// Render an inference `options` dict value (`{k: v, …}`).
+fn render_options_dict(options: &[(String, Value)]) -> String {
+    let items: Vec<String> = options
+        .iter()
+        .map(|(key, value)| format!("{}: {}", render_name(key), render_value(value)))
+        .collect();
+    format!("{{{}}}", items.join(", "))
 }
 
 pub(crate) fn render_value(value: &Value) -> String {
     match value {
         Value::Str(value) => format!("'{}'", escape_string(value)),
         Value::Int(value) => value.to_string(),
+        Value::UInt(value) => value.to_string(),
         Value::Float(value) => render_f64(*value),
         Value::Bool(value) => value.to_string(),
         Value::Null => "null".into(),

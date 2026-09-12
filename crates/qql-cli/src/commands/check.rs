@@ -438,6 +438,7 @@ fn stmt_needs_embeddings(stmt: &qql_core::ast::Stmt) -> bool {
     match stmt {
         Stmt::Query(q) => query_stmt_needs_embeddings(q),
         Stmt::Upsert(u) => u.embedding.is_some() || !u.embed.is_empty(),
+        Stmt::Batch(b) => b.statements.iter().any(stmt_needs_embeddings),
         _ => false,
     }
 }
@@ -455,6 +456,8 @@ fn query_expr_needs_embeddings(e: &qql_core::ast::QueryExpr) -> bool {
         | QueryInput::Param(..)
         | QueryInput::PositionalParam(..) => true,
         QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..)) => true,
+        // Custom inference objects resolve server-side (never embedded locally).
+        QueryInput::Object { .. } => false,
         QueryInput::Vector(_) | QueryInput::Point(_) => false,
     };
     let prefetch_needs = |list: &[qql_core::ast::Prefetch]| {
@@ -554,6 +557,11 @@ fn stmt_collections(stmts: &[qql_core::ast::Stmt]) -> Vec<String> {
             Stmt::Facet(f) => {
                 if let QueryCollection::Explicit(name) = &f.collection {
                     push(name);
+                }
+            }
+            Stmt::Batch(b) => {
+                for name in stmt_collections(&b.statements) {
+                    push(&name);
                 }
             }
             _ => {}

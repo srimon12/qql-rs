@@ -53,6 +53,9 @@ where
     if let Some(f) = &mut prefetch.filter {
         bind_filter(f, lookup, positional)?;
     }
+    if let Some(spec) = &mut prefetch.lookup {
+        bind_shard_key(&mut spec.shard_key, lookup, positional)?;
+    }
     Ok(())
 }
 
@@ -119,7 +122,12 @@ where
                 bind_prefetch(p, lookup, positional)?;
             }
         }
-        QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => {}
+        QueryExpr::OrderBy { start_from, .. } => {
+            if let Some(value) = start_from {
+                bind_value(value, lookup, positional)?;
+            }
+        }
+        QueryExpr::SampleRandom => {}
         QueryExpr::Fusion { prefetch, .. } => {
             for p in prefetch {
                 bind_prefetch(p, lookup, positional)?;
@@ -263,6 +271,11 @@ where
             if let Some(after) = &mut scroll.after {
                 bind_point_id(after, &lookup, positional)?;
             }
+            if let Some(order) = scroll.order_by.as_mut()
+                && let Some(value) = order.start_from.as_mut()
+            {
+                bind_value(value, &lookup, positional)?;
+            }
             if let Some(param) = scroll.limit_param.take() {
                 let span = scroll.limit_span.take();
                 scroll.limit =
@@ -323,6 +336,9 @@ where
                 }
             }
             upsert.points = bound;
+            if let Some(filter) = &mut upsert.update_filter {
+                super::filter::bind_filter(filter, &lookup, positional)?;
+            }
             bind_shard_key(&mut upsert.shard_key, &lookup, positional)?;
             Ok(())
         }
@@ -387,6 +403,15 @@ where
             bind_shard_key(&mut facet.shard_key, &lookup, positional)?;
             Ok(())
         }
+        Stmt::Batch(batch) => {
+            // Erase to `dyn` so nested batches reuse one instantiation
+            // instead of growing `&&&&F` forever.
+            let lookup = &lookup as &dyn Fn(&str) -> Option<Value>;
+            for member in &mut batch.statements {
+                bind_stmt(member, lookup, positional)?;
+            }
+            Ok(())
+        }
         other => Err(QqlError::validation(
             "QQL-BIND-UNSUPPORTED-STATEMENT",
             format!(
@@ -427,6 +452,19 @@ where
                 )
             })?;
             *vec = crate::parser::helpers::vector_from_value(val, span.as_deref().copied())?;
+        }
+        VectorValue::Document { options, .. } | VectorValue::Image { options, .. } => {
+            for (_, value) in options {
+                bind_value(value, lookup, positional)?;
+            }
+        }
+        VectorValue::Object {
+            object, options, ..
+        } => {
+            bind_value(object, lookup, positional)?;
+            for (_, value) in options {
+                bind_value(value, lookup, positional)?;
+            }
         }
         _ => {}
     }

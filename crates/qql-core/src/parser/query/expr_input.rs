@@ -1,8 +1,9 @@
-use crate::ast::{FusionMethod, QueryInput};
+use crate::ast::{FusionMethod, QueryInput, Value};
 use crate::error::{QqlError, Span};
 use crate::parser::AstLowerer;
 use crate::token::TokenKind;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 impl<'a> AstLowerer<'a> {
     pub(crate) fn parse_query_input(&mut self) -> Result<QueryInput, QqlError> {
@@ -20,10 +21,12 @@ impl<'a> AstLowerer<'a> {
                 (self.parse_string()?, None)
             };
             let model = self.parse_optional_model_string()?;
+            let options = self.parse_optional_inference_options()?;
             return Ok(QueryInput::Text {
                 text,
                 model,
                 text_param,
+                options,
             });
         }
         // IMAGE is a bare word (not reserved) — local path or URL for CLIP vision.
@@ -31,7 +34,34 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
             let source = self.parse_string()?;
             let model = self.parse_optional_model_string()?;
-            return Ok(QueryInput::Image { source, model });
+            let options = self.parse_optional_inference_options()?;
+            return Ok(QueryInput::Image {
+                source,
+                model,
+                options,
+            });
+        }
+        // OBJECT is the custom inference input (OpenAPI InferenceObject):
+        // an arbitrary model payload with optional MODEL / OPTIONS.
+        // Parentheses around the object are accepted (`OBJECT ({…})`) but
+        // never emitted; the canonical form is the bare object.
+        if self.peek_word("OBJECT")? {
+            self.advance()?;
+            let object = if self.peek()?.kind == TokenKind::Lparen {
+                self.advance()?;
+                let entries = self.parse_payload_dict()?;
+                self.expect(TokenKind::Rparen)?;
+                Value::Dict(entries)
+            } else {
+                Value::Dict(self.parse_payload_dict()?)
+            };
+            let model = self.parse_optional_model_string()?;
+            let options = self.parse_optional_inference_options()?;
+            return Ok(QueryInput::Object {
+                object: alloc::boxed::Box::new(object),
+                model,
+                options,
+            });
         }
         if self.peek()?.kind == TokenKind::Vector {
             self.advance()?;
@@ -48,7 +78,7 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::Lbracket || self.peek()?.kind == TokenKind::Lbrace {
             return self.parse_vector_value().map(QueryInput::Vector);
         }
-        if self.peek_word("POINT")? {
+        if self.peek()?.kind == TokenKind::Point {
             self.advance()?;
             return self.parse_point_id("POINT").map(QueryInput::Point);
         }
@@ -71,13 +101,29 @@ impl<'a> AstLowerer<'a> {
                 text,
                 model: None,
                 text_param: None,
+                options: Vec::new(),
             });
         }
         Err(QqlError::parse(
             "QQL-PARSE-QUERY-INPUT",
-            "query input requires TEXT, IMAGE, VECTOR, POINT, or parameter",
+            "query input requires TEXT, IMAGE, OBJECT, VECTOR, POINT, or parameter",
             self.peek()?.span,
         ))
+    }
+
+    /// Parse an optional trailing `OPTIONS {…}` inference-options dict.
+    ///
+    /// The dict is opaque: keys and values pass through to the inference
+    /// service as-is (including BM25 option objects). Duplicate keys are
+    /// rejected by `parse_payload_dict`.
+    pub(crate) fn parse_optional_inference_options(
+        &mut self,
+    ) -> Result<Vec<(String, Value)>, QqlError> {
+        if self.peek_word("OPTIONS")? {
+            self.advance()?;
+            return self.parse_payload_dict();
+        }
+        Ok(Vec::new())
     }
 
     pub(crate) fn parse_fusion_method(&mut self) -> Result<FusionMethod, QqlError> {

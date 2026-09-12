@@ -22,7 +22,7 @@ pub(crate) fn decode_match(
                     Value::String(_) | Value::Bool(_) => {
                         json::json_to_ast_value(raw, &child(path, "value"))?
                     }
-                    Value::Number(n) if n.as_i64().is_some() => {
+                    Value::Number(n) if n.as_i64().is_some() || n.as_u64().is_some() => {
                         json::json_to_ast_value(raw, &child(path, "value"))?
                     }
                     other => {
@@ -67,7 +67,7 @@ pub(crate) fn decode_match(
                         Value::String(_) | Value::Bool(_) => {
                             json::json_to_ast_value(item, &index(&any_path, i))
                         }
-                        Value::Number(n) if n.as_i64().is_some() => {
+                        Value::Number(n) if n.as_i64().is_some() || n.as_u64().is_some() => {
                             json::json_to_ast_value(item, &index(&any_path, i))
                         }
                         other => Err(invalid(
@@ -104,14 +104,13 @@ pub(crate) fn decode_match(
             "integer" => FilterExpr::Compare {
                 field: field.to_string(),
                 op: ComparisonOp::Eq,
-                value: AstValue::Int(
-                    json::required(obj, "integer", path)
-                        .and_then(|v| json::u64_at(v, &child(path, "integer")))?
-                        .try_into()
-                        .map_err(|_| {
-                            invalid(child(path, "integer"), "integer exceeds the i64 range")
-                        })?,
-                ),
+                value: {
+                    let n = json::required(obj, "integer", path)
+                        .and_then(|v| json::u64_at(v, &child(path, "integer")))?;
+                    i64::try_from(n)
+                        .map(AstValue::Int)
+                        .unwrap_or(AstValue::UInt(n))
+                },
             },
             "boolean" => FilterExpr::Compare {
                 field: field.to_string(),
@@ -121,17 +120,46 @@ pub(crate) fn decode_match(
                         .and_then(|v| json::bool_at(v, &child(path, "boolean")))?,
                 ),
             },
-            "text_any" => {
-                return Err(invalid(
-                    child(path, "text_any"),
-                    "text_any (token-level match) has no QQL representation; use MATCH 'text' or MATCH ANY (values)",
-                ));
-            }
+            "text_any" => FilterExpr::MatchTokens {
+                field: field.to_string(),
+                text: json::required(obj, "text_any", path)
+                    .and_then(|v| Ok(json::string_at(v, &child(path, "text_any"))?.to_string()))?,
+            },
             "except" => {
-                return Err(invalid(
-                    child(path, "except"),
-                    "match except (at-least-one-value-not-matching) has no QQL representation",
-                ));
+                let except_path = child(path, "except");
+                let raw = json::required(obj, "except", path)
+                    .and_then(|v| json::array(v, &except_path))?;
+                let values = raw
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| match item {
+                        Value::String(_) | Value::Bool(_) => {
+                            json::json_to_ast_value(item, &index(&except_path, i))
+                        }
+                        Value::Number(n) if n.as_i64().is_some() || n.as_u64().is_some() => {
+                            json::json_to_ast_value(item, &index(&except_path, i))
+                        }
+                        other => Err(invalid(
+                            index(&except_path, i),
+                            format!(
+                                "match except values must be strings or integers, got {}",
+                                json::type_name(other)
+                            ),
+                        )),
+                    })
+                    .collect::<Result<Vec<AstValue>, _>>()?;
+                if values.is_empty() {
+                    // QQL `MATCH EXCEPT` requires at least one literal; an
+                    // empty upstream list has no spelling.
+                    return Err(invalid(
+                        except_path,
+                        "match except must list at least one value",
+                    ));
+                }
+                FilterExpr::MatchExcept {
+                    field: field.to_string(),
+                    values,
+                }
             }
             other => {
                 return Err(invalid(child(path, other), "unknown Match variant"));
@@ -147,7 +175,11 @@ pub(crate) fn decode_match(
     variant.ok_or_else(|| invalid(path, "empty match object"))
 }
 
-/// Decode a `RangeInterface` (`{gt?, gte?, lt?, lte?}` of numbers or datetimes).
+/// Decode a `RangeInterface` (`{gt?, gte?, lt?, lte?}` of numbers or strings).
+///
+/// String bounds are carried as `Value::Str` without any datetime-shape gate:
+/// QQL spells every string bound as a quoted literal, so ISO datetimes and
+/// plain strings (e.g. keyword ordering bounds) decode identically.
 pub(crate) fn decode_range(
     value: &Value,
     path: &str,
@@ -173,20 +205,15 @@ pub(crate) fn decode_range(
             Value::Null => continue,
             Value::String(_) => {
                 let s = json::string_at(raw, &child(path, key))?;
-                if !qql_core::ast::looks_like_iso_datetime(s) {
-                    return Err(invalid(
-                        child(path, key),
-                        "string range bounds must be ISO 8601 datetimes",
-                    ));
-                }
                 AstValue::Str(s.to_string())
             }
             Value::Number(_) => {
-                let n = json::f64_at(raw, &child(path, key))?;
                 if let Some(i) = raw.as_i64() {
                     AstValue::Int(i)
+                } else if let Some(u) = raw.as_u64() {
+                    AstValue::UInt(u)
                 } else {
-                    AstValue::Float(n)
+                    AstValue::Float(json::f64_at(raw, &child(path, key))?)
                 }
             }
             other => {

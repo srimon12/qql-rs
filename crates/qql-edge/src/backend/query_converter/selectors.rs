@@ -100,10 +100,38 @@ pub(crate) fn convert_order_by_interface(
     };
     let key: JsonPath = serde_json::from_value(serde_json::Value::String(order_by.key.clone()))
         .map_err(|e| edge_error(format!("invalid order_by key: {e}")))?;
+    let start_from = order_by
+        .start_from
+        .as_ref()
+        .map(|value| {
+            use qdrant_edge::StartFrom;
+            if let Some(n) = value.as_i64() {
+                Ok(StartFrom::Integer(n))
+            } else if let Some(n) = value.as_u64() {
+                i64::try_from(n)
+                    .map(StartFrom::Integer)
+                    .map_err(|_| edge_error(format!("order_by start_from {n} exceeds i64")))
+            } else if let Some(f) = value.as_f64() {
+                Ok(StartFrom::Float(f))
+            } else if let Some(text) = value.as_str() {
+                text.parse::<qdrant_edge::DateTimeWrapper>()
+                    .map(StartFrom::Datetime)
+                    .map_err(|_| {
+                        edge_error(format!(
+                            "order_by start_from '{text}' must be an integer, float, or ISO-8601 datetime"
+                        ))
+                    })
+            } else {
+                Err(edge_error(format!(
+                    "order_by start_from {value} must be an integer, float, or ISO-8601 datetime"
+                )))
+            }
+        })
+        .transpose()?;
     Ok(OrderByInterface::Struct(OrderBy {
         key,
         direction,
-        start_from: None,
+        start_from,
     }))
 }
 

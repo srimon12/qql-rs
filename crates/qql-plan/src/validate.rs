@@ -174,9 +174,15 @@ pub(crate) fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), 
                 Some(VectorKind::Dense)
             }
             QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
-            QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..))
+            QueryInput::Vector(
+                VectorValue::Document { .. }
+                | VectorValue::Image { .. }
+                | VectorValue::Object { .. },
+            )
+            | QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..))
             | QueryInput::Text { .. }
             | QueryInput::Image { .. }
+            | QueryInput::Object { .. }
             | QueryInput::Point(_)
             | QueryInput::Param(..)
             | QueryInput::PositionalParam(..) => None,
@@ -229,6 +235,9 @@ pub(crate) fn validate_recommend_average_dims(expression: &QueryExpr) -> Result<
                     .then_some((rows.len(), dim))
             }
             VectorValue::Sparse { .. }
+            | VectorValue::Document { .. }
+            | VectorValue::Image { .. }
+            | VectorValue::Object { .. }
             | VectorValue::Param(..)
             | VectorValue::PositionalParam(..) => None,
         }

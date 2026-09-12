@@ -169,10 +169,40 @@ pub struct UpsertStmt {
     pub embedding: Option<EmbeddingSpec>,
     /// `EMBED <field> INTO <vector>` directives.
     pub embed: Vec<EmbedDirective>,
+    /// `UPDATE FILTER <filter>` guard: only matching points update.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub update_filter: Option<FilterExpr>,
+    /// `UPDATE MODE <insert_only | update_only | upsert>` guard.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub update_mode: Option<UpsertUpdateMode>,
     /// `SHARD '<key>'` or `SHARD <n>` routing key.
     pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
+}
+
+/// Write mode for `UPDATE MODE` on `UPSERT` (OpenAPI `UpdateMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum UpsertUpdateMode {
+    /// Only insert new points, do not update existing points.
+    InsertOnly,
+    /// Only update existing points, do not insert new points.
+    UpdateOnly,
+    /// Insert new points, update existing points (the default).
+    Upsert,
+}
+
+#[cfg(feature = "serde")]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// `CLEAR PAYLOAD FROM <collection> WHERE …` statement.
@@ -285,6 +315,15 @@ pub struct UpdatePayloadStmt {
     pub selector: PointSelector,
     /// Payload keys to merge into the points.
     pub payload: Vec<(String, Value)>,
+    /// `KEY '<path>'` nested assignment path (OpenAPI `SetPayload.key`).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub key: Option<String>,
+    /// `OVERWRITE` flag: replace the full payload instead of merging.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_false"))]
+    pub overwrite: bool,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).

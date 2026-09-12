@@ -87,6 +87,14 @@ pub async fn execute_planned_grpc(
             request,
             wait,
         } => super::execute_write::execute_update_payload(client, collection, request, *wait).await,
+        PlannedOperation::OverwritePayload {
+            collection,
+            request,
+            wait,
+        } => {
+            super::execute_write::execute_overwrite_payload(client, collection, request, *wait)
+                .await
+        }
         PlannedOperation::CreateCollection {
             collection,
             request,
@@ -126,6 +134,11 @@ pub async fn execute_planned_grpc(
         PlannedOperation::CrossRerank { .. } => Err(QqlError::execution(
             "QQL-RERANK-CROSS",
             "CROSS RERANK is executed client-side by the Executor, not as a single gRPC route",
+            None,
+        )),
+        PlannedOperation::Batch { .. } => Err(QqlError::execution(
+            "QQL-GRPC-BATCH",
+            "BATCH is dispatched by the Executor through the batch RPCs, not as a single gRPC route",
             None,
         )),
         PlannedOperation::GetQuotas | PlannedOperation::SetQuotas { .. } => {

@@ -314,17 +314,34 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> Result<qdrant::VectorIn
                     .collect(),
             })
         }
-        PlanQueryInput::Document { text, model } => Variant::Document(qdrant::Document {
+        PlanQueryInput::Document {
+            text,
+            model,
+            options,
+        } => Variant::Document(qdrant::Document {
             text: text.clone(),
             model: model.clone().unwrap_or_default(),
-            ..Default::default()
+            options: grpc_options(options),
         }),
-        PlanQueryInput::Image { image, model } => Variant::Image(qdrant::Image {
+        PlanQueryInput::Image {
+            image,
+            model,
+            options,
+        } => Variant::Image(qdrant::Image {
             image: Some(qdrant::Value {
                 kind: Some(qdrant::value::Kind::StringValue(image.clone())),
             }),
             model: model.clone().unwrap_or_default(),
-            ..Default::default()
+            options: grpc_options(options),
+        }),
+        PlanQueryInput::Object {
+            object,
+            model,
+            options,
+        } => Variant::Object(qdrant::InferenceObject {
+            object: Some(super::values::to_qdrant_value(object.clone())),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
         }),
         // Fail closed: `ensure_no_unbound_params` (batch) and
         // `validate_no_unbound_scalar_params` (prepared templates) gate every
@@ -349,10 +366,55 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> Result<qdrant::VectorIn
                 None,
             ));
         }
+        // Per-point inference values bound into the query-input slot lower
+        // like their query-input counterparts.
+        PlanQueryInput::Vector(PlanVectorValue::Document {
+            text,
+            model,
+            options,
+        }) => Variant::Document(qdrant::Document {
+            text: text.clone(),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
+        }),
+        PlanQueryInput::Vector(PlanVectorValue::Image {
+            image,
+            model,
+            options,
+        }) => Variant::Image(qdrant::Image {
+            image: Some(qdrant::Value {
+                kind: Some(qdrant::value::Kind::StringValue(image.clone())),
+            }),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
+        }),
+        PlanQueryInput::Vector(PlanVectorValue::Object {
+            object,
+            model,
+            options,
+        }) => Variant::Object(qdrant::InferenceObject {
+            object: Some(super::values::to_qdrant_value(object.clone())),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
+        }),
     };
     Ok(qdrant::VectorInput {
         variant: Some(variant),
     })
+}
+
+/// Convert plan inference `options` to the proto options map (empty when unset).
+fn grpc_options(
+    options: &Option<serde_json::Map<String, serde_json::Value>>,
+) -> std::collections::HashMap<String, qdrant::Value> {
+    options
+        .as_ref()
+        .map(|map| {
+            map.iter()
+                .map(|(k, v)| (k.clone(), super::values::to_qdrant_value(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn to_payload_selector(ps: &PayloadSelectorReq) -> qdrant::WithPayloadSelector {
@@ -436,6 +498,35 @@ pub(crate) fn plan_vector_to_proto(v: &PlanVectorValue) -> Result<qdrant::Vector
                 .iter()
                 .map(|row| qdrant::DenseVector { data: row.clone() })
                 .collect(),
+        }),
+        PlanVectorValue::Document {
+            text,
+            model,
+            options,
+        } => ProtoVector::Document(qdrant::Document {
+            text: text.clone(),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
+        }),
+        PlanVectorValue::Image {
+            image,
+            model,
+            options,
+        } => ProtoVector::Image(qdrant::Image {
+            image: Some(qdrant::Value {
+                kind: Some(qdrant::value::Kind::StringValue(image.clone())),
+            }),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
+        }),
+        PlanVectorValue::Object {
+            object,
+            model,
+            options,
+        } => ProtoVector::Object(qdrant::InferenceObject {
+            object: Some(super::values::to_qdrant_value(object.clone())),
+            model: model.clone().unwrap_or_default(),
+            options: grpc_options(options),
         }),
         // Fail closed (see `to_vector_input`): gating lives in
         // `ensure_no_unbound_params` / `validate_no_unbound_scalar_params`,

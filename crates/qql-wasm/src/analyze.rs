@@ -118,6 +118,9 @@ impl Client {
             qql_plan::RestProjectionError::SerializeFailed { message } => {
                 JsValue::from_str(&format!("plan IR serialization failed: {message}"))
             }
+            qql_plan::RestProjectionError::OverwriteRequiresBatch => JsValue::from_str(
+                "OVERWRITE has no single REST route: POST /points/payload is merge-only; use a BATCH block",
+            ),
         })?;
         let envelope = self
             .send_json(route.method.as_str(), &route.path, route.body_json())

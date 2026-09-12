@@ -182,7 +182,7 @@ pub trait QdrantOps: Send + Sync {
 
 Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON, and the strict per-operation parser (`crate::rest_response::parse_planned`) decodes the OpenAPI response shape into `BackendResponse`, failing `QQL-BACKEND-ENVELOPE` on any missing or mistyped field. gRPC and edge convert proto / `qdrant-edge` values straight into typed `BackendResponse` for every operation — reads, mutations, and DDL alike; no JSON response builders or `TODO(R2/R3)` fallback arms remain.
 
-### Statement → Endpoint Matrix (26 REST routes: 25 statements + 1 helper)
+### Statement → Endpoint Matrix (27 REST routes: 26 statements + 1 helper)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -211,6 +211,8 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `SHOW COLLECTION` | `/collections/{c}` | GET |
 | `SHOW QUOTAS` | `/quotas` | GET |
 | `SET QUOTA` | `/quotas` | PUT |
+| `BATCH {` queries `}` | `/points/query/batch` | POST |
+| `BATCH {` mutations `}` | `/points/batch` | POST |
 | *(helper, no QQL statement)* `change_aliases` | `/collections/aliases` | POST |
 
 `QUERY CROSS RERANK` is client-side (no Qdrant route). Shard-key ops execute via `execute_planned`.

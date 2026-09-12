@@ -21,8 +21,11 @@ pub struct MockQdrantClient {
     pub last_planned: Arc<Mutex<Option<qql_plan::PlannedOperation>>>,
     pub batch_call_count: Arc<Mutex<usize>>,
     pub last_batch_searches_count: Arc<Mutex<usize>>,
+    pub last_batch_timeout: Arc<Mutex<Option<u64>>>,
+    pub last_batch_consistency: Arc<Mutex<Option<String>>>,
     pub update_batch_call_count: Arc<Mutex<usize>>,
     pub last_update_batch_ops_count: Arc<Mutex<usize>>,
+    pub last_update_batch_wait: Arc<Mutex<Option<bool>>>,
     pub execute_planned_call_count: Arc<Mutex<usize>>,
     pub create_collection_call_count: Arc<Mutex<usize>>,
     /// Counts `get_collection_info` calls (schema-fetch accounting for
@@ -52,8 +55,11 @@ impl Default for MockQdrantClient {
             last_planned: Arc::new(Mutex::new(None)),
             batch_call_count: Arc::new(Mutex::new(0)),
             last_batch_searches_count: Arc::new(Mutex::new(0)),
+            last_batch_timeout: Arc::new(Mutex::new(None)),
+            last_batch_consistency: Arc::new(Mutex::new(None)),
             update_batch_call_count: Arc::new(Mutex::new(0)),
             last_update_batch_ops_count: Arc::new(Mutex::new(0)),
+            last_update_batch_wait: Arc::new(Mutex::new(None)),
             execute_planned_call_count: Arc::new(Mutex::new(0)),
             info_call_count: Arc::new(Mutex::new(0)),
             exists_call_count: Arc::new(Mutex::new(0)),
@@ -192,9 +198,13 @@ impl QdrantOps for MockQdrantClient {
         &self,
         _collection: &str,
         batch: &QueryBatchRequest,
+        timeout: Option<u64>,
+        consistency: Option<qql_plan::types::ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError> {
         *self.batch_call_count.lock().unwrap() += 1;
         *self.last_batch_searches_count.lock().unwrap() = batch.searches.len();
+        *self.last_batch_timeout.lock().unwrap() = timeout;
+        *self.last_batch_consistency.lock().unwrap() = consistency.map(|c| c.to_query_value());
         if *self.fail_query_batch.lock().unwrap() {
             return Err(QqlError::transport(
                 "QQL-BACKEND-HTTP",
@@ -217,9 +227,11 @@ impl QdrantOps for MockQdrantClient {
         &self,
         _collection: &str,
         batch: &UpdateBatchRequest,
+        wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
         *self.update_batch_call_count.lock().unwrap() += 1;
         *self.last_update_batch_ops_count.lock().unwrap() = batch.operations.len();
+        *self.last_update_batch_wait.lock().unwrap() = Some(wait);
         Ok(batch
             .operations
             .iter()

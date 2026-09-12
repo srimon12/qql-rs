@@ -121,16 +121,20 @@ impl QdrantOps for GrpcQdrant {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
+        timeout: Option<u64>,
+        consistency: Option<qql_plan::types::ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError> {
-        crate::grpc_route::execute_query_batch_grpc(self, collection, batch).await
+        crate::grpc_route::execute_query_batch_grpc(self, collection, batch, timeout, consistency)
+            .await
     }
 
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
+        wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
-        crate::grpc_route::execute_update_batch_grpc(self, collection, batch).await
+        crate::grpc_route::execute_update_batch_grpc(self, collection, batch, wait).await
     }
 
     async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {

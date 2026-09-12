@@ -9,20 +9,15 @@ use crate::decode::{formula, vector};
 use crate::json::{self, child, index, invalid};
 use qql_core::ast::{FeedbackItem, FeedbackStrategy, FusionMethod, QueryExpr};
 
-/// Decode `{"order_by": field | {key, direction, start_from?}}`.
+/// Decode `{"order_by": field | {key, direction?, start_from?}}`.
 pub(crate) fn order_by(obj: &json::Obj, path: &str) -> Result<QueryExpr, ConvertError> {
     use qql_core::ast::OrderDirection;
     let ob_path = child(path, "order_by");
     let value = json::required(obj, "order_by", path)?;
-    let (field, direction) = match value {
-        Value::String(field) => (field.clone(), OrderDirection::Asc),
+    let (field, direction, start_from) = match value {
+        Value::String(field) => (field.clone(), OrderDirection::Asc, None),
         Value::Object(ob) => {
-            if ob.contains_key("start_from") {
-                return Err(invalid(
-                    child(&ob_path, "start_from"),
-                    "ORDER BY start_from has no QQL representation",
-                ));
-            }
+            json::reject_unknown(ob, &ob_path, &["key", "direction", "start_from"])?;
             let field = json::required(ob, "key", &ob_path)
                 .and_then(|v| Ok(json::string_at(v, &child(&ob_path, "key"))?.to_string()))?;
             let direction = match ob.get("direction").filter(|v| !v.is_null()) {
@@ -38,7 +33,11 @@ pub(crate) fn order_by(obj: &json::Obj, path: &str) -> Result<QueryExpr, Convert
                     }
                 },
             };
-            (field, direction)
+            let start_from = match ob.get("start_from").filter(|v| !v.is_null()) {
+                None => None,
+                Some(raw) => Some(decode_start_from(raw, &child(&ob_path, "start_from"))?),
+            };
+            (field, direction, start_from)
         }
         other => {
             return Err(invalid(
@@ -50,7 +49,27 @@ pub(crate) fn order_by(obj: &json::Obj, path: &str) -> Result<QueryExpr, Convert
             ));
         }
     };
-    Ok(QueryExpr::OrderBy { field, direction })
+    Ok(QueryExpr::OrderBy {
+        field,
+        direction,
+        start_from,
+    })
+}
+
+/// Decode an `OrderBy.start_from` payload value: integer, float, or datetime string.
+pub(crate) fn decode_start_from(
+    value: &Value,
+    path: &str,
+) -> Result<qql_core::ast::Value, ConvertError> {
+    match json::json_to_ast_value(value, path)? {
+        scalar @ (qql_core::ast::Value::Int(_)
+        | qql_core::ast::Value::Float(_)
+        | qql_core::ast::Value::Str(_)) => Ok(scalar),
+        _ => Err(invalid(
+            path,
+            "ORDER BY start_from must be an integer, float, or datetime string",
+        )),
+    }
 }
 
 /// Decode `{"sample": "random"}`.

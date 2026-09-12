@@ -416,6 +416,18 @@ fn plan_input_to_vector_internal(input: &PlanQueryInput) -> Result<VectorInterna
         PlanQueryInput::Image { .. } => Err(edge_error(
             "image input reached edge execution without client-side embedding",
         )),
+        // Edge has no inference service; custom objects stay rejected like
+        // the other inference inputs.
+        PlanQueryInput::Object { .. } => Err(edge_error(
+            "object input reached edge execution without client-side embedding",
+        )),
+        PlanQueryInput::Vector(
+            PlanVectorValue::Document { .. }
+            | PlanVectorValue::Image { .. }
+            | PlanVectorValue::Object { .. },
+        ) => Err(edge_error(
+            "inference vector reached edge execution without client-side embedding",
+        )),
     }
 }
 

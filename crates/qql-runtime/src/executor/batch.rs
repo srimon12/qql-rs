@@ -1,7 +1,7 @@
 use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 use qql_core::parser;
-use qql_plan::{BatchGrouper, plan};
+use qql_plan::{BatchGrouper, PlannedOperation, plan};
 
 use crate::executor::{ExecResponse, ExecutionReport, Executor, OnError};
 
@@ -161,8 +161,19 @@ impl Executor {
                     .await?;
             }
             if let Some(single) = dispatch_single {
-                self.dispatch_or_collect(single, stop_on_error, &mut results)
-                    .await?;
+                // Explicit BATCH blocks never merge with ambient groups: flush
+                // whatever is pending, then run members as one forced group.
+                if matches!(single, PlannedOperation::Batch { .. }) {
+                    if let Some(ops) = grouper.finish() {
+                        self.flush_planned_group(ops, stop_on_error, &mut results)
+                            .await?;
+                    }
+                    self.execute_batch_op(&single, stop_on_error, &mut results)
+                        .await?;
+                } else {
+                    self.dispatch_or_collect(single, stop_on_error, &mut results)
+                        .await?;
+                }
             }
         }
 
@@ -214,7 +225,13 @@ impl Executor {
         if is_query {
             let (collection, batch) = qql_plan::build_query_batch(&operations)?;
             let expected = batch.searches.len();
-            match self.client.execute_query_batch(&collection, &batch).await {
+            // Ambient groups carry no header opts: per-search read opts stay
+            // on the member requests (gRPC) as before.
+            match self
+                .client
+                .execute_query_batch(&collection, &batch, None, None)
+                .await
+            {
                 Ok(responses) if responses.len() == expected => {
                     for (response, op) in responses.into_iter().zip(operations.iter()) {
                         // Batch items normalize exactly like singly dispatched
@@ -291,7 +308,12 @@ impl Executor {
 
         let (collection, _labels, batch) = qql_plan::build_update_batch(&operations)?;
         let expected = batch.operations.len();
-        match self.client.execute_update_batch(&collection, &batch).await {
+        // Ambient groups always wait, preserving prior behavior.
+        match self
+            .client
+            .execute_update_batch(&collection, &batch, true)
+            .await
+        {
             Ok(responses) if responses.len() == expected => {
                 for (response, op) in responses.into_iter().zip(operations.iter()) {
                     // Same normalization as single dispatch: upserts report
@@ -312,6 +334,128 @@ impl Executor {
                     return Err(error);
                 }
                 self.retry_batch_individually(operations, results).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Run an explicit `BATCH` block as one forced group with header opts.
+    ///
+    /// Unlike ambient groups, members always take the batch RPC path (even a
+    /// lone member, so header `WAIT` / `PARAMS` are never dropped) and never
+    /// merge with neighboring statements. Per-member responses normalize
+    /// exactly like grouped results.
+    pub(crate) async fn execute_batch_op(
+        &self,
+        op: &qql_plan::PlannedOperation,
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        use qql_plan::PlannedOperation;
+        let PlannedOperation::Batch {
+            key,
+            operations,
+            wait,
+            timeout,
+            consistency,
+        } = op
+        else {
+            return Err(QqlError::execution(
+                "QQL-BATCH-INVARIANT",
+                "execute_batch_op requires a Batch operation",
+                None,
+            ));
+        };
+        match key {
+            qql_plan::BatchKey::Query(collection) => {
+                let (_, batch) = qql_plan::build_query_batch(operations)?;
+                let expected = batch.searches.len();
+                match self
+                    .client
+                    .execute_query_batch(collection, &batch, *timeout, consistency.clone())
+                    .await
+                {
+                    Ok(responses) if responses.len() == expected => {
+                        for (response, op) in responses.into_iter().zip(operations.iter()) {
+                            results.push(Self::normalize_planned(op, response)?);
+                        }
+                    }
+                    Ok(responses) => {
+                        let error =
+                            qql_plan::verify_batch_cardinality("query", expected, responses.len())
+                                .unwrap_err();
+                        if stop_on_error {
+                            return Err(error);
+                        }
+                        self.retry_forced_members_individually(operations.clone(), results)
+                            .await?;
+                    }
+                    Err(error) => {
+                        if stop_on_error {
+                            return Err(error);
+                        }
+                        self.retry_forced_members_individually(operations.clone(), results)
+                            .await?;
+                    }
+                }
+            }
+            qql_plan::BatchKey::Mutation(collection) => {
+                let (_, _, batch) = qql_plan::build_update_batch(operations)?;
+                let expected = batch.operations.len();
+                match self
+                    .client
+                    .execute_update_batch(collection, &batch, wait.unwrap_or(true))
+                    .await
+                {
+                    Ok(responses) if responses.len() == expected => {
+                        for (response, op) in responses.into_iter().zip(operations.iter()) {
+                            results.push(Self::normalize_planned(op, response)?);
+                        }
+                    }
+                    Ok(responses) => {
+                        let error =
+                            qql_plan::verify_batch_cardinality("update", expected, responses.len())
+                                .unwrap_err();
+                        if stop_on_error {
+                            return Err(error);
+                        }
+                        self.retry_forced_members_individually(operations.clone(), results)
+                            .await?;
+                    }
+                    Err(error) => {
+                        if stop_on_error {
+                            return Err(error);
+                        }
+                        self.retry_forced_members_individually(operations.clone(), results)
+                            .await?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Retry forced batch members one request at a time.
+    ///
+    /// Members are never `Batch` or client-side ops (the planner rejects
+    /// those), so this dispatches straight through [`Self::dispatch_raw`]
+    /// instead of [`Self::dispatch_or_collect`] — keeping
+    /// [`Self::dispatch_planned`] non-recursive.
+    async fn retry_forced_members_individually(
+        &self,
+        operations: Vec<qql_plan::PlannedOperation>,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        for operation in operations {
+            match self.dispatch_raw(&operation).await {
+                Ok(response) => results.push(Self::normalize_planned(&operation, response)?),
+                Err(error) => results.push(ExecResponse {
+                    ok: false,
+                    operation: operation.operation_label().to_string(),
+                    message: error.to_string(),
+                    data: None,
+                    telemetry: None,
+                }),
             }
         }
         Ok(())

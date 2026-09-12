@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::ConvertError;
 use crate::decode::DecodeCtx;
+use crate::decode::modes::decode_start_from;
 use crate::decode::params::{decode_with_payload, decode_with_vector};
 use crate::decode::{filter, vector};
 use crate::json::{self, child, index, invalid};
@@ -52,6 +53,7 @@ pub(crate) fn point_request(body: &Value, ctx: DecodeCtx<'_>) -> Result<QueryStm
 
 /// Decode a `POST /points/scroll` (`ScrollRequest`) body into `SCROLL`.
 pub(crate) fn scroll(body: &Value, ctx: DecodeCtx<'_>) -> Result<ScrollStmt, ConvertError> {
+    use qql_core::ast::OrderDirection;
     ctx.opts.reject_wait()?;
     ctx.opts.reject_read()?;
     let path = "body";
@@ -69,20 +71,51 @@ pub(crate) fn scroll(body: &Value, ctx: DecodeCtx<'_>) -> Result<ScrollStmt, Con
             "shard_key",
         ],
     )?;
-    if obj.contains_key("order_by") {
-        return Err(invalid(
-            child(path, "order_by"),
-            "SCROLL order_by has no QQL representation; use QUERY ORDER BY",
-        ));
-    }
-    if let Some(payload) = obj.get("with_payload").filter(|v| !v.is_null())
-        && payload != &Value::Bool(true)
-    {
-        return Err(invalid(
-            child(path, "with_payload"),
-            "SCROLL always returns payload in QQL; with_payload false / field lists have no representation",
-        ));
-    }
+    let order_by = match obj.get("order_by").filter(|v| !v.is_null()) {
+        None => None,
+        Some(Value::String(field)) => Some(qql_core::ast::ScrollOrderBy {
+            field: field.clone(),
+            direction: OrderDirection::Asc,
+            start_from: None,
+        }),
+        Some(Value::Object(ob)) => {
+            let ob_path = child(path, "order_by");
+            json::reject_unknown(ob, &ob_path, &["key", "direction", "start_from"])?;
+            let field = json::required(ob, "key", &ob_path)
+                .and_then(|v| Ok(json::string_at(v, &child(&ob_path, "key"))?.to_string()))?;
+            let direction = match ob.get("direction").filter(|v| !v.is_null()) {
+                None => OrderDirection::Asc,
+                Some(dir) => match json::string_at(dir, &child(&ob_path, "direction"))? {
+                    "asc" => OrderDirection::Asc,
+                    "desc" => OrderDirection::Desc,
+                    other => {
+                        return Err(invalid(
+                            child(&ob_path, "direction"),
+                            format!("unknown order direction '{other}'"),
+                        ));
+                    }
+                },
+            };
+            let start_from = match ob.get("start_from").filter(|v| !v.is_null()) {
+                None => None,
+                Some(raw) => Some(decode_start_from(raw, &child(&ob_path, "start_from"))?),
+            };
+            Some(qql_core::ast::ScrollOrderBy {
+                field,
+                direction,
+                start_from,
+            })
+        }
+        Some(other) => {
+            return Err(invalid(
+                child(path, "order_by"),
+                format!(
+                    "expected a field name or order object, got {}",
+                    json::type_name(other)
+                ),
+            ));
+        }
+    };
     let limit = json::opt_u64(obj, "limit", path)?.unwrap_or(10);
     let after = match obj.get("offset").filter(|v| !v.is_null()) {
         None => None,
@@ -93,7 +126,9 @@ pub(crate) fn scroll(body: &Value, ctx: DecodeCtx<'_>) -> Result<ScrollStmt, Con
         limit,
         filter: filter::filter_field(obj, "filter", path)?,
         after,
+        order_by,
         shard_key: vector::shard_key_field(obj, path)?,
+        with_payload: decode_with_payload(obj, path)?,
         with_vector: decode_with_vector(obj, path)?,
         limit_param: None,
         limit_span: None,

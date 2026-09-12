@@ -2,8 +2,21 @@
 
 use super::query::QueryCollection;
 use super::types::*;
-use crate::ast::FilterExpr;
+use crate::ast::{FilterExpr, Value};
 use alloc::string::String;
+
+/// `ORDER BY` tail of a `SCROLL` statement (OpenAPI `ScrollRequest.order_by`).
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ScrollOrderBy {
+    /// Payload field to sort on.
+    pub field: String,
+    /// Sort direction (`ASC` default).
+    pub direction: OrderDirection,
+    /// Optional paging origin: resume ordering from this payload value
+    /// (OpenAPI `OrderBy.start_from`: integer, float, or datetime string).
+    pub start_from: Option<Value>,
+}
 
 /// `SCROLL FROM <collection> … LIMIT n` — cursor-based point iteration.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,8 +30,12 @@ pub struct ScrollStmt {
     pub filter: Option<Box<FilterExpr>>,
     /// `AFTER` cursor — resume scrolling after this point ID.
     pub after: Option<PointId>,
+    /// Optional `ORDER BY` payload ordering (OpenAPI `order_by`).
+    pub order_by: Option<ScrollOrderBy>,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<super::ShardKey>,
+    /// Optional `WITH PAYLOAD` selector. Defaults to all payload when `None`.
+    pub with_payload: Option<PayloadSelector>,
     /// Optional `WITH VECTOR` selector. Defaults to no vectors when `None`.
     pub with_vector: Option<VectorSelector>,
     /// Optional limit parameter placeholder (`:limit` or `?`).

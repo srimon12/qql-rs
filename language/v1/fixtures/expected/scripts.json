@@ -178,13 +178,16 @@
             "on_disk": null,
             "payload_m": null
           },
+          "metadata": null,
           "optimizers": null,
           "params": null,
           "quantization": null,
           "quantization_update": null,
           "sparse_vector_diffs": [],
+          "strict_mode": null,
           "vector_diffs": [],
-          "vectors": null
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {

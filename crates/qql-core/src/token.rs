@@ -47,6 +47,8 @@ pub enum TokenKind {
     Asc,
     /// The `AVERAGE_VECTOR` keyword.
     AverageVector,
+    /// The `BATCH` keyword.
+    Batch,
     /// The `BEST_SCORE` keyword.
     BestScore,
     /// The `BETWEEN` keyword.
@@ -117,6 +119,8 @@ pub enum TokenKind {
     End,
     /// The `EUCLID` keyword.
     Euclid,
+    /// The `EXCEPT` keyword (used by `MATCH EXCEPT`).
+    Except,
     /// The `EXACT` keyword.
     Exact,
     /// The `FACET` keyword.
@@ -135,6 +139,8 @@ pub enum TokenKind {
     Feedback,
     /// The `FIELD` keyword.
     Field,
+    /// The `FILTER` keyword (upsert `UPDATE FILTER` guard).
+    Filter,
     /// A float literal token; also the `FLOAT` field-type keyword.
     Float,
     /// The `FOR` keyword.
@@ -183,6 +189,8 @@ pub enum TokenKind {
     Include,
     /// The `INDEX` keyword.
     Index,
+    /// The `INSERT_ONLY` keyword (upsert `UPDATE MODE` value).
+    InsertOnly,
     /// The `INDEXED_ONLY` keyword.
     IndexedOnly,
     /// The `INDICES` keyword.
@@ -227,6 +235,8 @@ pub enum TokenKind {
     Max,
     /// The `MAX_SELECTIVITY` keyword.
     MaxSelectivity,
+    /// The `METADATA` keyword.
+    Metadata,
     /// The `MIDPOINT` keyword.
     Midpoint,
     /// The `MIN` keyword.
@@ -235,6 +245,8 @@ pub enum TokenKind {
     Mmr,
     /// The `MODEL` keyword.
     Model,
+    /// The `MODE` keyword (upsert `UPDATE MODE` guard).
+    Mode,
     /// The `MULTI` keyword.
     Multi,
     /// The `MULTIVECTOR` keyword.
@@ -251,16 +263,22 @@ pub enum TokenKind {
     Not,
     /// The `NULL` keyword.
     Null,
+    /// The `OBJECT` keyword.
+    Object,
     /// The `OFFSET` keyword.
     Offset,
     /// The `ON` keyword.
     On,
     /// The `OPTIMIZERS` keyword.
     Optimizers,
+    /// The `OPTIONS` keyword.
+    Options,
     /// The `OR` keyword.
     Or,
     /// The `ORDER` keyword.
     Order,
+    /// The `OVERWRITE` keyword (payload `OVERWRITE` flag).
+    Overwrite,
     /// The `OVERSAMPLING` keyword.
     Oversampling,
     /// The `PARAMS` keyword.
@@ -323,6 +341,8 @@ pub enum TokenKind {
     Shard,
     /// The `SHOW` keyword.
     Show,
+    /// The `SHOULD` keyword (used by `MIN SHOULD`).
+    Should,
     /// The `SIZE` keyword.
     Size,
     /// The `SLICE` keyword.
@@ -331,8 +351,12 @@ pub enum TokenKind {
     Sparse,
     /// The `SQRT` keyword.
     Sqrt,
+    /// The `START` keyword (`ORDER BY … START FROM <value>` paging origin).
+    Start,
     /// The `STRATEGY` keyword.
     Strategy,
+    /// The `STRICT_MODE` keyword.
+    StrictMode,
     /// The `SUM_SCORES` keyword.
     SumScores,
     /// The `TARGET` keyword.
@@ -345,6 +369,8 @@ pub enum TokenKind {
     Threshold,
     /// The `TIMEOUT` keyword.
     Timeout,
+    /// The `TOKENS` keyword (used by `MATCH TOKENS`).
+    Tokens,
     /// The `TOP_LEFT` keyword.
     TopLeft,
     /// The `TRUE` keyword.
@@ -353,6 +379,8 @@ pub enum TokenKind {
     Type,
     /// The `UPDATE` keyword.
     Update,
+    /// The `UPDATE_ONLY` keyword (upsert `UPDATE MODE` value).
+    UpdateOnly,
     /// The `UPSERT` keyword.
     Upsert,
     /// The `USING` keyword.
@@ -367,6 +395,8 @@ pub enum TokenKind {
     Vector,
     /// The `WAIT` keyword.
     Wait,
+    /// The `WAL` keyword.
+    Wal,
     /// The `WHEN` keyword.
     When,
     /// The `WHERE` keyword.
@@ -433,6 +463,7 @@ gen_as_str! {
     As => "AS",
     Asc => "ASC",
     AverageVector => "AVERAGE_VECTOR",
+    Batch => "BATCH",
     BestScore => "BEST_SCORE",
     Between => "BETWEEN",
     Bool => "BOOL",
@@ -468,6 +499,7 @@ gen_as_str! {
     Empty => "EMPTY",
     End => "END",
     Euclid => "EUCLID",
+    Except => "EXCEPT",
     Exact => "EXACT",
     Facet => "FACET",
     Exclude => "EXCLUDE",
@@ -477,6 +509,7 @@ gen_as_str! {
     False => "FALSE",
     Feedback => "FEEDBACK",
     Field => "FIELD",
+    Filter => "FILTER",
     Float => "FLOAT",
     For => "FOR",
     Formula => "FORMULA",
@@ -501,6 +534,7 @@ gen_as_str! {
     In => "IN",
     Include => "INCLUDE",
     Index => "INDEX",
+    InsertOnly => "INSERT_ONLY",
     IndexedOnly => "INDEXED_ONLY",
     Indices => "INDICES",
     Integer => "INTEGER",
@@ -523,10 +557,12 @@ gen_as_str! {
     MatchAny => "MATCH_ANY",
     Max => "MAX",
     MaxSelectivity => "MAX_SELECTIVITY",
+    Metadata => "METADATA",
     Midpoint => "MIDPOINT",
     Min => "MIN",
     Mmr => "MMR",
     Model => "MODEL",
+    Mode => "MODE",
     Multi => "MULTI",
     Multivector => "MULTIVECTOR",
     Naive => "NAIVE",
@@ -535,11 +571,14 @@ gen_as_str! {
     Nested => "NESTED",
     Not => "NOT",
     Null => "NULL",
+    Object => "OBJECT",
     Offset => "OFFSET",
     On => "ON",
     Optimizers => "OPTIMIZERS",
+    Options => "OPTIONS",
     Or => "OR",
     Order => "ORDER",
+    Overwrite => "OVERWRITE",
     Oversampling => "OVERSAMPLING",
     Params => "PARAMS",
     Payload => "PAYLOAD",
@@ -571,21 +610,26 @@ gen_as_str! {
     Set => "SET",
     Shard => "SHARD",
     Show => "SHOW",
+    Should => "SHOULD",
     Size => "SIZE",
     Slice => "SLICE",
     Sparse => "SPARSE",
     Sqrt => "SQRT",
+    Start => "START",
     Strategy => "STRATEGY",
+    StrictMode => "STRICT_MODE",
     SumScores => "SUM_SCORES",
     Target => "TARGET",
     Text => "TEXT",
     Then => "THEN",
     Threshold => "THRESHOLD",
     Timeout => "TIMEOUT",
+    Tokens => "TOKENS",
     TopLeft => "TOP_LEFT",
     True => "TRUE",
     Type => "TYPE",
     Update => "UPDATE",
+    UpdateOnly => "UPDATE_ONLY",
     Upsert => "UPSERT",
     Using => "USING",
     Uuid => "UUID",
@@ -593,6 +637,7 @@ gen_as_str! {
     ValuesCount => "VALUES_COUNT",
     Vector => "VECTOR",
     Wait => "WAIT",
+    Wal => "WAL",
     When => "WHEN",
     Where => "WHERE",
     With => "WITH",

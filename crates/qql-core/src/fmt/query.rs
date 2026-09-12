@@ -68,7 +68,17 @@ pub(crate) fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
             let _ = write!(clause, " SIZE {}", size);
         }
         if let Some(lookup) = &group.lookup {
-            let _ = write!(clause, " LOOKUP FROM {}", render_name(lookup));
+            let _ = write!(clause, " LOOKUP FROM {}", render_name(&lookup.collection));
+            if let Some(selector) = &lookup.payload {
+                let _ = write!(
+                    clause,
+                    " WITH PAYLOAD {}",
+                    render_payload_selector(selector)
+                );
+            }
+            if let Some(selector) = &lookup.vectors {
+                let _ = write!(clause, " WITH VECTOR {}", render_vector_selector(selector));
+            }
         }
         parts.push(clause);
     }

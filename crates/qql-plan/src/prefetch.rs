@@ -81,6 +81,7 @@ pub fn lower_prefetch_with_ctes(
         lookup_from: prefetch.lookup.as_ref().map(|l| LookupRequest {
             collection: l.collection.clone(),
             vector: l.vector.clone(),
+            shard_key: l.shard_key.as_ref().map(PlanShardKey::from),
         }),
         prefetch: nested_prefetch,
     })
@@ -201,6 +202,7 @@ pub(crate) fn build_query_with_prefetch(
                 QueryInput::Text { text, .. } => PlanQueryInput::Document {
                     text: text.clone(),
                     model: Some(rerank_model.clone()),
+                    options: None,
                 },
                 _ => lower_query_input(input),
             };
@@ -262,6 +264,7 @@ fn build_text_input(text: &str, model: &Option<String>, using: Option<&str>) -> 
     PlanQueryInput::Document {
         text: text.to_string(),
         model: resolved_model,
+        options: None,
     }
 }
 
@@ -298,6 +301,7 @@ pub(crate) fn extract_lookup_from(query: &QueryStmt) -> Option<LookupRequest> {
             return Some(LookupRequest {
                 collection: l.collection.clone(),
                 vector: l.vector.clone(),
+                shard_key: l.shard_key.as_ref().map(PlanShardKey::from),
             });
         }
     }

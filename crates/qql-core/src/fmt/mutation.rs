@@ -2,12 +2,13 @@
 
 use crate::ast::{
     ClearPayloadStmt, CountStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, EmbedDirective,
-    EmbedKind, EmbeddingSpec, FacetStmt, PointEntry, PointSelector, PointVectors, QueryCollection,
-    ScrollStmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt, escape_string,
+    EmbedKind, EmbeddingSpec, FacetStmt, OrderDirection, PointEntry, PointSelector, PointVectors,
+    QueryCollection, ScrollStmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
+    UpsertUpdateMode, escape_string,
 };
 use crate::fmt::expr::{
-    render_name, render_placeholder, render_point_id, render_value, render_vector_selector,
-    render_vector_value,
+    render_name, render_payload_selector, render_placeholder, render_point_id, render_value,
+    render_vector_selector, render_vector_value,
 };
 use crate::fmt::filter::render_filter;
 use alloc::format;
@@ -24,8 +25,25 @@ pub(crate) fn render_scroll(statement: &ScrollStmt) -> String {
     if let Some(after) = &statement.after {
         let _ = write!(out, " AFTER {}", render_point_id(after));
     }
+    if let Some(order) = &statement.order_by {
+        let _ = write!(
+            out,
+            " ORDER BY {} {}",
+            render_name(&order.field),
+            match order.direction {
+                OrderDirection::Asc => "ASC",
+                OrderDirection::Desc => "DESC",
+            }
+        );
+        if let Some(value) = &order.start_from {
+            let _ = write!(out, " START FROM {}", render_value(value));
+        }
+    }
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD {key}");
+    }
+    if let Some(selector) = &statement.with_payload {
+        let _ = write!(out, " WITH PAYLOAD {}", render_payload_selector(selector));
     }
     if let Some(selector) = &statement.with_vector {
         let _ = write!(out, " WITH VECTOR {}", render_vector_selector(selector));
@@ -73,6 +91,20 @@ pub(crate) fn render_upsert(statement: &UpsertStmt) -> String {
             out.push_str(" EMBED ");
             out.push_str(&render_embed_directive(&statement.embed[0]));
         }
+    }
+    if let Some(filter) = &statement.update_filter {
+        let _ = write!(out, " UPDATE FILTER {}", render_filter(filter));
+    }
+    if let Some(mode) = &statement.update_mode {
+        let _ = write!(
+            out,
+            " UPDATE MODE {}",
+            match mode {
+                UpsertUpdateMode::InsertOnly => "insert_only",
+                UpsertUpdateMode::UpdateOnly => "update_only",
+                UpsertUpdateMode::Upsert => "upsert",
+            }
+        );
     }
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD {key}");
@@ -214,11 +246,17 @@ pub(crate) fn render_update_payload(statement: &UpdatePayloadStmt) -> String {
         .map(|(key, value)| format!("{}: {}", render_name(key), render_value(value)))
         .collect();
     let mut out = format!(
-        "UPDATE {} SET PAYLOAD = {{{}}} WHERE {}",
+        "UPDATE {} SET PAYLOAD = {{{}}}",
         render_name(&statement.collection),
         payload.join(", "),
-        render_point_selector(&statement.selector)
     );
+    if let Some(key) = &statement.key {
+        let _ = write!(out, " KEY '{}'", escape_string(key));
+    }
+    if statement.overwrite {
+        out.push_str(" OVERWRITE");
+    }
+    let _ = write!(out, " WHERE {}", render_point_selector(&statement.selector));
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD {key}");
     }

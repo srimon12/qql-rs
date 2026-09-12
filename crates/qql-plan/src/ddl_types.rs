@@ -228,6 +228,120 @@ pub struct TurboQuantization {
     pub memory: Option<MemoryPlacement>,
 }
 
+/// OpenAPI `WalConfigDiff` (collection creation only).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct WalConfig {
+    /// Size of a single WAL segment in MB (`wal_capacity_mb`).
+    #[serde(rename = "wal_capacity_mb", skip_serializing_if = "Option::is_none")]
+    pub capacity_mb: Option<u64>,
+    /// WAL segments created ahead of use (`wal_segments_ahead`).
+    #[serde(rename = "wal_segments_ahead", skip_serializing_if = "Option::is_none")]
+    pub segments_ahead: Option<u64>,
+    /// Closed WAL segments retained (`wal_retain_closed`).
+    #[serde(rename = "wal_retain_closed", skip_serializing_if = "Option::is_none")]
+    pub retain_closed: Option<u64>,
+}
+
+/// OpenAPI `StrictModeConfig` (collection creation and update).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StrictModeConfig {
+    /// Whether strict mode is enabled (`enabled`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Max `limit` for APIs without their own cap (`max_query_limit`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_query_limit: Option<u64>,
+    /// Max `timeout` (`max_timeout`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_timeout: Option<u64>,
+    /// Allow unindexed fields in retrieval filters (`unindexed_filtering_retrieve`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unindexed_filtering_retrieve: Option<bool>,
+    /// Allow unindexed fields in update filters (`unindexed_filtering_update`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unindexed_filtering_update: Option<bool>,
+    /// Max HNSW ef in search params (`search_max_hnsw_ef`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_max_hnsw_ef: Option<u64>,
+    /// Whether exact search is allowed (`search_allow_exact`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_allow_exact: Option<bool>,
+    /// Max oversampling in search (`search_max_oversampling`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_max_oversampling: Option<f64>,
+    /// Max upsert batch size (`upsert_max_batchsize`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upsert_max_batchsize: Option<u64>,
+    /// Max search batch size (`search_max_batchsize`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_max_batchsize: Option<u64>,
+    /// Max vector-storage bytes, ignoring replicas (`max_collection_vector_size_bytes`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_collection_vector_size_bytes: Option<u64>,
+    /// Max reads per minute per replica (`read_rate_limit`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_rate_limit: Option<u64>,
+    /// Max writes per minute per replica (`write_rate_limit`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_rate_limit: Option<u64>,
+    /// Max payload-storage bytes (`max_collection_payload_size_bytes`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_collection_payload_size_bytes: Option<u64>,
+    /// Max estimated point count (`max_points_count`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_points_count: Option<u64>,
+    /// Max filter conditions (`filter_max_conditions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_max_conditions: Option<u64>,
+    /// Max condition size, e.g. `MatchAny` items (`condition_max_size`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_max_size: Option<u64>,
+    /// Per-multivector caps (`multivector_config`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multivector_config: Option<StrictModeMultivectorConfig>,
+    /// Per-sparse-vector caps (`sparse_config`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sparse_config: Option<StrictModeSparseConfig>,
+    /// Max payload index count (`max_payload_index_count`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_payload_index_count: Option<u64>,
+    /// Resident-memory percent cap (`max_resident_memory_percent`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_resident_memory_percent: Option<u64>,
+}
+
+/// OpenAPI `StrictModeMultivectorConfig`: per-multivector caps by vector name.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StrictModeMultivectorConfig {
+    /// Caps keyed by multivector name (`{max_vectors}` each).
+    #[serde(flatten)]
+    pub vectors: BTreeMap<String, StrictModeMultivector>,
+}
+
+/// One multivector's strict-mode caps.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StrictModeMultivector {
+    /// Max vectors in the multivector (`max_vectors`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_vectors: Option<u64>,
+}
+
+/// OpenAPI `StrictModeSparseConfig`: per-sparse-vector caps by vector name.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StrictModeSparseConfig {
+    /// Caps keyed by sparse vector name (`{max_length}` each).
+    #[serde(flatten)]
+    pub vectors: BTreeMap<String, StrictModeSparse>,
+}
+
+/// One sparse vector's strict-mode caps.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StrictModeSparse {
+    /// Max sparse vector length (`max_length`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u64>,
+}
+
 /// Multivector (late-interaction) comparator; OpenAPI `max_sim` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -418,6 +532,15 @@ pub struct CreateCollectionRequest {
     /// Vector quantization settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<QuantizationConfig>,
+    /// Write-ahead log settings (`WITH WAL`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wal_config: Option<Box<WalConfig>>,
+    /// Strict-mode settings (`WITH STRICT_MODE`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict_mode_config: Option<Box<StrictModeConfig>>,
+    /// Free-form collection metadata (`WITH METADATA`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Box<serde_json::Map<String, serde_json::Value>>>,
     /// Number of shards (`shard_number`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_number: Option<u64>,
@@ -444,6 +567,12 @@ pub struct UpdateCollectionRequest {
     /// Quantization replacement (`Disabled` or a config).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<QuantizationConfigDiff>,
+    /// Strict-mode replacement (`WITH STRICT_MODE`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict_mode_config: Option<Box<StrictModeConfig>>,
+    /// Metadata merge (`WITH METADATA`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Box<serde_json::Map<String, serde_json::Value>>>,
     /// Per-vector dense diffs: REST `VectorsConfigDiff` is this name-keyed map
     /// (`""` addresses the default unnamed vector).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -464,6 +593,12 @@ pub struct CreateShardKeyRequest {
     /// Replication factor for the key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replication_factor: Option<u64>,
+    /// Peer ids placing the key's shards.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Vec<u64>>,
+    /// Initial replica state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_state: Option<String>,
 }
 
 /// Plan IR for dropping a custom shard key from a collection.

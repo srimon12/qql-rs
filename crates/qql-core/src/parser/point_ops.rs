@@ -1,5 +1,5 @@
 use super::AstLowerer;
-use crate::ast::{CountStmt, FacetStmt, ScrollStmt, Stmt};
+use crate::ast::{CountStmt, FacetStmt, OrderDirection, ScrollOrderBy, ScrollStmt, Stmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
@@ -21,9 +21,45 @@ impl<'a> AstLowerer<'a> {
         } else {
             None
         };
+        // Optional: ORDER BY <key> [ASC|DESC] [START FROM <value>].
+        let order_by = if self.peek()?.kind == TokenKind::Order {
+            self.advance()?;
+            self.expect(TokenKind::By)?;
+            let field = self.parse_field_path()?;
+            let direction = match self.peek()?.kind {
+                TokenKind::Desc => {
+                    self.advance()?;
+                    OrderDirection::Desc
+                }
+                TokenKind::Asc => {
+                    self.advance()?;
+                    OrderDirection::Asc
+                }
+                _ => OrderDirection::Asc,
+            };
+            let start_from = self.parse_optional_order_start()?;
+            Some(ScrollOrderBy {
+                field,
+                direction,
+                start_from,
+            })
+        } else {
+            None
+        };
         let shard_key = if self.peek()?.kind == TokenKind::Shard {
             self.advance()?;
             Some(self.parse_shard_key_atom()?)
+        } else {
+            None
+        };
+        // Optional: WITH PAYLOAD [true|false|INCLUDE (...)|EXCLUDE (...)].
+        // Bare `WITH PAYLOAD` without a selector means all payload.
+        let with_payload = if self.peek()?.kind == TokenKind::With
+            && self.peek_nth(1).kind == TokenKind::Payload
+        {
+            self.advance()?;
+            self.advance()?;
+            Some(self.parse_payload_selector()?)
         } else {
             None
         };
@@ -48,7 +84,9 @@ impl<'a> AstLowerer<'a> {
             limit,
             filter,
             after,
+            order_by,
             shard_key,
+            with_payload,
             with_vector,
             limit_param,
             limit_span,

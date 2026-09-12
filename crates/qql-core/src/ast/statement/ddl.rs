@@ -232,6 +232,12 @@ pub struct CollectionConfig {
     pub quantization: Option<Box<QuantizationConfig>>,
     /// Quantization replacement emitted by `ALTER COLLECTION`.
     pub quantization_update: Option<Box<QuantizationUpdate>>,
+    /// Write-ahead log settings (`WITH WAL (…)`); raw pairs, validated by plan.
+    pub wal: Option<Vec<(String, Value)>>,
+    /// Strict-mode settings (`WITH STRICT_MODE (…)`); raw pairs, validated by plan.
+    pub strict_mode: Option<Vec<(String, Value)>>,
+    /// Collection metadata (`WITH METADATA (…)`); raw pairs, serialized as a map.
+    pub metadata: Option<Vec<(String, Value)>>,
     /// Per-vector dense diffs emitted by `ALTER COLLECTION … WITH VECTOR <name>`.
     pub vector_diffs: Vec<VectorDiff>,
     /// Per-sparse-vector diffs emitted by `ALTER COLLECTION … WITH SPARSE <name>`.
@@ -330,6 +336,10 @@ pub struct CreateShardKeyStmt {
     pub shards_number: Option<u64>,
     /// Replication factor for these shards.
     pub replication_factor: Option<u64>,
+    /// Peer ids placing the key's shards (`placement = […]`).
+    pub placement: Option<Vec<u64>>,
+    /// Initial replica state (`initial_state = '…'`), canonical casing.
+    pub initial_state: Option<String>,
 }
 
 /// `DROP SHARD KEY '<key>' ON COLLECTION <c>`.

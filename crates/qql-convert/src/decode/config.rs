@@ -295,6 +295,27 @@ pub(crate) fn sparse_index(value: &Value, path: &str) -> Result<SparseIndexConfi
     })
 }
 
+/// Decode a free-form config object (`wal_config`, `strict_mode_config`,
+/// `metadata`) into ordered AST pairs (sorted for canonical output).
+///
+/// Values decode generically; the plan layer validates keys and types
+/// fail-closed when lowering.
+pub(crate) fn raw_options(
+    value: &Value,
+    path: &str,
+) -> Result<Vec<(String, qql_core::ast::Value)>, ConvertError> {
+    let obj = json::object(value, path)?;
+    let mut pairs = Vec::with_capacity(obj.len());
+    for (key, item) in obj {
+        pairs.push((
+            key.clone(),
+            crate::json::json_to_ast_value(item, &child(path, key))?,
+        ));
+    }
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(pairs)
+}
+
 /// Decode `CreateCollection` top-level collection params.
 ///
 /// The OpenAPI create body hoists replication / consistency / payload storage

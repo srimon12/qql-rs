@@ -94,6 +94,32 @@ impl<'a> AstLowerer<'a> {
             }
             return Ok(FilterExpr::Slice { total, index });
         }
+        // `MIN` is also a plausible field name (`min = 5`), so only treat it
+        // as the `MIN SHOULD` opener when `SHOULD` follows.
+        if self.peek()?.kind == TokenKind::Min && self.peek_nth(1).kind == TokenKind::Should {
+            let start = self.peek()?.span;
+            self.advance()?;
+            self.advance()?;
+            let min_count = self.parse_non_negative_u64("MIN SHOULD")?;
+            if min_count == 0 {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-MIN-SHOULD",
+                    "MIN SHOULD count must be >= 1",
+                    Some(start),
+                ));
+            }
+            self.expect(TokenKind::Lparen)?;
+            let mut operands = alloc::vec![self.parse_filter_expr()?];
+            while self.peek()?.kind == TokenKind::Comma {
+                self.advance()?;
+                operands.push(self.parse_filter_expr()?);
+            }
+            self.expect(TokenKind::Rparen)?;
+            return Ok(FilterExpr::MinShould {
+                min_count,
+                operands,
+            });
+        }
         self.parse_predicate()
     }
 
@@ -316,6 +342,26 @@ impl<'a> AstLowerer<'a> {
                     field,
                     prefix: self.parse_string()?,
                 });
+            }
+            if self.peek()?.kind == TokenKind::Tokens {
+                self.advance()?;
+                return Ok(FilterExpr::MatchTokens {
+                    field,
+                    text: self.parse_string()?,
+                });
+            }
+            if self.peek()?.kind == TokenKind::Except {
+                self.advance()?;
+                let list_tok = self.peek()?;
+                let values = self.parse_literal_list()?;
+                if values.is_empty() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-MATCH-EXCEPT",
+                        "MATCH EXCEPT requires a non-empty exact-value list",
+                        list_tok.span,
+                    ));
+                }
+                return Ok(FilterExpr::MatchExcept { field, values });
             }
             return Ok(FilterExpr::MatchText {
                 field,

@@ -171,7 +171,6 @@ fn unsupported_endpoints_fail_closed() {
         ("GET", "/collections/docs/snapshots"),
         ("PUT", "/collections/docs/points/payload"),
         ("POST", "/collections/docs/points/search"),
-        ("POST", "/collections/docs/points/query/batch"),
         ("PUT", "/collections/docs/vectors/dense"),
     ] {
         let input = wrapped(method, path, serde_json::json!({}));
@@ -183,6 +182,73 @@ fn unsupported_endpoints_fail_closed() {
             "{method} {path} must be unsupported"
         );
     }
+}
+
+#[test]
+fn batch_endpoints_decode_to_single_block() {
+    let batch = wrapped(
+        "POST",
+        "/collections/docs/points/query/batch",
+        serde_json::json!({"searches": [
+            {"query": {"nearest": [0.1]}, "limit": 1},
+            {"query": {"nearest": [0.2]}, "limit": 3},
+        ]}),
+    );
+    assert_eq!(
+        convert_json(&batch, None).expect("query batch"),
+        ["BATCH {\n  QUERY [0.1] FROM docs LIMIT 1;\n  QUERY [0.2] FROM docs LIMIT 3;\n}"]
+    );
+    let shared = wrapped_query(
+        "POST",
+        "/collections/docs/points/query/batch",
+        serde_json::json!({"timeout": "30"}),
+        serde_json::json!({"searches": [
+            {"query": {"nearest": [0.1]}, "limit": 1},
+        ]}),
+    );
+    assert_eq!(
+        convert_json(&shared, None).expect("query batch with timeout"),
+        ["BATCH {\n  QUERY [0.1] FROM docs LIMIT 1;\n} PARAMS (timeout = 30)"]
+    );
+    let ops = wrapped(
+        "POST",
+        "/collections/docs/points/batch",
+        serde_json::json!({"operations": [
+            {"upsert": {"points": [{"id": 1, "vector": [0.1]}]}},
+            {"delete": {"points": [2]}},
+            {"set_payload": {"payload": {"a": 1}, "points": [1]}},
+        ]}),
+    );
+    assert_eq!(
+        convert_json(&ops, None).expect("points batch"),
+        [
+            "BATCH {\n  UPSERT INTO docs VALUES {id: 1, vector: [0.1]};\n  DELETE FROM docs WHERE id IN (2);\n  UPDATE docs SET PAYLOAD = {a: 1} WHERE id IN (1);\n}"
+        ]
+    );
+    let waited = wrapped_query(
+        "POST",
+        "/collections/docs/points/batch",
+        serde_json::json!({"wait": false}),
+        serde_json::json!({"operations": [
+            {"delete": {"points": [2]}},
+        ]}),
+    );
+    assert_eq!(
+        convert_json(&waited, None).expect("points batch with wait"),
+        ["BATCH {\n  DELETE FROM docs WHERE id IN (2);\n} WAIT false"]
+    );
+    let overwrite = wrapped(
+        "POST",
+        "/collections/docs/points/batch",
+        serde_json::json!({"operations": [
+            {"overwrite_payload": {"payload": {"a": 1}, "points": [1]}},
+        ]}),
+    );
+    // `overwrite_payload` decodes into an `OVERWRITE` payload statement.
+    assert_eq!(
+        convert_json(&overwrite, None).expect("overwrite_payload batch decodes"),
+        ["BATCH {\n  UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id IN (1);\n}"]
+    );
 }
 
 #[test]
@@ -204,78 +270,54 @@ fn typed_errors_cover_invalid_inputs() {
         ConvertError::UndecodableBody { .. }
     ));
 
-    // min_should is a documented typed error, not a silent drop.
-    let err = convert_err(
-        r#"{"query": {"nearest": [0.1]}, "filter": {"min_should": {"conditions": [{"key": "a", "match": {"value": 1}}], "min_count": 1}}}"#,
+    // min_should decodes to MIN SHOULD (at-least-N of a condition set).
+    let stmts = convert(
+        r#"{"filter": {"min_should": {"conditions": [{"key": "a", "match": {"value": 1}}], "min_count": 1}}, "limit": 1}"#,
     );
     assert!(
-        matches!(err, ConvertError::InvalidField { ref path, .. } if path == "body.filter.min_should"),
-        "{err:?}"
+        stmts[0].contains("MIN SHOULD 1 (a = 1)"),
+        "unexpected min_should conversion: {}",
+        stmts[0]
     );
 
-    // match.except has no QQL representation.
-    let err = convert_err(
-        r#"{"query": {"nearest": [0.1]}, "filter": {"must": [{"key": "a", "match": {"except": ["x"]}}]}}"#,
+    // match.except decodes to MATCH EXCEPT.
+    let stmts =
+        convert(r#"{"filter": {"must": [{"key": "a", "match": {"except": ["x"]}}]}, "limit": 1}"#);
+    assert!(
+        stmts[0].contains("a MATCH EXCEPT ('x')"),
+        "unexpected except conversion: {}",
+        stmts[0]
     );
-    assert!(matches!(err, ConvertError::InvalidField { .. }), "{err:?}");
 }
 
 /// Shapes the QQL AST cannot express fail closed with a typed error naming
 /// the offending path — never a silent drop or a placeholder statement.
+///
+/// (`SetPayload.key`, upsert `update_filter` / `update_mode`, and batch
+/// `overwrite_payload` are representable — `UPDATE … KEY`, `UPDATE FILTER` /
+/// `UPDATE MODE`, and `OVERWRITE` — so they are covered by the round-trip
+/// suites, not this table. `UpdateVectors.update_filter` stays fail-closed.)
 #[test]
 fn unrepresentable_fields_are_typed_errors() {
     let cases: Vec<(&str, &str, &str)> = vec![
         // (wrapped method, wrapped path, body)
+        // SCROLL order_by is representable (`SCROLL … ORDER BY …`), so the
+        // fail-closed scroll case uses an unknown field instead.
         (
             "POST",
             "/collections/docs/points/scroll",
-            r#"{"order_by": {"key": "created_at"}}"#,
+            r#"{"order_by": {"key": "created_at", "unknown_opt": true}}"#,
         ),
-        (
-            "POST",
-            "/collections/docs/points/payload",
-            r#"{"payload": {"a": 1}, "points": [1], "key": "nested.path"}"#,
-        ),
+        // UpdateVectors.update_filter stays fail-closed (no QQL representation).
         (
             "PUT",
             "/collections/docs/points/vectors",
             r#"{"points": [{"id": 1, "vector": [0.1]}], "update_filter": {"must": [{"key": "a", "match": {"value": 1}}]}}"#,
         ),
-        (
-            "PUT",
-            "/collections/docs/points",
-            r#"{"points": [{"id": 1, "vector": [0.1]}], "update_mode": "insert_only"}"#,
-        ),
-        (
-            "PUT",
-            "/collections/docs",
-            r#"{"vectors": {"dense": {"size": 4, "distance": "Cosine"}}, "wal_config": {"wal_capacity_mb": 8}}"#,
-        ),
-        (
-            "PUT",
-            "/collections/docs",
-            r#"{"vectors": {"dense": {"size": 4, "distance": "Cosine"}}, "metadata": {"a": 1}}"#,
-        ),
-        (
-            "PATCH",
-            "/collections/docs",
-            r#"{"strict_mode_config": {"enabled": true}}"#,
-        ),
-        (
-            "PUT",
-            "/collections/docs/shards",
-            r#"{"shard_key": "acme", "placement": [1]}"#,
-        ),
-        (
-            "POST",
-            "/collections/docs/points/query",
-            r#"{"query": {"nearest": {"text": "x", "model": "m", "options": {"a": 1}}}}"#,
-        ),
-        (
-            "POST",
-            "/collections/docs/points/query",
-            r#"{"query": {"nearest": {"object": {"a": 1}, "model": "m"}}}"#,
-        ),
+        // NOTE: upsert update_filter/update_mode, SetPayload key, scroll
+        // order_by, wal/strict/metadata/placement, inference options/object,
+        // and text-index stopwords used to fail here; they are now faithful
+        // QQL shapes (see the route_parity corpus), so they left this table.
     ];
     for (method, path, body) in cases {
         let wrapped = wrapped(method, path, serde_json::from_str(body).expect("case body"));

@@ -11,6 +11,9 @@ pub enum Value {
     Str(String),
     /// Integer literal.
     Int(i64),
+    /// Unsigned integer literal: bare digit literals that overflow `i64`
+    /// (up to `u64::MAX`) parse here instead of failing or becoming strings.
+    UInt(u64),
     /// Floating-point literal.
     Float(f64),
     /// Boolean literal (`true` / `false`).
@@ -48,6 +51,7 @@ impl core::fmt::Debug for Value {
         match self {
             Self::Str(value) => f.debug_tuple("Str").field(value).finish(),
             Self::Int(value) => f.debug_tuple("Int").field(value).finish(),
+            Self::UInt(value) => f.debug_tuple("UInt").field(value).finish(),
             Self::Float(value) => f.debug_tuple("Float").field(value).finish(),
             Self::Bool(value) => f.debug_tuple("Bool").field(value).finish(),
             Self::Null => f.write_str("Null"),
@@ -105,22 +109,25 @@ impl Value {
 
     /// Convert a JSON value into a QQL `Value`.
     ///
-    /// Integer numbers stay `Int`; any other number becomes `Float`.
+    /// Integer numbers stay `Int`, unsigned integers above `i64::MAX` become
+    /// `UInt`, and any other number becomes `Float`.
     #[cfg(feature = "json")]
     pub fn from_json(value: serde_json::Value) -> Result<Self, QqlError> {
         match value {
             serde_json::Value::String(value) => Ok(Self::Str(value)),
-            serde_json::Value::Number(value) => value
-                .as_i64()
-                .map(Self::Int)
-                .or_else(|| value.as_f64().map(Self::Float))
-                .ok_or_else(|| {
-                    QqlError::validation(
-                        "QQL-JSON-NUMBER",
-                        "JSON number cannot be represented by QQL",
-                        None,
-                    )
-                }),
+            serde_json::Value::Number(value) => match value.as_i64() {
+                Some(int) => Ok(Self::Int(int)),
+                None => match value.as_u64() {
+                    Some(uint) => Ok(Self::UInt(uint)),
+                    None => value.as_f64().map(Self::Float).ok_or_else(|| {
+                        QqlError::validation(
+                            "QQL-JSON-NUMBER",
+                            "JSON number cannot be represented by QQL",
+                            None,
+                        )
+                    }),
+                },
+            },
             serde_json::Value::Bool(value) => Ok(Self::Bool(value)),
             serde_json::Value::Null => Ok(Self::Null),
             serde_json::Value::Array(items) => items
@@ -148,6 +155,7 @@ impl Value {
         match self {
             Self::Str(value) => Ok(serde_json::Value::String(value.clone())),
             Self::Int(value) => Ok(serde_json::Value::Number((*value).into())),
+            Self::UInt(value) => Ok(serde_json::Value::Number((*value).into())),
             Self::Float(value) => serde_json::Number::from_f64(*value)
                 .map(serde_json::Value::Number)
                 .ok_or_else(|| {

@@ -35,6 +35,11 @@ pub enum UpdateOperation {
         /// Payload keys to merge into the targeted points.
         set_payload: UpdatePayloadRequest,
     },
+    /// `{ "overwrite_payload": … }` — replace the full payload.
+    Overwrite {
+        /// Payload replacing the targeted points' payload.
+        overwrite_payload: UpdatePayloadRequest,
+    },
     /// `{ "clear_payload": … }` — remove all payload.
     ClearPayload {
         /// Selector for the points whose payload is cleared.
@@ -64,6 +69,7 @@ impl UpdateOperation {
             UpdateOperation::Upsert { .. } => "UPSERT",
             UpdateOperation::Delete { .. } => "DELETE",
             UpdateOperation::SetPayload { .. } => "UPDATE_PAYLOAD",
+            UpdateOperation::Overwrite { .. } => "OVERWRITE_PAYLOAD",
             UpdateOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
             UpdateOperation::DeletePayload { .. } => "DELETE_PAYLOAD",
             UpdateOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
@@ -123,9 +129,27 @@ pub struct ScrollRequest {
 pub struct UpsertRequest {
     /// Points to insert or overwrite.
     pub points: Vec<UpsertPointRequest>,
+    /// `update_filter`: only matching points update (new points insert anyway).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_filter: Option<FilterExpression>,
+    /// `update_mode`: insert_only / update_only / upsert (default when omitted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_mode: Option<UpdateMode>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<crate::semantic::PlanShardKey>,
+}
+
+/// OpenAPI `UpdateMode` for upserts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    /// Only insert new points, do not update existing points.
+    InsertOnly,
+    /// Only update existing points, do not insert new points.
+    UpdateOnly,
+    /// Insert new points, update existing points (the default).
+    Upsert,
 }
 
 impl UpsertRequest {
@@ -196,6 +220,9 @@ pub struct UpdatePayloadRequest {
     pub filter: Option<FilterExpression>,
     /// Payload keys to set on the selected points.
     pub payload: serde_json::Map<String, serde_json::Value>,
+    /// Nested assignment path (OpenAPI `SetPayload.key`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<crate::semantic::PlanShardKey>,

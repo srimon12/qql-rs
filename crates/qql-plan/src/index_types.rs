@@ -135,11 +135,18 @@ impl Serialize for StemmingAlgorithm {
     }
 }
 
-/// OpenAPI `StopwordsSet`: custom stopwords (QQL exposes no language lists).
+/// OpenAPI `StopwordsSet`: predefined language lists plus custom stopwords.
+///
+/// Serializes as `{"languages": […], "custom": […]}` with empty sides
+/// omitted; a language-only set keeps the `languages` key so the wire form
+/// round-trips through conversion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StopwordsSet {
+    /// Predefined language stopword lists (OpenAPI `Language` names).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub languages: Vec<String>,
     /// Custom stopwords, merged with any language lists server-side.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub custom: Vec<String>,
 }
 

@@ -1,7 +1,7 @@
 //! Wrapped-request endpoint resolution.
 //!
 //! The authority for endpoint → statement mapping is the "Statement →
-//! Endpoint Matrix" in the workspace `AGENTS.md` (26 routes: 25 statements +
+//! Endpoint Matrix" in the workspace `AGENTS.md` (27 routes: 26 statements +
 //! the `change_aliases` helper). OpenAPI paths outside that matrix are
 //! [`ConvertError::UnsupportedEndpoint`], even when `openapi.json` defines a
 //! request schema for them — QQL has no statement to emit.
@@ -61,6 +61,10 @@ pub(crate) enum Endpoint {
     ShowQuotas,
     /// `PUT /quotas` → `SET QUOTA`.
     SetQuota,
+    /// `POST /collections/{c}/points/query/batch` → one query `BATCH` block.
+    QueryBatch,
+    /// `POST /collections/{c}/points/batch` → one mutation `BATCH` block.
+    PointsBatch,
 }
 
 impl Endpoint {
@@ -149,6 +153,8 @@ pub(crate) fn parse(method: &str, path: &str) -> Result<EndpointMatch, ConvertEr
         ("POST", ["points", "count"]) => Endpoint::Count,
         ("PUT", ["points"]) => Endpoint::Upsert,
         ("POST", ["points", "delete"]) => Endpoint::Delete,
+        ("POST", ["points", "query", "batch"]) => Endpoint::QueryBatch,
+        ("POST", ["points", "batch"]) => Endpoint::PointsBatch,
         ("POST", ["points", "payload", "clear"]) => Endpoint::ClearPayload,
         ("POST", ["points", "payload", "delete"]) => Endpoint::DeletePayload,
         ("POST", ["points", "vectors", "delete"]) => Endpoint::DeleteVectors,

@@ -30,6 +30,12 @@ pub struct CreateCollectionRestBody<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     quantization_config: Option<&'a QuantizationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    wal_config: Option<&'a WalConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strict_mode_config: Option<&'a StrictModeConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     shard_number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sharding_method: Option<ShardingMethod>,
@@ -52,6 +58,9 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> CreateColle
         hnsw_config: req.hnsw_config.as_ref(),
         optimizers_config: req.optimizers_config.as_ref(),
         quantization_config: req.quantization_config.as_ref(),
+        wal_config: req.wal_config.as_deref(),
+        strict_mode_config: req.strict_mode_config.as_deref(),
+        metadata: req.metadata.as_deref(),
         shard_number: req.shard_number,
         sharding_method: req.sharding_method,
         // OpenAPI CreateCollection: replication_factor / write_consistency_factor /

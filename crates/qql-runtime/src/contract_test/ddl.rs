@@ -139,7 +139,7 @@ fn ddl_create_grpc_reads_same_ir_as_rest_projection() {
     let Stmt::CreateCollection(cc) = stmt else {
         panic!()
     };
-    let req = lower_create_collection(&cc);
+    let req = lower_create_collection(&cc).expect("create lowers");
     let rest = serde_json::to_value(create_collection_rest_body(&req)).unwrap();
     assert_eq!(rest["replication_factor"], 2);
     assert_eq!(

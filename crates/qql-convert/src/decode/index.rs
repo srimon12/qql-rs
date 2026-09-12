@@ -144,23 +144,54 @@ fn decode_stemmer(value: &Value, path: &str) -> Result<AstValue, ConvertError> {
     }
 }
 
-/// Decode `StopwordsInterface` into the AST's custom stopword list.
+/// Decode `StopwordsInterface` into AST options: a bare language name, a
+/// custom list, or a `{languages, custom}` set object.
 fn decode_stopwords(value: &Value, path: &str) -> Result<AstValue, ConvertError> {
     match value {
+        // A bare `Language` string selects the predefined list.
+        Value::String(language) => Ok(AstValue::Str(check_language(language, path)?)),
         Value::Array(items) => items_to_strings(items, path).map(AstValue::List),
         Value::Object(obj) => {
-            if obj.get("languages").is_some_and(|v| !v.is_null()) {
-                return Err(invalid(
-                    child(path, "languages"),
-                    "predefined stopword languages have no QQL representation; only a custom list is supported",
-                ));
-            }
-            match obj.get("custom").filter(|v| !v.is_null()) {
-                None => Ok(AstValue::List(Vec::new())),
-                Some(value) => {
+            json::reject_unknown(obj, path, &["languages", "custom"])?;
+            let languages = match obj.get("languages").filter(|v| !v.is_null()) {
+                None => None,
+                Some(languages) => {
+                    let list_path = child(path, "languages");
+                    let items = json::array(languages, &list_path)?;
+                    let mut checked = Vec::with_capacity(items.len());
+                    for (i, item) in items.iter().enumerate() {
+                        checked.push(AstValue::Str(check_language(
+                            json::string_at(item, &crate::json::index(&list_path, i))?,
+                            &crate::json::index(&list_path, i),
+                        )?));
+                    }
+                    Some(checked)
+                }
+            };
+            let custom = match obj.get("custom").filter(|v| !v.is_null()) {
+                None => None,
+                Some(custom) => {
                     let list_path = child(path, "custom");
-                    items_to_strings(json::array(value, &list_path)?, &list_path)
-                        .map(AstValue::List)
+                    Some(items_to_strings(
+                        json::array(custom, &list_path)?,
+                        &list_path,
+                    )?)
+                }
+            };
+            // A custom-only set is the plain list form; language sets keep the
+            // `{languages: […], custom: […]}` object spelling (empty sides
+            // omitted so the canonical form is minimal).
+            match (languages, custom) {
+                (None, Some(words)) => Ok(AstValue::List(words)),
+                (languages, custom) => {
+                    let mut entries = Vec::new();
+                    if let Some(languages) = languages.filter(|words| !words.is_empty()) {
+                        entries.push(("languages".to_string(), AstValue::List(languages)));
+                    }
+                    if let Some(custom) = custom.filter(|words| !words.is_empty()) {
+                        entries.push(("custom".to_string(), AstValue::List(custom)));
+                    }
+                    Ok(AstValue::Dict(entries))
                 }
             }
         }
@@ -170,6 +201,52 @@ fn decode_stopwords(value: &Value, path: &str) -> Result<AstValue, ConvertError>
         )),
     }
 }
+
+/// Validate a stopword language against the OpenAPI `Language` enum,
+/// normalizing to lowercase.
+fn check_language(raw: &str, path: &str) -> Result<String, ConvertError> {
+    let lower = raw.to_ascii_lowercase();
+    if STOPWORD_LANGUAGES.contains(&lower.as_str()) {
+        Ok(lower)
+    } else {
+        Err(invalid(path, format!("unknown stopwords language '{raw}'")))
+    }
+}
+
+/// OpenAPI `Language` names accepted in `stopwords` language lists.
+/// Mirrors the plan-side table; both reject unknown languages fail-closed.
+const STOPWORD_LANGUAGES: &[&str] = &[
+    "arabic",
+    "azerbaijani",
+    "basque",
+    "bengali",
+    "catalan",
+    "chinese",
+    "danish",
+    "dutch",
+    "english",
+    "finnish",
+    "french",
+    "german",
+    "greek",
+    "hebrew",
+    "hinglish",
+    "hungarian",
+    "indonesian",
+    "italian",
+    "japanese",
+    "kazakh",
+    "nepali",
+    "norwegian",
+    "portuguese",
+    "romanian",
+    "russian",
+    "slovene",
+    "spanish",
+    "swedish",
+    "tajik",
+    "turkish",
+];
 
 /// Decode a JSON array of strings into AST string literals.
 fn items_to_strings(items: &[Value], path: &str) -> Result<Vec<AstValue>, ConvertError> {

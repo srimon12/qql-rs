@@ -19,6 +19,7 @@ pub fn value_to_literal(value: &Value) -> Result<String, QqlError> {
     match value {
         Value::Str(s) => Ok(escape_str_literal(s)),
         Value::Int(n) => Ok(n.to_string()),
+        Value::UInt(n) => Ok(n.to_string()),
         Value::Float(f) => {
             if !f.is_finite() {
                 return Err(QqlError::validation(

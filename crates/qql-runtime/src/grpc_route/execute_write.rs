@@ -7,9 +7,19 @@ use crate::grpc::GrpcQdrant;
 use crate::qdrant_grpc::qdrant;
 
 use super::common::{shard_key_selector, to_point_id};
+use super::filter::to_filter_opt;
 use super::query::{points_and_filter_selector, to_vectors};
 use super::typed::mutation_response_to_typed;
 use super::values::to_qdrant_value;
+
+/// Map a plan [`qql_plan::types::UpdateMode`] to the proto `UpdateMode` value.
+fn to_update_mode(mode: qql_plan::types::UpdateMode) -> i32 {
+    match mode {
+        qql_plan::types::UpdateMode::Upsert => qdrant::UpdateMode::Upsert as i32,
+        qql_plan::types::UpdateMode::InsertOnly => qdrant::UpdateMode::InsertOnly as i32,
+        qql_plan::types::UpdateMode::UpdateOnly => qdrant::UpdateMode::UpdateOnly as i32,
+    }
+}
 
 /// Upsert points via `Points.Upsert`.
 pub(crate) async fn execute_upsert(
@@ -45,6 +55,8 @@ pub(crate) async fn execute_upsert(
         wait: Some(wait),
         points,
         shard_key_selector: shard_key_selector(&request.shard_key),
+        update_filter: to_filter_opt(request.update_filter.as_ref())?,
+        update_mode: request.update_mode.map(to_update_mode),
         ..Default::default()
     };
     let resp = client
@@ -196,12 +208,42 @@ pub(crate) async fn execute_update_payload(
         payload: payload_map,
         points_selector: selector,
         shard_key_selector: shard_key_selector(&request.shard_key),
+        key: request.key.clone(),
         ..Default::default()
     };
     let resp = client
         .set_payload(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
+    Ok(mutation_response_to_typed(resp))
+}
+
+/// Replace the full payload via `Points.OverwritePayload`.
+pub(crate) async fn execute_overwrite_payload(
+    client: &GrpcQdrant,
+    collection: &str,
+    request: &qql_plan::types::UpdatePayloadRequest,
+    wait: bool,
+) -> Result<BackendResponse, QqlError> {
+    let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
+    let payload_map: std::collections::HashMap<String, qdrant::Value> = request
+        .payload
+        .iter()
+        .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+        .collect();
+    let grpc_req = qdrant::SetPayloadPoints {
+        collection_name: collection.to_owned(),
+        wait: Some(wait),
+        payload: payload_map,
+        points_selector: selector,
+        shard_key_selector: shard_key_selector(&request.shard_key),
+        key: request.key.clone(),
+        ..Default::default()
+    };
+    let resp = client
+        .overwrite_payload(grpc_req)
+        .await
+        .map_err(|e| QqlError::backend("QQL-GRPC", format!("overwrite_payload: {e}"), None))?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -215,6 +257,7 @@ pub async fn execute_update_batch_grpc(
     client: &GrpcQdrant,
     collection: &str,
     batch: &qql_plan::UpdateBatchRequest,
+    wait: bool,
 ) -> Result<Vec<BackendResponse>, QqlError> {
     let operations: Vec<qdrant::PointsUpdateOperation> = batch
         .operations
@@ -224,7 +267,7 @@ pub async fn execute_update_batch_grpc(
 
     let grpc_req = qdrant::UpdateBatchPoints {
         collection_name: collection.to_string(),
-        wait: Some(true),
+        wait: Some(wait),
         operations,
         ..Default::default()
     };
@@ -276,8 +319,8 @@ pub(crate) fn to_points_update_operation(
             Operation::Upsert(points_update_operation::PointStructList {
                 points,
                 shard_key_selector,
-                update_filter: None,
-                update_mode: None,
+                update_filter: super::filter::to_filter_opt(upsert.update_filter.as_ref())?,
+                update_mode: upsert.update_mode.map(to_update_mode),
             })
         }
         UpdateOperation::Delete { delete } => {
@@ -302,7 +345,23 @@ pub(crate) fn to_points_update_operation(
                     set_payload.filter.as_ref(),
                 )?,
                 shard_key_selector: shard_key_selector(&set_payload.shard_key),
-                key: None,
+                key: set_payload.key.clone(),
+            })
+        }
+        UpdateOperation::Overwrite { overwrite_payload } => {
+            let payload_map: std::collections::HashMap<String, qdrant::Value> = overwrite_payload
+                .payload
+                .iter()
+                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                .collect();
+            Operation::OverwritePayload(points_update_operation::OverwritePayload {
+                payload: payload_map,
+                points_selector: points_and_filter_selector(
+                    overwrite_payload.points.as_ref(),
+                    overwrite_payload.filter.as_ref(),
+                )?,
+                shard_key_selector: shard_key_selector(&overwrite_payload.shard_key),
+                key: overwrite_payload.key.clone(),
             })
         }
         UpdateOperation::ClearPayload { clear_payload } => {
@@ -358,4 +417,83 @@ pub(crate) fn to_points_update_operation(
     Ok(qdrant::PointsUpdateOperation {
         operation: Some(operation),
     })
+}
+
+#[cfg(test)]
+mod mutation_gap_tests {
+    use super::to_points_update_operation;
+    use qql_core::parser::Parser;
+    use qql_plan::{UpdateOperation, plan};
+
+    fn planned_update_op(source: &str) -> (String, UpdateOperation) {
+        let stmt = Parser::parse(source).expect("parse");
+        let op = plan(&stmt).expect("plan");
+        qql_plan::mutation::planned_to_update_operation(&op).expect("update operation")
+    }
+
+    #[test]
+    fn upsert_guards_map_to_proto() {
+        let (collection, update) = planned_update_op(
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active' UPDATE MODE insert_only;",
+        );
+        assert_eq!(collection, "docs");
+        let proto = to_points_update_operation(&update).expect("proto");
+        match proto.operation.expect("operation") {
+            crate::qdrant_grpc::qdrant::points_update_operation::Operation::Upsert(list) => {
+                assert!(list.update_filter.is_some(), "update_filter must map");
+                assert_eq!(
+                    list.update_mode,
+                    Some(crate::qdrant_grpc::qdrant::UpdateMode::InsertOnly as i32)
+                );
+            }
+            other => panic!("expected Upsert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn upsert_defaults_leave_proto_guards_empty() {
+        let (_, update) = planned_update_op("UPSERT INTO docs VALUES {id: 1, vector: [0.1]};");
+        let proto = to_points_update_operation(&update).expect("proto");
+        match proto.operation.expect("operation") {
+            crate::qdrant_grpc::qdrant::points_update_operation::Operation::Upsert(list) => {
+                assert!(list.update_filter.is_none());
+                assert!(list.update_mode.is_none());
+            }
+            other => panic!("expected Upsert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_payload_key_maps_to_proto() {
+        let (_, update) =
+            planned_update_op("UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;");
+        let proto = to_points_update_operation(&update).expect("proto");
+        match proto.operation.expect("operation") {
+            crate::qdrant_grpc::qdrant::points_update_operation::Operation::SetPayload(set) => {
+                assert_eq!(set.key.as_deref(), Some("a.b"));
+            }
+            other => panic!("expected SetPayload, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn overwrite_maps_to_proto_overwrite_variant() {
+        let (_, update) =
+            planned_update_op("UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' OVERWRITE WHERE id = 1;");
+        // Single-route REST projection stays fail-closed for overwrite.
+        let stmt =
+            Parser::parse("UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1;").unwrap();
+        let op = plan(&stmt).unwrap();
+        assert!(qql_plan::to_rest_route(&op).is_err());
+        // The batch op maps to the proto overwrite variant (not set_payload).
+        let proto = to_points_update_operation(&update).expect("proto");
+        match proto.operation.expect("operation") {
+            crate::qdrant_grpc::qdrant::points_update_operation::Operation::OverwritePayload(
+                overwrite,
+            ) => {
+                assert_eq!(overwrite.key.as_deref(), Some("a.b"));
+            }
+            other => panic!("expected OverwritePayload, got {other:?}"),
+        }
+    }
 }

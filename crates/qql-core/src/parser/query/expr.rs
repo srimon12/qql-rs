@@ -1,4 +1,4 @@
-use crate::ast::{OrderDirection, QueryExpr};
+use crate::ast::{OrderDirection, QueryExpr, Value};
 use crate::error::QqlError;
 use crate::parser::AstLowerer;
 use crate::token::TokenKind;
@@ -51,7 +51,12 @@ impl<'a> AstLowerer<'a> {
                 }
                 _ => OrderDirection::Asc,
             };
-            return Ok(QueryExpr::OrderBy { field, direction });
+            let start_from = self.parse_optional_order_start()?;
+            return Ok(QueryExpr::OrderBy {
+                field,
+                direction,
+                start_from,
+            });
         }
         if self.peek()?.kind == TokenKind::Sample {
             self.advance()?;
@@ -110,5 +115,28 @@ impl<'a> AstLowerer<'a> {
             prefetch: Vec::new(),
             mmr: None,
         })
+    }
+
+    /// Parse an optional `START FROM <value>` paging origin after `ORDER BY`.
+    ///
+    /// OpenAPI `OrderBy.start_from` is a starting payload value: an integer, a
+    /// float, or a datetime string. Parameter placeholders (`:name` / `?`)
+    /// bind like any other scalar. Anything else fails closed.
+    pub(crate) fn parse_optional_order_start(&mut self) -> Result<Option<Value>, QqlError> {
+        if self.peek()?.kind != TokenKind::Start {
+            return Ok(None);
+        }
+        self.advance()?;
+        self.expect(TokenKind::From)?;
+        let span = self.peek()?.span;
+        match self.parse_value()? {
+            value @ (Value::Int(_) | Value::Float(_) | Value::Str(_)) => Ok(Some(value)),
+            value @ (Value::Param(..) | Value::PositionalParam(..)) => Ok(Some(value)),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-ORDER-START",
+                "ORDER BY START FROM requires an integer, float, datetime string, or placeholder",
+                span,
+            )),
+        }
     }
 }

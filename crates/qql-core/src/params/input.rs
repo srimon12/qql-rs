@@ -1,10 +1,11 @@
 //! Query input parameter binding and resolution.
 
-use super::value::{bind_point_id, resolve_param, resolve_positional};
+use super::value::{bind_point_id, bind_value, resolve_param, resolve_positional};
 use crate::ast::Value;
 use crate::ast::statement::{ContextPair, FeedbackItem, PointId, QueryInput};
 use crate::error::{QqlError, Span};
 use alloc::format;
+use alloc::string::String;
 
 /// Recursively bind parameters into a `QueryInput` in-place.
 pub fn bind_query_input<F>(
@@ -30,7 +31,10 @@ where
             bind_point_id(point, lookup, positional)?;
         }
         QueryInput::Text {
-            text, text_param, ..
+            text,
+            text_param,
+            options,
+            ..
         } => {
             if let Some(param) = text_param.take() {
                 if let Some(param_name) = param.strip_prefix(':') {
@@ -75,8 +79,33 @@ where
                     }
                 }
             }
+            bind_option_values(options, lookup, positional)?;
+        }
+        QueryInput::Image { options, .. } => {
+            bind_option_values(options, lookup, positional)?;
+        }
+        QueryInput::Object {
+            object, options, ..
+        } => {
+            bind_value(object, lookup, positional)?;
+            bind_option_values(options, lookup, positional)?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// Bind parameters inside an inference `OPTIONS` dict in-place.
+fn bind_option_values<F>(
+    options: &mut [(String, Value)],
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    for (_, value) in options {
+        bind_value(value, lookup, positional)?;
     }
     Ok(())
 }
@@ -88,8 +117,10 @@ pub fn value_to_query_input(val: Value, span: Option<Span>) -> Result<QueryInput
             text: s,
             model: None,
             text_param: None,
+            options: alloc::vec::Vec::new(),
         }),
         Value::Int(n) if n >= 0 => Ok(QueryInput::Point(PointId::Number(n as u64))),
+        Value::UInt(n) => Ok(QueryInput::Point(PointId::Number(n))),
         Value::List(_) | Value::Dict(_) | Value::F32Array(_) => {
             let vec = crate::parser::helpers::vector_from_value(val, span)?;
             Ok(QueryInput::Vector(vec))

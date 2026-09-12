@@ -15,7 +15,9 @@ pub use crate::ddl_rest::{
 };
 
 /// Lower `CREATE COLLECTION` to the transport-neutral create request.
-pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionRequest {
+pub fn lower_create_collection(
+    stmt: &CreateCollectionStmt,
+) -> Result<CreateCollectionRequest, QqlError> {
     let mut req = CreateCollectionRequest {
         vectors: None,
         sparse_vectors: None,
@@ -23,6 +25,9 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         optimizers_config: None,
         params: None,
         quantization_config: None,
+        wal_config: None,
+        strict_mode_config: None,
+        metadata: None,
         shard_number: None,
         sharding_method: None,
         shard_keys: None,
@@ -69,7 +74,7 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
     }
 
     if let Some(ref config) = stmt.config {
-        fill_collection_config(&mut req, config);
+        fill_collection_config(&mut req, config)?;
         // Collection-scoped `WITH VECTOR (…)` settings are defaults: they fill
         // unset per-vector values and never override an explicit per-vector
         // setting.
@@ -78,7 +83,7 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         }
     }
 
-    req
+    Ok(req)
 }
 
 /// Lower `ALTER COLLECTION` to the transport-neutral update request.
@@ -90,6 +95,8 @@ pub fn lower_alter_collection(
         optimizers_config: None,
         params: None,
         quantization_config: None,
+        strict_mode_config: None,
+        metadata: None,
         vectors: None,
         sparse_vectors: None,
     };
@@ -135,9 +142,7 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
             }
             "stemmer" => options.stemmer = Some(StemmingAlgorithm::parse(index_str(key, value)?)),
             "stopwords" => {
-                options.stopwords = Some(StopwordsSet {
-                    custom: index_str_list(key, value)?,
-                });
+                options.stopwords = Some(lower_stopwords(key, value)?);
             }
             "memory" => {
                 let raw = index_str(key, value)?;
@@ -206,7 +211,128 @@ fn index_str_list(key: &str, value: &Value) -> Result<Vec<String>, QqlError> {
     }
 }
 
-fn fill_collection_config(req: &mut CreateCollectionRequest, config: &CollectionConfig) {
+/// Lower a `stopwords` index option: a custom list, a bare language name, or
+/// a `{languages: […], custom: […]}` set mirroring OpenAPI `StopwordsSet`.
+fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
+    match value {
+        Value::List(_) => Ok(StopwordsSet {
+            languages: Vec::new(),
+            custom: index_str_list(key, value)?,
+        }),
+        Value::Str(language) => Ok(StopwordsSet {
+            languages: vec![check_stopword_language(language)?],
+            custom: Vec::new(),
+        }),
+        Value::Dict(entries) => {
+            let mut languages = Vec::new();
+            let mut custom = Vec::new();
+            for (entry_key, entry_value) in entries {
+                if entry_key.eq_ignore_ascii_case("languages") {
+                    let items = match entry_value {
+                        Value::List(items) => items,
+                        _ => {
+                            return Err(index_option_error(
+                                "stopwords languages must be a list of strings",
+                            ));
+                        }
+                    };
+                    for item in items {
+                        match item {
+                            Value::Str(language) => {
+                                languages.push(check_stopword_language(language)?);
+                            }
+                            _ => {
+                                return Err(index_option_error(
+                                    "stopwords languages must be a list of strings",
+                                ));
+                            }
+                        }
+                    }
+                } else if entry_key.eq_ignore_ascii_case("custom") {
+                    match entry_value {
+                        Value::List(items) => {
+                            for item in items {
+                                match item {
+                                    Value::Str(word) => custom.push(word.clone()),
+                                    _ => {
+                                        return Err(index_option_error(
+                                            "stopwords custom must be a list of strings",
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            return Err(index_option_error(
+                                "stopwords custom must be a list of strings",
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(index_option_error(format!(
+                        "unknown stopwords set key '{entry_key}'. Expected: languages, custom"
+                    )));
+                }
+            }
+            Ok(StopwordsSet { languages, custom })
+        }
+        _ => Err(index_option_error(format!(
+            "{key} must be a list of strings, a language name, or {{languages: […], custom: […]}}"
+        ))),
+    }
+}
+
+/// Validate a stopword language against the OpenAPI `Language` enum
+/// (case-insensitive); returns the canonical lowercase name.
+fn check_stopword_language(raw: &str) -> Result<String, QqlError> {
+    let lower = raw.to_ascii_lowercase();
+    if STOPWORD_LANGUAGES.contains(&lower.as_str()) {
+        Ok(lower)
+    } else {
+        Err(index_option_error(format!(
+            "unknown stopwords language '{raw}'"
+        )))
+    }
+}
+
+/// OpenAPI `Language` names accepted in `stopwords` language lists.
+const STOPWORD_LANGUAGES: &[&str] = &[
+    "arabic",
+    "azerbaijani",
+    "basque",
+    "bengali",
+    "catalan",
+    "chinese",
+    "danish",
+    "dutch",
+    "english",
+    "finnish",
+    "french",
+    "german",
+    "greek",
+    "hebrew",
+    "hinglish",
+    "hungarian",
+    "indonesian",
+    "italian",
+    "japanese",
+    "kazakh",
+    "nepali",
+    "norwegian",
+    "portuguese",
+    "romanian",
+    "russian",
+    "slovene",
+    "spanish",
+    "swedish",
+    "tajik",
+    "turkish",
+];
+
+fn fill_collection_config(
+    req: &mut CreateCollectionRequest,
+    config: &CollectionConfig,
+) -> Result<(), QqlError> {
     if let Some(ref h) = config.hnsw {
         req.hnsw_config = Some(lower_hnsw_config(h));
     }
@@ -226,6 +352,16 @@ fn fill_collection_config(req: &mut CreateCollectionRequest, config: &Collection
     if let Some(ref q) = config.quantization {
         req.quantization_config = Some(lower_quantization_config(q));
     }
+    if let Some(ref wal) = config.wal {
+        req.wal_config = Some(Box::new(lower_wal_config(wal)?));
+    }
+    if let Some(ref strict) = config.strict_mode {
+        req.strict_mode_config = Some(Box::new(lower_strict_mode_config(strict)?));
+    }
+    if let Some(ref metadata) = config.metadata {
+        req.metadata = Some(Box::new(lower_metadata_map(metadata)));
+    }
+    Ok(())
 }
 
 fn fill_update_collection_config(
@@ -242,6 +378,19 @@ fn fill_update_collection_config(
         req.params = Some(lower_collection_params(p));
     }
     req.quantization_config = lower_quantization_diff(config);
+    if let Some(ref strict) = config.strict_mode {
+        req.strict_mode_config = Some(Box::new(lower_strict_mode_config(strict)?));
+    }
+    if let Some(ref metadata) = config.metadata {
+        req.metadata = Some(Box::new(lower_metadata_map(metadata)));
+    }
+    // The update wire shape has no WAL field; the parser rejects
+    // `ALTER … WITH WAL`, so a hand-built AST reaching here fails closed.
+    if config.wal.is_some() {
+        return Err(collection_config_error(
+            "WITH WAL is supported only for CREATE COLLECTION",
+        ));
+    }
 
     // `ALTER COLLECTION … WITH VECTOR (…)` addresses the default unnamed vector
     // (REST documents the empty-string map key for exactly that case).
@@ -398,6 +547,287 @@ fn lower_sharding_method(method: &str) -> ShardingMethod {
     } else {
         ShardingMethod::Auto
     }
+}
+
+fn collection_config_error(message: impl Into<alloc::borrow::Cow<'static, str>>) -> QqlError {
+    QqlError::validation("QQL-PLAN-COLLECTION-CONFIG", message, None)
+}
+
+/// Find a raw config pair by key (case-insensitive).
+fn config_pair<'a>(pairs: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+    pairs
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| v)
+}
+
+/// Extract an optional non-negative integer pair (`None` when absent).
+fn config_pair_u64(pairs: &[(String, Value)], key: &str) -> Result<Option<u64>, QqlError> {
+    match config_pair(pairs, key) {
+        None => Ok(None),
+        Some(Value::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
+        Some(Value::Float(n)) if *n >= 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
+        Some(_) => Err(collection_config_error(format!(
+            "{key} must be a non-negative integer"
+        ))),
+    }
+}
+
+/// Extract an optional positive integer pair (`None` when absent).
+fn config_pair_positive_u64(pairs: &[(String, Value)], key: &str) -> Result<Option<u64>, QqlError> {
+    match config_pair(pairs, key) {
+        None => Ok(None),
+        Some(Value::Int(n)) if *n > 0 => Ok(Some(*n as u64)),
+        Some(Value::Float(n)) if *n > 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
+        Some(_) => Err(collection_config_error(format!(
+            "{key} must be a positive integer"
+        ))),
+    }
+}
+
+/// Extract an optional boolean pair (`None` when absent).
+fn config_pair_bool(pairs: &[(String, Value)], key: &str) -> Result<Option<bool>, QqlError> {
+    match config_pair(pairs, key) {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(collection_config_error(format!(
+            "{key} must be true or false"
+        ))),
+    }
+}
+
+/// Extract an optional finite number pair (`None` when absent).
+fn config_pair_f64(pairs: &[(String, Value)], key: &str) -> Result<Option<f64>, QqlError> {
+    match config_pair(pairs, key) {
+        None => Ok(None),
+        Some(Value::Int(n)) => Ok(Some(*n as f64)),
+        Some(Value::Float(n)) if n.is_finite() => Ok(Some(*n)),
+        Some(_) => Err(collection_config_error(format!("{key} must be a number"))),
+    }
+}
+
+/// Lower `WITH WAL (…)` pairs to the OpenAPI `WalConfigDiff` shape.
+fn lower_wal_config(pairs: &[(String, Value)]) -> Result<WalConfig, QqlError> {
+    for (key, _) in pairs {
+        if !(key.eq_ignore_ascii_case("wal_capacity_mb")
+            || key.eq_ignore_ascii_case("wal_segments_ahead")
+            || key.eq_ignore_ascii_case("wal_retain_closed"))
+        {
+            return Err(collection_config_error(format!(
+                "unknown WAL parameter '{key}'. Expected: wal_capacity_mb, wal_segments_ahead, wal_retain_closed"
+            )));
+        }
+    }
+    // OpenAPI minimums: capacity ≥ 1, the rest ≥ 0.
+    Ok(WalConfig {
+        capacity_mb: config_pair_positive_u64(pairs, "wal_capacity_mb")?,
+        segments_ahead: config_pair_u64(pairs, "wal_segments_ahead")?,
+        retain_closed: config_pair_u64(pairs, "wal_retain_closed")?,
+    })
+}
+
+/// Lower `WITH STRICT_MODE (…)` pairs to the OpenAPI `StrictModeConfig` shape.
+fn lower_strict_mode_config(pairs: &[(String, Value)]) -> Result<StrictModeConfig, QqlError> {
+    for (key, _) in pairs {
+        if !is_strict_mode_key(key) {
+            return Err(collection_config_error(format!(
+                "unknown STRICT_MODE parameter '{key}'"
+            )));
+        }
+    }
+    let mut config = StrictModeConfig {
+        enabled: config_pair_bool(pairs, "enabled")?,
+        max_query_limit: config_pair_positive_u64(pairs, "max_query_limit")?,
+        max_timeout: config_pair_positive_u64(pairs, "max_timeout")?,
+        unindexed_filtering_retrieve: config_pair_bool(pairs, "unindexed_filtering_retrieve")?,
+        unindexed_filtering_update: config_pair_bool(pairs, "unindexed_filtering_update")?,
+        search_max_hnsw_ef: config_pair_u64(pairs, "search_max_hnsw_ef")?,
+        search_allow_exact: config_pair_bool(pairs, "search_allow_exact")?,
+        search_max_oversampling: config_pair_f64(pairs, "search_max_oversampling")?,
+        upsert_max_batchsize: config_pair_u64(pairs, "upsert_max_batchsize")?,
+        search_max_batchsize: config_pair_u64(pairs, "search_max_batchsize")?,
+        max_collection_vector_size_bytes: config_pair_u64(
+            pairs,
+            "max_collection_vector_size_bytes",
+        )?,
+        read_rate_limit: config_pair_positive_u64(pairs, "read_rate_limit")?,
+        write_rate_limit: config_pair_positive_u64(pairs, "write_rate_limit")?,
+        max_collection_payload_size_bytes: config_pair_u64(
+            pairs,
+            "max_collection_payload_size_bytes",
+        )?,
+        max_points_count: config_pair_positive_u64(pairs, "max_points_count")?,
+        filter_max_conditions: config_pair_u64(pairs, "filter_max_conditions")?,
+        condition_max_size: config_pair_u64(pairs, "condition_max_size")?,
+        multivector_config: None,
+        sparse_config: None,
+        max_payload_index_count: config_pair_u64(pairs, "max_payload_index_count")?,
+        max_resident_memory_percent: None,
+    };
+    if let Some(value) = config_pair(pairs, "multivector_config") {
+        config.multivector_config = Some(lower_strict_multivector_config(value)?);
+    }
+    if let Some(value) = config_pair(pairs, "sparse_config") {
+        config.sparse_config = Some(lower_strict_sparse_config(value)?);
+    }
+    if let Some(value) = config_pair(pairs, "max_resident_memory_percent") {
+        match value {
+            Value::Int(n) if (1..=100).contains(n) => {
+                config.max_resident_memory_percent = Some(*n as u64);
+            }
+            _ => {
+                return Err(collection_config_error(
+                    "max_resident_memory_percent must be an integer in [1, 100]",
+                ));
+            }
+        }
+    }
+    Ok(config)
+}
+
+/// Lower a `multivector_config` strict-mode value (`{name: {max_vectors}}`).
+fn lower_strict_multivector_config(value: &Value) -> Result<StrictModeMultivectorConfig, QqlError> {
+    let Value::Dict(entries) = value else {
+        return Err(collection_config_error(
+            "multivector_config must be an object",
+        ));
+    };
+    let mut vectors = BTreeMap::new();
+    for (name, caps) in entries {
+        let Value::Dict(fields) = caps else {
+            return Err(collection_config_error(format!(
+                "multivector_config '{name}' must be an object"
+            )));
+        };
+        let mut entry = StrictModeMultivector::default();
+        for (key, val) in fields {
+            if !key.eq_ignore_ascii_case("max_vectors") {
+                return Err(collection_config_error(format!(
+                    "unknown multivector_config key '{key}'. Expected: max_vectors"
+                )));
+            }
+            match val {
+                Value::Int(n) if *n >= 1 => entry.max_vectors = Some(*n as u64),
+                _ => {
+                    return Err(collection_config_error(
+                        "max_vectors must be a positive integer",
+                    ));
+                }
+            }
+        }
+        vectors.insert(name.clone(), entry);
+    }
+    Ok(StrictModeMultivectorConfig { vectors })
+}
+
+/// Lower a `sparse_config` strict-mode value (`{name: {max_length}}`).
+fn lower_strict_sparse_config(value: &Value) -> Result<StrictModeSparseConfig, QqlError> {
+    let Value::Dict(entries) = value else {
+        return Err(collection_config_error("sparse_config must be an object"));
+    };
+    let mut vectors = BTreeMap::new();
+    for (name, caps) in entries {
+        let Value::Dict(fields) = caps else {
+            return Err(collection_config_error(format!(
+                "sparse_config '{name}' must be an object"
+            )));
+        };
+        let mut entry = StrictModeSparse::default();
+        for (key, val) in fields {
+            if !key.eq_ignore_ascii_case("max_length") {
+                return Err(collection_config_error(format!(
+                    "unknown sparse_config key '{key}'. Expected: max_length"
+                )));
+            }
+            match val {
+                Value::Int(n) if *n >= 1 => entry.max_length = Some(*n as u64),
+                _ => {
+                    return Err(collection_config_error(
+                        "max_length must be a positive integer",
+                    ));
+                }
+            }
+        }
+        vectors.insert(name.clone(), entry);
+    }
+    Ok(StrictModeSparseConfig { vectors })
+}
+
+/// Lower `WITH METADATA (…)` pairs to the free-form metadata map.
+///
+/// `ensure_no_unbound_params` (via `validate_no_unbound_ddl_options`) rejects
+/// placeholders before lowering, so `value_to_json` never sees one here
+/// through the supported entry points.
+fn lower_metadata_map(pairs: &[(String, Value)]) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::with_capacity(pairs.len());
+    for (key, value) in pairs {
+        map.insert(key.clone(), crate::filter::value_to_json(value));
+    }
+    map
+}
+
+/// Canonical OpenAPI `ReplicaState` names for shard-key `initial_state`.
+const REPLICA_STATES: &[&str] = &[
+    "Active",
+    "Dead",
+    "Partial",
+    "Initializing",
+    "Listener",
+    "PartialSnapshot",
+    "Recovery",
+    "Resharding",
+    "ReshardingScaleDown",
+    "ActiveRead",
+    "ManualRecovery",
+];
+
+/// Validate (and canonicalize the casing of) a shard-key `initial_state`.
+/// The parser stores the canonical form; a hand-built AST is normalized here
+/// and fails closed on unknown states.
+pub(crate) fn lower_replica_state(raw: Option<&str>) -> Result<Option<String>, QqlError> {
+    match raw {
+        None => Ok(None),
+        Some(state) => REPLICA_STATES
+            .iter()
+            .find(|known| known.eq_ignore_ascii_case(state))
+            .map(|known| Some(known.to_string()))
+            .ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-PLAN-SHARD-KEY",
+                    format!("unknown replica state '{state}'"),
+                    None,
+                )
+            }),
+    }
+}
+
+/// True when `key` names a `STRICT_MODE` option (case-insensitive).
+/// Mirrors `qql_core::parser::is_strict_mode_key` for hand-built ASTs.
+fn is_strict_mode_key(key: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "enabled",
+        "max_query_limit",
+        "max_timeout",
+        "unindexed_filtering_retrieve",
+        "unindexed_filtering_update",
+        "search_max_hnsw_ef",
+        "search_allow_exact",
+        "search_max_oversampling",
+        "upsert_max_batchsize",
+        "search_max_batchsize",
+        "max_collection_vector_size_bytes",
+        "read_rate_limit",
+        "write_rate_limit",
+        "max_collection_payload_size_bytes",
+        "max_points_count",
+        "filter_max_conditions",
+        "condition_max_size",
+        "multivector_config",
+        "sparse_config",
+        "max_payload_index_count",
+        "max_resident_memory_percent",
+    ];
+    KEYS.iter().any(|known| known.eq_ignore_ascii_case(key))
 }
 
 fn apply_vector_defaults(vectors: Option<&mut DenseVectorsConfig>, default: &VectorsConfig) {
@@ -617,7 +1047,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         assert_eq!(json["vectors"]["dense"]["size"], 384);
         assert_eq!(json["vectors"]["dense"]["distance"], "Cosine");
@@ -650,7 +1080,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["hnsw_config"]["m"], 16);
     }
@@ -722,6 +1152,7 @@ mod tests {
         assert_eq!(
             req.options.stopwords,
             Some(StopwordsSet {
+                languages: Vec::new(),
                 custom: vec!["the".into(), "a".into()]
             })
         );
@@ -767,7 +1198,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         let quant = &json["vectors"]["v"]["quantization_config"];
         assert_eq!(quant["product"]["compression"], "x16");
@@ -782,7 +1213,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         assert_eq!(
             json["vectors"]["v"]["quantization_config"]["product"]["compression"],
@@ -798,7 +1229,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         let quant = &json["vectors"]["v"]["quantization_config"];
         assert_eq!(quant["binary"]["encoding"], "two_bits");
@@ -813,7 +1244,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         let quant = &json["vectors"]["v"]["quantization_config"];
         assert_eq!(quant["turbo"]["bits"], "bits1_5");
@@ -842,7 +1273,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         let v = &json["vectors"]["v"];
         assert_eq!(v["on_disk"], true);
@@ -862,7 +1293,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         for name in ["v", "w"] {
             assert_eq!(json["vectors"][name]["on_disk"], true);
@@ -879,7 +1310,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         assert_eq!(json["vectors"]["v"]["on_disk"], false);
         assert_eq!(json["vectors"]["v"]["memory"], "cold");
@@ -895,7 +1326,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(
             json["optimizers_config"]["max_optimization_threads"],
@@ -914,7 +1345,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let rest = rest_json!(&req);
         // OpenAPI top-level params
         assert_eq!(rest["replication_factor"], 2);
@@ -975,7 +1406,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let rest = rest_json!(&req);
         assert!(rest["hnsw_config"].is_object());
         assert_eq!(rest["hnsw_config"]["m"], 16);
@@ -1160,7 +1591,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         let sparse = &json["sparse_vectors"]["bm25"];
         assert_eq!(sparse["modifier"], "idf");
@@ -1177,7 +1608,7 @@ mod tests {
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };
-        let req = lower_create_collection(cc);
+        let req = lower_create_collection(cc).unwrap();
         let json = rest_json!(&req);
         assert_eq!(json["sparse_vectors"]["bm25"]["modifier"], "idf");
     }

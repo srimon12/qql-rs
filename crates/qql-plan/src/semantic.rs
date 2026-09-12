@@ -175,6 +175,33 @@ pub enum PlanVectorValue {
     },
     /// Multi-dense vector: one row per input token or patch.
     MultiDense(Vec<Vec<f32>>),
+    /// Per-point document inference (OpenAPI `Document` passthrough).
+    Document {
+        /// Document text to embed.
+        text: String,
+        /// Embedding model; empty when the executor fills it in.
+        model: Option<String>,
+        /// Opaque inference options, serialized as `options` when present.
+        options: Option<serde_json::Map<String, serde_json::Value>>,
+    },
+    /// Per-point image inference (OpenAPI `Image` passthrough).
+    Image {
+        /// Image URL or base64 payload.
+        image: String,
+        /// Image embedding model; empty when the executor fills it in.
+        model: Option<String>,
+        /// Opaque inference options, serialized as `options` when present.
+        options: Option<serde_json::Map<String, serde_json::Value>>,
+    },
+    /// Per-point custom inference (OpenAPI `InferenceObject` passthrough).
+    Object {
+        /// Arbitrary model input, serialized as `object`.
+        object: serde_json::Value,
+        /// Embedding model; empty when the executor fills it in.
+        model: Option<String>,
+        /// Opaque inference options, serialized as `options` when present.
+        options: Option<serde_json::Map<String, serde_json::Value>>,
+    },
     /// Parameter placeholder for vector (`:name`).
     Param(String),
     /// Positional parameter placeholder (`?N` or `?`).
@@ -192,6 +219,33 @@ impl From<&qql_core::ast::VectorValue> for PlanVectorValue {
             qql_core::ast::VectorValue::MultiDense(rows) => {
                 PlanVectorValue::MultiDense(rows.clone())
             }
+            qql_core::ast::VectorValue::Document {
+                text,
+                model,
+                options,
+            } => PlanVectorValue::Document {
+                text: text.clone(),
+                model: model.clone(),
+                options: plan_options(options),
+            },
+            qql_core::ast::VectorValue::Image {
+                source,
+                model,
+                options,
+            } => PlanVectorValue::Image {
+                image: source.clone(),
+                model: model.clone(),
+                options: plan_options(options),
+            },
+            qql_core::ast::VectorValue::Object {
+                object,
+                model,
+                options,
+            } => PlanVectorValue::Object {
+                object: crate::filter::value_to_json(object),
+                model: model.clone(),
+                options: plan_options(options),
+            },
             qql_core::ast::VectorValue::Param(name, _) => PlanVectorValue::Param(name.clone()),
             qql_core::ast::VectorValue::PositionalParam(idx, _) => {
                 PlanVectorValue::PositionalParam(*idx)
@@ -376,6 +430,45 @@ impl Serialize for PlanVectorValue {
                 }
                 seq.end()
             }
+            PlanVectorValue::Document {
+                text,
+                model,
+                options,
+            } => {
+                let mut map = serializer.serialize_map(Some(2 + usize::from(options.is_some())))?;
+                map.serialize_entry("text", text)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                if let Some(options) = options {
+                    map.serialize_entry("options", options)?;
+                }
+                map.end()
+            }
+            PlanVectorValue::Image {
+                image,
+                model,
+                options,
+            } => {
+                let mut map = serializer.serialize_map(Some(2 + usize::from(options.is_some())))?;
+                map.serialize_entry("image", image)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                if let Some(options) = options {
+                    map.serialize_entry("options", options)?;
+                }
+                map.end()
+            }
+            PlanVectorValue::Object {
+                object,
+                model,
+                options,
+            } => {
+                let mut map = serializer.serialize_map(Some(2 + usize::from(options.is_some())))?;
+                map.serialize_entry("object", object)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                if let Some(options) = options {
+                    map.serialize_entry("options", options)?;
+                }
+                map.end()
+            }
             PlanVectorValue::Param(name) => serializer.serialize_str(&format!(":{name}")),
             PlanVectorValue::PositionalParam(idx) => serializer.serialize_str(&format!("?{idx}")),
         }
@@ -518,6 +611,8 @@ pub enum PlanQueryInput {
         text: String,
         /// Embedding model; empty when the executor fills it in.
         model: Option<String>,
+        /// Opaque inference options, serialized as `options` when present.
+        options: Option<serde_json::Map<String, serde_json::Value>>,
     },
     /// OpenAPI `Image` inference input (image URL or base64 + model).
     /// Prefer resolving to a dense [`PlanQueryInput::Vector`] client-side when
@@ -529,6 +624,18 @@ pub enum PlanQueryInput {
         image: String,
         /// Image embedding model; empty when the executor fills it in.
         model: Option<String>,
+        /// Opaque inference options, serialized as `options` when present.
+        options: Option<serde_json::Map<String, serde_json::Value>>,
+    },
+    /// OpenAPI `InferenceObject` input (arbitrary model payload + model).
+    /// Passthrough only: the executor never interprets `object`.
+    Object {
+        /// Arbitrary model input, serialized as `object`.
+        object: serde_json::Value,
+        /// Embedding model; empty when the executor fills it in.
+        model: Option<String>,
+        /// Opaque inference options, serialized as `options` when present.
+        options: Option<serde_json::Map<String, serde_json::Value>>,
     },
 }
 
@@ -539,13 +646,33 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
             qql_core::ast::QueryInput::Vector(v) => {
                 PlanQueryInput::Vector(PlanVectorValue::from(v))
             }
-            qql_core::ast::QueryInput::Text { text, model, .. } => PlanQueryInput::Document {
+            qql_core::ast::QueryInput::Text {
+                text,
+                model,
+                options,
+                ..
+            } => PlanQueryInput::Document {
                 text: text.clone(),
                 model: model.clone(),
+                options: plan_options(options),
             },
-            qql_core::ast::QueryInput::Image { source, model } => PlanQueryInput::Image {
+            qql_core::ast::QueryInput::Image {
+                source,
+                model,
+                options,
+            } => PlanQueryInput::Image {
                 image: source.clone(),
                 model: model.clone(),
+                options: plan_options(options),
+            },
+            qql_core::ast::QueryInput::Object {
+                object,
+                model,
+                options,
+            } => PlanQueryInput::Object {
+                object: crate::filter::value_to_json(object),
+                model: model.clone(),
+                options: plan_options(options),
             },
             qql_core::ast::QueryInput::Param(name, _) => {
                 PlanQueryInput::Vector(PlanVectorValue::Param(name.clone()))
@@ -557,28 +684,71 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
     }
 }
 
+/// Lower AST inference `OPTIONS` pairs to a JSON map (`None` when empty, so
+/// absent options stay absent on the wire).
+fn plan_options(
+    options: &[(alloc::string::String, qql_core::ast::Value)],
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if options.is_empty() {
+        return None;
+    }
+    let mut map = serde_json::Map::with_capacity(options.len());
+    for (key, value) in options {
+        map.insert(key.clone(), crate::filter::value_to_json(value));
+    }
+    Some(map)
+}
+
 impl Serialize for PlanQueryInput {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             PlanQueryInput::Point(id) => id.serialize(serializer),
             PlanQueryInput::Vector(v) => v.serialize(serializer),
-            PlanQueryInput::Document { text, model } => {
+            PlanQueryInput::Document {
+                text,
+                model,
+                options,
+            } => {
                 // OpenAPI Document requires both "text" and "model" fields.
                 // Model-less plans serialize "model": "" as a placeholder the
                 // executor's embedding resolution replaces before dispatch.
-                let mut map = serializer.serialize_map(Some(2))?;
+                let mut map = serializer.serialize_map(Some(2 + usize::from(options.is_some())))?;
                 map.serialize_entry("text", text)?;
                 map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                if let Some(options) = options {
+                    map.serialize_entry("options", options)?;
+                }
                 map.end()
             }
-            PlanQueryInput::Image { image, model } => {
+            PlanQueryInput::Image {
+                image,
+                model,
+                options,
+            } => {
                 // OpenAPI Image requires both "image" and "model" fields.
                 // gRPC proto Image uses a Value for the image field; REST
                 // always serializes as an object with two string members.
                 // Model-less plans keep "" as a placeholder for the executor.
-                let mut map = serializer.serialize_map(Some(2))?;
+                let mut map = serializer.serialize_map(Some(2 + usize::from(options.is_some())))?;
                 map.serialize_entry("image", image)?;
                 map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                if let Some(options) = options {
+                    map.serialize_entry("options", options)?;
+                }
+                map.end()
+            }
+            PlanQueryInput::Object {
+                object,
+                model,
+                options,
+            } => {
+                // OpenAPI InferenceObject: {"object": …, "model": …}.
+                let mut map = serializer.serialize_map(Some(2 + usize::from(options.is_some())))?;
+                map.serialize_entry("object", object)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                if let Some(options) = options {
+                    map.serialize_entry("options", options)?;
+                }
                 map.end()
             }
         }

@@ -140,6 +140,18 @@ impl<'a> AstLowerer<'a> {
                 self.advance()?;
                 self.parse_collection_params_config_block(for_alter)
             }
+            TokenKind::Wal => {
+                self.advance()?;
+                self.parse_wal_config_block(for_alter)
+            }
+            TokenKind::StrictMode => {
+                self.advance()?;
+                self.parse_strict_mode_config_block()
+            }
+            TokenKind::Metadata => {
+                self.advance()?;
+                self.parse_metadata_config_block()
+            }
             TokenKind::Quantization => {
                 self.advance()?;
                 self.parse_quantization_config_block()
@@ -152,9 +164,9 @@ impl<'a> AstLowerer<'a> {
                 alloc::format!(
                     "{}, got '{}'",
                     if for_alter {
-                        "expected HNSW, VECTOR, SPARSE, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH"
+                        "expected HNSW, VECTOR, SPARSE, OPTIMIZERS, PARAMS, QUANTIZATION, STRICT_MODE, or METADATA after WITH"
                     } else {
-                        "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH"
+                        "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, QUANTIZATION, WAL, STRICT_MODE, or METADATA after WITH"
                     },
                     tok.text
                 ),
@@ -281,6 +293,9 @@ impl<'a> AstLowerer<'a> {
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
             vector_diffs: alloc::vec![VectorDiff {
                 name,
                 hnsw,
@@ -339,6 +354,9 @@ impl<'a> AstLowerer<'a> {
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
             vector_diffs: Vec::new(),
             sparse_vector_diffs: alloc::vec![SparseVectorDiff {
                 name,
@@ -412,6 +430,9 @@ impl<'a> AstLowerer<'a> {
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
             vector_diffs: Vec::new(),
             sparse_vector_diffs: Vec::new(),
         })
@@ -445,6 +466,9 @@ impl<'a> AstLowerer<'a> {
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
             vector_diffs: Vec::new(),
             sparse_vector_diffs: Vec::new(),
         })
@@ -542,6 +566,9 @@ impl<'a> AstLowerer<'a> {
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
             vector_diffs: Vec::new(),
             sparse_vector_diffs: Vec::new(),
         })
@@ -549,7 +576,7 @@ impl<'a> AstLowerer<'a> {
 
     pub fn parse_collection_params_config_block(
         &mut self,
-        for_alter: bool,
+        _for_alter: bool,
     ) -> Result<CollectionConfig, QqlError> {
         let config = self.parse_config_block()?;
         for (key, value) in &config {
@@ -577,15 +604,9 @@ impl<'a> AstLowerer<'a> {
             validate_params_value(key, value, self.peek()?.span)?;
         }
 
-        if !for_alter
-            && (config_has_key(&config, "read_fan_out_factor")
-                || config_has_key(&config, "read_fan_out_delay_ms"))
-        {
-            return Err(validation_err(
-                "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
-                self.peek()?.span,
-            ));
-        }
+        // `read_fan_out_*` only exist on the update wire shape
+        // (`CollectionParamsDiff`); create-time values are applied with a
+        // follow-up PATCH (see `create_collection_deferred_params_rest`).
 
         Ok(CollectionConfig {
             vectors: None,
@@ -674,6 +695,104 @@ impl<'a> AstLowerer<'a> {
             })),
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// `WITH WAL (…)` — write-ahead log settings (CREATE-only; the update
+    /// wire shape has no WAL field).
+    pub fn parse_wal_config_block(
+        &mut self,
+        for_alter: bool,
+    ) -> Result<CollectionConfig, QqlError> {
+        if for_alter {
+            return Err(validation_err(
+                "WITH WAL is supported only for CREATE COLLECTION",
+                self.peek()?.span,
+            ));
+        }
+        let config = self.parse_config_block()?;
+        for (key, value) in &config {
+            let lower = key.to_ascii_lowercase();
+            match lower.as_str() {
+                "wal_capacity_mb" | "wal_segments_ahead" | "wal_retain_closed" => {}
+                _ => {
+                    return Err(validation_err(
+                        alloc::format!(
+                            "unknown WAL parameter '{}'. Expected: wal_capacity_mb, wal_segments_ahead, wal_retain_closed",
+                            key
+                        ),
+                        self.peek()?.span,
+                    ));
+                }
+            }
+            super::validate_wal_value(key, value, self.peek()?.span)?;
+        }
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: Some(config),
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// `WITH STRICT_MODE (…)` — strict-mode settings (CREATE and ALTER; the
+    /// plan layer validates value ranges and serializes the wire object).
+    pub fn parse_strict_mode_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
+        let config = self.parse_config_block()?;
+        for (key, value) in &config {
+            if !super::is_strict_mode_key(key) {
+                return Err(validation_err(
+                    alloc::format!(
+                        "unknown STRICT_MODE parameter '{}'. Expected: {}",
+                        key,
+                        super::STRICT_MODE_KEYS.join(", ")
+                    ),
+                    self.peek()?.span,
+                ));
+            }
+            super::validate_strict_mode_value(key, value, self.peek()?.span)?;
+        }
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: None,
+            strict_mode: Some(config),
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// `WITH METADATA (…)` — free-form collection metadata (CREATE and ALTER).
+    /// Keys are unrestricted; values are any JSON value.
+    pub fn parse_metadata_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
+        let config = self.parse_config_block()?;
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: Some(config),
             vector_diffs: Vec::new(),
             sparse_vector_diffs: Vec::new(),
         })
@@ -695,6 +814,9 @@ impl<'a> AstLowerer<'a> {
                     disabled: true,
                     config: None,
                 })),
+                wal: None,
+                strict_mode: None,
+                metadata: None,
                 vector_diffs: Vec::new(),
                 sparse_vector_diffs: Vec::new(),
             });
@@ -733,6 +855,40 @@ impl<'a> AstLowerer<'a> {
                 ));
             }
         };
+
+        // Each family accepts only its own sub-fields: misplaced keys (e.g.
+        // `quantile` on binary, `bits` on scalar) fail closed instead of
+        // being silently dropped.
+        for (key, _) in &config {
+            let allowed = match qtype {
+                QuantizationType::Scalar => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "quantile" | "always_ram" | "memory" | "disabled"
+                ),
+                QuantizationType::Binary => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "encoding" | "query_encoding" | "always_ram" | "memory" | "disabled"
+                ),
+                QuantizationType::Product => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "compression" | "always_ram" | "memory" | "disabled"
+                ),
+                QuantizationType::Turbo => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "bits" | "always_ram" | "memory" | "disabled"
+                ),
+            };
+            if !allowed {
+                return Err(validation_err(
+                    alloc::format!(
+                        "unknown QUANTIZATION parameter '{}' for type '{}'",
+                        key,
+                        type_str.to_ascii_lowercase()
+                    ),
+                    self.peek()?.span,
+                ));
+            }
+        }
 
         let always_ram = config_bool(&config, "always_ram").unwrap_or(false);
 
@@ -856,6 +1012,9 @@ impl<'a> AstLowerer<'a> {
                 disabled: false,
                 config: Some(Box::new(q_config)),
             })),
+            wal: None,
+            strict_mode: None,
+            metadata: None,
             vector_diffs: Vec::new(),
             sparse_vector_diffs: Vec::new(),
         })

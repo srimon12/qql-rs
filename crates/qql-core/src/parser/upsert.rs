@@ -1,5 +1,6 @@
 use super::helpers::{point_id_from_value, point_vectors_from_value};
 use super::{AstLowerer, ascii_equal};
+use crate::ast::UpsertUpdateMode;
 use crate::ast::{EmbedDirective, EmbedKind, PointEntry, Stmt, UpsertPoint, UpsertStmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -72,16 +73,84 @@ impl<'a> AstLowerer<'a> {
         } else {
             Vec::new()
         };
+        let (update_filter, update_mode) = self.parse_upsert_guards()?;
         let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
-
         Ok(Stmt::Upsert(Box::new(UpsertStmt {
             collection,
             points,
             embedding,
             embed,
+            update_filter,
+            update_mode,
             shard_key,
             wait,
         })))
+    }
+
+    /// Trailing `UPDATE FILTER <filter>` / `UPDATE MODE <mode>` guards, each
+    /// at most once and in either order.
+    fn parse_upsert_guards(
+        &mut self,
+    ) -> Result<(Option<crate::ast::FilterExpr>, Option<UpsertUpdateMode>), QqlError> {
+        let mut update_filter = None;
+        let mut update_mode = None;
+        loop {
+            // Guards open with UPDATE; SHARD / WAIT / EOF end the scan.
+            if self.peek()?.kind != TokenKind::Update {
+                break;
+            }
+            let second = self.peek_nth(1).kind;
+            if second == TokenKind::Filter {
+                if update_filter.is_some() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate UPDATE FILTER clause",
+                        self.peek()?.span,
+                    ));
+                }
+                self.advance()?;
+                self.advance()?;
+                update_filter = Some(self.parse_filter_expr()?);
+            } else if second == TokenKind::Mode {
+                if update_mode.is_some() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate UPDATE MODE clause",
+                        self.peek()?.span,
+                    ));
+                }
+                self.advance()?;
+                self.advance()?;
+                update_mode = Some(self.parse_upsert_mode()?);
+            } else {
+                break;
+            }
+        }
+        Ok((update_filter, update_mode))
+    }
+
+    /// Parse an upsert write mode word (`INSERT_ONLY` / `UPDATE_ONLY` / `UPSERT`).
+    fn parse_upsert_mode(&mut self) -> Result<UpsertUpdateMode, QqlError> {
+        let tok = self.peek()?;
+        match tok.kind {
+            TokenKind::InsertOnly => {
+                self.advance()?;
+                Ok(UpsertUpdateMode::InsertOnly)
+            }
+            TokenKind::UpdateOnly => {
+                self.advance()?;
+                Ok(UpsertUpdateMode::UpdateOnly)
+            }
+            TokenKind::Upsert => {
+                self.advance()?;
+                Ok(UpsertUpdateMode::Upsert)
+            }
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-UPSERT-MODE",
+                "UPDATE MODE requires insert_only, update_only, or upsert",
+                tok.span,
+            )),
+        }
     }
 
     fn parse_embed_clause(&mut self) -> Result<Vec<EmbedDirective>, QqlError> {

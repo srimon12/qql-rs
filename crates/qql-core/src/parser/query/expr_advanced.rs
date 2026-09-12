@@ -230,6 +230,7 @@ impl<'a> AstLowerer<'a> {
             text,
             model,
             text_param,
+            options,
         } = input
         else {
             return Err(QqlError::validation(
@@ -238,6 +239,13 @@ impl<'a> AstLowerer<'a> {
                 Some(input_tok.span),
             ));
         };
+        if !options.is_empty() {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-HYBRID",
+                "HYBRID shorthand cannot carry OPTIONS; query the dense and sparse vectors separately",
+                Some(input_tok.span),
+            ));
+        }
         let HybridUsing {
             dense_vector,
             sparse_vector,
@@ -342,6 +350,7 @@ impl<'a> AstLowerer<'a> {
                 text: self.parse_string()?,
                 model: None,
                 text_param: None,
+                options: Vec::new(),
             }
         } else if self.peek()?.kind == TokenKind::Vector {
             self.advance()?;

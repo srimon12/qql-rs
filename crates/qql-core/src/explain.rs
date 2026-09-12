@@ -46,6 +46,16 @@ pub fn explain_nodes(statements: &[Stmt]) -> String {
 pub fn explain_node(statement: &Stmt) -> String {
     let mut output = String::new();
     match statement {
+        Stmt::Batch(batch) => {
+            let _ = writeln!(
+                output,
+                "Statement: BATCH [{} members]",
+                batch.statements.len()
+            );
+            for (i, member) in batch.statements.iter().enumerate() {
+                let _ = writeln!(output, "├── Member {}: {}", i + 1, member.stmt_kind());
+            }
+        }
         Stmt::Query(query) => {
             let intent = query_intent(&query.expression);
             let _ = writeln!(output, "Statement: QUERY [{}]", intent);
@@ -173,6 +183,13 @@ pub fn explain_node(statement: &Stmt) -> String {
             if let Some(f) = &statement.filter {
                 let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
+            if let Some(order) = &statement.order_by {
+                let _ = writeln!(
+                    output,
+                    "├── Order By: {} {:?}",
+                    order.field, order.direction
+                );
+            }
             if let Some(shard) = &statement.shard_key {
                 let _ = writeln!(output, "├── Shard Key: {shard}");
             }
@@ -186,6 +203,16 @@ pub fn explain_node(statement: &Stmt) -> String {
             output.push_str("Statement: UPSERT\n");
             let _ = writeln!(output, "├── Collection: {}", statement.collection);
             let _ = writeln!(output, "├── Points: {}", statement.points.len());
+            if let Some(filter) = &statement.update_filter {
+                let _ = writeln!(
+                    output,
+                    "├── Update Filter: {}",
+                    crate::fmt::render_filter(filter)
+                );
+            }
+            if let Some(mode) = &statement.update_mode {
+                let _ = writeln!(output, "├── Update Mode: {mode:?}");
+            }
             if let Some(shard) = &statement.shard_key {
                 let _ = writeln!(output, "├── Shard Key: {}", shard);
             }
@@ -367,6 +394,12 @@ pub fn explain_node(statement: &Stmt) -> String {
                 "Statement: UPDATE PAYLOAD ON {}",
                 statement.collection
             );
+            if let Some(key) = &statement.key {
+                let _ = writeln!(output, "├── Key: {key}");
+            }
+            if statement.overwrite {
+                output.push_str("├── Overwrite: true\n");
+            }
             explain_mutation_tail(
                 &mut output,
                 &statement.selector,
@@ -412,6 +445,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Nearest { input, .. } => match input {
             QueryInput::Text { .. } => "nearest neighbors from text",
             QueryInput::Image { .. } => "nearest neighbors from an image",
+            QueryInput::Object { .. } => "nearest neighbors from an inference object",
             QueryInput::Vector(_) => "nearest neighbors from a vector",
             QueryInput::Point(_) => "nearest neighbors from a point",
             QueryInput::Param(..) | QueryInput::PositionalParam(..) => {
@@ -476,6 +510,7 @@ fn render_quota_value(value: &Value) -> String {
     match value {
         Value::Str(s) => format!("'{}'", s),
         Value::Int(n) => n.to_string(),
+        Value::UInt(n) => n.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".into(),

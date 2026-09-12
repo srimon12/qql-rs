@@ -173,6 +173,7 @@ fn rerank_without_dense_topology_errors() {
                 text: "r".to_string(),
                 model: None,
                 text_param: None,
+                options: Vec::new(),
             },
             model: "m".to_string(),
             using: None,

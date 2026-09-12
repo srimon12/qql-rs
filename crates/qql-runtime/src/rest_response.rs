@@ -71,6 +71,7 @@ pub(crate) fn parse_planned(
         PlannedOperation::Upsert { .. }
         | PlannedOperation::Delete { .. }
         | PlannedOperation::UpdatePayload { .. }
+        | PlannedOperation::OverwritePayload { .. }
         | PlannedOperation::ClearPayload { .. }
         | PlannedOperation::DeletePayload { .. }
         | PlannedOperation::UpdateVectors { .. }
@@ -86,6 +87,13 @@ pub(crate) fn parse_planned(
             return Err(QqlError::execution(
                 "QQL-REST-CLIENT-SIDE",
                 "CROSS RERANK is client-side and has no REST response",
+                None,
+            ));
+        }
+        PlannedOperation::Batch { .. } => {
+            return Err(QqlError::execution(
+                "QQL-REST-BATCH",
+                "BATCH is dispatched by the Executor through the batch RPCs, not as a single REST route",
                 None,
             ));
         }

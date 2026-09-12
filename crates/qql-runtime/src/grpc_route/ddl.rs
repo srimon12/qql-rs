@@ -401,7 +401,7 @@ pub(crate) fn text_index_params(options: &IndexOptions) -> qdrant::TextIndexPara
         qql_plan::TextTokenizer::Word => qdrant::TokenizerType::Word,
     };
     let stopwords = options.stopwords.as_ref().map(|set| qdrant::StopwordsSet {
-        languages: Vec::new(),
+        languages: set.languages.clone(),
         custom: set.custom.clone(),
     });
     let stemmer = options.stemmer.as_ref().map(|stemmer| {
@@ -487,6 +487,7 @@ mod tests {
             tokenizer: Some(qql_plan::TextTokenizer::Word),
             stemmer: Some(qql_plan::StemmingAlgorithm::Snowball("english".into())),
             stopwords: Some(qql_plan::StopwordsSet {
+                languages: Vec::new(),
                 custom: vec!["the".into()],
             }),
             ..Default::default()

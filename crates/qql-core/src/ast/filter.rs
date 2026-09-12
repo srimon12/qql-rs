@@ -137,6 +137,30 @@ pub enum FilterExpr {
         /// Required value prefix.
         prefix: String,
     },
+    /// `field MATCH TOKENS 'text'` — full-text match of at least one token
+    /// (Qdrant `MatchTextAny { text_any }`).
+    MatchTokens {
+        /// Payload field path.
+        field: String,
+        /// Text whose tokens are matched disjunctively.
+        text: String,
+    },
+    /// `field MATCH EXCEPT (…)` — at least one value must not match the
+    /// listed values (Qdrant `MatchExcept { except }`).
+    MatchExcept {
+        /// Payload field path.
+        field: String,
+        /// Rejected literal values.
+        values: Vec<Value>,
+    },
+    /// `MIN SHOULD n (…)` — at least `n` of the operands must hold
+    /// (Qdrant `MinShould { conditions, min_count }`, `min_count >= 1`).
+    MinShould {
+        /// Minimum number of operands required to match; must be `>= 1`.
+        min_count: u64,
+        /// Candidate sub-filters.
+        operands: Vec<FilterExpr>,
+    },
     /// `… AND …` — all operands must hold.
     And {
         /// Conjoined sub-filters.

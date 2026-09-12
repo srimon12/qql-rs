@@ -565,6 +565,7 @@ impl<'a> AstLowerer<'a> {
 pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError> {
     match value {
         Value::Int(value) if value >= 0 => Ok(PointId::Number(value as u64)),
+        Value::UInt(value) => Ok(PointId::Number(value)),
         Value::Str(value) => Ok(PointId::String(value)),
         Value::Param(name, param_span) => Ok(PointId::Param(
             name,
@@ -643,6 +644,12 @@ pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<Vect
             }
         }),
         Value::Dict(items) => {
+            // Per-point inference inputs (OpenAPI Document / Image /
+            // InferenceObject) share the dict spelling with sparse and named
+            // vectors; discriminate on their reserved keys first.
+            if let Some(inference) = try_inference_vector_value(&items, span)? {
+                return Ok(inference);
+            }
             let mut data_v = None;
             let mut dim_v = None;
             let mut indices_v = None;
@@ -673,6 +680,8 @@ pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<Vect
                 };
                 let dim = match dim {
                     Value::Int(n) if n > 0 => usize::try_from(n)
+                        .map_err(|_| vector_error("multivector dim is out of range", span))?,
+                    Value::UInt(n) if n > 0 => usize::try_from(n)
                         .map_err(|_| vector_error("multivector dim is out of range", span))?,
                     _ => {
                         return Err(vector_error(
@@ -718,6 +727,8 @@ pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<Vect
                 .map(|value| match value {
                     Value::Int(value) if value >= 0 => u32::try_from(value)
                         .map_err(|_| vector_error("sparse vector index is out of range", span)),
+                    Value::UInt(value) => u32::try_from(value)
+                        .map_err(|_| vector_error("sparse vector index is out of range", span)),
                     _ => Err(vector_error(
                         "sparse vector indices must be non-negative integers",
                         span,
@@ -755,6 +766,7 @@ fn numeric_vector(values: Vec<Value>, span: Option<Span>) -> Result<Vec<f32>, Qq
         .map(|value| {
             let value = match value {
                 Value::Int(value) => value as f64,
+                Value::UInt(value) => value as f64,
                 Value::Float(value) => value,
                 _ => {
                     return Err(QqlError::validation(
@@ -799,6 +811,13 @@ pub fn point_vectors_from_value(
                 key.eq_ignore_ascii_case("indices") || key.eq_ignore_ascii_case("values")
             }) =>
         {
+            // Whole-vector inference (`vector: {text: '…', model: '…'}`)
+            // precedes the named-vector map: a dict carrying an inference
+            // key is a Document / Image / InferenceObject, never a map with
+            // a vector literally named `text` / `image` / `object`.
+            if let Some(inference) = try_inference_vector_value(&items, span)? {
+                return Ok(PointVectors::Unnamed(inference));
+            }
             let mut vectors = Vec::new();
             for (name, value) in items {
                 vectors.push((name, vector_from_value(value, span)?));
@@ -806,5 +825,107 @@ pub fn point_vectors_from_value(
             Ok(PointVectors::Named(vectors))
         }
         value => vector_from_value(value, span).map(PointVectors::Unnamed),
+    }
+}
+
+/// Discriminate an inference dict (`text` / `image` / `object` keys) into a
+/// [`VectorValue`], or `None` when the dict carries no inference key.
+///
+/// Exactly one of `text` / `image` / `object` must be present; the only other
+/// accepted keys are `model` and `options`. Anything else — including sparse
+/// (`indices` / `values`) or multivector (`data` / `dim`) keys — fails closed
+/// instead of silently picking a meaning.
+pub(crate) fn try_inference_vector_value(
+    items: &[(String, Value)],
+    span: Option<Span>,
+) -> Result<Option<VectorValue>, QqlError> {
+    let find = |key: &str| items.iter().find(|(k, _)| k.eq_ignore_ascii_case(key));
+    // A vector literally named `text` / `image` stays a named vector unless
+    // its value has the inference shape (strings for text/image); only then
+    // is the dict claimed as an inference input. This mirrors the wire, where
+    // `{"text": […]}` resolves as a named-vector map, not a Document.
+    let has_text = matches!(find("text"), Some((_, Value::Str(_))));
+    let has_image = matches!(find("image"), Some((_, Value::Str(_))));
+    let has_object = find("object").is_some();
+    if !has_text && !has_image && !has_object {
+        return Ok(None);
+    }
+    if [has_text, has_image, has_object]
+        .into_iter()
+        .filter(|has| *has)
+        .count()
+        != 1
+    {
+        return Err(vector_error(
+            "inference vector carries more than one of text, image, object",
+            span,
+        ));
+    }
+    for (key, _) in items {
+        if !(key.eq_ignore_ascii_case("text")
+            || key.eq_ignore_ascii_case("image")
+            || key.eq_ignore_ascii_case("object")
+            || key.eq_ignore_ascii_case("model")
+            || key.eq_ignore_ascii_case("options"))
+        {
+            return Err(vector_error(
+                "inference vector must only carry text/image/object, model, and options",
+                span,
+            ));
+        }
+    }
+    let model = match find("model") {
+        None => None,
+        Some((_, Value::Str(model))) => Some(model.clone()),
+        Some(_) => {
+            return Err(vector_error(
+                "inference vector model must be a string",
+                span,
+            ));
+        }
+    };
+    let options = match find("options") {
+        None => Vec::new(),
+        Some((_, Value::Dict(entries))) => entries.clone(),
+        Some(_) => {
+            return Err(vector_error(
+                "inference vector options must be an object",
+                span,
+            ));
+        }
+    };
+    if has_text {
+        let (_, text) = find("text").expect("text key checked");
+        match text {
+            Value::Str(text) => Ok(Some(VectorValue::Document {
+                text: text.clone(),
+                model,
+                options,
+            })),
+            _ => Err(vector_error(
+                "inference document text must be a string",
+                span,
+            )),
+        }
+    } else if has_image {
+        let (_, source) = find("image").expect("image key checked");
+        match source {
+            Value::Str(source) => Ok(Some(VectorValue::Image {
+                source: source.clone(),
+                model,
+                options,
+            })),
+            _ => Err(vector_error(
+                "inference image source must be a string",
+                span,
+            )),
+        }
+    } else {
+        let (_, object) = find("object").expect("object key checked");
+        Ok(Some(VectorValue::Object {
+            object: alloc::boxed::Box::new(object.clone()),
+            model,
+            options,
+        }))
     }
 }

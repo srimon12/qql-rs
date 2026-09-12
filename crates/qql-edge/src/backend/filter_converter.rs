@@ -31,9 +31,9 @@ use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{
     AnyVariants, Condition, DateTimeWrapper, FieldCondition, Filter, GeoBoundingBox, GeoLineString,
     GeoPoint, GeoPolygon, GeoRadius, HasIdCondition, HasVectorCondition, IsEmptyCondition,
-    IsNullCondition, Match, MatchAny, MatchExcept, MatchPhrase, MatchPrefix, MatchText, MatchValue,
-    MinShould, Nested, NestedCondition, Range, RangeInterface, Slice, SliceCondition,
-    ValueVariants, ValuesCount,
+    IsNullCondition, Match, MatchAny, MatchExcept, MatchPhrase, MatchPrefix, MatchText,
+    MatchTextAny, MatchValue, MinShould, Nested, NestedCondition, Range, RangeInterface, Slice,
+    SliceCondition, ValueVariants, ValuesCount,
 };
 use qql_core::error::QqlError;
 use qql_plan::types::{
@@ -92,19 +92,23 @@ pub(crate) fn convert_formula_condition(
 }
 
 fn lower_compound(compound: &PlanFilterCompound) -> Result<Filter, QqlError> {
-    let should = lower_conditions(&compound.should)?;
-    let (should, min_should) = match compound.min_should {
-        Some(min_count) => (
-            None,
-            Some(MinShould {
-                conditions: should.unwrap_or_default(),
-                min_count,
-            }),
-        ),
-        None => (should, None),
-    };
+    let min_should = compound
+        .min_should
+        .as_ref()
+        .map(|min_should| {
+            min_should
+                .conditions
+                .iter()
+                .map(lower_clause)
+                .collect::<Result<Vec<_>, _>>()
+                .map(|conditions| MinShould {
+                    conditions,
+                    min_count: min_should.min_count as usize,
+                })
+        })
+        .transpose()?;
     Ok(Filter {
-        should,
+        should: lower_conditions(&compound.should)?,
         min_should,
         must: lower_conditions(&compound.must)?,
         must_not: lower_conditions(&compound.must_not)?,
@@ -145,6 +149,21 @@ fn lower_clause(clause: &PlanFilterClause) -> Result<Condition, QqlError> {
         PlanFilterClause::HasVector(condition) => Condition::HasVector(HasVectorCondition {
             has_vector: condition.has_vector.clone(),
         }),
+        PlanFilterClause::MinShould(condition) => {
+            let conditions = condition
+                .min_should
+                .conditions
+                .iter()
+                .map(lower_clause)
+                .collect::<Result<Vec<_>, _>>()?;
+            Condition::Filter(Filter {
+                min_should: Some(MinShould {
+                    conditions,
+                    min_count: condition.min_should.min_count as usize,
+                }),
+                ..Filter::default()
+            })
+        }
         PlanFilterClause::Nested(condition) => Condition::Nested(lower_nested(condition)?),
         PlanFilterClause::Filter(compound) => Condition::Filter(lower_compound(compound)?),
         PlanFilterClause::Slice(condition) => Condition::Slice(lower_slice(condition)?),
@@ -196,6 +215,9 @@ fn lower_match(value: &PlanMatchValue) -> Result<Match, QqlError> {
             value: lower_match_value(value)?,
         }),
         PlanMatchValue::Text { text } => Match::Text(MatchText { text: text.clone() }),
+        PlanMatchValue::TextAny { text_any } => Match::TextAny(MatchTextAny {
+            text_any: text_any.clone(),
+        }),
         PlanMatchValue::Any { any } => Match::Any(MatchAny {
             any: lower_any_variants(any)?,
         }),
@@ -730,20 +752,24 @@ mod tests {
         assert_eq!(nested.nested.filter.must.as_ref().map(Vec::len), Some(1));
     }
 
-    /// The legacy integer `min_should` ("at least N of `should`") maps onto the
-    /// modern object form by moving the `should` clauses into the conditions.
+    /// The object `min_should` (`{"conditions", "min_count"}`) passes through
+    /// with its own conditions (no `should`-moving: the threshold carries
+    /// its candidate list).
     #[test]
     fn legacy_min_should_moves_should_conditions() {
         let expression = PlanExpression::Compound(PlanCompound {
             must: vec![],
             must_not: vec![],
-            should: vec![match_field(
-                "tier",
-                PlanMatch::Value {
-                    value: json!("gold"),
-                },
-            )],
-            min_should: Some(1),
+            should: vec![],
+            min_should: Some(qql_plan::types::MinShould {
+                conditions: vec![match_field(
+                    "tier",
+                    PlanMatch::Value {
+                        value: json!("gold"),
+                    },
+                )],
+                min_count: 1,
+            }),
         });
         let lowered = convert_edge_filter(Some(&expression)).unwrap().unwrap();
         assert!(lowered.should.is_none());
