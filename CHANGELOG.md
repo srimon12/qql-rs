@@ -145,9 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Private & Shared Crate CI Verification**: Automated clippy, tests, and anti-drift checks covering `pyqql-common`, `nqql-common`, and cross-SDK shared test suites.
 - **Release Automation**: `scripts/check_release.py` supports atomic version synchronization across Cargo, PyPI, npm, and editor WASM.
 - **Error-Code Sync Gate**: `scripts/check-error-codes.sh` verifies emitted-vs-documented error codes in both directions (plus section coverage and sort order) as a required CI gate.
-- **Head-to-Head Benchmark Harnesses**:
-  - `vs-qdrant/`: Pits `pyqql`, `nqql`, and native `qql` against official Qdrant SDKs on a checksummed corpus (8,000 Berlin + 2,000 legal points) with parity-gated timings rendered from raw JSON.
-  - `vs-qdrant-edge/`: Runs `pyqql-edge` against `qdrant-edge-py` on the same in-process engine with digest-pinned precomputed vectors, parity-gated timings, threading / optimize / ingest groups, and durability barriers waiting for green status.
+- **Internal Parity & Verification Harnesses**: Automated verification suites validating exact result parity, durability barriers, and vector normalization across dense, sparse, and ColBERT multi-vector workloads.
 - **Cross-Platform Release Matrix**: Added `aarch64-unknown-linux-gnu` release builds for the CLI, `pyqql` / `pyqql-edge` wheels, and `nqql` / `nqql-edge` addons, with smoke testing for every artifact.
 - **Dependabot & Lockfile Refresh**: Dependabot configured targeting `dev` with weekly grouped updates and a 3-day cooldown. Lockfiles refreshed across workspace, website (Astro 7.3.2, Starlight 0.41.11), and VS Code.
 - **Hardened Installers**: `install.sh` and `install.ps1` fail loudly if releases cannot be resolved, output PATH export instructions, and support Linux ARM.

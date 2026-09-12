@@ -962,213 +962,39 @@ html.js .landing-fade-up.landing-visible {
   white-space: nowrap;
 }
 
-/* ── Outcome strip: bars + ratio + snippet badge. Nothing methodological ── */
-.landing-compare__perf {
+/* ── Comparison footer note & guide link ── */
+.landing-compare__foot {
   display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  padding: 1.1rem 1.25rem 1.2rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  padding: 0.9rem 1.25rem;
   border: 1px solid var(--sl-color-gray-5);
-  border-radius: 0.85rem;
+  border-radius: 0.75rem;
   background: color-mix(in srgb, var(--sl-color-gray-6) 32%, var(--sl-color-bg));
 }
 
-.landing-compare__perf-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.4rem 0.75rem;
-}
-
-.landing-compare__perf-title {
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--sl-color-gray-2);
-}
-
-.landing-compare__perf-ratio {
-  padding: 0.3rem 0.85rem;
-  border-radius: 999px;
-  font-size: 1.15rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-  border: 1px solid transparent;
-}
-
-.landing-compare__perf-ratio.is-win {
-  background: color-mix(in srgb, var(--sl-color-accent) 14%, transparent);
-  color: var(--sl-color-accent-high);
-  border-color: color-mix(in srgb, var(--sl-color-accent) 32%, transparent);
-}
-
-.landing-compare__perf-ratio.is-parity {
-  background: var(--sl-color-gray-6);
-  color: var(--sl-color-gray-2);
-  border-color: var(--sl-color-gray-5);
-}
-
-.landing-compare__perf-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.landing-compare__perf-rows[hidden] {
-  display: none;
-}
-
-.landing-compare__perf-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.35rem 0.75rem;
-  align-items: baseline;
-}
-
-.landing-compare__perf-name {
-  font-size: 0.78rem;
-  color: var(--sl-color-gray-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.landing-compare__perf-val {
-  font-size: 1.35rem;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  color: var(--sl-color-white);
-  white-space: nowrap;
-}
-
-.landing-compare__perf-track {
-  grid-column: 1 / -1;
-  display: block;
-  height: 0.65rem;
-  border-radius: 999px;
-  background: var(--sl-color-gray-6);
-  border: 1px solid var(--sl-color-gray-5);
-  overflow: hidden;
-}
-
-@media (min-width: 40rem) {
-  .landing-compare__perf-row {
-    grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr) auto;
-    align-items: center;
-  }
-
-  .landing-compare__perf-track {
-    grid-column: auto;
-  }
-}
-
-.landing-compare__perf-bar {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--sl-color-gray-4);
-  transition: width 450ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.landing-compare__perf-bar.is-lead {
-  background: var(--sl-color-accent);
-}
-
-.landing-compare__perf-empty {
+.landing-compare__foot-text {
   margin: 0;
   font-size: 0.85rem;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--sl-color-gray-2);
 }
 
-.landing-compare__perf-empty[hidden] {
-  display: none;
-}
-
-/* ── Methodology & caveats expander: quiet, collapsed, out of the way ── */
-.landing-compare__method {
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 0.7rem;
-  background: transparent;
-}
-
-.landing-compare__method-summary {
-  cursor: pointer;
-  padding: 0.6rem 1rem;
-  font-size: 0.74rem;
+.landing-compare__foot-link {
+  font-size: 0.85rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--sl-color-gray-3);
-}
-
-.landing-compare__method-summary:hover {
-  color: var(--sl-color-white);
-}
-
-.landing-compare__method-summary:focus-visible {
-  outline: 2px solid var(--sl-color-accent);
-  outline-offset: -2px;
-  border-radius: 0.7rem;
-}
-
-.landing-compare__method-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0 1rem 0.9rem;
-}
-
-.landing-compare__perf-note,
-.landing-compare__perf-loc,
-.landing-compare__perf-src {
-  margin: 0;
-  font-family: var(--sl-font-mono);
-  font-size: 0.66rem;
-  line-height: 1.55;
-  color: var(--sl-color-gray-3);
-}
-
-.landing-compare__perf-loc {
-  color: var(--sl-color-gray-2);
-}
-
-/* ── Caveats inside the expander ── */
-.landing-compare__caveats {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.72rem;
-  line-height: 1.55;
-  color: var(--sl-color-gray-3);
-}
-
-.landing-compare__caveats strong {
-  color: var(--sl-color-gray-1);
-  font-weight: 600;
-}
-
-.landing-compare__method-foot {
-  margin: 0.25rem 0 0;
-  font-size: 0.78rem;
-}
-
-.landing-compare__method-foot a {
   color: var(--sl-color-accent-high);
   text-decoration: none;
+  white-space: nowrap;
 }
 
-.landing-compare__method-foot a:hover {
+.landing-compare__foot-link:hover {
   color: var(--sl-color-white);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-compare__perf-bar,
   .landing-compare__tab,
   .landing-compare__modes button,
   .landing-compare__try,
