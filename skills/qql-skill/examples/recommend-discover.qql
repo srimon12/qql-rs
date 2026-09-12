@@ -1,0 +1,28 @@
+-- 7. Recommendation with positive and negative point IDs.
+QUERY RECOMMEND POSITIVE (101, 102, 103) NEGATIVE (201) STRATEGY average_vector
+  FROM product_catalog
+  USING product_dense
+  WHERE availability = 'in_stock' AND price >= 10
+  SCORE THRESHOLD 0.5
+  LIMIT 20;
+
+-- 9. Multi-collection discovery with target and context pairs.
+QUERY DISCOVER TARGET 'uuid-anchor-item'
+  CONTEXT (
+    POSITIVE 'uuid-positive-1' NEGATIVE 'uuid-negative-1',
+    POSITIVE 'uuid-positive-2' NEGATIVE 'uuid-negative-2'
+  )
+  FROM product_catalog
+  USING dense
+  WHERE category = 'electronics' AND rating >= 4.0
+  PARAMS (hnsw_ef = 128)
+  LIMIT 15;
+
+-- Context search guided by example pairs.
+QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2) FROM docs USING dense LIMIT 10;
+
+-- Relevance feedback with weighted judgments.
+QUERY RELEVANCE FEEDBACK TARGET TEXT 'query_text'
+  FEEDBACK ((POINT 1, 0.9), (POINT 2, 0.1))
+  STRATEGY NAIVE (a = 1.0, b = 0.75, c = 0.25)
+  FROM docs USING dense LIMIT 10;

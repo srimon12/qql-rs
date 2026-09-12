@@ -1,0 +1,55 @@
+-- 11. Score boosting with formula engine.
+WITH candidates AS (
+  QUERY TEXT 'vector database performance' FROM articles USING dense LIMIT 100
+)
+QUERY FORMULA (score * 0.7 + popularity * 0.3) DEFAULTS (popularity = 0.0)
+  FROM articles
+  PREFETCH (candidates)
+  LIMIT 20;
+
+-- 12. Conditional business logic scoring.
+WITH candidates AS (
+  QUERY TEXT 'clinical protocols' FROM documentation USING dense LIMIT 100
+)
+QUERY FORMULA (CASE WHEN priority = 'high' THEN score * 2.5 ELSE score END)
+  FROM documentation
+  PREFETCH (candidates)
+  LIMIT 15;
+
+-- 13. Geo-distance decay.
+WITH candidates AS (
+  QUERY TEXT 'emergency clinic' FROM restaurants USING dense LIMIT 100
+)
+QUERY FORMULA (score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)) DEFAULTS (location = {lat: 48.8566, lon: 2.3522})
+  FROM restaurants
+  PREFETCH (candidates)
+  LIMIT 10;
+
+-- 14. Mathematical score shaping.
+WITH candidates AS (
+  QUERY TEXT 'quantum computing' FROM papers USING dense LIMIT 100
+)
+QUERY FORMULA (SQRT(score) * LOG(citation_count + 1)) DEFAULTS (citation_count = 0)
+  FROM papers
+  PREFETCH (candidates)
+  LIMIT 20;
+
+QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+  DEFAULTS (score = 0.0)
+  FROM papers
+  LIMIT 20;
+
+-- 19. Time-based recency decay.
+QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
+  FROM news
+  LIMIT 20;
+
+-- Formula with ISO datetime target. Bare field infers datetime_key.
+WITH candidates AS (
+  QUERY TEXT 'vector database' FROM docs USING dense LIMIT 100
+)
+QUERY FORMULA score + 0.3 * EXP_DECAY(published_at, TARGET = "2024-01-01T00:00:00Z", SCALE = 630720000)
+  FROM docs PREFETCH (candidates) LIMIT 10;
+
+-- Canonical datetime form renders uppercase. Lowercase still parses.
+QUERY FORMULA DATETIME('2024-01-01T00:00:00Z') FROM docs LIMIT 1;
