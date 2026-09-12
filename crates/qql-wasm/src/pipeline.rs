@@ -188,6 +188,8 @@ impl Client {
                 "execute_batch_op requires a Batch operation",
             ));
         };
+        let route_method = route.method.as_str().to_string();
+        let body = route.body_json();
         let mut path = route.path;
         if !route.query.is_empty() {
             path.push('?');
@@ -200,8 +202,7 @@ impl Client {
                     .join("&"),
             );
         }
-        let body = route.body_json();
-        let response = match self.send_json(route.method.as_str(), &path, body).await {
+        let response = match self.send_json(&route_method, &path, body).await {
             Ok(response) => response,
             Err(error) => {
                 if on_error == WasmOnError::Stop {
@@ -274,9 +275,7 @@ impl Client {
                             }
                             retry_members(self, operations, on_error, results).await?;
                         } else {
-                            for ((label, operation), _) in
-                                labels.iter().zip(operations.iter()).zip(received.iter())
-                            {
+                            for (label, operation) in labels.iter().zip(operations.iter()) {
                                 let data = match operation {
                                     PlannedOperation::Upsert { request, .. } => {
                                         Some(serde_json::json!({"count": request.points.len()}))
