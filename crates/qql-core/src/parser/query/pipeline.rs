@@ -56,7 +56,17 @@ impl<'a> AstLowerer<'a> {
                 } else {
                     None
                 };
-                Some(LookupSpec { collection, vector })
+                let shard_key = if self.peek()?.kind == TokenKind::Shard {
+                    self.advance()?;
+                    Some(self.parse_shard_key_atom()?)
+                } else {
+                    None
+                };
+                Some(LookupSpec {
+                    collection,
+                    vector,
+                    shard_key,
+                })
             } else {
                 None
             };
@@ -122,11 +132,19 @@ pub(crate) fn expand_using_hybrid(
                     text,
                     model,
                     text_param,
+                    options,
                 },
             using: None,
             prefetch,
             mmr: None,
         } if prefetch.is_empty() => {
+            if !options.is_empty() {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-HYBRID",
+                    "USING HYBRID cannot carry OPTIONS; query the dense and sparse vectors separately",
+                    Some(span),
+                ));
+            }
             *expression = QueryExpr::Hybrid {
                 text: core::mem::take(text),
                 model: model.take(),

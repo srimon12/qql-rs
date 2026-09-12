@@ -146,13 +146,35 @@ const QUERY_CORPUS: &[&str] = &[
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE age BETWEEN 18 AND 65 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE rating = 4.5 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH ANY (1, 2) LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH TOKENS 'red shoes' LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE tags MATCH EXCEPT ('a', 'b') LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE code MATCH EXCEPT (1, 2) LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE MIN SHOULD 2 (a = 1, b = 2) LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE MIN SHOULD 1 (title MATCH TOKENS 'a b', tags MATCH EXCEPT (1, 2)) LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE big = 18446744073709551615 LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE n > 18446744073709551615 LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE name > 'm' LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE name BETWEEN 'a' AND 'm' LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH 'text with spaces' LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title = true LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WITH PAYLOAD true LIMIT 5;",
     "QUERY ORDER BY rank ASC FROM docs LIMIT 5;",
+    // W2: ORDER BY paging origin.
+    "QUERY ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 20;",
+    "QUERY ORDER BY score ASC START FROM 100 FROM docs LIMIT 5;",
+    // W2: group lookup with payload/vector selectors.
+    "QUERY TEXT 'news' MODEL 'e5' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 20;",
+    // W2: prefetch LOOKUP with shard routing.
+    "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 50) QUERY FUSION RRF FROM docs PREFETCH (a LOOKUP FROM docs2 VECTOR dense SHARD 'acme') LIMIT 10;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs SHARD 'acme' GROUP BY topic LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE loc GEO_BBOX {top_left: {lat: 1.0, lon: 2.0}, bottom_right: {lat: 3.0, lon: 4.0}} LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE loc GEO_POLYGON {exterior: [{lat: 0.0, lon: 0.0}, {lat: 1.0, lon: 0.0}, {lat: 1.0, lon: 1.0}], interiors: [[{lat: 0.1, lon: 0.1}, {lat: 0.2, lon: 0.1}, {lat: 0.2, lon: 0.2}]]} LIMIT 5;",
+    // Inference inputs with OPTIONS / InferenceObject (w4-inference-config).
+    "QUERY TEXT 'x' MODEL 'e5' OPTIONS {temperature: 0.5} FROM docs USING dense LIMIT 5;",
+    "QUERY IMAGE 'https://x/y.jpg' MODEL 'clip' OPTIONS {size: 512} FROM docs USING image LIMIT 5;",
+    "QUERY OBJECT {prompt: 'x', n: 2} MODEL 'm' FROM docs USING dense LIMIT 5;",
+    "QUERY OBJECT {a: 1} MODEL 'm' OPTIONS {k: true} FROM docs USING dense LIMIT 5;",
+    "QUERY OBJECT {a: 1} FROM docs USING dense LIMIT 5;",
 ];
 
 /// Retrieval / mutation corpus (SCROLL, COUNT, FACET, UPSERT, DELETE, …).
@@ -162,6 +184,13 @@ const MUTATION_CORPUS: &[&str] = &[
     "SCROLL FROM docs AFTER '550e8400-e29b-41d4-a716-446655440000' LIMIT 10;",
     "SCROLL FROM docs AFTER 'not-a-uuid' LIMIT 10;",
     "SCROLL FROM docs WITH VECTOR (dense) LIMIT 5;",
+    // W2: SCROLL ordering, payload selectors, and the combined shape.
+    "SCROLL FROM docs ORDER BY created_at DESC LIMIT 10;",
+    "SCROLL FROM docs ORDER BY score DESC START FROM 100 LIMIT 10;",
+    "SCROLL FROM docs WITH PAYLOAD false LIMIT 10;",
+    "SCROLL FROM docs WITH PAYLOAD INCLUDE (title, url) LIMIT 10;",
+    "SCROLL FROM docs WITH PAYLOAD EXCLUDE (secret) LIMIT 10;",
+    "SCROLL FROM docs WHERE status = 'active' AFTER 7 ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' SHARD 'acme' WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 10;",
     "COUNT FROM docs WHERE status = 'active';",
     "COUNT FROM docs SHARD 101 WITH (exact = false);",
     "COUNT FROM docs WHERE status = 'active' WITH (exact = true);",
@@ -188,6 +217,17 @@ const MUTATION_CORPUS: &[&str] = &[
     "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
     "UPDATE docs SET PAYLOAD = {a: 1, b: 'x'} WHERE id = 1;",
     "UPDATE docs SET PAYLOAD = {a: 1} WHERE k = 1;",
+    "UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;",
+    "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active';",
+    "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;",
+    "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE update_only;",
+    "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE upsert;",
+    "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active' UPDATE MODE update_only;",
+    // Per-point inference vectors (w4-inference-config).
+    "UPSERT INTO docs VALUES {id: 1, vector: {text: 'hello', model: 'm'}};",
+    "UPSERT INTO docs VALUES {id: 1, vector: {dense: {image: 'https://x/y.jpg', model: 'c'}, sparse: {indices: [1], values: [0.5]}}};",
+    "UPSERT INTO docs VALUES {id: 1, vector: {object: {a: 1}, model: 'm', options: {k: 1}}};",
+    "UPDATE docs SET VECTOR VALUES {id: 1, vector: {text: 'hello', model: 'm'}};",
 ];
 
 /// DDL corpus (CREATE/ALTER/DROP/index/shard keys/quotas).
@@ -214,9 +254,17 @@ const DDL_CORPUS: &[&str] = &[
     "CREATE INDEX ON COLLECTION docs FOR loc TYPE geo;",
     "CREATE INDEX ON COLLECTION docs FOR tenant TYPE keyword WITH (is_tenant = true, prefix = true, memory = 'cached');",
     "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (lowercase = true, ascii_folding = true, phrase_matching = true, min_token_len = 2, max_token_len = 10, tokenizer = 'word', stemmer = 'english', stopwords = ['the', 'a']);",
+    "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = 'english');",
+    "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = {languages: ['english', 'german'], custom: ['foo']});",
     "CREATE INDEX ON COLLECTION docs FOR n TYPE integer WITH (lookup = true, range = false, is_principal = true);",
     "DROP INDEX ON COLLECTION docs FOR city;",
     "CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 3, replication_factor = 2);",
+    "CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');",
+    "CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32, wal_segments_ahead = 2, wal_retain_closed = 1);",
+    "CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);",
+    "CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team', version = 3);",
+    "ALTER COLLECTION docs WITH STRICT_MODE (enabled = false, search_allow_exact = true);",
+    "ALTER COLLECTION docs WITH METADATA (owner = 'team');",
     "CREATE SHARD KEY 101 ON COLLECTION docs;",
     "DROP SHARD KEY 'acme' ON COLLECTION docs;",
     "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5);",
@@ -229,6 +277,22 @@ const DDL_CORPUS: &[&str] = &[
 #[test]
 fn query_corpus_routes_round_trip() {
     for source in QUERY_CORPUS {
+        assert_parity(source);
+    }
+}
+
+const BATCH_CORPUS: &[&str] = &[
+    "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; }",
+    "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority)",
+    "BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; }",
+    "BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false",
+    "BATCH { UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1; UPDATE docs SET PAYLOAD = {b: 2} WHERE id = 2; }",
+    "BATCH { UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' OVERWRITE WHERE id = 1; }",
+];
+
+#[test]
+fn batch_corpus_routes_round_trip() {
+    for source in BATCH_CORPUS {
         assert_parity(source);
     }
 }

@@ -68,17 +68,16 @@ pub(crate) fn shard_key(value: &Value, path: &str) -> Result<ShardKey, ConvertEr
 /// Decode a `LookupLocation` into a prefetch `LOOKUP FROM` spec.
 pub(crate) fn lookup_spec(value: &Value, path: &str) -> Result<LookupSpec, ConvertError> {
     let obj = json::object(value, path)?;
+    json::reject_unknown(obj, path, &["collection", "vector", "shard_key"])?;
     let collection = json::required(obj, "collection", path)
         .and_then(|v| Ok(json::string_at(v, &child(path, "collection"))?.to_string()))?;
-    if obj.contains_key("shard_key") {
-        return Err(invalid(
-            child(path, "shard_key"),
-            "LOOKUP FROM does not carry a shard key in QQL",
-        ));
-    }
     Ok(LookupSpec {
         collection,
         vector: json::opt_string(obj, "vector", path)?,
+        shard_key: match obj.get("shard_key").filter(|v| !v.is_null()) {
+            None => None,
+            Some(raw) => Some(shard_key(raw, &child(path, "shard_key"))?),
+        },
     })
 }
 
@@ -140,6 +139,17 @@ fn multi_dense(value: &Value, path: &str) -> Result<Vec<Vec<f32>>, ConvertError>
 /// Decode a `SparseVector` object (`{indices, values}`).
 pub(crate) fn sparse(value: &Value, path: &str) -> Result<VectorValue, ConvertError> {
     let obj = json::object(value, path)?;
+    // Inference keys never belong on a sparse vector; without this a
+    // `{text, indices, values}` mix would silently decode as sparse while
+    // the parser fails it closed.
+    for key in ["text", "image", "object"] {
+        if obj.contains_key(key) {
+            return Err(invalid(
+                child(path, key),
+                "sparse vector must only carry indices and values",
+            ));
+        }
+    }
     let indices = json::required(obj, "indices", path).and_then(|v| {
         json::array(v, &child(path, "indices"))?
             .iter()
@@ -168,7 +178,8 @@ pub(crate) fn sparse(value: &Value, path: &str) -> Result<VectorValue, ConvertEr
     Ok(VectorValue::Sparse { indices, values })
 }
 
-/// Decode a `Vector` value: dense, multi-dense, or sparse.
+/// Decode a `Vector` value: dense, multi-dense, sparse, or per-point
+/// inference (`Document` / `Image` / `InferenceObject`).
 pub(crate) fn vector_value(value: &Value, path: &str) -> Result<VectorValue, ConvertError> {
     match value {
         Value::Array(items) => {
@@ -180,11 +191,25 @@ pub(crate) fn vector_value(value: &Value, path: &str) -> Result<VectorValue, Con
                 Ok(VectorValue::Dense(dense(value, path)?))
             }
         }
-        Value::Object(_) => sparse(value, path),
+        Value::Object(obj) => {
+            if obj.contains_key("indices") || obj.contains_key("values") {
+                return sparse(value, path);
+            }
+            if obj.contains_key("text") || obj.contains_key("image") || obj.contains_key("object") {
+                return inference_vector_value(obj, path);
+            }
+            Err(invalid(
+                path,
+                format!(
+                    "expected a vector (array, sparse object, or inference object), got {}",
+                    type_name(value)
+                ),
+            ))
+        }
         other => Err(invalid(
             path,
             format!(
-                "expected a vector (array or sparse object), got {}",
+                "expected a vector (array, sparse object, or inference object), got {}",
                 type_name(other)
             ),
         )),
@@ -207,10 +232,7 @@ pub(crate) fn query_input(value: &Value, path: &str) -> Result<QueryInput, Conve
                 return image(obj, path);
             }
             if obj.contains_key("object") {
-                return Err(invalid(
-                    child(path, "object"),
-                    "InferenceObject inputs have no QQL representation",
-                ));
+                return inference_object(obj, path);
             }
             Err(invalid(
                 path,
@@ -224,14 +246,9 @@ pub(crate) fn query_input(value: &Value, path: &str) -> Result<QueryInput, Conve
     }
 }
 
-/// OpenAPI `Document`: `{text, model}` (model-less plans use `""`).
+/// OpenAPI `Document`: `{text, model, options?}` (model-less plans use `""`).
 fn document(obj: &json::Obj, path: &str) -> Result<QueryInput, ConvertError> {
-    if obj.contains_key("options") {
-        return Err(invalid(
-            child(path, "options"),
-            "Document options have no QQL representation",
-        ));
-    }
+    json::reject_unknown(obj, path, &["text", "model", "options"])?;
     let text = json::required(obj, "text", path)
         .and_then(|v| Ok(json::string_at(v, &child(path, "text"))?.to_string()))?;
     let model = json::required(obj, "model", path)
@@ -240,17 +257,13 @@ fn document(obj: &json::Obj, path: &str) -> Result<QueryInput, ConvertError> {
         text,
         model: if model.is_empty() { None } else { Some(model) },
         text_param: None,
+        options: inference_options(obj, path)?,
     })
 }
 
-/// OpenAPI `Image`: `{image, model}`.
+/// OpenAPI `Image`: `{image, model, options?}`.
 fn image(obj: &json::Obj, path: &str) -> Result<QueryInput, ConvertError> {
-    if obj.contains_key("options") {
-        return Err(invalid(
-            child(path, "options"),
-            "Image options have no QQL representation",
-        ));
-    }
+    json::reject_unknown(obj, path, &["image", "model", "options"])?;
     let source = json::required(obj, "image", path)
         .and_then(|v| Ok(json::string_at(v, &child(path, "image"))?.to_string()))?;
     let model = json::required(obj, "model", path)
@@ -258,14 +271,53 @@ fn image(obj: &json::Obj, path: &str) -> Result<QueryInput, ConvertError> {
     Ok(QueryInput::Image {
         source,
         model: if model.is_empty() { None } else { Some(model) },
+        options: inference_options(obj, path)?,
     })
+}
+
+/// OpenAPI `InferenceObject`: `{object, model, options?}`.
+fn inference_object(obj: &json::Obj, path: &str) -> Result<QueryInput, ConvertError> {
+    json::reject_unknown(obj, path, &["object", "model", "options"])?;
+    let object = crate::json::json_to_ast_value(
+        json::required(obj, "object", path)?,
+        &child(path, "object"),
+    )?;
+    let model = json::required(obj, "model", path)
+        .and_then(|v| Ok(json::string_at(v, &child(path, "model"))?.to_string()))?;
+    Ok(QueryInput::Object {
+        object: Box::new(object),
+        model: if model.is_empty() { None } else { Some(model) },
+        options: inference_options(obj, path)?,
+    })
+}
+
+/// Decode the optional free-form `options` member of an inference input into
+/// ordered AST pairs (sorted for canonical output).
+fn inference_options(
+    obj: &json::Obj,
+    path: &str,
+) -> Result<Vec<(String, qql_core::ast::Value)>, ConvertError> {
+    let Some(options) = obj.get("options").filter(|v| !v.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let options_path = child(path, "options");
+    let map = json::object(options, &options_path)?;
+    let mut pairs = Vec::with_capacity(map.len());
+    for (key, value) in map {
+        pairs.push((
+            key.clone(),
+            crate::json::json_to_ast_value(value, &child(&options_path, key))?,
+        ));
+    }
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(pairs)
 }
 
 /// Decode a `VectorStruct` (point-insert/update vectors) into `PointVectors`.
 ///
 /// Unnamed dense, multi-dense, and sparse values are supported, as is a map of
 /// named vectors. Per-point inference inputs (`Document` / `Image` /
-/// `InferenceObject`) have no QQL point-level form and fail closed.
+/// `InferenceObject`) decode to inference vector values, whole or per name.
 pub(crate) fn point_vectors(value: &Value, path: &str) -> Result<PointVectors, ConvertError> {
     match value {
         Value::Array(_) => Ok(PointVectors::Unnamed(vector_value(value, path)?)),
@@ -274,23 +326,11 @@ pub(crate) fn point_vectors(value: &Value, path: &str) -> Result<PointVectors, C
                 return Ok(PointVectors::Unnamed(sparse(value, path)?));
             }
             if obj.contains_key("text") || obj.contains_key("image") || obj.contains_key("object") {
-                return Err(invalid(
-                    path,
-                    "per-point inference vectors have no QQL representation; use an INTO/EMBED clause",
-                ));
+                return Ok(PointVectors::Unnamed(inference_vector_value(obj, path)?));
             }
             let mut named = Vec::with_capacity(obj.len());
             for (name, item) in obj {
-                named.push((
-                    name.clone(),
-                    vector_value(item, &child(path, name)).map_err(|err| {
-                        if let ConvertError::InvalidField { path, detail } = err {
-                            ConvertError::invalid(path, detail)
-                        } else {
-                            err
-                        }
-                    })?,
-                ));
+                named.push((name.clone(), named_vector_value(item, &child(path, name))?));
             }
             if named.is_empty() {
                 return Err(invalid(path, "vector map must not be empty"));
@@ -304,5 +344,62 @@ pub(crate) fn point_vectors(value: &Value, path: &str) -> Result<PointVectors, C
                 type_name(other)
             ),
         )),
+    }
+}
+
+/// Decode one named-map vector entry: dense, multi-dense, sparse, or
+/// per-name inference.
+fn named_vector_value(value: &Value, path: &str) -> Result<VectorValue, ConvertError> {
+    vector_value(value, path).map_err(|err| {
+        if let ConvertError::InvalidField { path, detail } = err {
+            ConvertError::invalid(path, detail)
+        } else {
+            err
+        }
+    })
+}
+
+/// Decode an inference object (`Document` / `Image` / `InferenceObject`)
+/// into a [`VectorValue`].
+fn inference_vector_value(obj: &json::Obj, path: &str) -> Result<VectorValue, ConvertError> {
+    let kinds = ["text", "image", "object"]
+        .into_iter()
+        .filter(|key| obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    let [kind] = kinds.as_slice() else {
+        return Err(invalid(
+            path,
+            "inference vector carries more than one of text, image, object",
+        ));
+    };
+    json::reject_unknown(obj, path, &["text", "image", "object", "model", "options"])?;
+    let model = json::string_at(json::required(obj, "model", path)?, &child(path, "model"))?;
+    let model = if model.is_empty() {
+        None
+    } else {
+        Some(model.to_string())
+    };
+    let options = inference_options(obj, path)?;
+    match *kind {
+        "text" => Ok(VectorValue::Document {
+            text: json::string_at(json::required(obj, "text", path)?, &child(path, "text"))?
+                .to_string(),
+            model,
+            options,
+        }),
+        "image" => Ok(VectorValue::Image {
+            source: json::string_at(json::required(obj, "image", path)?, &child(path, "image"))?
+                .to_string(),
+            model,
+            options,
+        }),
+        _ => Ok(VectorValue::Object {
+            object: Box::new(crate::json::json_to_ast_value(
+                json::required(obj, "object", path)?,
+                &child(path, "object"),
+            )?),
+            model,
+            options,
+        }),
     }
 }

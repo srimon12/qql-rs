@@ -26,6 +26,22 @@ impl Stmt {
             Self::DeleteVector(delete) => delete.shard_key.as_ref(),
             Self::UpdateVector(update) => update.shard_key.as_ref(),
             Self::UpdatePayload(update) => update.shard_key.as_ref(),
+            Self::Batch(batch) => {
+                // Members of one batch RPC normally share routing; report a
+                // key only when every member agrees so callers never act on
+                // a partial view.
+                let mut keys = batch.statements.iter().map(Stmt::shard_key);
+                match keys.next() {
+                    None => None,
+                    Some(first) => {
+                        if keys.all(|key| key == first) {
+                            first
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
             _ => None,
         }
     }
@@ -87,6 +103,13 @@ impl Stmt {
                 update.shard_key = shard_key;
                 true
             }
+            Self::Batch(batch) => {
+                let mut ok = true;
+                for member in &mut batch.statements {
+                    ok &= member.set_shard_key(shard_key.clone());
+                }
+                ok
+            }
             _ => false,
         }
     }
@@ -117,6 +140,11 @@ pub fn inject_filter(
     let filter = build_filter(field, operator, value.clone())?;
     match statement {
         Stmt::Query(query) => inject_query(query, &filter),
+        Stmt::Batch(batch) => {
+            for member in &mut batch.statements {
+                inject_filter(member, field, operator, value.clone())?;
+            }
+        }
         Stmt::Scroll(scroll) => merge_filter(&mut scroll.filter, filter),
         Stmt::Delete(delete) => merge_selector(&mut delete.selector, filter),
         Stmt::Count(count) => merge_filter(&mut count.filter, filter),
@@ -194,6 +222,7 @@ fn build_filter(field: &str, operator: ComparisonOp, value: Value) -> Result<Fil
         }
         let id = match value {
             Value::Int(value) if value >= 0 => PointId::Number(value as u64),
+            Value::UInt(value) => PointId::Number(value),
             Value::Str(value) => PointId::String(value),
             _ => {
                 return Err(QqlError::validation(

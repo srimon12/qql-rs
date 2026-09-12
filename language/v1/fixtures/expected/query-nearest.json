@@ -409,7 +409,11 @@
         "filter": null,
         "group": {
           "field": "category",
-          "lookup": "categories",
+          "lookup": {
+            "collection": "categories",
+            "payload": null,
+            "vectors": null
+          },
           "size": 5
         },
         "output": {

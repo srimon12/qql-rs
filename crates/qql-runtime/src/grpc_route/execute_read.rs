@@ -14,7 +14,7 @@ use crate::qdrant_grpc::qdrant;
 
 use super::query::{
     to_count_points, to_facet_counts, to_get_points, to_query_groups, to_query_points,
-    to_scroll_points,
+    to_read_consistency, to_scroll_points,
 };
 use super::typed::{
     facet_hit_to_typed, point_group_to_typed, retrieved_point_to_hit, scored_point_to_hit,
@@ -180,6 +180,8 @@ pub async fn execute_query_batch_grpc(
     client: &GrpcQdrant,
     collection: &str,
     batch: &qql_plan::QueryBatchRequest,
+    timeout: Option<u64>,
+    consistency: Option<qql_plan::types::ReadConsistencyParam>,
 ) -> Result<Vec<BackendResponse>, QqlError> {
     let query_points: Result<Vec<_>, _> = batch
         .searches
@@ -191,7 +193,8 @@ pub async fn execute_query_batch_grpc(
     let grpc_req = qdrant::QueryBatchPoints {
         collection_name: collection.to_string(),
         query_points,
-        ..Default::default()
+        read_consistency: consistency.as_ref().map(to_read_consistency),
+        timeout,
     };
 
     let resp = client

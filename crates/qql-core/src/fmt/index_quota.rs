@@ -53,6 +53,19 @@ pub(crate) fn render_create_shard_key(statement: &CreateShardKeyStmt) -> String 
     if let Some(value) = statement.replication_factor {
         options.push(format!("replication_factor = {}", value));
     }
+    if let Some(values) = &statement.placement {
+        options.push(format!(
+            "placement = [{}]",
+            values
+                .iter()
+                .map(|peer| peer.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(value) = &statement.initial_state {
+        options.push(format!("initial_state = '{}'", escape_string(value)));
+    }
     if !options.is_empty() {
         let _ = write!(out, " WITH ({})", options.join(", "));
     }

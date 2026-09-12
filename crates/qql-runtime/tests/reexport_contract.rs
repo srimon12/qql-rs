@@ -78,6 +78,8 @@ impl QdrantOps for StubBackend {
         &self,
         _collection: &str,
         _batch: &QueryBatchRequest,
+        _timeout: Option<u64>,
+        _consistency: Option<qql_plan::types::ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError> {
         Ok(Vec::new())
     }
@@ -86,6 +88,7 @@ impl QdrantOps for StubBackend {
         &self,
         _collection: &str,
         _batch: &UpdateBatchRequest,
+        _wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
         Ok(Vec::new())
     }

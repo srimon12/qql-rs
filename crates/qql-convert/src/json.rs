@@ -172,9 +172,8 @@ pub(crate) fn type_name(value: &Value) -> &'static str {
 
 /// Convert a JSON value into a QQL AST literal.
 ///
-/// Integers stay integers; other numbers become floats. A JSON integer that
-/// does not fit `i64` (possible for `u64` payload values) has no QQL literal
-/// and fails closed instead of silently truncating.
+/// Integers that fit `i64` stay `Int`; integers above `i64::MAX` become
+/// `UInt`; other numbers become floats.
 pub(crate) fn json_to_ast_value(value: &Value, path: &str) -> Result<ast::Value, ConvertError> {
     Ok(match value {
         Value::Null => ast::Value::Null,
@@ -182,12 +181,7 @@ pub(crate) fn json_to_ast_value(value: &Value, path: &str) -> Result<ast::Value,
         Value::Number(n) => match n.as_i64() {
             Some(i) => ast::Value::Int(i),
             None => match n.as_u64() {
-                Some(_) => {
-                    return Err(invalid(
-                        path,
-                        "integer exceeds the signed 64-bit range QQL can represent",
-                    ));
-                }
+                Some(u) => ast::Value::UInt(u),
                 None => ast::Value::Float(f64_at(value, path)?),
             },
         },

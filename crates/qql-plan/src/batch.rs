@@ -40,6 +40,9 @@ pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
         Stmt::DeletePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        // Explicit BATCH blocks are already one unit: they never merge into
+        // ambient groups (the executors intercept them before the grouper).
+        Stmt::Batch(_) => None,
         _ => None,
     }
 }

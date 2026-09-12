@@ -33,18 +33,26 @@ pub struct FilterCompound {
     /// Clauses of which at least one should match.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
-    /// At-least-N `should` threshold, when set.
+    /// At-least-N `should` threshold as a wire object (`{"conditions", "min_count"}`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_should: Option<usize>,
+    pub min_should: Option<MinShould>,
 }
 
 /// OpenAPI `MinShould`: clause list plus the minimum number that must match.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinShould {
     /// Candidate clauses.
     pub conditions: Vec<FilterClause>,
     /// Minimum number of clauses required to match.
     pub min_count: u64,
+}
+
+/// `{ "min_should": { "conditions": […], "min_count": n } }` — at least `n`
+/// of the conditions must match (OpenAPI `Filter.min_should`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MinShouldCondition {
+    /// At-least-N condition set.
+    pub min_should: MinShould,
 }
 
 /// One filter condition — any OpenAPI `Condition` variant.
@@ -61,6 +69,8 @@ pub enum FilterClause {
     HasId(HasIdCondition),
     /// `{ "has_vector": "name" }` — named-vector presence.
     HasVector(HasVectorCondition),
+    /// `{ "min_should": { "conditions": […], "min_count": n } }` — at-least-N match.
+    MinShould(MinShouldCondition),
     /// `{ "nested": … }` — filter over an array of objects.
     Nested(NestedCondition),
     /// Recursive sub-filter.
@@ -146,6 +156,11 @@ pub enum MatchValue {
     Text {
         /// Query text for the full-text index.
         text: String,
+    },
+    /// Full-text match of at least one token (`{"text_any": …}`).
+    TextAny {
+        /// Query text whose tokens are matched disjunctively.
+        text_any: String,
     },
     /// Match any of the listed values (`{"any": [...]}`).
     Any {

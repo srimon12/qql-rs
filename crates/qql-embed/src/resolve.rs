@@ -651,7 +651,7 @@ async fn apply_input(
     dense: DenseIter<'_>,
 ) -> Result<(), QqlError> {
     match input {
-        QueryInput::Image { source, model } => {
+        QueryInput::Image { source, model, .. } => {
             // Images always produce single-vector dense (CLIP vision, etc.).
             if target.kind == VectorKind::Sparse {
                 return Err(QqlError::execution(
@@ -722,6 +722,9 @@ async fn apply_input(
         | QueryInput::Point(_)
         | QueryInput::Param(..)
         | QueryInput::PositionalParam(..) => Ok(()),
+        // Custom inference objects have no client-side embedder method; the
+        // backend inference service resolves them (options ride along).
+        QueryInput::Object { .. } => Ok(()),
     }
 }
 

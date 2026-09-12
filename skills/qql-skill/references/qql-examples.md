@@ -483,7 +483,6 @@ DROP COLLECTION tenants;
 ```sql
 QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
   FROM news
-  USING dense
   LIMIT 20;
 ```
 
@@ -496,7 +495,6 @@ QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
 ```sql
 QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)
   FROM places
-  USING dense
   WHERE location GEO_BBOX {
     top_left: {lat: 48.8600, lon: 2.3400},
     bottom_right: {lat: 48.8500, lon: 2.3600}
@@ -819,3 +817,175 @@ OFFSET :offset;
 - `:name` is matched by identifier name; `?` maps 1-to-1 sequentially with the positional list.
 - Nested dict params expand to dotted keys (`{"loc": {"lat": 1.0}}` binds `:loc.lat`); flat dotted keys work identically.
 - Colons in compact dicts (`{a:b}`) are separators, not placeholders; write `{key: :val}` to bind a dict value.
+
+---
+
+## 34. Single-RPC Batch Blocks
+
+**Problem:** Two same-collection queries or mutations should travel as one Qdrant batch RPC instead of two round trips.
+
+**Why this works:** `BATCH { ... }` holds full member statements. Members share one collection and one family (all queries or all mutations). Query batches carry shared read opts in `PARAMS`; mutation batches carry `WAIT`.
+
+```sql
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; };
+
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority);
+
+BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false;
+```
+
+**Key decisions:**
+- One collection and one family per block. Mixed collections, mixed query/mutation members, DDL, `SHOW`, `COUNT`, `SCROLL`, `FACET`, and nested `BATCH` fail closed.
+- `WAIT` belongs on mutation batches. `PARAMS (timeout, consistency)` belongs on query batches.
+- `WAIT false` sends `?wait=false` explicitly. It never means omit the param.
+- Edge fans out per member. Remote Qdrant sends one native batch RPC.
+
+---
+
+## 35. At-Least-N Filters and Token Match Forms
+
+**Problem:** A document qualifies when at least two of three signals hold, when any token of a phrase matches, or when none of a denylist matches.
+
+**Why this works:** `MIN SHOULD n (...)` is an at-least-N disjunction over full filters. `MATCH TOKENS` tests any token of the text. `MATCH EXCEPT` rejects listed values.
+
+```sql
+QUERY TEXT 'x' FROM docs WHERE MIN SHOULD 2 (status = 'active', priority = 'high', category = 'tech') LIMIT 10;
+
+QUERY TEXT 'x' FROM docs WHERE title MATCH TOKENS 'red shoes' LIMIT 5;
+
+QUERY TEXT 'x' FROM docs WHERE tags MATCH EXCEPT ('archived', 'private') LIMIT 5;
+```
+
+**Key decisions:**
+- `MIN SHOULD` count is at least 1. Operands are full filters, so nesting and `MATCH TOKENS` inside works.
+- `MATCH EXCEPT` needs a non-empty value list.
+- All three lower to typed Qdrant filter shapes on REST, gRPC, and edge.
+
+---
+
+## 36. Scroll Ordering and Order Paging Origin
+
+**Problem:** Browse points in payload order, resume from a known value, and control which payload comes back.
+
+**Why this works:** `SCROLL ... ORDER BY` sorts by a payload key. `START FROM` resumes from that value. `WITH PAYLOAD` selects the returned fields.
+
+```sql
+SCROLL FROM docs ORDER BY created_at DESC LIMIT 10;
+
+SCROLL FROM docs ORDER BY score DESC START FROM 100 LIMIT 10;
+
+SCROLL FROM docs WHERE status = 'active' AFTER 7 ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' SHARD 'acme' WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 10;
+
+QUERY ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 20;
+```
+
+**Key decisions:**
+- `START FROM` takes an integer, float, datetime string, or placeholder.
+- `SCROLL ... WITH PAYLOAD` accepts `false`, `INCLUDE (...)`, or `EXCLUDE (...)`.
+- Clause order stays `AFTER`, `ORDER BY`, `SHARD`, `WITH PAYLOAD`, `WITH VECTOR`, `LIMIT`.
+
+---
+
+## 37. Group Lookup Selectors and Prefetch Routing
+
+**Problem:** Grouped hits need resolved metadata without a second fetch, and a prefetch join should target one shard.
+
+**Why this works:** `LOOKUP FROM` on `GROUP BY` carries payload and vector selectors. Prefetch `LOOKUP FROM` carries an optional vector and shard key.
+
+```sql
+QUERY TEXT 'news' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 20;
+
+WITH a AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 50) QUERY FUSION RRF FROM docs PREFETCH (a LOOKUP FROM docs2 VECTOR dense SHARD 'acme') LIMIT 10;
+```
+
+**Key decisions:**
+- Group `LOOKUP FROM` selectors shape the joined_docs payload on the wire.
+- Prefetch `SHARD` routes only that lookup leg. Statement `SHARD` still routes the whole request.
+- Group `LOOKUP FROM` stays remote-only on edge. Plain `GROUP BY` works offline.
+
+---
+
+## 38. Conditional Upserts and Nested Payload Writes
+
+**Problem:** An upsert should only touch matching points, only insert or only update, or write one nested path instead of merging the whole payload.
+
+**Why this works:** `UPDATE FILTER` guards the write with a filter. `UPDATE MODE` picks the write mode. `KEY` targets a nested path. `OVERWRITE` replaces the full payload and runs only inside `BATCH`.
+
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active';
+
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;
+
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active' UPDATE MODE update_only;
+
+UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
+
+BATCH { UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1; UPDATE docs SET PAYLOAD = {b: 2} WHERE id = 2; };
+```
+
+**Key decisions:**
+- Guards commute and each appears at most once. Unknown modes fail closed.
+- `KEY` plus `OVERWRITE` commute in source. Format normalizes to `KEY` then `OVERWRITE`.
+- A lone `OVERWRITE` outside `BATCH` fails closed (`QQL-REST-OVERWRITE-BATCH-ONLY`). There is no single-point replace route.
+
+---
+
+## 39. Inference Options, Objects, and Per-Point Vectors
+
+**Problem:** A query or point carries server-side inference input: generation options, a custom model payload, or a document/image/object instead of a literal vector.
+
+**Why this works:** `OPTIONS {...}` passes an opaque dict to the inference service. `OBJECT {...}` is the custom inference payload. Per-point dicts with `text`, `image`, or `object` keys use the same shapes inside `vector`.
+
+```sql
+QUERY TEXT 'hi' MODEL 'm' OPTIONS {temperature: 0.5} FROM docs USING dense LIMIT 1;
+
+QUERY IMAGE 'https://x/y.jpg' MODEL 'clip' OPTIONS {size: 512} FROM docs USING img LIMIT 1;
+
+QUERY OBJECT {a: 1} MODEL 'm' OPTIONS {k: true} FROM docs USING dense LIMIT 5;
+
+UPSERT INTO docs VALUES {id: 1, vector: {text: 'hello', model: 'm'}};
+
+UPSERT INTO docs VALUES {id: 1, vector: {dense: {text: 'hello', model: 'm'}, sparse: {indices: [1], values: [0.5]}}};
+
+UPDATE docs SET VECTOR dense = {text: 'hello', model: 'm'} WHERE id = 1;
+```
+
+**Key decisions:**
+- `OPTIONS` needs no `MODEL`. `OBJECT` needs no `MODEL` either (wire serializes an empty model placeholder).
+- Parenthesized `OBJECT ({...})` parses but formats to the bare object.
+- A dict with a numeric `text` value stays a named vector. Only string `text`/`image` or an `object` key claims the inference shape. Mixed inference and sparse keys fail closed.
+
+---
+
+## 40. Collection Blocks, Shard Placement, and Literal Forms
+
+**Problem:** Collections need WAL tuning, strict mode caps, free-form metadata, placed shard keys, richer text stopwords, and large integer IDs.
+
+**Why this works:** `WITH WAL`, `WITH STRICT_MODE`, and `WITH METADATA` are collection blocks. Shard keys take `placement` and `initial_state`. Text indexes take bare, list, or set stopwords. Large digits parse unsigned. Formula datetimes format canonical uppercase.
+
+```sql
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32, wal_segments_ahead = 2, wal_retain_closed = 1);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team', version = 3);
+
+ALTER COLLECTION docs WITH STRICT_MODE (enabled = false);
+
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');
+
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = 'english');
+
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = {languages: ['english'], custom: ['foo']});
+
+QUERY TEXT 'x' FROM docs WHERE big = 18446744073709551615 LIMIT 5;
+
+QUERY FORMULA DATETIME('2024-01-01T00:00:00Z') FROM docs LIMIT 1;
+```
+
+**Key decisions:**
+- `WITH WAL` is create-only. `WITH STRICT_MODE` and `WITH METADATA` work on create and alter.
+- `placement` is a peer-id list. `initial_state` is a replica-state string.
+- Create-time `read_fan_out_factor` and `read_fan_out_delay_ms` parse on `CREATE` and apply with a follow-up PATCH.
+- Unknown stopword languages fail at plan. Unknown set keys fail at parse.
+- Lowercase `datetime(...)` still parses and formats to `DATETIME(...)`.

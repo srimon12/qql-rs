@@ -292,6 +292,7 @@ mod tests {
             IndexOptions {
                 stemmer: Some(qql_plan::StemmingAlgorithm::parse("English")),
                 stopwords: Some(qql_plan::StopwordsSet {
+                    languages: Vec::new(),
                     custom: vec!["the".into(), "a".into()],
                 }),
                 ..Default::default()

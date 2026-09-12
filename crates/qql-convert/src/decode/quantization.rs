@@ -22,6 +22,23 @@ pub(crate) fn quantization(value: &Value, path: &str) -> Result<QuantizationConf
     };
     let params_path = child(path, kind);
     let params = json::object(obj.get(*kind).expect("variant present"), &params_path)?;
+    // Each family accepts only its own sub-fields: misplaced keys (e.g.
+    // `quantile` on binary, `bits` on scalar) fail closed instead of being
+    // silently dropped.
+    let allowed: &[&str] = match *kind {
+        "scalar" => &["type", "quantile", "always_ram", "memory"],
+        "product" => &["compression", "always_ram", "memory"],
+        "binary" => &["always_ram", "memory", "encoding", "query_encoding"],
+        _ => &["bits", "always_ram", "memory"],
+    };
+    for key in params.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(invalid(
+                child(&params_path, key),
+                format!("unknown {kind} quantization option '{key}'"),
+            ));
+        }
+    }
     // `always_ram` is a plain bool in the AST: QQL plans always serialize it.
     let always_ram = json::opt_bool(params, "always_ram", &params_path)?.unwrap_or(false);
     let memory = memory(params, "memory", &params_path)?;
@@ -69,16 +86,32 @@ pub(crate) fn quantization(value: &Value, path: &str) -> Result<QuantizationConf
                 memory,
             }
         }
-        "binary" => QuantizationConfig {
-            qtype: QuantizationType::Binary,
-            always_ram,
-            quantile: None,
-            bits: None,
-            compression: None,
-            encoding: json::opt_string(params, "encoding", &params_path)?,
-            query_encoding: json::opt_string(params, "query_encoding", &params_path)?,
-            memory,
-        },
+        "binary" => {
+            let encoding = match json::opt_string(params, "encoding", &params_path)? {
+                None => None,
+                Some(raw) => Some(check_binary_encoding(
+                    &raw,
+                    &child(&params_path, "encoding"),
+                )?),
+            };
+            let query_encoding = match json::opt_string(params, "query_encoding", &params_path)? {
+                None => None,
+                Some(raw) => Some(check_binary_query_encoding(
+                    &raw,
+                    &child(&params_path, "query_encoding"),
+                )?),
+            };
+            QuantizationConfig {
+                qtype: QuantizationType::Binary,
+                always_ram,
+                quantile: None,
+                bits: None,
+                compression: None,
+                encoding,
+                query_encoding,
+                memory,
+            }
+        }
         "turbo" => QuantizationConfig {
             qtype: QuantizationType::Turbo,
             always_ram,
@@ -110,6 +143,35 @@ fn turbo_bits(label: &str) -> Option<f64> {
     match value {
         1.0 | 1.5 | 2.0 | 4.0 => Some(value),
         _ => None,
+    }
+}
+
+/// Validate a `BinaryQuantizationEncoding` name, normalizing to lowercase.
+fn check_binary_encoding(raw: &str, path: &str) -> Result<String, ConvertError> {
+    let lower = raw.to_ascii_lowercase();
+    if matches!(lower.as_str(), "one_bit" | "two_bits" | "one_and_half_bits") {
+        Ok(lower)
+    } else {
+        Err(invalid(
+            path,
+            format!("unknown binary quantization encoding '{raw}'"),
+        ))
+    }
+}
+
+/// Validate a `BinaryQuantizationQueryEncoding` name, normalizing to lowercase.
+fn check_binary_query_encoding(raw: &str, path: &str) -> Result<String, ConvertError> {
+    let lower = raw.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "default" | "binary" | "scalar4bits" | "scalar8bits"
+    ) {
+        Ok(lower)
+    } else {
+        Err(invalid(
+            path,
+            format!("unknown binary quantization query encoding '{raw}'"),
+        ))
     }
 }
 

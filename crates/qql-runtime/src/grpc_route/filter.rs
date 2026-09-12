@@ -43,11 +43,26 @@ pub(crate) fn compound_to_filter(fc: &FilterCompound) -> Result<qdrant::Filter, 
         .iter()
         .map(to_condition)
         .collect::<Result<Vec<_>, _>>()?;
+    let min_should = fc
+        .min_should
+        .as_ref()
+        .map(|min_should| {
+            min_should
+                .conditions
+                .iter()
+                .map(to_condition)
+                .collect::<Result<Vec<_>, _>>()
+                .map(|conditions| qdrant::MinShould {
+                    conditions,
+                    min_count: min_should.min_count,
+                })
+        })
+        .transpose()?;
     Ok(qdrant::Filter {
         must,
         must_not,
         should,
-        ..Default::default()
+        min_should,
     })
 }
 
@@ -110,6 +125,21 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
         FilterClause::HasId(h) => ConditionOneOf::HasId(qdrant::HasIdCondition {
             has_id: h.has_id.iter().map(to_point_id).collect(),
         }),
+        FilterClause::MinShould(m) => {
+            let conditions = m
+                .min_should
+                .conditions
+                .iter()
+                .map(to_condition)
+                .collect::<Result<Vec<_>, _>>()?;
+            ConditionOneOf::Filter(qdrant::Filter {
+                min_should: Some(qdrant::MinShould {
+                    conditions,
+                    min_count: m.min_should.min_count,
+                }),
+                ..Default::default()
+            })
+        }
         FilterClause::HasVector(v) => ConditionOneOf::HasVector(qdrant::HasVectorCondition {
             has_vector: v.has_vector.clone(),
         }),
@@ -289,6 +319,9 @@ pub(crate) fn to_match(mv: &MatchValue) -> Result<qdrant::Match, QqlError> {
         }
         MatchValue::Text { text } => Ok(qdrant::Match {
             match_value: Some(Mv::Text(text.clone())),
+        }),
+        MatchValue::TextAny { text_any } => Ok(qdrant::Match {
+            match_value: Some(Mv::TextAny(text_any.clone())),
         }),
         MatchValue::Any { any } => exact_list_match(any, true),
         MatchValue::Except { except } => exact_list_match(except, false),

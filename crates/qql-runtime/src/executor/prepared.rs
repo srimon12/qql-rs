@@ -122,6 +122,8 @@ impl Executor {
             points: vec![ast::PointEntry::Param("rows".to_string(), None)],
             embedding: None,
             embed: Vec::new(),
+            update_filter: None,
+            update_mode: None,
             shard_key: None,
             wait: None,
         }));

@@ -72,6 +72,8 @@ WHERE field IS NOT EMPTY
 WHERE content MATCH 'hello world'           -- full-text match
 WHERE content MATCH ANY ('hello', 'world')   -- match any terms in list
 WHERE content MATCH PHRASE 'hello world'    -- exact phrase matching
+WHERE title MATCH TOKENS 'red shoes'        -- any token of the text matches
+WHERE tags MATCH EXCEPT ('archived', 'private') -- none of the values match
 ```
 
 ### Keyword prefix match (Qdrant ≥ 1.19)
@@ -83,7 +85,21 @@ WHERE title MATCH PREFIX 'Comp'
 
 Lowers to `{"key": "title", "match": {"prefix": "Comp"}}`. Full-text `MATCH` /
 `MATCH PHRASE` use the text index; `MATCH PREFIX` is for **keyword** fields with
-`CREATE INDEX … TYPE keyword WITH (prefix = true)`.
+`CREATE INDEX … TYPE keyword WITH (prefix = true)`. `MATCH TOKENS` lowers to
+`match_text_any`. `MATCH EXCEPT` lowers to `match_except` and needs a non-empty
+value list.
+
+---
+
+## 5b. At-least-N disjunction
+
+```sql
+WHERE MIN SHOULD 2 (status = 'active', priority = 'high', category = 'tech')
+```
+
+At least `n` of the operands must hold. Operands are full filters, so nesting
+works: `MIN SHOULD 1 (title MATCH TOKENS 'a b', tags MATCH EXCEPT (1, 2))`.
+The count is at least 1. Lower values fail closed (`QQL-VALIDATION-MIN-SHOULD`).
 
 ---
 

@@ -238,7 +238,7 @@ fn typed_update_batch_returns_mutations() {
         assert_eq!(collection, "docs");
 
         let responses = backend
-            .execute_update_batch(&collection, &batch)
+            .execute_update_batch(&collection, &batch, true)
             .await
             .expect("typed update batch");
         assert_eq!(responses.len(), mutations.len());

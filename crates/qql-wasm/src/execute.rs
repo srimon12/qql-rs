@@ -212,6 +212,8 @@ impl Client {
             points: vec![qql_core::ast::PointEntry::Param("rows".to_string(), None)],
             embedding: None,
             embed: Vec::new(),
+            update_filter: None,
+            update_mode: None,
             shard_key: None,
             wait: None,
         }));
@@ -278,6 +280,25 @@ impl Client {
         &self,
         stmt: &qql_core::ast::Stmt,
     ) -> Result<serde_json::Value, JsValue> {
+        // Explicit BATCH blocks run members as one forced group. The single
+        // response path summarizes; per-member responses belong to scripts.
+        if let qql_core::ast::Stmt::Batch(_) = stmt {
+            let operation = self.prepare_operation(stmt).await?;
+            let mut results = Vec::new();
+            self.execute_batch_op(operation, crate::params::WasmOnError::Stop, &mut results)
+                .await?;
+            let total = results.len();
+            let ok_count = results
+                .iter()
+                .filter(|r| r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
+                .count();
+            return Ok(exec_response(
+                ok_count == total,
+                "BATCH",
+                &format!("Batch: {ok_count}/{total} operations ok"),
+                None,
+            ));
+        }
         let operation = self.prepare_operation(stmt).await?;
         self.execute_planned_inner(&operation).await
     }

@@ -5,8 +5,8 @@ pub(crate) mod pipeline;
 
 use super::{AstLowerer, ascii_equal};
 use crate::ast::{
-    Cte, GroupSpec, PageSpec, QueryCollection, QueryOutput, QueryStmt, Stmt, VectorKind,
-    VectorTarget,
+    Cte, GroupLookup, GroupSpec, PageSpec, QueryCollection, QueryOutput, QueryStmt, Stmt,
+    VectorKind, VectorTarget,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -145,7 +145,30 @@ impl<'a> AstLowerer<'a> {
             let lookup = if self.peek()?.kind == TokenKind::Lookup {
                 self.advance()?;
                 self.expect(TokenKind::From)?;
-                Some(self.parse_identifier()?)
+                let collection = self.parse_identifier()?;
+                let payload = if self.peek()?.kind == TokenKind::With
+                    && self.peek_nth(1).kind == TokenKind::Payload
+                {
+                    self.advance()?;
+                    self.advance()?;
+                    Some(self.parse_payload_selector()?)
+                } else {
+                    None
+                };
+                let vectors = if self.peek()?.kind == TokenKind::With
+                    && self.peek_nth(1).kind == TokenKind::Vector
+                {
+                    self.advance()?;
+                    self.advance()?;
+                    Some(self.parse_vector_selector()?)
+                } else {
+                    None
+                };
+                Some(GroupLookup {
+                    collection,
+                    payload,
+                    vectors,
+                })
             } else {
                 None
             };

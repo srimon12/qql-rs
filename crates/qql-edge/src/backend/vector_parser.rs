@@ -52,6 +52,12 @@ fn plan_vector_value_internal(v: PlanVectorValue) -> Result<VectorInternal, QqlE
         PlanVectorValue::PositionalParam(idx) => Err(err(format!(
             "unbound positional parameter ?{idx} reached edge vector execution"
         ))),
+        // Edge has no inference service; per-point inference stays rejected.
+        PlanVectorValue::Document { .. }
+        | PlanVectorValue::Image { .. }
+        | PlanVectorValue::Object { .. } => Err(err(
+            "inference vectors require an inference service, which edge does not provide",
+        )),
     }
 }
 

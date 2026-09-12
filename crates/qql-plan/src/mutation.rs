@@ -22,6 +22,12 @@ pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
                 PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
             })
             .collect(),
+        update_filter: stmt.update_filter.as_ref().map(top_level_filter),
+        update_mode: stmt.update_mode.map(|mode| match mode {
+            qql_core::ast::UpsertUpdateMode::InsertOnly => UpdateMode::InsertOnly,
+            qql_core::ast::UpsertUpdateMode::UpdateOnly => UpdateMode::UpdateOnly,
+            qql_core::ast::UpsertUpdateMode::Upsert => UpdateMode::Upsert,
+        }),
         shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
     }
 }
@@ -95,18 +101,21 @@ pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRe
             points: Some(vec![point_id_req_typed(id)]),
             filter: None,
             payload,
+            key: stmt.key.clone(),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
         PointSelector::Ids(ids) => UpdatePayloadRequest {
             points: Some(ids.iter().map(point_id_req_typed).collect()),
             filter: None,
             payload,
+            key: stmt.key.clone(),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
         PointSelector::Filter(filter) => UpdatePayloadRequest {
             points: None,
             filter: Some(top_level_filter(filter)),
             payload,
+            key: stmt.key.clone(),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
     }
@@ -201,14 +210,32 @@ fn increment_uuid_point_id(s: &str) -> Option<String> {
     }
 }
 
-/// Lower `SCROLL` to the `/points/scroll` body: payload on, vectors off.
+/// Lower `SCROLL` to the `/points/scroll` body: payload on, vectors off,
+/// plus optional payload selection and payload-key ordering.
 pub fn lower_scroll_request(
     limit: u64,
     filter: Option<&qql_core::ast::FilterExpr>,
     after: Option<&qql_core::ast::PointId>,
+    order_by: Option<&qql_core::ast::ScrollOrderBy>,
     shard_key: Option<qql_core::ast::ShardKey>,
+    with_payload: Option<&qql_core::ast::PayloadSelector>,
     with_vector: Option<&qql_core::ast::VectorSelector>,
 ) -> ScrollRequest {
+    let with_payload = match with_payload {
+        None => Some(PayloadSelectorReq::All(true)),
+        Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),
+        Some(qql_core::ast::PayloadSelector::None) => Some(PayloadSelectorReq::All(false)),
+        Some(qql_core::ast::PayloadSelector::Include(fields)) => {
+            Some(PayloadSelectorReq::Include {
+                include: fields.clone(),
+            })
+        }
+        Some(qql_core::ast::PayloadSelector::Exclude(fields)) => {
+            Some(PayloadSelectorReq::Exclude {
+                exclude: fields.clone(),
+            })
+        }
+    };
     let with_vector = match with_vector {
         Some(qql_core::ast::VectorSelector::All) => Some(VectorSelectorReq::All(true)),
         Some(qql_core::ast::VectorSelector::None) => Some(VectorSelectorReq::All(false)),
@@ -231,9 +258,16 @@ pub fn lower_scroll_request(
             other => point_id_req_typed(other),
         }),
         limit: Some(limit),
-        with_payload: Some(PayloadSelectorReq::All(true)),
+        with_payload,
         with_vector,
-        order_by: None,
+        order_by: order_by.map(|order| OrderByQuery {
+            key: order.field.clone(),
+            direction: Some(match order.direction {
+                qql_core::ast::OrderDirection::Asc => "asc".into(),
+                qql_core::ast::OrderDirection::Desc => "desc".into(),
+            }),
+            start_from: order.start_from.as_ref().map(value_to_json),
+        }),
         shard_key: shard_key.as_ref().map(PlanShardKey::from),
     }
 }
@@ -272,6 +306,16 @@ pub fn planned_to_update_operation(
             collection.clone(),
             UpdateOperation::SetPayload {
                 set_payload: request.clone(),
+            },
+        )),
+        PlannedOperation::OverwritePayload {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection.clone(),
+            UpdateOperation::Overwrite {
+                overwrite_payload: request.clone(),
             },
         )),
         PlannedOperation::ClearPayload {

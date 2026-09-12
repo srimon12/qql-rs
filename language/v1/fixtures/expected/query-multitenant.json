@@ -79,9 +79,11 @@
           }
         },
         "limit": 50,
+        "order_by": null,
         "shard_key": {
           "Keyword": "ge"
         },
+        "with_payload": null,
         "with_vector": null
       }
     },

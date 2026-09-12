@@ -13,7 +13,8 @@ use crate::decode::{
 };
 use crate::json::{self, child, invalid};
 use qql_core::ast::{
-    Cte, GroupSpec, PageSpec, QueryCollection, QueryExpr, QueryOutput, QueryStmt, SearchParams,
+    Cte, GroupLookup, GroupSpec, PageSpec, PayloadSelector, QueryCollection, QueryExpr,
+    QueryOutput, QueryStmt, SearchParams, VectorSelector,
 };
 
 const QUERY_KEYS: &[&str] = &[
@@ -82,21 +83,23 @@ pub(crate) fn query_groups_request(
     let size = json::opt_u64(obj, "group_size", path)?;
     let lookup = match obj.get("with_lookup").filter(|v| !v.is_null()) {
         None => None,
-        Some(Value::String(name)) => Some(name.clone()),
+        Some(Value::String(name)) => Some(GroupLookup {
+            collection: name.clone(),
+            payload: None,
+            vectors: None,
+        }),
         Some(Value::Object(lookup)) => {
-            for key in lookup.keys() {
-                if key != "collection" {
-                    return Err(invalid(
-                        child(&child(path, "with_lookup"), key),
-                        "group lookup selectors (with_payload / with_vectors) have no QQL representation",
-                    ));
-                }
-            }
-            Some(json::required_str(
+            let lookup_path = child(path, "with_lookup");
+            json::reject_unknown(
                 lookup,
-                "collection",
-                &child(path, "with_lookup"),
-            )?)
+                &lookup_path,
+                &["collection", "with_payload", "with_vectors"],
+            )?;
+            Some(GroupLookup {
+                collection: json::required_str(lookup, "collection", &lookup_path)?,
+                payload: decode_lookup_payload(lookup, &lookup_path)?,
+                vectors: decode_lookup_vectors(lookup, &lookup_path)?,
+            })
         }
         Some(other) => {
             return Err(invalid(
@@ -213,4 +216,122 @@ fn validate_lookup_from(
             "top-level lookup_from is only reproducible from a PREFETCH LOOKUP FROM clause",
         ))
     }
+}
+
+/// Decode a group `with_lookup.with_payload` member.
+///
+/// Unlike query-output payloads (where wire `true` is the omitted default),
+/// a lookup selector round-trips explicitly: missing/`null` is `None` (bare
+/// `LOOKUP FROM <coll>`), every other shape is `Some(..)`.
+fn decode_lookup_payload(
+    lookup: &json::Obj,
+    path: &str,
+) -> Result<Option<PayloadSelector>, ConvertError> {
+    let Some(value) = lookup.get("with_payload").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let w_path = child(path, "with_payload");
+    match value {
+        Value::Bool(true) => Ok(Some(PayloadSelector::All)),
+        Value::Bool(false) => Ok(Some(PayloadSelector::None)),
+        Value::Array(items) => {
+            let names = lookup_names(items, &w_path)?;
+            if names.is_empty() {
+                return Err(invalid(
+                    w_path,
+                    "an empty payload include list selects no fields and has no QQL representation",
+                ));
+            }
+            Ok(Some(PayloadSelector::Include(names)))
+        }
+        Value::Object(selector) => {
+            json::reject_unknown(selector, &w_path, &["include", "exclude"])?;
+            match (
+                selector.contains_key("include"),
+                selector.contains_key("exclude"),
+            ) {
+                (true, false) => {
+                    let fields = lookup_names(
+                        json::array(
+                            json::required(selector, "include", &w_path)?,
+                            &child(&w_path, "include"),
+                        )?,
+                        &child(&w_path, "include"),
+                    )?;
+                    if fields.is_empty() {
+                        return Err(invalid(
+                            child(&w_path, "include"),
+                            "an empty payload include list selects no fields and has no QQL representation",
+                        ));
+                    }
+                    Ok(Some(PayloadSelector::Include(fields)))
+                }
+                (false, true) => {
+                    let fields = lookup_names(
+                        json::array(
+                            json::required(selector, "exclude", &w_path)?,
+                            &child(&w_path, "exclude"),
+                        )?,
+                        &child(&w_path, "exclude"),
+                    )?;
+                    if fields.is_empty() {
+                        // Excluding nothing keeps every field — the bare form.
+                        return Ok(None);
+                    }
+                    Ok(Some(PayloadSelector::Exclude(fields)))
+                }
+                _ => Err(invalid(
+                    w_path,
+                    "with_payload selector must set exactly one of include / exclude",
+                )),
+            }
+        }
+        other => Err(invalid(
+            w_path,
+            format!(
+                "expected a boolean, field list, or include/exclude object, got {}",
+                json::type_name(other)
+            ),
+        )),
+    }
+}
+
+/// Decode a group `with_lookup.with_vectors` member (note the plural key).
+fn decode_lookup_vectors(
+    lookup: &json::Obj,
+    path: &str,
+) -> Result<Option<VectorSelector>, ConvertError> {
+    let Some(value) = lookup.get("with_vectors").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let w_path = child(path, "with_vectors");
+    match value {
+        Value::Bool(true) => Ok(Some(VectorSelector::All)),
+        Value::Bool(false) => Ok(Some(VectorSelector::None)),
+        Value::Array(items) => {
+            let names = lookup_names(items, &w_path)?;
+            if names.is_empty() {
+                // Selecting no names is exactly `WITH VECTOR false`.
+                return Ok(Some(VectorSelector::None));
+            }
+            Ok(Some(VectorSelector::Names(names)))
+        }
+        other => Err(invalid(
+            w_path,
+            format!(
+                "expected a boolean or vector-name list, got {}",
+                json::type_name(other)
+            ),
+        )),
+    }
+}
+
+/// Decode a JSON array of field / vector names.
+fn lookup_names(items: &[Value], path: &str) -> Result<Vec<String>, ConvertError> {
+    use crate::json::index;
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| Ok(json::string_at(item, &index(path, i))?.to_string()))
+        .collect()
 }

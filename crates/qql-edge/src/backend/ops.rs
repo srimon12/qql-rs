@@ -424,6 +424,15 @@ impl QdrantOps for EdgeQdrant {
                     .await?;
                 ExecData::Mutation { affected: None }
             }
+            OverwritePayload {
+                collection,
+                request,
+                ..
+            } => {
+                self.execute_edge_overwrite_payload(collection, request)
+                    .await?;
+                ExecData::Mutation { affected: None }
+            }
             ClearPayload {
                 collection,
                 request,
@@ -511,6 +520,12 @@ impl QdrantOps for EdgeQdrant {
                 }
                 .error());
             }
+            Batch { .. } => {
+                return Err(EdgeUnsupported::Route {
+                    path_hint: "BATCH (dispatched by the Executor through the batch methods)",
+                }
+                .error());
+            }
             GetQuotas | SetQuotas { .. } => return Err(EdgeUnsupported::Quota.error()),
         };
         Ok(BackendResponse {
@@ -531,7 +546,11 @@ impl QdrantOps for EdgeQdrant {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
+        _timeout: Option<u64>,
+        _consistency: Option<qql_plan::types::ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError> {
+        // In-process execution applies immediately: timeout / consistency
+        // have no meaning against the local engine and are accepted silently.
         for request in &batch.searches {
             reject_shard_key(request.shard_key.as_ref())?;
         }
@@ -549,7 +568,10 @@ impl QdrantOps for EdgeQdrant {
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
+        _wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
+        // In-process execution is synchronous: every op is applied before the
+        // call returns, so `wait` is trivially satisfied.
         let mut results = Vec::with_capacity(batch.operations.len());
         for op in &batch.operations {
             match op {
@@ -561,6 +583,10 @@ impl QdrantOps for EdgeQdrant {
                 }
                 PlanUpdateOperation::SetPayload { set_payload } => {
                     self.execute_edge_update_payload(collection, set_payload)
+                        .await?;
+                }
+                PlanUpdateOperation::Overwrite { overwrite_payload } => {
+                    self.execute_edge_overwrite_payload(collection, overwrite_payload)
                         .await?;
                 }
                 PlanUpdateOperation::ClearPayload { clear_payload } => {

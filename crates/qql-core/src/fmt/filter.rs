@@ -104,6 +104,34 @@ fn render_filter_predicate(filter: &FilterExpr) -> String {
             render_name(field),
             escape_string(prefix)
         ),
+        FilterExpr::MatchTokens { field, text } => {
+            format!(
+                "{} MATCH TOKENS '{}'",
+                render_name(field),
+                escape_string(text)
+            )
+        }
+        FilterExpr::MatchExcept { field, values } => format!(
+            "{} MATCH EXCEPT ({})",
+            render_name(field),
+            values
+                .iter()
+                .map(render_value)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        FilterExpr::MinShould {
+            min_count,
+            operands,
+        } => format!(
+            "MIN SHOULD {} ({})",
+            min_count,
+            operands
+                .iter()
+                .map(render_filter)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         FilterExpr::Nested { path, filter } => format!(
             "NESTED('{}', {})",
             escape_string(path),

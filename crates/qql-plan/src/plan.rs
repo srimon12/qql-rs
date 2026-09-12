@@ -4,7 +4,8 @@
 //! are a projection (`to_rest_route`). gRPC converts the same typed operation.
 
 use crate::ddl::{
-    lower_alter_collection, lower_create_collection, lower_create_index, lower_set_quota,
+    lower_alter_collection, lower_create_collection, lower_create_index, lower_replica_state,
+    lower_set_quota,
 };
 use crate::mutation::{
     lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
@@ -104,6 +105,19 @@ pub enum PlannedOperation {
         /// Target collection name.
         collection: String,
         /// Lowered `/points/payload` request body.
+        request: UpdatePayloadRequest,
+        /// Wait for update.
+        wait: bool,
+    },
+    /// Replace full payload: batch-only (`{ "overwrite_payload": … }`).
+    ///
+    /// `POST /collections/{c}/points/payload` is merge-only, so this has no
+    /// single REST route: `to_rest_route` fails closed and batch planning
+    /// carries it as [`UpdateOperation::Overwrite`].
+    OverwritePayload {
+        /// Target collection name.
+        collection: String,
+        /// Lowered payload body (shared shape with `UpdatePayloadRequest`).
         request: UpdatePayloadRequest,
         /// Wait for update.
         wait: bool,
@@ -229,6 +243,19 @@ pub enum PlannedOperation {
         /// Replacement quota config; omitted keys become uncapped defaults.
         request: SetQuotaRequest,
     },
+    /// One Qdrant batch RPC for homogeneous same-collection members.
+    Batch {
+        /// Shared collection + family of every member.
+        key: BatchKey,
+        /// Member operations in execution order.
+        operations: Vec<PlannedOperation>,
+        /// Durability flag for mutation batches (`?wait=`).
+        wait: Option<bool>,
+        /// Shared read timeout in seconds (`?timeout=`).
+        timeout: Option<u64>,
+        /// Shared read consistency (`?consistency=`), query batches only.
+        consistency: Option<ReadConsistencyParam>,
+    },
 }
 
 impl PlannedOperation {
@@ -244,6 +271,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { .. } => "UPSERT",
             PlannedOperation::Delete { .. } => "DELETE",
             PlannedOperation::UpdatePayload { .. } => "UPDATE_PAYLOAD",
+            PlannedOperation::OverwritePayload { .. } => "OVERWRITE_PAYLOAD",
             PlannedOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
             PlannedOperation::DeletePayload { .. } => "DELETE_PAYLOAD",
             PlannedOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
@@ -261,6 +289,7 @@ impl PlannedOperation {
             PlannedOperation::CrossRerank { .. } => "CROSS_RERANK",
             PlannedOperation::GetQuotas => "SHOW_QUOTAS",
             PlannedOperation::SetQuotas { .. } => "SET_QUOTA",
+            PlannedOperation::Batch { .. } => "BATCH",
         }
     }
 
@@ -279,6 +308,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { .. } => "upsert",
             PlannedOperation::Delete { .. } => "delete",
             PlannedOperation::UpdatePayload { .. } => "update_payload",
+            PlannedOperation::OverwritePayload { .. } => "overwrite_payload",
             PlannedOperation::ClearPayload { .. } => "clear_payload",
             PlannedOperation::DeletePayload { .. } => "delete_payload",
             PlannedOperation::UpdateVectors { .. } => "update_vector",
@@ -296,6 +326,10 @@ impl PlannedOperation {
             PlannedOperation::CrossRerank { .. } => "cross_rerank",
             PlannedOperation::GetQuotas => "show_quotas",
             PlannedOperation::SetQuotas { .. } => "set_quota",
+            PlannedOperation::Batch { key, .. } => match key {
+                BatchKey::Query(_) => "query_batch",
+                BatchKey::Mutation(_) => "update_batch",
+            },
         }
     }
 
@@ -311,6 +345,7 @@ impl PlannedOperation {
             | PlannedOperation::Upsert { collection, .. }
             | PlannedOperation::Delete { collection, .. }
             | PlannedOperation::UpdatePayload { collection, .. }
+            | PlannedOperation::OverwritePayload { collection, .. }
             | PlannedOperation::ClearPayload { collection, .. }
             | PlannedOperation::DeletePayload { collection, .. }
             | PlannedOperation::UpdateVectors { collection, .. }
@@ -325,6 +360,9 @@ impl PlannedOperation {
             | PlannedOperation::ListShardKeys { collection }
             | PlannedOperation::GetCollection { collection }
             | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
+            PlannedOperation::Batch { key, .. } => Some(match key {
+                BatchKey::Query(collection) | BatchKey::Mutation(collection) => collection.as_str(),
+            }),
             PlannedOperation::ListCollections
             | PlannedOperation::GetQuotas
             | PlannedOperation::SetQuotas { .. } => None,
@@ -338,6 +376,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { .. }
             | PlannedOperation::Delete { .. }
             | PlannedOperation::UpdatePayload { .. }
+            | PlannedOperation::OverwritePayload { .. }
             | PlannedOperation::ClearPayload { .. }
             | PlannedOperation::DeletePayload { .. }
             | PlannedOperation::UpdateVectors { .. }
@@ -379,6 +418,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { request, .. } => request.shard_key.as_ref(),
             PlannedOperation::Delete { request, .. } => request.shard_key.as_ref(),
             PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::OverwritePayload { request, .. } => request.shard_key.as_ref(),
             PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_ref(),
             PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_ref(),
             PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_ref(),
@@ -512,7 +552,9 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 scroll.limit,
                 scroll.filter.as_deref(),
                 scroll.after.as_ref(),
+                scroll.order_by.as_ref(),
                 scroll.shard_key.clone(),
+                scroll.with_payload.as_ref(),
                 scroll.with_vector.as_ref(),
             ),
         }),
@@ -548,14 +590,26 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             request: lower_update_vector_request(update),
             wait: update.wait.unwrap_or(true),
         }),
-        Stmt::UpdatePayload(update) => Ok(PlannedOperation::UpdatePayload {
-            collection: update.collection.clone(),
-            request: lower_update_payload_request(update),
-            wait: update.wait.unwrap_or(true),
-        }),
+        Stmt::UpdatePayload(update) => {
+            let request = lower_update_payload_request(update);
+            let wait = update.wait.unwrap_or(true);
+            if update.overwrite {
+                Ok(PlannedOperation::OverwritePayload {
+                    collection: update.collection.clone(),
+                    request,
+                    wait,
+                })
+            } else {
+                Ok(PlannedOperation::UpdatePayload {
+                    collection: update.collection.clone(),
+                    request,
+                    wait,
+                })
+            }
+        }
         Stmt::CreateCollection(create) => Ok(PlannedOperation::CreateCollection {
             collection: create.collection.clone(),
-            request: lower_create_collection(create),
+            request: lower_create_collection(create)?,
         }),
         Stmt::AlterCollection(alter) => Ok(PlannedOperation::UpdateCollection {
             collection: alter.collection.clone(),
@@ -651,6 +705,8 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
                 shards_number: sk.shards_number,
                 replication_factor: sk.replication_factor,
+                placement: sk.placement.clone(),
+                initial_state: lower_replica_state(sk.initial_state.as_deref())?,
             },
         }),
         Stmt::DropShardKey(sk) => Ok(PlannedOperation::DropShardKey {
@@ -670,6 +726,160 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
         Stmt::SetQuota(stmt) => Ok(PlannedOperation::SetQuotas {
             request: lower_set_quota(stmt)?,
         }),
+        Stmt::Batch(batch) => plan_batch(batch),
+    }
+}
+
+/// Plan a `BATCH { … }` block into one batch operation.
+///
+/// Members plan through the same lowering as standalone statements, then
+/// must share one batch key (one collection, one family). Shared wire opts
+/// live on the block: `WAIT` for mutation batches, `PARAMS`
+/// (timeout / consistency) for query batches. Members carrying those shared
+/// opts fail with a move-it-to-the-header error instead of silently dropping
+/// them (per-search `params` keys stay on the member).
+fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlError> {
+    let mut operations = Vec::with_capacity(batch.statements.len());
+    for member in &batch.statements {
+        operations.push(lower_statement_to_planned(member)?);
+    }
+    let mut keys = operations.iter().map(PlannedOperation::batch_key);
+    let key = match keys.next() {
+        Some(Some(key)) => key,
+        _ => {
+            let label = batch
+                .statements
+                .first()
+                .map(Stmt::stmt_kind)
+                .unwrap_or("BATCH");
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-BATCH-MEMBER",
+                alloc::format!("BATCH member cannot run in a batch RPC: {label}"),
+                None,
+            ));
+        }
+    };
+    for (member, operation) in batch.statements.iter().zip(operations.iter()) {
+        if operation.batch_key().as_ref() != Some(&key) {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-BATCH-MIXED",
+                alloc::format!(
+                    "BATCH members must share one collection and one family, got {} next to {}",
+                    member.stmt_kind(),
+                    batch
+                        .statements
+                        .first()
+                        .map(Stmt::stmt_kind)
+                        .unwrap_or("BATCH"),
+                ),
+                None,
+            ));
+        }
+    }
+    match &key {
+        BatchKey::Query(_) => {
+            if batch.wait.is_some() {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BATCH-WAIT",
+                    "WAIT has no representation on query batches",
+                    None,
+                ));
+            }
+            let (timeout, consistency) = batch_shared_read_opts(batch.params.as_ref())?;
+            for member in &batch.statements {
+                if let Stmt::Query(query) = member
+                    && let Some(params) = query.params.as_ref()
+                    && (params.timeout.is_some() || params.consistency.is_some())
+                {
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-BATCH-PARAMS",
+                        "move member PARAMS timeout / consistency to the BATCH header",
+                        None,
+                    ));
+                }
+            }
+            Ok(PlannedOperation::Batch {
+                key,
+                operations,
+                wait: None,
+                timeout,
+                consistency,
+            })
+        }
+        BatchKey::Mutation(_) => {
+            if let Some(params) = batch.params.as_ref()
+                && (params.timeout.is_some() || params.consistency.is_some())
+            {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BATCH-PARAMS",
+                    "PARAMS timeout / consistency have no representation on mutation batches",
+                    None,
+                ));
+            }
+            for member in &batch.statements {
+                if batch_member_wait(member).is_some() {
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-BATCH-WAIT",
+                        "move member WAIT to the BATCH header",
+                        None,
+                    ));
+                }
+            }
+            Ok(PlannedOperation::Batch {
+                key,
+                operations,
+                wait: batch.wait,
+                timeout: None,
+                consistency: None,
+            })
+        }
+    }
+}
+
+/// Split batch-header `PARAMS` into shared read opts, rejecting per-search keys.
+fn batch_shared_read_opts(
+    params: Option<&qql_core::ast::SearchParams>,
+) -> Result<(Option<u64>, Option<ReadConsistencyParam>), QqlError> {
+    let Some(params) = params else {
+        return Ok((None, None));
+    };
+    let present = [
+        ("hnsw_ef", params.hnsw_ef.is_some()),
+        ("exact", params.exact.is_some()),
+        ("acorn", params.acorn.is_some()),
+        ("max_selectivity", params.max_selectivity.is_some()),
+        ("indexed_only", params.indexed_only.is_some()),
+        ("quantization", params.quantization.is_some()),
+        ("rrf_k", params.rrf_k.is_some()),
+        ("rrf_weights", params.rrf_weights.is_some()),
+        ("idf", params.idf.is_some()),
+    ];
+    if let Some((name, _)) = present.iter().find(|(_, is_some)| *is_some) {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-BATCH-PARAMS",
+            alloc::format!(
+                "PARAMS {name} has no representation on a BATCH header; keep it on member queries"
+            ),
+            None,
+        ));
+    }
+    Ok((
+        params.timeout,
+        params.consistency.as_ref().map(ReadConsistencyParam::from),
+    ))
+}
+
+/// Explicit `WAIT` on a batch member, if any (all mutation kinds carry one).
+fn batch_member_wait(member: &Stmt) -> Option<bool> {
+    match member {
+        Stmt::Upsert(stmt) => stmt.wait,
+        Stmt::Delete(stmt) => stmt.wait,
+        Stmt::ClearPayload(stmt) => stmt.wait,
+        Stmt::DeletePayload(stmt) => stmt.wait,
+        Stmt::DeleteVector(stmt) => stmt.wait,
+        Stmt::UpdateVector(stmt) => stmt.wait,
+        Stmt::UpdatePayload(stmt) => stmt.wait,
+        _ => None,
     }
 }
 
@@ -863,6 +1073,7 @@ mod tests {
                     text: "rerank text".into(),
                     model: None,
                     text_param: None,
+                    options: Vec::new(),
                 },
                 model: "colbert-v2".into(),
                 using: None,
@@ -913,6 +1124,7 @@ mod tests {
                     text: "rerank text".into(),
                     model: None,
                     text_param: None,
+                    options: Vec::new(),
                 },
                 model: "colbert-v2".into(),
                 using: Some(VectorTarget {
@@ -1199,5 +1411,82 @@ mod tests {
             }
             other => panic!("expected CrossRerank, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    fn plan_source(source: &str) -> Result<PlannedOperation, qql_core::error::QqlError> {
+        let stmt = qql_core::parser::Parser::parse(source).expect("fixture must parse");
+        plan(&stmt)
+    }
+
+    #[test]
+    fn batch_homogeneity_is_enforced() {
+        // Mixed families fail.
+        let err =
+            plan_source("BATCH { QUERY [0.1] FROM docs LIMIT 1; DELETE FROM docs WHERE id = 1; }")
+                .expect_err("mixed batch must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-MIXED");
+        // Mixed collections fail.
+        let err =
+            plan_source("BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM other LIMIT 1; }")
+                .expect_err("mixed collections must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-MIXED");
+        // Non-batchable members fail (group query plans to QueryGroups).
+        let err = plan_source(
+            "BATCH { QUERY [0.1] FROM docs GROUP BY city LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }",
+        )
+        .expect_err("group member must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-MEMBER");
+    }
+
+    #[test]
+    fn batch_header_opts_are_exclusive() {
+        // WAIT belongs to mutation batches only.
+        let err = plan_source("BATCH { QUERY [0.1] FROM docs LIMIT 1; } WAIT true")
+            .expect_err("wait on query batch must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-WAIT");
+        // Member WAIT must move to the header.
+        let err = plan_source(
+            "BATCH { DELETE FROM docs WHERE id = 1 WAIT false; DELETE FROM docs WHERE id = 2; }",
+        )
+        .expect_err("member wait must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-WAIT");
+        // Member timeout must move to the header.
+        let err = plan_source(
+            "BATCH { QUERY [0.1] FROM docs PARAMS (timeout = 5) LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }",
+        )
+        .expect_err("member timeout must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-PARAMS");
+        // Per-search params keys stay on the member.
+        plan_source(
+            "BATCH { QUERY [0.1] FROM docs PARAMS (hnsw_ef = 32) LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }",
+        )
+        .expect("per-search params must stay");
+    }
+
+    #[test]
+    fn batch_header_opts_reach_the_wire() {
+        let op =
+            plan_source("BATCH { DELETE FROM docs WHERE id = 1; } WAIT false").expect("plan batch");
+        let route = to_rest_route(&op).expect("route batch");
+        assert_eq!(route.path, "/collections/docs/points/batch");
+        assert!(route.query.iter().any(|(k, v)| k == "wait" && v == "false"));
+        let op = plan_source(
+            "BATCH { QUERY [0.1] FROM docs LIMIT 1; } PARAMS (timeout = 30, consistency = majority)",
+        )
+        .expect("plan query batch");
+        let route = to_rest_route(&op).expect("route query batch");
+        assert_eq!(route.path, "/collections/docs/points/query/batch");
+        assert!(route.query.iter().any(|(k, v)| k == "timeout" && v == "30"));
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "majority")
+        );
     }
 }

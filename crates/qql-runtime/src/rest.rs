@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use qql_core::error::QqlError;
 use qql_plan::types::Method as PlanMethod;
+use qql_plan::types::ReadConsistencyParam;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 pub use crate::client::REQUEST_ID_HEADER;
@@ -443,6 +444,11 @@ impl QdrantOps for RestQdrant {
                 format!("plan IR REST request body serialization failed: {message}"),
                 None,
             ),
+            qql_plan::RestProjectionError::OverwriteRequiresBatch => QqlError::validation(
+                "QQL-REST-OVERWRITE-BATCH-ONLY",
+                "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only;                  run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
+                None,
+            ),
         })?;
         let envelope = self.execute_http(route).await?;
         crate::rest_response::parse_planned(op, envelope)
@@ -452,8 +458,21 @@ impl QdrantOps for RestQdrant {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
+        timeout: Option<u64>,
+        consistency: Option<ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError> {
-        let path = format!("/collections/{collection}/points/query/batch");
+        let mut path = format!("/collections/{collection}/points/query/batch");
+        let mut query = Vec::new();
+        if let Some(secs) = timeout {
+            query.push(format!("timeout={secs}"));
+        }
+        if let Some(consistency) = consistency.as_ref() {
+            query.push(format!("consistency={}", consistency.to_query_value()));
+        }
+        if !query.is_empty() {
+            path.push('?');
+            path.push_str(&query.join("&"));
+        }
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
         crate::rest_response::parse_query_batch(&value)
     }
@@ -462,8 +481,9 @@ impl QdrantOps for RestQdrant {
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
+        wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
-        let path = format!("/collections/{collection}/points/batch?wait=true");
+        let path = format!("/collections/{collection}/points/batch?wait={wait}");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
         crate::rest_response::parse_update_batch(&value)
     }

@@ -1,4 +1,5 @@
 pub(crate) mod alter_drop_show;
+pub(crate) mod batch;
 pub(crate) mod config_parsers;
 pub(crate) mod config_validation;
 pub(crate) mod create;
@@ -19,10 +20,11 @@ use crate::token::{Token, TokenKind};
 use alloc::string::String;
 use alloc::vec::Vec;
 pub use config_validation::{
-    check_deleted_threshold, config_bool, config_float_range, config_has_key,
+    STRICT_MODE_KEYS, check_deleted_threshold, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
-    merge_collection_config, validate_hnsw_value, validate_index_options,
-    validate_optimizers_value, validate_params_value, validate_vectors_value,
+    is_strict_mode_key, merge_collection_config, validate_hnsw_value, validate_index_options,
+    validate_optimizers_value, validate_params_value, validate_strict_mode_value,
+    validate_vectors_value, validate_wal_value,
 };
 pub use recover::RecoveredScript;
 
@@ -222,6 +224,7 @@ impl<'a> AstLowerer<'a> {
             TokenKind::Count => self.parse_count(),
             TokenKind::Facet => self.parse_facet(),
             TokenKind::Set => self.parse_set_quota(),
+            TokenKind::Batch => self.parse_batch(),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-STATEMENT",
                 alloc::format!("expected a QQL statement keyword, got '{}'", tok.text),
@@ -332,8 +335,12 @@ impl<'a> AstLowerer<'a> {
             TokenKind::Integer => {
                 self.advance()?;
                 // `INTEGER` is also a field-type keyword mapped onto this kind.
+                // Bare digit literals that overflow `i64` become `UInt`
+                // instead of failing; the keyword spelling is a string.
                 if let Ok(v) = tok.text.parse::<i64>() {
                     Ok(crate::ast::Value::Int(v))
+                } else if let Ok(v) = tok.text.parse::<u64>() {
+                    Ok(crate::ast::Value::UInt(v))
                 } else {
                     Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }

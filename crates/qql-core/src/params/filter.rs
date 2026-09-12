@@ -31,12 +31,16 @@ where
             bind_value(low, lookup, positional)?;
             bind_value(high, lookup, positional)?;
         }
-        FilterExpr::In { values, .. } | FilterExpr::MatchAny { values, .. } => {
+        FilterExpr::In { values, .. }
+        | FilterExpr::MatchAny { values, .. }
+        | FilterExpr::MatchExcept { values, .. } => {
             for v in values {
                 bind_value(v, lookup, positional)?;
             }
         }
-        FilterExpr::And { operands } | FilterExpr::Or { operands } => {
+        FilterExpr::And { operands }
+        | FilterExpr::Or { operands }
+        | FilterExpr::MinShould { operands, .. } => {
             for op in operands {
                 bind_filter(op, lookup, positional)?;
             }

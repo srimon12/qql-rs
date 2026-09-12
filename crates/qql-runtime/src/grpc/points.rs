@@ -127,6 +127,18 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("set_payload", e, &self.current_request_id()))
     }
 
+    /// gRPC `OverwritePayload`: replace the full payload on points.
+    pub async fn overwrite_payload(
+        &self,
+        req: qdrant::SetPayloadPoints,
+    ) -> Result<qdrant::PointsOperationResponse, QqlError> {
+        let mut cl = self.points_client();
+        cl.overwrite_payload(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| grpc_error("overwrite_payload", e, &self.current_request_id()))
+    }
+
     /// gRPC `Collections/Create`: create a collection from a raw request.
     pub async fn create_collection_raw(
         &self,

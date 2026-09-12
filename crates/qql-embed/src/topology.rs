@@ -311,9 +311,10 @@ fn configure_prefetches(
 
 fn input_kind(input: &QueryInput) -> Option<VectorKind> {
     match input {
-        // Text/image/point kinds are filled from USING / schema before embed.
+        // Text/image/object/point kinds are filled from USING / schema before embed.
         QueryInput::Text { .. }
         | QueryInput::Image { .. }
+        | QueryInput::Object { .. }
         | QueryInput::Point(_)
         | QueryInput::Param(..)
         | QueryInput::PositionalParam(..)
@@ -322,6 +323,11 @@ fn input_kind(input: &QueryInput) -> Option<VectorKind> {
             Some(VectorKind::Dense)
         }
         QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
+        // Per-point inference values never appear as query inputs through the
+        // supported paths; hand-built ASTs resolve their kind from schema.
+        QueryInput::Vector(
+            VectorValue::Document { .. } | VectorValue::Image { .. } | VectorValue::Object { .. },
+        ) => None,
     }
 }
 

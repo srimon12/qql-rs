@@ -1,4 +1,4 @@
-use crate::filter::top_level_filter;
+use crate::filter::{top_level_filter, value_to_json};
 use crate::prefetch::{build_query_with_prefetch, default_model_for_using, extract_lookup_from};
 use crate::semantic::PlanQueryInput;
 use crate::types::*;
@@ -87,7 +87,11 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 },
             }
         }
-        QueryExpr::OrderBy { field, direction } => {
+        QueryExpr::OrderBy {
+            field,
+            direction,
+            start_from,
+        } => {
             let dir = match direction {
                 OrderDirection::Asc => Some("asc".into()),
                 OrderDirection::Desc => Some("desc".into()),
@@ -96,6 +100,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 order_by: OrderByQuery {
                     key: field.clone(),
                     direction: dir,
+                    start_from: start_from.as_ref().map(value_to_json),
                 },
             }
         }
@@ -209,6 +214,32 @@ fn lower_output_selector(
     (with_payload, with_vector)
 }
 
+/// Lower a `GROUP BY … LOOKUP` clause to its wire form: a bare collection
+/// name when no selectors are present, otherwise the full lookup object.
+fn lower_group_lookup(lookup: &qql_core::ast::GroupLookup) -> WithLookupValue {
+    if lookup.payload.is_none() && lookup.vectors.is_none() {
+        return WithLookupValue::Collection(lookup.collection.clone());
+    }
+    WithLookupValue::Full(WithLookup {
+        collection: lookup.collection.clone(),
+        with_payload: lookup.payload.as_ref().map(|selector| match selector {
+            qql_core::ast::PayloadSelector::All => PayloadSelectorReq::All(true),
+            qql_core::ast::PayloadSelector::None => PayloadSelectorReq::All(false),
+            qql_core::ast::PayloadSelector::Include(fields) => PayloadSelectorReq::Include {
+                include: fields.clone(),
+            },
+            qql_core::ast::PayloadSelector::Exclude(fields) => PayloadSelectorReq::Exclude {
+                exclude: fields.clone(),
+            },
+        }),
+        with_vectors: lookup.vectors.as_ref().map(|selector| match selector {
+            qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
+            qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
+            qql_core::ast::VectorSelector::Names(names) => VectorSelectorReq::Names(names.clone()),
+        }),
+    })
+}
+
 /// Lower a full `QUERY` statement into the `/points/query` request body.
 pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
@@ -284,10 +315,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         group_by: group.field.clone(),
         group_size: group.size.unwrap_or(3),
         limit: effective_limit,
-        with_lookup: group
-            .lookup
-            .as_ref()
-            .map(|coll| WithLookupValue::Collection(coll.clone())),
+        with_lookup: group.lookup.as_ref().map(lower_group_lookup),
         lookup_from: extract_lookup_from(query),
         shard_key: query
             .shard_key

@@ -12,7 +12,7 @@ use crate::ast::{
     OptimizersRuntimeConfig, SparseVectorDef, SparseVectorDiff, VectorDef, VectorDiff,
     VectorsConfig, escape_string,
 };
-use crate::fmt::expr::{render_distance, render_f64, render_name};
+use crate::fmt::expr::{render_distance, render_f64, render_name, render_value};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -127,6 +127,21 @@ pub(crate) fn render_collection_config_clauses(config: &CollectionConfig) -> Vec
         && let Some(body) = render_quantization_block(quantization)
     {
         clauses.push(format!("WITH QUANTIZATION ({})", body));
+    }
+    if let Some(wal) = &config.wal
+        && let Some(body) = render_raw_options(wal)
+    {
+        clauses.push(format!("WITH WAL ({})", body));
+    }
+    if let Some(strict_mode) = &config.strict_mode
+        && let Some(body) = render_raw_options(strict_mode)
+    {
+        clauses.push(format!("WITH STRICT_MODE ({})", body));
+    }
+    if let Some(metadata) = &config.metadata
+        && let Some(body) = render_raw_options(metadata)
+    {
+        clauses.push(format!("WITH METADATA ({})", body));
     }
     if let Some(update) = &config.quantization_update {
         if update.disabled {
@@ -427,4 +442,19 @@ pub(crate) fn render_params_block(params: &CollectionParamsConfig) -> Option<Str
     } else {
         Some(options.join(", "))
     }
+}
+
+/// Render a raw `key = value` options block (`WITH WAL` / `WITH STRICT_MODE` /
+/// `WITH METADATA`); `None` when the block carries no pairs.
+pub(crate) fn render_raw_options(options: &[(String, crate::ast::Value)]) -> Option<String> {
+    if options.is_empty() {
+        return None;
+    }
+    Some(
+        options
+            .iter()
+            .map(|(key, value)| format!("{} = {}", render_name(key), render_value(value)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }

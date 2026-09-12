@@ -1,5 +1,6 @@
 //! Endpoint dispatch: matrix operation + body → typed statements.
 
+pub(crate) mod batch;
 pub(crate) mod condition;
 pub(crate) mod config;
 pub(crate) mod ddl;
@@ -140,6 +141,8 @@ pub(crate) fn endpoint(
             vec![Stmt::ShowQuotas]
         }
         Endpoint::SetQuota => vec![Stmt::SetQuota(Box::new(ddl::set_quota(body, ctx)?))],
+        Endpoint::QueryBatch => batch::query_batch(body, ctx)?,
+        Endpoint::PointsBatch => batch::points_batch(body, ctx)?,
     })
 }
 
@@ -188,5 +191,7 @@ fn endpoint_name(op: Endpoint) -> &'static str {
         Endpoint::ShowCollection => "GET /collections/{c}",
         Endpoint::ShowQuotas => "GET /quotas",
         Endpoint::SetQuota => "PUT /quotas",
+        Endpoint::QueryBatch => "POST /points/query/batch",
+        Endpoint::PointsBatch => "POST /points/batch",
     }
 }

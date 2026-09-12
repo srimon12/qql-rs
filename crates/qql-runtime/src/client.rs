@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use qql_core::error::QqlError;
+use qql_plan::types::ReadConsistencyParam;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::executor::response::BackendResponse;
@@ -112,19 +113,30 @@ pub trait QdrantOps: QdrantOpsBound {
     /// Send multiple `QueryRequest`s to the same collection in one network call
     /// via Qdrant's `/points/query/batch` (REST) or `QueryBatch` (gRPC) endpoint.
     /// Returns one typed response per search, in order.
+    ///
+    /// `timeout` / `consistency` are the batch-level query params. Explicit
+    /// `BATCH` blocks pass their header opts; ambient statement groups pass
+    /// `None` (per-search read opts stay on the member requests for gRPC and
+    /// are dropped on REST, as before).
     async fn execute_query_batch(
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
+        timeout: Option<u64>,
+        consistency: Option<ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError>;
 
     /// Apply a series of point mutations in one network call via Qdrant's
     /// `POST /points/batch` (REST) or `UpdateBatch` (gRPC) endpoint.
     /// Returns one typed response per operation, in order.
+    ///
+    /// Explicit `BATCH` blocks pass their header `WAIT` (default `true`);
+    /// ambient statement groups pass `true`, preserving prior behavior.
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
+        wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError>;
 
     /// Atomically update collection aliases (`POST /collections/aliases`).

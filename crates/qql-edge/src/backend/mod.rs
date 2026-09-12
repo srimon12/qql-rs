@@ -472,9 +472,46 @@ impl EdgeQdrant {
             parsed_points.push(psp);
         }
 
-        let op = UpdateOperation::PointOperation(PointOperations::UpsertPoints(
-            PointInsertOperations::PointsList(parsed_points),
-        ));
+        let op = match (&req.update_filter, req.update_mode) {
+            (None, None) => UpdateOperation::PointOperation(PointOperations::UpsertPoints(
+                PointInsertOperations::PointsList(parsed_points),
+            )),
+            _ => {
+                let edge_filter = match &req.update_filter {
+                    Some(filter) => convert_edge_filter(Some(filter))?.ok_or_else(|| {
+                        QqlError::execution(
+                            "QQL-EDGE-FILTER-CONVERT",
+                            "upsert update_filter converted to empty",
+                            None,
+                        )
+                        .with_collection(collection_name.clone())
+                    })?,
+                    None => {
+                        // Mode-only guard: no filter to check, so every existing
+                        // point is eligible — the engine needs a filter, and an
+                        // empty match-all is not expressible, so fail closed.
+                        return Err(QqlError::execution(
+                            "QQL-EDGE-UPSERT-MODE-ONLY",
+                            "qdrant-edge conditional upsert requires update_filter alongside update_mode",
+                            None,
+                        )
+                        .with_collection(collection_name.clone()));
+                    }
+                };
+                let update_mode = req.update_mode.map(|mode| match mode {
+                    qql_plan::types::UpdateMode::Upsert => qdrant_edge::UpdateMode::Upsert,
+                    qql_plan::types::UpdateMode::InsertOnly => qdrant_edge::UpdateMode::InsertOnly,
+                    qql_plan::types::UpdateMode::UpdateOnly => qdrant_edge::UpdateMode::UpdateOnly,
+                });
+                UpdateOperation::PointOperation(PointOperations::UpsertPointsConditional(
+                    qdrant_edge::ConditionalInsertOperation {
+                        points_op: qdrant_edge::PointInsertOperations::PointsList(parsed_points),
+                        condition: edge_filter,
+                        update_mode,
+                    },
+                ))
+            }
+        };
 
         shard
             .update(op)
@@ -676,6 +713,7 @@ impl EdgeQdrant {
         reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
         let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
+        let key = req.key.as_deref().map(parse_json_path).transpose()?;
 
         let op = if let Some(points) = &req.points {
             let ids = to_edge_ids(points.iter())?;
@@ -683,7 +721,7 @@ impl EdgeQdrant {
                 payload,
                 points: Some(ids),
                 filter: None,
-                key: None,
+                key,
             })
         } else if let Some(filter) = &req.filter {
             qdrant_edge::PayloadOps::SetPayload(qdrant_edge::SetPayloadOp {
@@ -697,12 +735,60 @@ impl EdgeQdrant {
                     )
                     .with_collection(collection.to_string())
                 })?),
-                key: None,
+                key,
             })
         } else {
             return Err(QqlError::execution(
                 "QQL-EDGE-SET-PAYLOAD-REQUIRES-TARGET",
                 "set_payload requires point ids or a filter",
+                None,
+            )
+            .with_collection(collection.to_string()));
+        };
+
+        shard
+            .update(UpdateOperation::PayloadOperation(op))
+            .map_err(|e| edge_err(EdgeOp::UpdatePayload, Some(collection), e))
+    }
+
+    /// Replace the full payload in-process (edge executes immediately, like
+    /// set_payload: there is no batch RPC to fan out through).
+    async fn execute_edge_overwrite_payload(
+        &self,
+        collection: &str,
+        req: &qql_plan::types::UpdatePayloadRequest,
+    ) -> Result<(), QqlError> {
+        reject_shard_key(req.shard_key.as_ref())?;
+        let shard = self.open_shard(collection).await?;
+        let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
+        let key = req.key.as_deref().map(parse_json_path).transpose()?;
+
+        let op = if let Some(points) = &req.points {
+            let ids = to_edge_ids(points.iter())?;
+            qdrant_edge::PayloadOps::OverwritePayload(qdrant_edge::SetPayloadOp {
+                payload,
+                points: Some(ids),
+                filter: None,
+                key,
+            })
+        } else if let Some(filter) = &req.filter {
+            qdrant_edge::PayloadOps::OverwritePayload(qdrant_edge::SetPayloadOp {
+                payload,
+                points: None,
+                filter: Some(convert_edge_filter(Some(filter))?.ok_or_else(|| {
+                    QqlError::execution(
+                        "QQL-EDGE-FILTER-CONVERT",
+                        "overwrite_payload filter converted to empty",
+                        None,
+                    )
+                    .with_collection(collection.to_string())
+                })?),
+                key,
+            })
+        } else {
+            return Err(QqlError::execution(
+                "QQL-EDGE-OVERWRITE-PAYLOAD-REQUIRES-TARGET",
+                "overwrite_payload requires point ids or a filter",
                 None,
             )
             .with_collection(collection.to_string()));

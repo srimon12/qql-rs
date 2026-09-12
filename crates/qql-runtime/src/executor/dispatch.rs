@@ -72,6 +72,23 @@ impl Executor {
                 .await;
         }
 
+        // Explicit BATCH blocks run members as one forced group. The single
+        // response path summarizes; per-member responses belong to the script
+        // path (`execute_batch_nodes`).
+        if matches!(op, PlannedOperation::Batch { .. }) {
+            let mut results = Vec::new();
+            self.execute_batch_op(op, true, &mut results).await?;
+            let total = results.len();
+            let ok_count = results.iter().filter(|r| r.ok).count();
+            return Ok(ExecResponse {
+                ok: ok_count == total,
+                operation: "BATCH".to_string(),
+                message: format!("Batch: {ok_count}/{total} operations ok"),
+                data: None,
+                telemetry: None,
+            });
+        }
+
         let result = self.dispatch_raw(op).await?;
         Self::normalize_planned(op, result)
     }
@@ -149,6 +166,7 @@ impl Executor {
             }
             PlannedOperation::Delete { .. }
             | PlannedOperation::UpdatePayload { .. }
+            | PlannedOperation::OverwritePayload { .. }
             | PlannedOperation::ClearPayload { .. }
             | PlannedOperation::DeletePayload { .. }
             | PlannedOperation::UpdateVectors { .. }

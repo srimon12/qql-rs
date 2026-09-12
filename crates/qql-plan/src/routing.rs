@@ -31,6 +31,10 @@ pub enum RestProjectionError {
         /// Statement type name used in error messages.
         stmt_type: &'static str,
     },
+    /// Overwrite-payload has no single REST route: `POST /points/payload`
+    /// is merge-only, so `OVERWRITE` only runs inside a batch
+    /// (`POST /points/batch` with `{ "overwrite_payload": … }`).
+    OverwriteRequiresBatch,
     /// Plan IR failed to serialize to JSON (a `Serialize` regression).
     SerializeFailed {
         /// Underlying serde error message.
@@ -220,6 +224,9 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             query: mut_query(*wait),
             body: body(request)?,
         },
+        PlannedOperation::OverwritePayload { .. } => {
+            return Err(RestProjectionError::OverwriteRequiresBatch);
+        }
         // DDL: REST shapes differ from plan IR — typed OpenAPI projections
         PlannedOperation::CreateCollection {
             collection,
@@ -316,6 +323,44 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 body: body(request)?,
             }
         }
+        PlannedOperation::Batch {
+            key,
+            operations,
+            wait,
+            timeout,
+            consistency,
+        } => match key {
+            crate::batch::BatchKey::Query(collection) => {
+                let (_, batch) = crate::batch::build_query_batch(operations).map_err(|e| {
+                    RestProjectionError::SerializeFailed {
+                        message: e.to_string(),
+                    }
+                })?;
+                Route {
+                    method: Method::Post,
+                    path: format!("/collections/{collection}/points/query/batch"),
+                    query: read_query(*timeout, consistency.as_ref()),
+                    body: body(&batch)?,
+                }
+            }
+            crate::batch::BatchKey::Mutation(collection) => {
+                let (_, _, batch) = crate::batch::build_update_batch(operations).map_err(|e| {
+                    RestProjectionError::SerializeFailed {
+                        message: e.to_string(),
+                    }
+                })?;
+                let mut query = Vec::new();
+                if let Some(wait) = wait {
+                    query.push(("wait".into(), wait.to_string()));
+                }
+                Route {
+                    method: Method::Post,
+                    path: format!("/collections/{collection}/points/batch"),
+                    query,
+                    body: body(&batch)?,
+                }
+            }
+        },
         PlannedOperation::CrossRerank { .. } => {
             return Err(RestProjectionError::ClientSideOnly {
                 stmt_type: "cross_rerank",
@@ -327,7 +372,9 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
 /// Plan a statement and project it to a REST route in one call.
 ///
 /// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
-/// RERANK) that have no single Qdrant REST endpoint.
+/// RERANK) that have no single Qdrant REST endpoint, and
+/// `QQL-REST-OVERWRITE-BATCH-ONLY` for `OVERWRITE` payload writes (merge-only
+/// `POST /points/payload` cannot replace payload; use a batch).
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
     let op = plan(statement)?;
     to_rest_route(&op).map_err(|err| match err {
@@ -337,6 +384,12 @@ pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
                 "{stmt_type} is client-side and has no single Qdrant REST route; \
                  execute via the runtime CROSS RERANK path"
             ),
+            None,
+        ),
+        RestProjectionError::OverwriteRequiresBatch => QqlError::validation(
+            "QQL-REST-OVERWRITE-BATCH-ONLY",
+            "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only; \
+             run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
             None,
         ),
         RestProjectionError::SerializeFailed { message } => QqlError::execution(

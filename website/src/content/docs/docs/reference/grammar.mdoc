@@ -28,7 +28,7 @@ change, regenerate it with `qql-grammar-gen` and review the complete diff.
 script = [ statement, { ";", statement }, [ ";" ] ] ;
 statement = query | scroll | count | upsert | update | delete
           | clear-payload | delete-payload | delete-vector
-          | create | alter | drop | show | facet ;
+          | create | alter | drop | show | facet | batch ;
 ```
 
 ## Statement surface
@@ -55,6 +55,8 @@ Every statement family, including the three `SHOW` forms:
 | `CREATE SHARD KEY 'name' ON COLLECTION ...` | `create-shard-key` |
 | `DROP SHARD KEY 'name' ON COLLECTION ...` | `drop-shard-key` |
 | `SHOW COLLECTIONS;` / `SHOW COLLECTION name;` / `SHOW SHARD KEYS ON COLLECTION name;` | `show-collections` / `show-collection` / `show-shard-keys` |
+| `SHOW QUOTAS;` / `SET QUOTA (...);` | `show-quotas` / `set-quota` |
+| `BATCH { <stmt>; ... } [WAIT ...] [PARAMS ...]` | `batch` |
 
 ## Query tail clause order
 
@@ -62,7 +64,7 @@ A query tail accepts each clause at most once, in this order:
 
 `USING` (a named vector with optional `AS <kind>`, or `HYBRID`) → `PREFETCH` →
 `WHERE` → `SHARD` → `PARAMS` → `SCORE THRESHOLD` → `GROUP BY [SIZE n] [LOOKUP
-FROM collection]` → `WITH PAYLOAD` → `WITH VECTOR` → `LIMIT` → `OFFSET`.
+FROM collection [WITH PAYLOAD ...] [WITH VECTOR ...]]` → `WITH PAYLOAD` → `WITH VECTOR` → `LIMIT` → `OFFSET`.
 
 The parser rejects a duplicate or out-of-order clause with
 `QQL-PARSE-CLAUSE-ORDER` rather than silently reordering it.
@@ -71,6 +73,8 @@ The parser rejects a duplicate or out-of-order clause with
 
 - Keywords are ASCII case-insensitive.
 - Identifiers are case-sensitive and preserve spelling.
+- Bare digit literals above `i64::MAX` parse as unsigned (up to `u64::MAX`).
+- Formula datetimes format canonical uppercase (`DATETIME`, `DATETIME_KEY`); lowercase still parses.
 - Dotted and array payload paths are accepted.
 - Strings support single, double, raw, triple, and backtick delimiters.
 - `--` starts a line comment; block comments do not exist.

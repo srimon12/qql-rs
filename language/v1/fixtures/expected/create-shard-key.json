@@ -4,6 +4,8 @@
     {
       "CreateShardKey": {
         "collection": "docs",
+        "initial_state": null,
+        "placement": null,
         "replication_factor": null,
         "shard_key": {
           "Keyword": "acme"
@@ -14,6 +16,8 @@
     {
       "CreateShardKey": {
         "collection": "docs",
+        "initial_state": null,
+        "placement": null,
         "replication_factor": null,
         "shard_key": {
           "Keyword": "default"
@@ -35,6 +39,8 @@
     {
       "CreateShardKey": {
         "collection": "docs",
+        "initial_state": null,
+        "placement": null,
         "replication_factor": null,
         "shard_key": {
           "Number": 101

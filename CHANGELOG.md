@@ -184,6 +184,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lockfile refresh**: `cargo update -w`, website pnpm (Astro 7.3.2, Starlight 0.41.11), and VS Code npm lockfiles refreshed; majors (TypeScript 7, Starlight 0.42) stay with Dependabot.
 - **Installer hardening**: `install.sh` / `install.ps1` fail loudly when the latest release cannot be resolved instead of falling back to a pinned old version, print the PATH export hint, and accept Linux ARM.
 
+### 🔁 Migration Stabilization
+- **Resume identity**: resume compares normalized endpoints and hashes checkpoint names instead of gating on cutover flags, so restarts land on the same checkpoint.
+- **Shard routing**: discovery merges keys, cache keys drop the redundant wait suffix, and restore failures chain with ingest errors instead of masking them.
+- **Ingest controls**: batch-delay throttle plus per-family quantize docs, full JSON field docs, and Berlin harness constants.
+
+### 🔁 Convert / Format / Record Parity
+- **`WAIT false` survives the round trip**: the planner emits `?wait=false` explicitly on mutations and create-index instead of omitting it, so `plan → route → convert → replan` no longer flips durability to `true`.
+- **Formatter fidelity**: collection modes emit alongside explicit vector definitions, vector placeholders render bare `?`, quoted formula variables stay quoted, `$score` stays bare, and `DATETIME(...)` / `DATETIME_KEY(...)` are canonical uppercase.
+- **Converter fail-closed strictness**: bodyless routes reject non-empty bodies, partial `mmr` objects fail instead of inventing defaults.
+- **Recorder transparency**: repeated headers survive both directions, capture line numbers increment only on successful writes, startup counting streams instead of loading the capture, same-file output detection handles `./`-qualified and symlinked paths, `--target` is URL-validated at startup, and `--qql-out` errors are `-- ERROR` comments that replay without hand-editing.
+
+### 📦 First-Class Batches & Full REST Coverage
+- **`BATCH { … }` blocks**: one statement, one RPC. Members plan through existing lowering and must share one collection and one family; header `WAIT` / `PARAMS` reach REST, gRPC, and WASM; ambient statement grouping is unchanged. `qql convert` decodes both batch endpoints into one block with route-parity coverage.
+- **Filters**: `MIN SHOULD n (...)`, `MATCH TOKENS`, `MATCH EXCEPT`, `u64` literals, non-ISO string range bounds.
+- **Scroll & ordering**: `SCROLL … ORDER BY …`, scroll payload selectors, `ORDER BY … START FROM …`, full `LOOKUP` selectors, `lookup_from` shard routing.
+- **Mutations**: upsert `UPDATE FILTER` / `UPDATE MODE`, payload `KEY`, `OVERWRITE` (batch routes; single REST projection fails closed, gRPC maps the proto variant).
+- **Inference inputs & config**: input `OPTIONS`, `OBJECT {...}` inputs, per-point inference vectors, text-index stopwords/languages, collection `WAL` / `STRICT_MODE` / `METADATA` / read-fan-out / placement blocks, quantization extras.
+- **Docs sync**: skill references, `docs/`, and website language pages cover the new surface with parse-verified examples; conformance corpus at 41 valid files (300 statements), 73 invalid cases, 41 snapshots and formats.
+
 ## [0.3.1] - 2026-09-04
 
 ### 📦 Packaging

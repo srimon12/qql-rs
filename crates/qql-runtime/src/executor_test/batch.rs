@@ -565,3 +565,70 @@ async fn same_collection_query_batch_yields_per_statement_hits() {
         assert!(r.ok, "every batched statement must succeed: {r:?}");
     }
 }
+
+#[tokio::test]
+async fn test_explicit_batch_forces_single_group_with_header_opts() {
+    let mut client = MockQdrantClient::default();
+    client.info = Some(CollectionInfo::default());
+    let update_calls = client.update_batch_call_count.clone();
+    let last_wait = client.last_update_batch_wait.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "SHOW COLLECTIONS; BATCH { DELETE FROM docs WHERE id = 1; DELETE FROM docs WHERE id = 2; } WAIT false; SHOW COLLECTIONS;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+
+    // SHOW barriers flank the block, yet members stay one forced group.
+    assert_eq!(results.len(), 4, "one response per statement: {results:?}");
+    assert_eq!(*update_calls.lock().unwrap(), 1, "exactly one batch RPC");
+    assert_eq!(
+        *last_wait.lock().unwrap(),
+        Some(false),
+        "header WAIT reaches the backend"
+    );
+    for r in &results {
+        assert!(r.ok, "every statement must succeed: {r:?}");
+    }
+}
+
+#[tokio::test]
+async fn test_explicit_query_batch_carries_timeout() {
+    let mut client = MockQdrantClient::default();
+    client.info = Some(CollectionInfo::default());
+    let batch_calls = client.batch_call_count.clone();
+    let last_timeout = client.last_batch_timeout.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; } PARAMS (timeout = 30)",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+
+    assert_eq!(results.len(), 2, "one response per member: {results:?}");
+    assert_eq!(*batch_calls.lock().unwrap(), 1, "exactly one batch RPC");
+    assert_eq!(
+        *last_timeout.lock().unwrap(),
+        Some(30),
+        "header timeout reaches the backend"
+    );
+}
+
+#[tokio::test]
+async fn test_execute_node_batch_returns_summary() {
+    let mut client = MockQdrantClient::default();
+    client.info = Some(CollectionInfo::default());
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmt = qql_core::parser::Parser::parse(
+        "BATCH { DELETE FROM docs WHERE id = 1; DELETE FROM docs WHERE id = 2; }",
+    )
+    .unwrap();
+    let resp = executor.execute_node(stmt).await.unwrap();
+
+    assert!(resp.ok, "{resp:?}");
+    assert_eq!(resp.operation, "BATCH");
+    assert!(resp.message.contains("2/2"), "{resp:?}");
+}

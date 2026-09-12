@@ -29,7 +29,8 @@ LIMIT 10;
 | `=`, `!=`, `>`, `>=`, `<`, `<=` | Scalar equality and range comparison |
 | `BETWEEN`, `IN`, `NOT IN` | Inclusive ranges and membership sets |
 | `IS NULL`, `IS EMPTY` | Missing or empty payload values |
-| `MATCH`, `MATCH ANY`, `MATCH PHRASE`, `MATCH PREFIX` | Text and keyword-prefix payload matching |
+| `MATCH`, `MATCH ANY`, `MATCH PHRASE`, `MATCH PREFIX`, `MATCH TOKENS`, `MATCH EXCEPT` | Text and keyword-prefix payload matching |
+| `MIN SHOULD n (...)` | At-least-N disjunction over full filters |
 | `SLICE (total, index)` | Deterministic point-ID slice (parallelism / sampling) |
 | `HAS_VECTOR`, `VALUES_COUNT` | Vector presence and array cardinality |
 
@@ -42,9 +43,11 @@ string).
 
 ## Text, cardinality, and presence predicates
 
-`MATCH` covers four text forms: a plain string match, `MATCH ANY` over a
-non-empty list, `MATCH PHRASE` for ordered multi-token phrases, and
-`MATCH PREFIX` for keyword-prefix matching (Qdrant 1.19+). Field and
+`MATCH` covers six text forms: a plain string match, `MATCH ANY` over a
+non-empty list, `MATCH PHRASE` for ordered multi-token phrases,
+`MATCH PREFIX` for keyword-prefix matching (Qdrant 1.19+), `MATCH TOKENS` when
+any token of the text may match, and `MATCH EXCEPT` when none of the listed
+values may match. Field and
 text-index compatibility is enforced by the backend at execution time —
 `MATCH PREFIX` is most useful on a keyword field indexed with
 `prefix = true` (see [Collections and indexes](/docs/language/collections-indexes/)).
@@ -54,7 +57,27 @@ text-index compatibility is enforced by the backend at execution time —
 ```sql
 QUERY 'search'
 FROM docs
-WHERE content MATCH 'hello world' AND tags MATCH ANY ('hello', 'world') AND description MATCH PHRASE 'vector database' AND title MATCH PREFIX 'Comp' AND reviews VALUES_COUNT >= 2 AND HAS_VECTOR dense AND NOT notes IS NULL
+WHERE content MATCH 'hello world' AND tags MATCH ANY ('hello', 'world') AND description MATCH PHRASE 'vector database' AND title MATCH PREFIX 'Comp' AND summary MATCH TOKENS 'red shoes' AND status MATCH EXCEPT ('archived', 'private') AND reviews VALUES_COUNT >= 2 AND HAS_VECTOR dense AND NOT notes IS NULL
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Require at least N conditions
+
+`MIN SHOULD n (...)` keeps points where at least `n` of the operands hold.
+Operands are full filters, so nesting and token predicates compose. The count
+is at least `1`; lower values fail closed with `QQL-VALIDATION-MIN-SHOULD`.
+
+{% qqlExample title="At-least-N disjunction" %}
+```sql
+QUERY 'search'
+FROM docs
+WHERE MIN SHOULD 2 (status = 'active', priority = 'high', category = 'tech')
+LIMIT 10;
+
+QUERY 'search'
+FROM docs
+WHERE MIN SHOULD 1 (title MATCH TOKENS 'a b', tags MATCH EXCEPT (1, 2))
 LIMIT 10;
 ```
 {% /qqlExample %}

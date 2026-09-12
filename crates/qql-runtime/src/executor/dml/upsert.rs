@@ -518,9 +518,12 @@ fn validate_vector_value(
     let dimensions = match value {
         VectorValue::Dense(vector) => Some(vector.len()),
         VectorValue::MultiDense(rows) => rows.first().map(Vec::len),
-        VectorValue::Sparse { .. } | VectorValue::Param(..) | VectorValue::PositionalParam(..) => {
-            None
-        }
+        VectorValue::Sparse { .. }
+        | VectorValue::Document { .. }
+        | VectorValue::Image { .. }
+        | VectorValue::Object { .. }
+        | VectorValue::Param(..)
+        | VectorValue::PositionalParam(..) => None,
     };
     if let Some(got) = dimensions
         && got != spec.size as usize

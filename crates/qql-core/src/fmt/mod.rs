@@ -267,7 +267,32 @@ pub fn format_stmt(statement: &Stmt) -> String {
         Stmt::UpdatePayload(statement) => mutation::render_update_payload(statement),
         Stmt::Count(statement) => mutation::render_count(statement),
         Stmt::Facet(statement) => mutation::render_facet(statement),
+        Stmt::Batch(statement) => render_batch(statement),
     }
+}
+
+/// Render a `BATCH { … }` block with one canonical member per line.
+fn render_batch(statement: &crate::ast::BatchStmt) -> String {
+    let mut out = String::from("BATCH {");
+    for member in &statement.statements {
+        out.push_str("\n  ");
+        // Members may themselves span lines (multi-line upserts); indent
+        // continuations so the block stays readable and re-parseable.
+        let rendered = format_stmt(member).replace('\n', "\n  ");
+        out.push_str(&rendered);
+        out.push(';');
+    }
+    out.push_str("\n}");
+    if let Some(wait) = statement.wait {
+        out.push_str(&alloc::format!(" WAIT {wait}"));
+    }
+    if let Some(params) = &statement.params {
+        out.push_str(&alloc::format!(
+            " PARAMS ({})",
+            render_search_params(params)
+        ));
+    }
+    out
 }
 
 /// Render a single statement in human-readable QQL form with compact vector literals.

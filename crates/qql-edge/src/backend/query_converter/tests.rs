@@ -227,6 +227,7 @@ fn test_order_by_conversion() {
         order_by: OrderByQuery {
             key: "created_at".to_string(),
             direction: Some("desc".to_string()),
+            start_from: None,
         },
     };
     let result = convert_query(&query, None);
@@ -315,6 +316,7 @@ fn test_group_lookup_rejected() {
     request.lookup_from = Some(qql_plan::types::LookupRequest {
         collection: "other".to_string(),
         vector: None,
+        shard_key: None,
     });
     let error = convert_query_groups_request(&request).expect_err("lookup_from must fail");
     assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP");
@@ -523,6 +525,7 @@ fn test_convert_order_by_interface() {
     let ob = OrderByQuery {
         key: "price".to_string(),
         direction: Some("asc".to_string()),
+        start_from: None,
     };
     let result = convert_order_by_interface(&ob).unwrap();
     match result {

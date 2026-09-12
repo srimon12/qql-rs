@@ -45,18 +45,41 @@ pub(crate) fn filter_opt(value: &Value, path: &str) -> Result<Option<FilterExpr>
     if CONDITION_KEYS.iter().any(|key| obj.contains_key(*key)) {
         return Ok(Some(condition(value, path)?));
     }
-    if let Some(min_should) = obj.get("min_should") {
+    let mut clauses: Vec<FilterExpr> = Vec::new();
+    if let Some(min_should) = obj.get("min_should").filter(|v| !v.is_null()) {
         let min_path = child(path, "min_should");
         let min = json::object(min_should, &min_path)?;
-        let _ = json::required(min, "min_count", &min_path)?;
-        return Err(invalid(
-            min_path,
-            "min_should (at-least-N of a condition set) has no QQL representation",
-        ));
+        json::reject_unknown(min, &min_path, &["conditions", "min_count"])?;
+        let conditions_path = child(&min_path, "conditions");
+        let conditions = json::required(min, "conditions", &min_path)
+            .and_then(|v| json::array(v, &conditions_path))?;
+        let min_count = json::required(min, "min_count", &min_path)
+            .and_then(|v| json::u64_at(v, &child(&min_path, "min_count")))?;
+        if min_count == 0 {
+            return Err(invalid(
+                child(&min_path, "min_count"),
+                "min_count must be >= 1",
+            ));
+        }
+        let operands = conditions
+            .iter()
+            .enumerate()
+            .map(|(i, item)| condition(item, &index(&conditions_path, i)))
+            .collect::<Result<Vec<_>, _>>()?;
+        if operands.is_empty() {
+            return Err(invalid(
+                conditions_path,
+                "min_should conditions must list at least one condition",
+            ));
+        }
+        clauses.push(FilterExpr::MinShould {
+            min_count,
+            operands,
+        });
     }
     for key in obj.keys() {
         match key.as_str() {
-            "must" | "should" | "must_not" => {}
+            "must" | "should" | "must_not" | "min_should" => {}
             other => {
                 return Err(invalid(
                     child(path, other),
@@ -80,7 +103,9 @@ pub(crate) fn filter_opt(value: &Value, path: &str) -> Result<Option<FilterExpr>
         ));
     }
 
-    let mut clauses: Vec<FilterExpr> = Vec::new();
+    // A decoded `min_should` clause (pushed above) combines with the
+    // must/should/must_not clauses conjunctively, matching Qdrant's joint
+    // evaluation of every set member.
     if let Some(must) = must {
         clauses.push(match must.len() {
             1 => must.into_iter().next().expect("len checked"),

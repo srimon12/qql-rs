@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{
@@ -270,6 +271,8 @@ impl<'a> AstLowerer<'a> {
         let collection = self.parse_identifier()?;
         let mut shards_number = None;
         let mut replication_factor = None;
+        let mut placement = None;
+        let mut initial_state = None;
         if self.peek()?.kind == TokenKind::With {
             self.advance()?;
             let opts = self.parse_config_block()?;
@@ -283,11 +286,17 @@ impl<'a> AstLowerer<'a> {
                         replication_factor =
                             Some(self.positive_shard_key_u64("replication_factor", value)?);
                     }
+                    "placement" => {
+                        placement = Some(self.shard_key_placement(value)?);
+                    }
+                    "initial_state" => {
+                        initial_state = Some(self.shard_key_initial_state(value)?);
+                    }
                     _ => {
                         return Err(QqlError::parse(
                             "QQL-PARSE-SHARD-KEY-CONFIG",
                             alloc::format!(
-                                "unknown CREATE SHARD KEY parameter '{}'. Expected: shards_number, replication_factor",
+                                "unknown CREATE SHARD KEY parameter '{}'. Expected: shards_number, replication_factor, placement, initial_state",
                                 key
                             ),
                             self.peek()?.span,
@@ -301,6 +310,8 @@ impl<'a> AstLowerer<'a> {
             shard_key: shard_name,
             shards_number,
             replication_factor,
+            placement,
+            initial_state,
         })))
     }
 
@@ -321,4 +332,70 @@ impl<'a> AstLowerer<'a> {
             )),
         }
     }
+
+    /// `placement` is the list of peer ids hosting the key's shards
+    /// (OpenAPI `CreateShardingKey.placement`).
+    fn shard_key_placement(&mut self, value: &crate::ast::Value) -> Result<Vec<u64>, QqlError> {
+        match value {
+            crate::ast::Value::List(items) if !items.is_empty() => items
+                .iter()
+                .map(|item| match item {
+                    crate::ast::Value::Int(n) if *n >= 0 => Ok(*n as u64),
+                    _ => Err(QqlError::parse(
+                        "QQL-PARSE-SHARD-KEY-CONFIG",
+                        "placement entries must be non-negative integers (peer ids)",
+                        self.peek()?.span,
+                    )),
+                })
+                .collect(),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-SHARD-KEY-CONFIG",
+                "placement must be a non-empty list of peer ids",
+                self.peek()?.span,
+            )),
+        }
+    }
+
+    /// `initial_state` is the key's initial replica state (OpenAPI
+    /// `ReplicaState`). Accepted case-insensitively, stored canonical.
+    fn shard_key_initial_state(&mut self, value: &crate::ast::Value) -> Result<String, QqlError> {
+        let span = self.peek()?.span;
+        match value {
+            crate::ast::Value::Str(raw) => canonical_replica_state(raw).ok_or_else(|| {
+                QqlError::parse(
+                    "QQL-PARSE-SHARD-KEY-CONFIG",
+                    alloc::format!("unknown replica state '{raw}'"),
+                    span,
+                )
+            }),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-SHARD-KEY-CONFIG",
+                "initial_state must be a string",
+                span,
+            )),
+        }
+    }
+}
+
+/// Canonical OpenAPI `ReplicaState` names.
+const REPLICA_STATES: &[&str] = &[
+    "Active",
+    "Dead",
+    "Partial",
+    "Initializing",
+    "Listener",
+    "PartialSnapshot",
+    "Recovery",
+    "Resharding",
+    "ReshardingScaleDown",
+    "ActiveRead",
+    "ManualRecovery",
+];
+
+/// Canonicalize a replica state name (case-insensitive); `None` when unknown.
+fn canonical_replica_state(raw: &str) -> Option<String> {
+    REPLICA_STATES
+        .iter()
+        .find(|state| state.eq_ignore_ascii_case(raw))
+        .map(|state| state.to_string())
 }

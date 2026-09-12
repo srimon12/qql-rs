@@ -47,21 +47,6 @@ pub(crate) fn create_collection(
             "read_fan_out_delay_ms",
         ],
     )?;
-    for key in [
-        "wal_config",
-        "strict_mode_config",
-        "metadata",
-        "read_fan_out_factor",
-        "read_fan_out_delay_ms",
-    ] {
-        if obj.contains_key(key) {
-            return Err(invalid(
-                child(path, key),
-                format!("{key} has no QQL representation"),
-            ));
-        }
-    }
-
     let vectors = decode_vectors(obj.get("vectors"), &child(path, "vectors"))?;
     let sparse_vectors =
         decode_sparse_vectors(obj.get("sparse_vectors"), &child(path, "sparse_vectors"))?;
@@ -73,6 +58,9 @@ pub(crate) fn create_collection(
         params: None,
         quantization: None,
         quantization_update: None,
+        wal: None,
+        strict_mode: None,
+        metadata: None,
         vector_diffs: Vec::new(),
         sparse_vector_diffs: Vec::new(),
     };
@@ -90,6 +78,18 @@ pub(crate) fn create_collection(
             value,
             &child(path, "quantization_config"),
         )?));
+    }
+    if let Some(value) = obj.get("wal_config").filter(|v| !v.is_null()) {
+        config.wal = Some(config::raw_options(value, &child(path, "wal_config"))?);
+    }
+    if let Some(value) = obj.get("strict_mode_config").filter(|v| !v.is_null()) {
+        config.strict_mode = Some(config::raw_options(
+            value,
+            &child(path, "strict_mode_config"),
+        )?);
+    }
+    if let Some(value) = obj.get("metadata").filter(|v| !v.is_null()) {
+        config.metadata = Some(config::raw_options(value, &child(path, "metadata"))?);
     }
     let params = config::create_params(obj, path)?;
     if params_used(&params) {
@@ -154,6 +154,9 @@ fn config_used(config: &CollectionConfig) -> bool {
         || config.optimizers.is_some()
         || config.params.is_some()
         || config.quantization.is_some()
+        || config.wal.is_some()
+        || config.strict_mode.is_some()
+        || config.metadata.is_some()
 }
 
 /// Decode a `PATCH /collections/{c}` (`UpdateCollection`) body.
@@ -179,15 +182,6 @@ pub(crate) fn alter_collection(
             "metadata",
         ],
     )?;
-    for key in ["strict_mode_config", "metadata"] {
-        if obj.contains_key(key) {
-            return Err(invalid(
-                child(path, key),
-                format!("{key} has no QQL representation"),
-            ));
-        }
-    }
-
     let mut config = CollectionConfig {
         vectors: None,
         hnsw: None,
@@ -195,6 +189,9 @@ pub(crate) fn alter_collection(
         params: None,
         quantization: None,
         quantization_update: None,
+        wal: None,
+        strict_mode: None,
+        metadata: None,
         vector_diffs: Vec::new(),
         sparse_vector_diffs: Vec::new(),
     };
@@ -219,6 +216,15 @@ pub(crate) fn alter_collection(
             &child(path, "quantization_config"),
         )?));
     }
+    if let Some(value) = obj.get("strict_mode_config").filter(|v| !v.is_null()) {
+        config.strict_mode = Some(config::raw_options(
+            value,
+            &child(path, "strict_mode_config"),
+        )?);
+    }
+    if let Some(value) = obj.get("metadata").filter(|v| !v.is_null()) {
+        config.metadata = Some(config::raw_options(value, &child(path, "metadata"))?);
+    }
     config.vector_diffs = decode_vector_diffs(obj.get("vectors"), &child(path, "vectors"))?;
     config.sparse_vector_diffs =
         decode_sparse_diffs(obj.get("sparse_vectors"), &child(path, "sparse_vectors"))?;
@@ -236,6 +242,8 @@ fn config_all_empty(config: &CollectionConfig) -> bool {
         && config.optimizers.is_none()
         && config.params.is_none()
         && config.quantization_update.is_none()
+        && config.strict_mode.is_none()
+        && config.metadata.is_none()
         && config.vector_diffs.is_empty()
         && config.sparse_vector_diffs.is_empty()
 }
@@ -336,14 +344,6 @@ pub(crate) fn create_shard_key(
             "initial_state",
         ],
     )?;
-    for key in ["placement", "initial_state"] {
-        if obj.contains_key(key) {
-            return Err(invalid(
-                child(path, key),
-                format!("{key} has no QQL representation"),
-            ));
-        }
-    }
     let shard_key = vector::shard_key(
         json::required(obj, "shard_key", path)?,
         &child(path, "shard_key"),
@@ -353,8 +353,62 @@ pub(crate) fn create_shard_key(
         shard_key,
         shards_number: json::opt_u64(obj, "shards_number", path)?,
         replication_factor: json::opt_u64(obj, "replication_factor", path)?,
+        placement: decode_placement(obj, path)?,
+        initial_state: decode_initial_state(obj, path)?,
     })
 }
+
+/// Decode `CreateShardingKey.placement` (list of peer ids).
+fn decode_placement(obj: &json::Obj, path: &str) -> Result<Option<Vec<u64>>, ConvertError> {
+    let Some(value) = obj.get("placement").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let list_path = child(path, "placement");
+    let items = json::array(value, &list_path)?;
+    if items.is_empty() {
+        return Err(invalid(list_path, "placement must not be empty"));
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| json::u64_at(item, &crate::json::index(&list_path, i)))
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// Decode `CreateShardingKey.initial_state` (a `ReplicaState` name),
+/// normalizing to the canonical casing.
+fn decode_initial_state(obj: &json::Obj, path: &str) -> Result<Option<String>, ConvertError> {
+    let Some(value) = obj.get("initial_state").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let raw = json::string_at(value, &child(path, "initial_state"))?;
+    REPLICA_STATES
+        .iter()
+        .find(|state| state.eq_ignore_ascii_case(raw))
+        .map(|state| Some(state.to_string()))
+        .ok_or_else(|| {
+            invalid(
+                child(path, "initial_state"),
+                format!("unknown replica state '{raw}'"),
+            )
+        })
+}
+
+/// Canonical OpenAPI `ReplicaState` names.
+const REPLICA_STATES: &[&str] = &[
+    "Active",
+    "Dead",
+    "Partial",
+    "Initializing",
+    "Listener",
+    "PartialSnapshot",
+    "Recovery",
+    "Resharding",
+    "ReshardingScaleDown",
+    "ActiveRead",
+    "ManualRecovery",
+];
 
 /// Decode a `POST /collections/{c}/shards/delete` (`DropShardingKey`) body.
 pub(crate) fn drop_shard_key(

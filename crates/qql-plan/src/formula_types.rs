@@ -109,6 +109,13 @@ impl From<&Value> for FormulaDefault {
         match value {
             Value::Str(value) => Self::String(value.clone()),
             Value::Int(value) => Self::Int(*value),
+            // The transports carry no `uint64` scalar (gRPC `Value` is
+            // int64/double): values that fit stay exact integers, larger
+            // ones widen to `Float` rather than growing the variant set
+            // every transport matches on.
+            Value::UInt(value) => i64::try_from(*value)
+                .map(Self::Int)
+                .unwrap_or(Self::Float(*value as f64)),
             Value::Float(value) => Self::Float(*value),
             Value::Bool(value) => Self::Bool(*value),
             Value::Null => Self::Null,

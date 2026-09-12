@@ -171,6 +171,7 @@ pub struct WithLookup {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<PayloadSelectorReq>,
     /// Vector selection applied to looked-up points.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub with_vectors: Option<VectorSelectorReq>,
 }
 
@@ -422,6 +423,9 @@ pub struct OrderByQuery {
     /// Sort direction: `"asc"` or `"desc"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<String>,
+    /// Starting payload value to scroll from (integer, float, or datetime string).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_from: Option<serde_json::Value>,
 }
 
 /// One multi-stage prefetch stage; nested stages recurse via `prefetch`.
@@ -461,6 +465,9 @@ pub struct LookupRequest {
     /// Named vector used for the lookup.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector: Option<String>,
+    /// Shard routing for the lookup collection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// OpenAPI `PayloadSelector`: all on/off, include-list, or exclude-list.

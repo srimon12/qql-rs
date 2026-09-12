@@ -87,6 +87,38 @@ fn filter_predicates_roundtrip() {
             r#"{"should": [{"key": "a", "match": {"value": 1}}, {"key": "b", "match": {"value": 2}}], "must": [{"key": "c", "match": {"value": 3}}]}"#,
             "c = 3 AND (a = 1 OR b = 2)",
         ),
+        (
+            r#"{"min_should": {"conditions": [{"key": "a", "match": {"value": 1}}, {"key": "b", "match": {"value": 2}}], "min_count": 2}}"#,
+            "MIN SHOULD 2 (a = 1, b = 2)",
+        ),
+        (
+            r#"{"must": [{"key": "title", "match": {"text_any": "red shoes"}}]}"#,
+            "title MATCH TOKENS 'red shoes'",
+        ),
+        (
+            r#"{"must": [{"key": "tags", "match": {"except": ["a", "b"]}}]}"#,
+            "tags MATCH EXCEPT ('a', 'b')",
+        ),
+        (
+            r#"{"must": [{"key": "code", "match": {"except": [1, 2]}}]}"#,
+            "code MATCH EXCEPT (1, 2)",
+        ),
+        (
+            r#"{"must": [{"key": "big", "match": {"value": 18446744073709551615}}]}"#,
+            "big = 18446744073709551615",
+        ),
+        (
+            r#"{"must": [{"key": "n", "range": {"gt": 18446744073709551615}}]}"#,
+            "n > 18446744073709551615",
+        ),
+        (
+            r#"{"must": [{"key": "name", "range": {"gt": "m"}}]}"#,
+            "name > 'm'",
+        ),
+        (
+            r#"{"must": [{"key": "name", "range": {"gte": "a", "lte": "m"}}]}"#,
+            "name BETWEEN 'a' AND 'm'",
+        ),
     ];
     for (filter, expected) in cases {
         let body = format!(r#"{{"filter": {filter}, "limit": 1}}"#);

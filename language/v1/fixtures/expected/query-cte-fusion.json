@@ -538,6 +538,7 @@
                 "filter": null,
                 "lookup": {
                   "collection": "other",
+                  "shard_key": null,
                   "vector": "dense"
                 },
                 "score_threshold": null,

@@ -149,6 +149,8 @@ async fn upsert_batch_cardinality_mismatch_errors() {
             field: None,
         }),
         embed: vec![],
+        update_filter: None,
+        update_mode: None,
         shard_key: None,
         wait: None,
     }));
@@ -179,6 +181,8 @@ async fn unnamed_vector_topology_conflict_rejected() {
             field: None,
         }),
         embed: vec![],
+        update_filter: None,
+        update_mode: None,
         shard_key: None,
         wait: None,
     }));

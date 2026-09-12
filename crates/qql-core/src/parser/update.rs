@@ -37,6 +37,7 @@ impl<'a> AstLowerer<'a> {
                 self.advance()?;
                 self.expect(TokenKind::Equals)?;
                 let payload = self.parse_payload_dict()?;
+                let (key, overwrite) = self.parse_payload_tail()?;
                 self.expect(TokenKind::Where)?;
                 let selector = selector_from_filter(self.parse_filter_expr()?);
                 let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
@@ -44,6 +45,8 @@ impl<'a> AstLowerer<'a> {
                     collection,
                     selector,
                     payload,
+                    key,
+                    overwrite,
                     shard_key,
                     wait,
                 })))
@@ -54,6 +57,41 @@ impl<'a> AstLowerer<'a> {
                 self.peek()?.span,
             )),
         }
+    }
+
+    /// Trailing `KEY '<path>'` / `OVERWRITE` modifiers after the payload
+    /// dict, each at most once and in either order.
+    fn parse_payload_tail(&mut self) -> Result<(Option<String>, bool), QqlError> {
+        let mut key = None;
+        let mut overwrite = false;
+        loop {
+            match self.peek()?.kind {
+                TokenKind::Key => {
+                    if key.is_some() {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-DUPLICATE-CLAUSE",
+                            "duplicate KEY clause",
+                            self.peek()?.span,
+                        ));
+                    }
+                    self.advance()?;
+                    key = Some(self.parse_string()?);
+                }
+                TokenKind::Overwrite => {
+                    if overwrite {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-DUPLICATE-CLAUSE",
+                            "duplicate OVERWRITE clause",
+                            self.peek()?.span,
+                        ));
+                    }
+                    self.advance()?;
+                    overwrite = true;
+                }
+                _ => break,
+            }
+        }
+        Ok((key, overwrite))
     }
 
     /// `SET VECTOR [name] = <vectors> WHERE id = <id>`.

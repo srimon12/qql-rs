@@ -1,11 +1,13 @@
 //! Typed AST for QQL statements (`Stmt` and its variants).
 
+pub mod batch;
 pub mod ddl;
 pub mod mutation;
 pub mod query;
 pub mod retrieval;
 pub mod types;
 
+pub use batch::*;
 pub use ddl::*;
 pub use mutation::*;
 pub use query::*;
@@ -64,6 +66,8 @@ pub enum Stmt {
     ShowQuotas,
     /// `SET QUOTA (…)` cluster quota replacement.
     SetQuota(Box<SetQuotaStmt>),
+    /// `BATCH { … }` single-RPC batch of homogeneous members.
+    Batch(Box<BatchStmt>),
 }
 
 #[cfg(feature = "serde")]
@@ -138,6 +142,7 @@ impl serde::Serialize for Stmt {
                 map.end()
             }
             Stmt::SetQuota(s) => serializer.serialize_newtype_variant("Stmt", 22, "SetQuota", s),
+            Stmt::Batch(s) => serializer.serialize_newtype_variant("Stmt", 23, "Batch", s),
         }
     }
 }
@@ -212,6 +217,7 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                     "Count" => Stmt::Count(map.next_value()?),
                     "Facet" => Stmt::Facet(map.next_value()?),
                     "SetQuota" => Stmt::SetQuota(map.next_value()?),
+                    "Batch" => Stmt::Batch(map.next_value()?),
                     _ => {
                         return Err(A::Error::unknown_variant(
                             &key,
@@ -239,6 +245,7 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                                 "Facet",
                                 "ShowQuotas",
                                 "SetQuota",
+                                "Batch",
                             ],
                         ));
                     }
@@ -281,6 +288,7 @@ impl Stmt {
             Self::ShowShardKeys(_) => "SHOW SHARD KEYS",
             Self::ShowQuotas => "SHOW QUOTAS",
             Self::SetQuota(_) => "SET QUOTA",
+            Self::Batch(_) => "BATCH",
         }
     }
 }

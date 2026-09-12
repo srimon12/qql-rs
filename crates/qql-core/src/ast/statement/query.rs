@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum QueryInput {
-    /// Text to embed (`TEXT '…' [MODEL '…']`).
+    /// Text to embed (`TEXT '…' [MODEL '…'] [OPTIONS {…}]`).
     Text {
         /// The text to embed.
         text: String,
@@ -22,6 +22,12 @@ pub enum QueryInput {
             serde(default, skip_serializing_if = "Option::is_none")
         )]
         text_param: Option<String>,
+        /// Opaque inference options (`OPTIONS {…}`), passed to the model as-is.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Vec::is_empty")
+        )]
+        options: Vec<(String, Value)>,
     },
     /// Image path or URL for dense embedding (CLIP vision, etc.).
     /// Resolved to [`VectorValue::Dense`] before plan/dispatch.
@@ -30,6 +36,26 @@ pub enum QueryInput {
         source: String,
         /// Optional embedding model override.
         model: Option<String>,
+        /// Opaque inference options (`OPTIONS {…}`), passed to the model as-is.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Vec::is_empty")
+        )]
+        options: Vec<(String, Value)>,
+    },
+    /// Custom inference object (`OBJECT {…} [MODEL '…'] [OPTIONS {…}]`).
+    /// Passed through to the backend inference service; never executed locally.
+    Object {
+        /// Arbitrary model input (usually an object).
+        object: Box<Value>,
+        /// Optional embedding model override.
+        model: Option<String>,
+        /// Opaque inference options (`OPTIONS {…}`), passed to the model as-is.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Vec::is_empty")
+        )]
+        options: Vec<(String, Value)>,
     },
     /// Pre-computed vector value used as-is.
     Vector(VectorValue),
@@ -169,7 +195,7 @@ pub enum PrefetchSource {
     Query(Box<QueryStmt>),
 }
 
-/// `LOOKUP FROM <collection> [VECTOR <name>]` group-value join hint.
+/// `LOOKUP FROM <collection> [VECTOR <name>] [SHARD <key>]` group-value join hint.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LookupSpec {
@@ -177,6 +203,8 @@ pub struct LookupSpec {
     pub collection: String,
     /// Optional named vector used by the lookup.
     pub vector: Option<String>,
+    /// Optional shard routing for the lookup collection.
+    pub shard_key: Option<ShardKey>,
 }
 
 /// One stage of the `PREFETCH (…)` pipeline.
@@ -246,12 +274,15 @@ pub enum QueryExpr {
         /// Multi-stage `PREFETCH` pipeline.
         prefetch: Vec<Prefetch>,
     },
-    /// `QUERY ORDER BY field [ASC|DESC]` — payload-value ordering.
+    /// `QUERY ORDER BY field [ASC|DESC] [START FROM <value>]` — payload-value ordering.
     OrderBy {
         /// Payload field to sort on.
         field: String,
         /// Sort direction (`ASC` default).
         direction: OrderDirection,
+        /// Optional paging origin: resume ordering from this payload value
+        /// (OpenAPI `OrderBy.start_from`: integer, float, or datetime string).
+        start_from: Option<Value>,
     },
     /// `QUERY SAMPLE RANDOM` — random sample of points.
     SampleRandom,
@@ -398,7 +429,7 @@ pub struct QueryOutput {
     pub vectors: Option<VectorSelector>,
 }
 
-/// `GROUP BY field [SIZE n] [LOOKUP FROM c [VECTOR v]]` settings.
+/// `GROUP BY field [SIZE n] [LOOKUP FROM c [WITH PAYLOAD …] [WITH VECTOR …]]` settings.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GroupSpec {
@@ -407,7 +438,20 @@ pub struct GroupSpec {
     /// Maximum hits per group.
     pub size: Option<u64>,
     /// Optional collection used to resolve group values.
-    pub lookup: Option<String>,
+    pub lookup: Option<GroupLookup>,
+}
+
+/// `LOOKUP FROM <collection>` group-value resolution with result selectors
+/// (OpenAPI `WithLookup`: bare name or `{collection, with_payload, with_vectors}`).
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GroupLookup {
+    /// Collection providing the looked-up points.
+    pub collection: String,
+    /// Payload selector applied to looked-up points.
+    pub payload: Option<PayloadSelector>,
+    /// Vector selector applied to looked-up points.
+    pub vectors: Option<VectorSelector>,
 }
 
 /// `LIMIT` / `OFFSET` result paging.

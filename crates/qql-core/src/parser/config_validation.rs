@@ -368,6 +368,27 @@ pub fn merge_collection_config(
         }
         current.quantization_update = new.quantization_update;
     }
+    if new.wal.is_some() {
+        if current.wal.is_some() {
+            return Err(validation_err("WAL clause may only appear once", span));
+        }
+        current.wal = new.wal;
+    }
+    if new.strict_mode.is_some() {
+        if current.strict_mode.is_some() {
+            return Err(validation_err(
+                "STRICT_MODE clause may only appear once",
+                span,
+            ));
+        }
+        current.strict_mode = new.strict_mode;
+    }
+    if new.metadata.is_some() {
+        if current.metadata.is_some() {
+            return Err(validation_err("METADATA clause may only appear once", span));
+        }
+        current.metadata = new.metadata;
+    }
     for diff in new.vector_diffs {
         if current.vector_diffs.iter().any(|d| d.name == diff.name) {
             return Err(validation_err(
@@ -458,9 +479,68 @@ pub fn validate_index_options(options: &[(String, Value)], span: Span) -> Result
                         }
                     }
                 }
+                // A bare language name (`stopwords = 'english'`) selects the
+                // predefined list; names are validated against the OpenAPI
+                // `Language` enum at plan time.
+                Value::Str(_) => {}
+                // `stopwords = {languages: […], custom: […]}` mirrors the
+                // OpenAPI `StopwordsSet` object.
+                Value::Dict(entries) => {
+                    for (entry_key, entry_value) in entries {
+                        if entry_key.eq_ignore_ascii_case("languages") {
+                            match entry_value {
+                                Value::List(items) => {
+                                    for item in items {
+                                        if !matches!(item, Value::Str(_)) {
+                                            return Err(validation_err(
+                                                "stopwords languages must be a list of strings",
+                                                span,
+                                            ));
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(validation_err(
+                                        "stopwords languages must be a list of strings",
+                                        span,
+                                    ));
+                                }
+                            }
+                        } else if entry_key.eq_ignore_ascii_case("custom") {
+                            match entry_value {
+                                Value::List(items) => {
+                                    for item in items {
+                                        if !matches!(item, Value::Str(_)) {
+                                            return Err(validation_err(
+                                                "stopwords custom must be a list of strings",
+                                                span,
+                                            ));
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(validation_err(
+                                        "stopwords custom must be a list of strings",
+                                        span,
+                                    ));
+                                }
+                            }
+                        } else {
+                            return Err(validation_err(
+                                alloc::format!(
+                                    "unknown stopwords set key '{entry_key}'. Expected: languages, custom"
+                                ),
+                                span,
+                            ));
+                        }
+                    }
+                }
                 _ => {
                     return Err(validation_err(
-                        alloc::format!("{} must be a list of strings", k),
+                        alloc::format!(
+                            "{} must be a list of strings, a language name, or {{languages: […], custom: […]}}",
+                            k
+                        ),
                         span,
                     ));
                 }
@@ -468,6 +548,91 @@ pub fn validate_index_options(options: &[(String, Value)], span: Span) -> Result
             _ => {
                 return Err(validation_err(
                     alloc::format!("unknown index option: {}", k),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Closed key set of `WITH STRICT_MODE (…)` (OpenAPI `StrictModeConfig`).
+pub const STRICT_MODE_KEYS: &[&str] = &[
+    "enabled",
+    "max_query_limit",
+    "max_timeout",
+    "unindexed_filtering_retrieve",
+    "unindexed_filtering_update",
+    "search_max_hnsw_ef",
+    "search_allow_exact",
+    "search_max_oversampling",
+    "upsert_max_batchsize",
+    "search_max_batchsize",
+    "max_collection_vector_size_bytes",
+    "read_rate_limit",
+    "write_rate_limit",
+    "max_collection_payload_size_bytes",
+    "max_points_count",
+    "filter_max_conditions",
+    "condition_max_size",
+    "multivector_config",
+    "sparse_config",
+    "max_payload_index_count",
+    "max_resident_memory_percent",
+];
+
+/// True when `key` names a `STRICT_MODE` option (case-insensitive).
+pub fn is_strict_mode_key(key: &str) -> bool {
+    STRICT_MODE_KEYS.iter().any(|known| ascii_equal(known, key))
+}
+
+/// Type-checks one WAL config option (`wal_capacity_mb`, …).
+pub fn validate_wal_value(key: &str, value: &Value, span: Span) -> Result<(), QqlError> {
+    if !matches!(value, Value::Int(_)) {
+        return Err(validation_err(
+            alloc::format!("{} must be an integer", key),
+            span,
+        ));
+    }
+    Ok(())
+}
+
+/// Type-checks one strict-mode config option by shape (ranges are enforced at
+/// plan time so hand-built ASTs fail closed there too).
+pub fn validate_strict_mode_value(key: &str, value: &Value, span: Span) -> Result<(), QqlError> {
+    let lower = key.to_ascii_lowercase();
+    match lower.as_str() {
+        "enabled"
+        | "unindexed_filtering_retrieve"
+        | "unindexed_filtering_update"
+        | "search_allow_exact" => {
+            if !matches!(value, Value::Bool(_)) {
+                return Err(validation_err(
+                    alloc::format!("{} must be true or false", key),
+                    span,
+                ));
+            }
+        }
+        "search_max_oversampling" => {
+            if !matches!(value, Value::Int(_) | Value::Float(_)) {
+                return Err(validation_err(
+                    alloc::format!("{} must be a number", key),
+                    span,
+                ));
+            }
+        }
+        "multivector_config" | "sparse_config" => {
+            if !matches!(value, Value::Dict(_)) {
+                return Err(validation_err(
+                    alloc::format!("{} must be an object", key),
+                    span,
+                ));
+            }
+        }
+        _ => {
+            if !matches!(value, Value::Int(_)) {
+                return Err(validation_err(
+                    alloc::format!("{} must be an integer", key),
                     span,
                 ));
             }

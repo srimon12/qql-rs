@@ -111,6 +111,7 @@ where
 pub fn value_to_point_id(val: &Value, span: Option<Span>) -> Result<PointId, QqlError> {
     match val {
         Value::Int(n) if *n >= 0 => Ok(PointId::Number(*n as u64)),
+        Value::UInt(n) => Ok(PointId::Number(*n)),
         Value::Str(s) => Ok(PointId::String(s.clone())),
         _ => Err(QqlError::validation(
             "QQL-BIND-TYPE-MISMATCH",
@@ -151,6 +152,7 @@ where
 pub fn value_to_shard_key(val: &Value, span: Option<Span>) -> Result<ShardKey, QqlError> {
     match val {
         Value::Int(n) if *n >= 0 => Ok(ShardKey::Number(*n as u64)),
+        Value::UInt(n) => Ok(ShardKey::Number(*n)),
         Value::Str(s) => Ok(ShardKey::Keyword(s.clone())),
         _ => Err(QqlError::validation(
             "QQL-BIND-TYPE-MISMATCH",
@@ -164,6 +166,7 @@ pub fn value_to_shard_key(val: &Value, span: Option<Span>) -> Result<ShardKey, Q
 pub fn value_to_u64(val: &Value, clause: &str, span: Option<Span>) -> Result<u64, QqlError> {
     match val {
         Value::Int(n) if *n >= 0 => Ok(*n as u64),
+        Value::UInt(n) => Ok(*n),
         _ => Err(QqlError::validation(
             "QQL-BIND-TYPE-MISMATCH",
             format!("{clause} parameter must be a non-negative integer"),

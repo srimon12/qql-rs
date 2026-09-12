@@ -4,8 +4,8 @@ use crate::ast::Value;
 use crate::ast::filter::{FilterExpr, PointIdPredicate};
 use crate::ast::formula::FormulaExpr;
 use crate::ast::statement::{
-    PointId, PointSelector, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryInput,
-    QueryStmt, ShardKey, Stmt, VectorValue,
+    CollectionConfig, PointId, PointSelector, PointVectors, Prefetch, PrefetchSource, QueryExpr,
+    QueryInput, QueryStmt, ShardKey, Stmt, VectorValue,
 };
 use crate::error::QqlError;
 
@@ -97,12 +97,22 @@ fn validate_no_unbound_query_input(input: &QueryInput) -> Result<(), QqlError> {
             Err(unbound_positional_err(*idx, span.as_deref().copied()))
         }
         QueryInput::Point(point) => validate_no_unbound_point_id(point),
-        QueryInput::Text { text_param, .. } => {
+        QueryInput::Text {
+            text_param,
+            options,
+            ..
+        } => {
             if let Some(param) = text_param {
-                Err(unbound_param_str_err(param, None))
-            } else {
-                Ok(())
+                return Err(unbound_param_str_err(param, None));
             }
+            validate_no_unbound_options(options)
+        }
+        QueryInput::Image { options, .. } => validate_no_unbound_options(options),
+        QueryInput::Object {
+            object, options, ..
+        } => {
+            validate_no_unbound_value(object)?;
+            validate_no_unbound_options(options)
         }
         _ => Ok(()),
     }
@@ -124,13 +134,17 @@ fn validate_no_unbound_filter(filter: &FilterExpr) -> Result<(), QqlError> {
             validate_no_unbound_value(low)?;
             validate_no_unbound_value(high)
         }
-        FilterExpr::In { values, .. } | FilterExpr::MatchAny { values, .. } => {
+        FilterExpr::In { values, .. }
+        | FilterExpr::MatchAny { values, .. }
+        | FilterExpr::MatchExcept { values, .. } => {
             for v in values {
                 validate_no_unbound_value(v)?;
             }
             Ok(())
         }
-        FilterExpr::And { operands } | FilterExpr::Or { operands } => {
+        FilterExpr::And { operands }
+        | FilterExpr::Or { operands }
+        | FilterExpr::MinShould { operands, .. } => {
             for op in operands {
                 validate_no_unbound_filter(op)?;
             }
@@ -157,6 +171,9 @@ fn validate_no_unbound_prefetch(prefetch: &Prefetch) -> Result<(), QqlError> {
     }
     if let Some(f) = &prefetch.filter {
         validate_no_unbound_filter(f)?;
+    }
+    if let Some(spec) = &prefetch.lookup {
+        validate_no_unbound_shard_key(&spec.shard_key)?;
     }
     Ok(())
 }
@@ -223,7 +240,13 @@ fn validate_no_unbound_query_expr(expr: &QueryExpr) -> Result<(), QqlError> {
             }
             Ok(())
         }
-        QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => Ok(()),
+        QueryExpr::OrderBy { start_from, .. } => {
+            if let Some(value) = start_from {
+                validate_no_unbound_value(value)?;
+            }
+            Ok(())
+        }
+        QueryExpr::SampleRandom => Ok(()),
         QueryExpr::Fusion { prefetch, .. } => {
             for p in prefetch {
                 validate_no_unbound_prefetch(p)?;
@@ -329,8 +352,25 @@ fn validate_no_unbound_vector_value(vec: &VectorValue) -> Result<(), QqlError> {
         VectorValue::PositionalParam(idx, span) => {
             Err(unbound_positional_err(*idx, span.as_deref().copied()))
         }
+        VectorValue::Document { options, .. } | VectorValue::Image { options, .. } => {
+            validate_no_unbound_options(options)
+        }
+        VectorValue::Object {
+            object, options, ..
+        } => {
+            validate_no_unbound_value(object)?;
+            validate_no_unbound_options(options)
+        }
         _ => Ok(()),
     }
+}
+
+/// Reject unbound placeholders inside an inference `OPTIONS` dict.
+fn validate_no_unbound_options(options: &[(String, Value)]) -> Result<(), QqlError> {
+    for (_, value) in options {
+        validate_no_unbound_value(value)?;
+    }
+    Ok(())
 }
 
 fn validate_no_unbound_point_vectors(pv: &PointVectors) -> Result<(), QqlError> {
@@ -360,6 +400,11 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
             if let Some(after) = &scroll.after {
                 validate_no_unbound_point_id(after)?;
             }
+            if let Some(order) = &scroll.order_by
+                && let Some(value) = &order.start_from
+            {
+                validate_no_unbound_value(value)?;
+            }
             if let Some(param) = &scroll.limit_param {
                 return Err(unbound_param_str_err(param, scroll.limit_span));
             }
@@ -385,6 +430,9 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
                         return Err(unbound_positional_err(*idx, span.as_deref().copied()));
                     }
                 }
+            }
+            if let Some(filter) = &upsert.update_filter {
+                validate_no_unbound_filter(filter)?;
             }
             validate_no_unbound_shard_key(&upsert.shard_key)?;
             Ok(())
@@ -444,18 +492,36 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
         }
         Stmt::CreateShardKey(sk) => validate_no_unbound_shard_key(&Some(sk.shard_key.clone())),
         Stmt::DropShardKey(sk) => validate_no_unbound_shard_key(&Some(sk.shard_key.clone())),
-        Stmt::CreateCollection(cc) => validate_collection_shard_keys(
-            cc.config
-                .as_ref()
-                .and_then(|config| config.params.as_ref())
-                .and_then(|params| params.shard_keys.as_ref()),
-        ),
-        Stmt::AlterCollection(ac) => validate_collection_shard_keys(
-            ac.config
-                .as_ref()
-                .and_then(|config| config.params.as_ref())
-                .and_then(|params| params.shard_keys.as_ref()),
-        ),
+        Stmt::CreateCollection(cc) => {
+            validate_collection_shard_keys(
+                cc.config
+                    .as_ref()
+                    .and_then(|config| config.params.as_ref())
+                    .and_then(|params| params.shard_keys.as_ref()),
+            )?;
+            if let Some(config) = &cc.config {
+                validate_no_unbound_ddl_options(config)?;
+            }
+            Ok(())
+        }
+        Stmt::AlterCollection(ac) => {
+            validate_collection_shard_keys(
+                ac.config
+                    .as_ref()
+                    .and_then(|config| config.params.as_ref())
+                    .and_then(|params| params.shard_keys.as_ref()),
+            )?;
+            if let Some(config) = &ac.config {
+                validate_no_unbound_ddl_options(config)?;
+            }
+            Ok(())
+        }
+        Stmt::Batch(batch) => {
+            for member in &batch.statements {
+                validate_no_unbound_params(member)?;
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -470,25 +536,58 @@ fn validate_collection_shard_keys(keys: Option<&Vec<ShardKey>>) -> Result<(), Qq
     Ok(())
 }
 
-fn check_vector_value_template(vec: &VectorValue, has_vec_params: &mut bool) {
+/// Reject unbound placeholders in raw `WITH WAL` / `WITH STRICT_MODE` /
+/// `WITH METADATA` option pairs (they lower through `value_to_json`, which
+/// cannot represent placeholders).
+fn validate_no_unbound_ddl_options(config: &CollectionConfig) -> Result<(), QqlError> {
+    for options in [&config.wal, &config.strict_mode, &config.metadata]
+        .into_iter()
+        .flatten()
+    {
+        for (_, value) in options {
+            validate_no_unbound_value(value)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_vector_value_template(
+    vec: &VectorValue,
+    has_vec_params: &mut bool,
+) -> Result<(), QqlError> {
     match vec {
         VectorValue::Param(..) | VectorValue::PositionalParam(..) => {
             *has_vec_params = true;
+            Ok(())
         }
-        _ => {}
+        VectorValue::Document { options, .. } | VectorValue::Image { options, .. } => {
+            validate_no_unbound_options(options)
+        }
+        VectorValue::Object {
+            object, options, ..
+        } => {
+            validate_no_unbound_value(object)?;
+            validate_no_unbound_options(options)
+        }
+        _ => Ok(()),
     }
 }
 
-fn check_point_vectors_template(pv: &PointVectors, has_vec_params: &mut bool) {
+fn check_point_vectors_template(
+    pv: &PointVectors,
+    has_vec_params: &mut bool,
+) -> Result<(), QqlError> {
     match pv {
         PointVectors::Param(..) | PointVectors::PositionalParam(..) => {
             *has_vec_params = true;
+            Ok(())
         }
         PointVectors::Unnamed(v) => check_vector_value_template(v, has_vec_params),
         PointVectors::Named(list) => {
             for (_, v) in list {
-                check_vector_value_template(v, has_vec_params);
+                check_vector_value_template(v, has_vec_params)?;
             }
+            Ok(())
         }
     }
 }
@@ -503,18 +602,28 @@ fn check_query_input_template(
             Ok(())
         }
         QueryInput::Vector(vec) => {
-            check_vector_value_template(vec, has_vec_params);
+            check_vector_value_template(vec, has_vec_params)?;
             Ok(())
         }
         QueryInput::Point(point) => validate_no_unbound_point_id(point),
-        QueryInput::Text { text_param, .. } => {
+        QueryInput::Text {
+            text_param,
+            options,
+            ..
+        } => {
             if let Some(param) = text_param {
                 Err(unbound_param_str_err(param, None))
             } else {
-                Ok(())
+                validate_no_unbound_options(options)
             }
         }
-        _ => Ok(()),
+        QueryInput::Image { options, .. } => validate_no_unbound_options(options),
+        QueryInput::Object {
+            object, options, ..
+        } => {
+            validate_no_unbound_value(object)?;
+            validate_no_unbound_options(options)
+        }
     }
 }
 
@@ -552,7 +661,13 @@ fn check_query_expr_template(expr: &QueryExpr, has_vec_params: &mut bool) -> Res
             }
             Ok(())
         }
-        QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom | QueryExpr::Fusion { .. } => Ok(()),
+        QueryExpr::OrderBy { start_from, .. } => {
+            if let Some(value) = start_from {
+                validate_no_unbound_value(value)?;
+            }
+            Ok(())
+        }
+        QueryExpr::SampleRandom | QueryExpr::Fusion { .. } => Ok(()),
         QueryExpr::Formula {
             expression,
             defaults,
@@ -652,7 +767,7 @@ pub fn validate_no_unbound_scalar_params(stmt: &Stmt) -> Result<bool, QqlError> 
                     crate::ast::PointEntry::Inline(inline) => {
                         validate_no_unbound_point_id(&inline.id)?;
                         if let Some(vectors) = &inline.vectors {
-                            check_point_vectors_template(vectors, &mut has_vec_params);
+                            check_point_vectors_template(vectors, &mut has_vec_params)?;
                         }
                         for (_k, v) in &inline.payload {
                             validate_no_unbound_value(v)?;
@@ -660,12 +775,15 @@ pub fn validate_no_unbound_scalar_params(stmt: &Stmt) -> Result<bool, QqlError> 
                     }
                 }
             }
+            if let Some(filter) = &upsert.update_filter {
+                validate_no_unbound_filter(filter)?;
+            }
             Ok(has_vec_params)
         }
         Stmt::UpdateVector(uv) => {
             for point in &uv.points {
                 validate_no_unbound_point_id(&point.id)?;
-                check_point_vectors_template(&point.vectors, &mut has_vec_params);
+                check_point_vectors_template(&point.vectors, &mut has_vec_params)?;
             }
             Ok(has_vec_params)
         }
@@ -679,6 +797,11 @@ pub fn validate_no_unbound_scalar_params(stmt: &Stmt) -> Result<bool, QqlError> 
             }
             if let Some(after) = &scroll.after {
                 validate_no_unbound_point_id(after)?;
+            }
+            if let Some(order) = &scroll.order_by
+                && let Some(value) = &order.start_from
+            {
+                validate_no_unbound_value(value)?;
             }
             if let Some(param) = &scroll.limit_param {
                 return Err(unbound_param_str_err(param, scroll.limit_span));
@@ -723,6 +846,12 @@ pub fn validate_no_unbound_scalar_params(stmt: &Stmt) -> Result<bool, QqlError> 
             }
             Ok(has_vec_params)
         }
+        Stmt::Batch(batch) => {
+            for member in &batch.statements {
+                has_vec_params |= validate_no_unbound_scalar_params(member)?;
+            }
+            Ok(has_vec_params)
+        }
         _ => {
             validate_no_unbound_params(stmt)?;
             Ok(false)
@@ -753,6 +882,16 @@ fn collect_from_val(
             }
         }
         _ => {}
+    }
+}
+
+fn collect_from_options(
+    options: &[(String, Value)],
+    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
+    max_pos: &mut usize,
+) {
+    for (_, value) in options {
+        collect_from_val(value, named, max_pos);
     }
 }
 
@@ -818,6 +957,15 @@ fn collect_from_vector_val(
         VectorValue::PositionalParam(idx, _) => {
             *max_pos = (*max_pos).max(*idx + 1);
         }
+        VectorValue::Document { options, .. } | VectorValue::Image { options, .. } => {
+            collect_from_options(options, named, max_pos);
+        }
+        VectorValue::Object {
+            object, options, ..
+        } => {
+            collect_from_val(object, named, max_pos);
+            collect_from_options(options, named, max_pos);
+        }
         _ => {}
     }
 }
@@ -859,11 +1007,24 @@ fn collect_from_query_input(
         QueryInput::Point(point) => collect_from_point_id(point, named, max_pos),
         QueryInput::Text {
             text_param: Some(param),
+            options,
             ..
         } => {
             collect_from_param_str(param, named, max_pos);
+            collect_from_options(options, named, max_pos);
         }
-        _ => {}
+        QueryInput::Text { options, .. } => {
+            collect_from_options(options, named, max_pos);
+        }
+        QueryInput::Image { options, .. } => {
+            collect_from_options(options, named, max_pos);
+        }
+        QueryInput::Object {
+            object, options, ..
+        } => {
+            collect_from_val(object, named, max_pos);
+            collect_from_options(options, named, max_pos);
+        }
     }
 }
 
@@ -886,12 +1047,16 @@ fn collect_from_filter(
             collect_from_val(low, named, max_pos);
             collect_from_val(high, named, max_pos);
         }
-        FilterExpr::In { values, .. } | FilterExpr::MatchAny { values, .. } => {
+        FilterExpr::In { values, .. }
+        | FilterExpr::MatchAny { values, .. }
+        | FilterExpr::MatchExcept { values, .. } => {
             for v in values {
                 collect_from_val(v, named, max_pos);
             }
         }
-        FilterExpr::And { operands } | FilterExpr::Or { operands } => {
+        FilterExpr::And { operands }
+        | FilterExpr::Or { operands }
+        | FilterExpr::MinShould { operands, .. } => {
             for op in operands {
                 collect_from_filter(op, named, max_pos);
             }
@@ -993,6 +1158,15 @@ fn collect_from_query_stmt(
                 collect_from_query_input(&pair.negative, named, max_pos);
             }
         }
+        QueryExpr::OrderBy {
+            start_from: Some(value),
+            ..
+        } => {
+            collect_from_val(value, named, max_pos);
+        }
+        QueryExpr::OrderBy {
+            start_from: None, ..
+        } => {}
         QueryExpr::Formula {
             expression,
             defaults,
@@ -1020,6 +1194,9 @@ fn collect_from_query_stmt(
                 if let Some(f) = &p.filter {
                     collect_from_filter(f, named, max_pos);
                 }
+                if let Some(spec) = &p.lookup {
+                    collect_from_shard_key(&spec.shard_key, named, max_pos);
+                }
             }
         }
         QueryExpr::Hybrid {
@@ -1039,6 +1216,9 @@ fn collect_from_query_stmt(
                 if let Some(f) = &p.filter {
                     collect_from_filter(f, named, max_pos);
                 }
+                if let Some(spec) = &p.lookup {
+                    collect_from_shard_key(&spec.shard_key, named, max_pos);
+                }
             }
         }
         QueryExpr::CrossRerank {
@@ -1055,6 +1235,9 @@ fn collect_from_query_stmt(
                 }
                 if let Some(f) = &p.filter {
                     collect_from_filter(f, named, max_pos);
+                }
+                if let Some(spec) = &p.lookup {
+                    collect_from_shard_key(&spec.shard_key, named, max_pos);
                 }
             }
         }
@@ -1080,6 +1263,7 @@ fn collect_from_query_stmt(
 /// the point-splice fast path instead of scalar binding.
 pub fn stmt_has_point_params(stmt: &Stmt) -> bool {
     match stmt {
+        Stmt::Batch(batch) => batch.statements.iter().any(stmt_has_point_params),
         Stmt::Upsert(upsert) => upsert.points.iter().any(|point| {
             matches!(
                 point,
@@ -1106,6 +1290,11 @@ pub fn collect_statement_params(
             if let Some(after) = &scroll.after {
                 collect_from_point_id(after, &mut named, &mut max_pos);
             }
+            if let Some(order) = &scroll.order_by
+                && let Some(value) = &order.start_from
+            {
+                collect_from_val(value, &mut named, &mut max_pos);
+            }
             collect_from_shard_key(&scroll.shard_key, &mut named, &mut max_pos);
             if let Some(param) = &scroll.limit_param {
                 collect_from_param_str(param, &mut named, &mut max_pos);
@@ -1130,6 +1319,9 @@ pub fn collect_statement_params(
                         max_pos = max_pos.max(*idx + 1);
                     }
                 }
+            }
+            if let Some(filter) = &upsert.update_filter {
+                collect_from_filter(filter, &mut named, &mut max_pos);
             }
             collect_from_shard_key(&upsert.shard_key, &mut named, &mut max_pos);
         }
@@ -1216,6 +1408,13 @@ pub fn collect_statement_params(
             collect_from_shard_key(&facet.shard_key, &mut named, &mut max_pos);
             if let Some(param) = &facet.limit_param {
                 collect_from_param_str(param, &mut named, &mut max_pos);
+            }
+        }
+        Stmt::Batch(batch) => {
+            for member in &batch.statements {
+                let (names, pos) = collect_statement_params(member);
+                named.extend(names);
+                max_pos = max_pos.max(pos);
             }
         }
         _ => {}
