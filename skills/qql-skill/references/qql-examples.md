@@ -483,7 +483,6 @@ DROP COLLECTION tenants;
 ```sql
 QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
   FROM news
-  USING dense
   LIMIT 20;
 ```
 
@@ -496,7 +495,6 @@ QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
 ```sql
 QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)
   FROM places
-  USING dense
   WHERE location GEO_BBOX {
     top_left: {lat: 48.8600, lon: 2.3400},
     bottom_right: {lat: 48.8500, lon: 2.3600}
