@@ -132,5 +132,5 @@ console.log(client.routeAffinity); // "session-acme-42"
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [Filters](../../docs/filters.md) · [inject_filter](../../docs/inject_filter.md)
-- [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md) · [Node skill](../../skills/qql-skill/references/node-sdk.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Filters](https://github.com/srimon12/qql-rs/blob/main/docs/filters.md) · [inject_filter](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md)
+- [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md) · [Node skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/node-sdk.md)

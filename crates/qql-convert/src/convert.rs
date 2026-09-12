@@ -17,19 +17,29 @@ use qql_core::fmt::format_stmt;
 /// the buffer is not a single JSON value and has two or more non-empty lines
 /// — the shape `qql record --out` writes.
 pub fn convert_stmts(input: &str, collection: Option<&str>) -> Result<Vec<Stmt>, ConvertError> {
-    let trimmed = input.trim();
+    let owned;
+    let trimmed = match strip_fence_lines(input.trim()) {
+        Some(unfenced) => {
+            owned = unfenced;
+            owned.as_str()
+        }
+        None => input.trim(),
+    };
     if trimmed.is_empty() {
         return Err(ConvertError::undecodable("no input"));
     }
     match serde_json::from_str::<Value>(trimmed) {
         Ok(value) => convert_value(&value, collection),
-        Err(err) => {
+        Err(json_err) => {
+            if let Some(pasted) = crate::snippet::convert_pasted(trimmed, collection) {
+                return pasted;
+            }
             let nonempty = trimmed
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .count();
             if nonempty < 2 {
-                return Err(ConvertError::InvalidJson(err.to_string()));
+                return Err(ConvertError::InvalidJson(json_err.to_string()));
             }
             convert_jsonl(trimmed, collection)
         }
@@ -94,6 +104,7 @@ fn convert_bare(raw: &Value, collection: Option<&str>) -> Result<Vec<Stmt>, Conv
         Some(name) if !name.is_empty() => name,
         _ => return Err(ConvertError::MissingCollection),
     };
+    crate::endpoint::reject_template_collection(collection)?;
     crate::bare::convert(raw, collection)
 }
 
@@ -128,16 +139,57 @@ fn convert_wrapped(
     wrapped: Wrapped<'_>,
     collection: Option<&str>,
 ) -> Result<Vec<Stmt>, ConvertError> {
-    let (path, path_query) = split_path_query(wrapped.path);
+    convert_method_path_body(
+        wrapped.method,
+        wrapped.path,
+        wrapped.query,
+        wrapped.body,
+        collection,
+    )
+}
+
+/// Shared lowering for every envelope: wrapped requests plus the pasted
+/// snippet / curl shapes in [`crate::snippet`].
+///
+/// `path` may carry a `?query` suffix; `query` is the wrapped envelope's
+/// optional query object (pasted shapes have none). Collection names that look
+/// like pasted placeholders fail via [`crate::endpoint::parse`].
+pub(crate) fn convert_method_path_body(
+    method: &str,
+    path: &str,
+    query: Option<&Value>,
+    body: Option<&Value>,
+    collection: Option<&str>,
+) -> Result<Vec<Stmt>, ConvertError> {
+    let (path, path_query) = split_path_query(path);
     let mut opts = RequestOpts::from_query_string(path_query)?;
-    opts.merge(RequestOpts::from_value(wrapped.query)?);
-    let matched = endpoint::parse(wrapped.method, path)?;
+    opts.merge(RequestOpts::from_value(query)?);
+    let matched = endpoint::parse(method, path)?;
     let collection = matched.collection.as_deref().or(collection).unwrap_or("");
     let ctx = DecodeCtx {
         collection,
         opts: &opts,
     };
-    decode::endpoint(&matched, wrapped.body, ctx)
+    decode::endpoint(&matched, body, ctx)
+}
+
+/// Markdown fences are paste noise (` ```http … ``` ` from docs), not input.
+fn strip_fence_lines(trimmed: &str) -> Option<String> {
+    let mut lines: Vec<&str> = trimmed.lines().collect();
+    if !lines
+        .first()
+        .is_some_and(|l| l.trim_start().starts_with("```"))
+    {
+        return None;
+    }
+    lines.remove(0);
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    if lines.last().is_some_and(|l| l.trim() == "```") {
+        lines.pop();
+    }
+    Some(lines.join("\n"))
 }
 
 /// Split `path?query` into `(path, query)` with the leading `?` removed.
