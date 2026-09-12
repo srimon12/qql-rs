@@ -5,6 +5,7 @@
  * no async init() is required.
  */
 
+import path from "node:path";
 import type { QqlParams } from "./params";
 import type { CompiledRoute, WasmAnalyzeResult } from "./types";
 
@@ -31,10 +32,9 @@ export function initWasm(): void {
   if (_analyze) return;
 
   try {
-    // Compiled output lives at out/core/wasm.js → ../../wasm/qql_wasm.js
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const path = require("node:path") as typeof import("path");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // Compiled output lives at out/core/wasm.js → ../../wasm/qql_wasm.js.
+    // Dynamic require: the bundle path is computed from __dirname at runtime,
+    // so it cannot be a static import. Typed via @types/node (see tsconfig).
     const qqlWasm = require(path.join(__dirname, "..", "..", "wasm", "qql_wasm.js"));
     if (typeof qqlWasm.analyze !== "function") {
       throw new Error("qql-wasm module loaded but analyze() is not a function");

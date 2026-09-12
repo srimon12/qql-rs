@@ -562,8 +562,15 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
+          npm audit --audit-level=high
           npm run check
           npm test
+      - name: Package the extension (validates the VSIX manifest end to end)
+        working-directory: editors/vscode
+        run: |
+          set -euo pipefail
+          npx @vscode/vsce package -o /tmp/qql-lang.vsix
+          ls -la /tmp/qql-lang.vsix
 
   # ── Website documentation ────────────────────────────────────
   # Validate the docs corpus (raw fences, parse + plan of every example and

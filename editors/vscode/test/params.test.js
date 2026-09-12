@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Contract tests for the `:name` / `?` placeholder path the extension relies
  * on (`src/core/wasm.ts` + `src/core/params.ts`).
@@ -21,14 +19,14 @@ const root = path.join(__dirname, "..");
 test("bind substitutes named placeholders from an object", () => {
   assert.strictEqual(
     wasm.bind("QUERY TEXT :q FROM docs USING dense LIMIT :n", { q: "hi", n: 10 }),
-    "QUERY TEXT 'hi' FROM docs USING dense LIMIT 10",
+    "QUERY TEXT 'hi' FROM docs USING dense LIMIT 10"
   );
 });
 
 test("bind substitutes positional placeholders from an array", () => {
   assert.strictEqual(
     wasm.bind("QUERY TEXT ? FROM docs USING dense LIMIT ?", ["hi", 10]),
-    "QUERY TEXT 'hi' FROM docs USING dense LIMIT 10",
+    "QUERY TEXT 'hi' FROM docs USING dense LIMIT 10"
   );
 });
 
@@ -44,7 +42,7 @@ test("analyze without params reports a QQL-BIND-* error", () => {
   assert.ok(result.error, "expected an error");
   assert.ok(
     result.error.code.startsWith("QQL-BIND-"),
-    `expected QQL-BIND-*, got ${result.error.code}`,
+    `expected QQL-BIND-*, got ${result.error.code}`
   );
 });
 

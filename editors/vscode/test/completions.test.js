@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Static well-formedness tests for the QQL VS Code extension sources.
  *
@@ -15,18 +13,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.join(__dirname, "..");
-const completions = fs.readFileSync(
-  path.join(root, "src", "providers", "completions.ts"),
-  "utf8",
-);
-const keywords = fs.readFileSync(
-  path.join(root, "src", "keywords.generated.ts"),
-  "utf8",
-);
+const completions = fs.readFileSync(path.join(root, "src", "providers", "completions.ts"), "utf8");
+const keywords = fs.readFileSync(path.join(root, "src", "keywords.generated.ts"), "utf8");
 
-test("snippet count matches the documented claim (README: 36)", () => {
+test("snippet count matches the documented claim (README: 44)", () => {
   const labels = [...completions.matchAll(/^\s*label: "([^"]+)",$/gm)].map((m) => m[1]);
-  assert.strictEqual(labels.length, 36, "expected exactly 36 snippets");
+  assert.strictEqual(labels.length, 44, "expected exactly 44 snippets");
   assert.strictEqual(new Set(labels).size, labels.length, "snippet labels must be unique");
 });
 
@@ -35,17 +27,29 @@ test("snippet insertText values are well-formed", () => {
   // visible "\n" into the user's document instead of a newline.
   assert.doesNotMatch(completions, /\\\\n/, "found literal \\\\n in providers/completions.ts");
 
-  // The QUERY IMAGE snippet must use a real \n escape before "  FROM".
+  // The QUERY IMAGE snippet must break the line before "  FROM" with a real
+  // newline: a \n escape inside a regular string, or a literal line break
+  // inside a template literal. (A literal backslash-n in the inserted value
+  // is guarded by the check above.)
   assert.match(
     completions,
-    /QUERY IMAGE '\$\{1:[^']*}' MODEL '\$\{2:clip-vit\}'\\n  FROM \$\{3:collection\}/,
-    "QUERY IMAGE snippet must break lines with \\n escapes",
+    /QUERY IMAGE '[^\n]*' MODEL '[^\n]*'(?:\\n|\r?\n) {2}FROM/,
+    "QUERY IMAGE snippet must break lines with a real newline"
   );
 
-  // Every insertText line must terminate its string cleanly (no trailing
-  // dangling backslash) and every snippet entry must carry a detail.
+  // Every insertText fragment must terminate its string cleanly: "..." fragments
+  // must not end in a dangling backslash, and `...` template fragments must not
+  // end a line in a backslash (an accidental line continuation that would eat
+  // the newline). Every snippet entry must carry a detail.
   for (const m of completions.matchAll(/insertText: "([^"]*)"(?:\s*\+|\s*,)/g)) {
     assert.doesNotMatch(m[1], /\\$/, "insertText fragment must not end in a backslash");
+  }
+  for (const m of completions.matchAll(/insertText: `([^`]*)`,/g)) {
+    assert.doesNotMatch(
+      m[1],
+      /\\(?:\r?\n|$)/,
+      "template insertText must not end lines in a backslash"
+    );
   }
   const snippetsEnd = completions.indexOf("// Contextual follow-ups");
   const snippetBlock = completions.slice(0, snippetsEnd);
@@ -53,20 +57,21 @@ test("snippet insertText values are well-formed", () => {
   const detailCount = (snippetBlock.match(/\bdetail:/g) || []).length;
   // One declaration belongs to the QqlSnippet interface; every concrete
   // snippet contributes exactly one additional property.
-  assert.strictEqual(insertTextCount, 37, "every snippet must have insertText");
-  assert.strictEqual(detailCount, 37, "every snippet must have a detail");
+  assert.strictEqual(insertTextCount, 45, "every snippet must have insertText");
+  assert.strictEqual(detailCount, 45, "every snippet must have a detail");
 });
 
 test("1.7 statement starters and follow-ups are registered", () => {
-  const statements = fs.readFileSync(
-    path.join(root, "src", "core", "statements.ts"),
-    "utf8",
-  );
+  const statements = fs.readFileSync(path.join(root, "src", "core", "statements.ts"), "utf8");
   for (const starter of ["FACET", "SET"]) {
-    assert.match(completions, new RegExp(`"${starter}",?\\s*$`, "m"), `${starter} must be a statement starter`);
+    assert.match(
+      completions,
+      new RegExp(`"${starter}",?\\s*$`, "m"),
+      `${starter} must be a statement starter`
+    );
     assert.ok(
       statements.includes(`"${starter}",`),
-      `statements.ts splitter must start on ${starter}`,
+      `statements.ts splitter must start on ${starter}`
     );
   }
   assert.match(statements, /pendingSet/, "splitter must refine SET QUOTA");
@@ -98,10 +103,51 @@ test("1.7 snippets exist in completions", () => {
   }
 });
 
-test("snippets/qql.json mirrors the 1.7 additions", () => {
-  const snippets = JSON.parse(
-    fs.readFileSync(path.join(root, "snippets", "qql.json"), "utf8"),
+test("every snippets/qql.json body matches a providers/completions.ts value", () => {
+  // snippets/qql.json is a curated subset of the 44 provider snippets (native
+  // editor snippets vs. completion items). The bodies must still be exact
+  // copies — never drifted edits. Evaluates the template-literal insertTexts
+  // with a single-pass unescape so `\\` sequences can't double-convert.
+  const values = new Set(
+    [...completions.matchAll(/insertText: `([^`]*)`,/g)].map((m) => unescapeTemplate(m[1]))
   );
+  assert.ok(values.size >= 44, `expected 44 snippet values, got ${values.size}`);
+  const snippets = JSON.parse(fs.readFileSync(path.join(root, "snippets", "qql.json"), "utf8"));
+  for (const [name, snippet] of Object.entries(snippets)) {
+    const body = snippet.body.join("\n");
+    assert.ok(
+      values.has(body),
+      `snippets/qql.json "${name}" drifted from providers/completions.ts`
+    );
+  }
+});
+
+function unescapeTemplate(source) {
+  let out = "";
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === "\\" && i + 1 < source.length) {
+      const next = source[i + 1];
+      if (next === "n") {
+        out += "\n";
+      } else if (next === "r") {
+        out += "\r";
+      } else if (next === "t") {
+        out += "\t";
+      } else if (next === "\n") {
+        // Line continuation — guarded against elsewhere; drop it here.
+      } else {
+        out += next;
+      }
+      i++;
+    } else {
+      out += source[i];
+    }
+  }
+  return out;
+}
+
+test("snippets/qql.json mirrors the 1.7 additions", () => {
+  const snippets = JSON.parse(fs.readFileSync(path.join(root, "snippets", "qql.json"), "utf8"));
   for (const name of [
     "Alter vector diff",
     "Alter sparse diff",
@@ -114,7 +160,9 @@ test("snippets/qql.json mirrors the 1.7 additions", () => {
     const body = snippets[name].body.join("\n");
     assert.doesNotMatch(body, /\\\\n/, `"${name}" body has a literal \\\\n`);
   }
-  const allBodies = Object.values(snippets).map((s) => s.body.join("\n")).join("\n");
+  const allBodies = Object.values(snippets)
+    .map((s) => s.body.join("\n"))
+    .join("\n");
   assert.match(allBodies, /WITH VECTOR \$\{2:dense\}/, "vector-diff snippet missing");
   assert.match(allBodies, /WITH SPARSE/, "sparse-diff snippet missing");
   assert.match(allBodies, /SHARD \$\{6:101\}/, "numeric SHARD snippet missing");
@@ -131,7 +179,7 @@ test("qql.params setting is contributed", () => {
 test("diagnostics hint the new 1.7 error codes", () => {
   const diagnostics = fs.readFileSync(
     path.join(root, "src", "providers", "diagnostics.ts"),
-    "utf8",
+    "utf8"
   );
   for (const code of [
     "QQL-PARSE-VECTOR-DIFF",
@@ -151,21 +199,16 @@ test("keyword count supports the '130+' claim", () => {
 });
 
 test("extension main entry points at the tsc output (out/)", () => {
-  const pkg = JSON.parse(
-    fs.readFileSync(path.join(root, "package.json"), "utf8"),
-  );
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   assert.strictEqual(pkg.main, "./out/extension.js");
   // No dead esbuild glue: the build script must not exist anymore.
+  assert.ok(!pkg.scripts?.build, "package.json must not keep the dead esbuild build script");
   assert.ok(
-    !(pkg.scripts || {}).build,
-    "package.json must not keep the dead esbuild build script",
-  );
-  assert.ok(
-    !(pkg.devDependencies || {}).esbuild,
-    "esbuild devDependency must be removed with the dead build script",
+    !pkg.devDependencies?.esbuild,
+    "esbuild devDependency must be removed with the dead build script"
   );
   assert.ok(
     !fs.existsSync(path.join(root, "scripts", "build.mjs")),
-    "scripts/build.mjs must be deleted",
+    "scripts/build.mjs must be deleted"
   );
 });

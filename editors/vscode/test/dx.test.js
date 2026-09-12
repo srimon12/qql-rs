@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Contract + wiring tests for DX items 1-8.
  *
@@ -49,7 +47,7 @@ test("placeholder token shapes for exact-range diagnostics", () => {
   assert.strictEqual(kinds[colon + 1].text, "q");
   assert.ok(
     kinds.some((t) => t.text === "?"),
-    "expected a ? token",
+    "expected a ? token"
   );
 });
 
@@ -116,7 +114,7 @@ test("codeActions provider covers dup WAIT + missing params", () => {
   assert.match(
     src("extension.ts"),
     /registerCodeActionsProvider/,
-    "extension must register the provider",
+    "extension must register the provider"
   );
 });
 

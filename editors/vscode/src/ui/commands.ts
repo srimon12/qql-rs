@@ -23,11 +23,15 @@ import { updateDiagnostics } from "../providers/diagnostics";
 /** Single reusable output channel — avoids opening dozens of untitled docs. */
 let output: vscode.OutputChannel | undefined;
 
-function getOutput(): vscode.OutputChannel {
+export function getQqlOutput(): vscode.OutputChannel {
   if (!output) {
     output = vscode.window.createOutputChannel("QQL");
   }
   return output;
+}
+
+function getOutput(): vscode.OutputChannel {
+  return getQqlOutput();
 }
 
 function showInOutput(title: string, body: string): void {
@@ -561,7 +565,8 @@ function applyToStatements(
   }
   const rewritten = spans.map((span) => rewrite(span.source));
   void editor.edit((builder) => {
-    spans.forEach((span, i) => {
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
       builder.replace(
         new vscode.Range(
           byteOffsetToPosition(document, span.start),
@@ -569,6 +574,6 @@ function applyToStatements(
         ),
         rewritten[i]
       );
-    });
+    }
   });
 }
