@@ -442,3 +442,51 @@ fn unknown_request_fields_fail_closed() {
         "{err:?}"
     );
 }
+
+#[test]
+fn wait_false_survives_plan_route_convert() {
+    let delete = wrapped_query(
+        "POST",
+        "/collections/docs/points/delete",
+        serde_json::json!({"wait": false}),
+        serde_json::json!({"points": [1]}),
+    );
+    assert_eq!(
+        convert_json(&delete, None).expect("wait false"),
+        ["DELETE FROM docs WHERE id IN (1) WAIT false"]
+    );
+    let stmt =
+        qql_core::parser::Parser::parse("DELETE FROM docs WHERE id IN (1) WAIT false;").unwrap();
+    let route = qql_plan::routing::try_route(&stmt).unwrap();
+    assert!(route.query.iter().any(|(k, v)| k == "wait" && v == "false"));
+}
+
+#[test]
+fn bodyless_routes_reject_non_empty_body() {
+    for (method, path) in [
+        ("DELETE", "/collections/docs"),
+        ("DELETE", "/collections/docs/index/city"),
+        ("GET", "/collections"),
+        ("GET", "/collections/docs"),
+        ("GET", "/collections/docs/shards"),
+        ("GET", "/quotas"),
+    ] {
+        let input = wrapped(method, path, serde_json::json!({"unexpected": 1}));
+        let err = convert_json(&input, None).expect_err("body must fail closed");
+        assert!(
+            matches!(err, ConvertError::InvalidField { ref path, .. } if path == "body"),
+            "{method} {path}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn partial_mmr_fails_closed() {
+    let input = wrapped(
+        "POST",
+        "/collections/docs/points/query",
+        serde_json::json!({"query": {"nearest": [0.1], "mmr": {}}, "limit": 2}),
+    );
+    let err = convert_json(&input, None).expect_err("partial mmr must fail");
+    assert!(matches!(err, ConvertError::InvalidField { .. }), "{err:?}");
+}

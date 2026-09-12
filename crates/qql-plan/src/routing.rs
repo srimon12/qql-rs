@@ -89,11 +89,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
     /// `shard_key` query parameter, so emitting one would be dead weight at
     /// best and a conflicting string form for numeric keys at worst.
     fn mut_query(wait: bool) -> Vec<(String, String)> {
-        let mut q = Vec::new();
-        if wait {
-            q.push(("wait".into(), "true".into()));
-        }
-        q
+        vec![("wait".into(), wait.to_string())]
     }
 
     Ok(match op {
@@ -156,10 +152,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             request,
             wait,
         } => {
-            let mut query = Vec::new();
-            if *wait {
-                query.push(("wait".into(), "true".into()));
-            }
+            let query = vec![("wait".into(), wait.to_string())];
             Route {
                 method: Method::Put,
                 path: format!("/collections/{collection}/points"),
@@ -253,11 +246,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Put,
             path: format!("/collections/{collection}/index"),
-            query: if *wait {
-                vec![("wait".into(), "true".into())]
-            } else {
-                Vec::new()
-            },
+            query: vec![("wait".into(), wait.to_string())],
             body: body(&crate::ddl::create_index_rest_body(request))?,
         },
         PlannedOperation::CreateShardKey {
@@ -599,7 +588,12 @@ mod tests {
         let s_false =
             Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT false;").unwrap();
         let r_false = try_route(&s_false).unwrap();
-        assert!(!r_false.query.iter().any(|(k, _)| k == "wait"));
+        assert!(
+            r_false
+                .query
+                .iter()
+                .any(|(k, v)| k == "wait" && v == "false")
+        );
     }
 
     #[test]
@@ -612,7 +606,12 @@ mod tests {
             Parser::parse("CREATE INDEX ON COLLECTION docs FOR tag TYPE keyword WAIT false;")
                 .unwrap();
         let r_nowait = try_route(&s_nowait).unwrap();
-        assert!(!r_nowait.query.iter().any(|(k, _)| k == "wait"));
+        assert!(
+            r_nowait
+                .query
+                .iter()
+                .any(|(k, v)| k == "wait" && v == "false")
+        );
     }
 
     #[test]

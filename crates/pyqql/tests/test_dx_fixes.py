@@ -165,7 +165,7 @@ class TestVerdictRoundTwo(unittest.TestCase):
             "QUERY FORMULA GAUSS_DECAY(DATETIME_KEY('judgment_date'), TARGET = :now) FROM docs"
         )[0]
         bound = stmt.bind({"now": "2024-01-01T00:00:00Z"})
-        self.assertIn("TARGET = datetime('2024-01-01T00:00:00Z')", str(bound))
+        self.assertIn("TARGET = DATETIME('2024-01-01T00:00:00Z')", str(bound))
         route = bound.compile_route()
         self.assertIn("2024-01-01T00:00:00Z", str(route["payload"]))
 

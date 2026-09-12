@@ -322,7 +322,7 @@ pub(crate) fn render_point_vectors(vectors: &PointVectors) -> String {
             format!("{{{}}}", entries.join(", "))
         }
         PointVectors::Param(name, _) => format!(":{}", name),
-        PointVectors::PositionalParam(idx, _) => format!("?{}", idx + 1),
+        PointVectors::PositionalParam(..) => "?".to_string(),
     }
 }
 

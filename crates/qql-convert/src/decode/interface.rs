@@ -108,7 +108,7 @@ pub(crate) fn query_interface(
 fn nearest(
     obj: &json::Obj,
     path: &str,
-    fallback_limit: Option<u64>,
+    _fallback_limit: Option<u64>,
 ) -> Result<QueryExpr, ConvertError> {
     let nearest_path = child(path, "nearest");
     let input = vector::query_input(json::required(obj, "nearest", path)?, &nearest_path)?;
@@ -117,9 +117,25 @@ fn nearest(
         Some(value) => {
             let mmr_path = child(path, "mmr");
             let mmr = json::object(value, &mmr_path)?;
-            let diversity = json::opt_f64(mmr, "diversity", &mmr_path)?.unwrap_or(0.5);
-            let candidates = json::opt_u64(mmr, "candidates_limit", &mmr_path)?
-                .unwrap_or(fallback_limit.unwrap_or(10));
+            json::reject_unknown(mmr, &mmr_path, &["diversity", "candidates_limit"])?;
+            let diversity = match mmr.get("diversity").filter(|v| !v.is_null()) {
+                Some(v) => json::f64_at(v, &child(&mmr_path, "diversity"))?,
+                None => {
+                    return Err(invalid(
+                        child(&mmr_path, "diversity"),
+                        "mmr requires diversity and candidates_limit",
+                    ));
+                }
+            };
+            let candidates = match mmr.get("candidates_limit").filter(|v| !v.is_null()) {
+                Some(v) => json::u64_at(v, &child(&mmr_path, "candidates_limit"))?,
+                None => {
+                    return Err(invalid(
+                        child(&mmr_path, "candidates_limit"),
+                        "mmr requires diversity and candidates_limit",
+                    ));
+                }
+            };
             Some(Box::new(MmrConfig {
                 diversity,
                 candidates,

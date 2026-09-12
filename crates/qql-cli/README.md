@@ -148,9 +148,10 @@ LIMIT 10;
 
 Zero-code-change capture for migration: Qdrant keeps its address, point the
 app at the recorder instead, change nothing else. Every request is forwarded
-to `--target` byte-identically (status, headers, body — auth included);
-bodied requests under `/collections/` are appended as wrapped
-`{"method","path","body"}` JSONL for later `qql convert` use.
+to `--target` (status, headers, body — auth included; repeated headers are
+preserved); collection and quota routes are appended as wrapped
+`{"method","path","query"?,"body"?}` JSONL for later `qql convert` use.
+Bodyless `SHOW` / `DROP` routes are recorded with no `body`.
 
 ```bash
 cargo build -p qql-cli --features record
@@ -162,12 +163,13 @@ qql convert --collection docs capture.jsonl   # replay/migrate later
 ```
 
 Bare `qql record` uses those defaults. Notes: query strings are forwarded
-but not recorded (the wrapped shape has no query field; a trailing `/` is
-stripped from the recorded path only); non-JSON bodies are forwarded, not
+upstream and recorded as a `"query"` object (`wait`, `timeout`,
+`consistency`) so `qql convert` recovers `WAIT` and `PARAMS`; a trailing `/`
+is stripped from the recorded path only; non-JSON bodies are forwarded, not
 recorded; bodies are buffered in RAM (multi-hundred-MB single upserts sit in
 memory — fine for ColBERT-size batches); `--qql-out` converts at record time
-and failures become `# ERROR <file:line> <error>` comments (delete those
-lines before `qql execute` replay — `#` is not a QQL comment). Ctrl-C stops
+and failures become `-- ERROR <file:line> <error>` comments (valid QQL
+comments, so the capture replays without hand-editing). Ctrl-C stops
 the recorder; files are fsynced per line so nothing is lost.
 
 ## Script format

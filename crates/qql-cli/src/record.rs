@@ -23,7 +23,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
@@ -71,10 +70,15 @@ pub(crate) async fn serve(
     if !target.starts_with("http://") && !target.starts_with("https://") {
         return Err(format!("--target must start with http:// or https://, got '{target}'").into());
     }
-    if Some(&opts.out) == opts.qql_out.as_ref() {
+    if reqwest::Url::parse(&target).is_err() {
+        return Err(format!("--target is not a valid URL, got '{target}'").into());
+    }
+    if let Some(qql_out) = opts.qql_out.as_ref()
+        && same_file(&opts.out, qql_out)
+    {
         return Err("--out and --qql-out must be different files".into());
     }
-    let base_lines = count_lines(&opts.out).unwrap_or(0);
+    let base_lines = count_lines(&opts.out).await.unwrap_or(0);
     let jsonl = open_append(&opts.out).await?;
     let qql = match &opts.qql_out {
         Some(path) => Some(open_append(path).await?),
@@ -90,7 +94,6 @@ pub(crate) async fn serve(
         client,
         target,
         out_label: opts.out.display().to_string(),
-        recorded: AtomicU64::new(0),
         files: tokio::sync::Mutex::new(OutFiles {
             jsonl,
             qql,
@@ -123,10 +126,8 @@ struct Recorder {
     client: reqwest::Client,
     /// Upstream base URL without trailing `/`.
     target: String,
-    /// `--out` path as given, used in `# ERROR <file:line>` comments.
+    /// `--out` path as given, used in `-- ERROR <file:line>` comments.
     out_label: String,
-    /// Requests recorded this session (for the shutdown summary).
-    recorded: AtomicU64,
     /// Capture files; the mutex serializes appends so JSONL/QQL order matches.
     files: tokio::sync::Mutex<OutFiles>,
 }
@@ -158,14 +159,14 @@ const HOP_BY_HOP: [&str; 11] = [
     "content-length",
 ];
 
-/// Copy headers minus hop-by-hop ones.
+/// Copy headers minus hop-by-hop ones, preserving multi-values.
 fn forwarded(headers: &HeaderMap) -> HeaderMap {
     let mut out = HeaderMap::new();
     for (name, value) in headers {
         if HOP_BY_HOP.contains(&name.as_str()) {
             continue;
         }
-        out.insert(name.clone(), value.clone());
+        out.append(name.clone(), value.clone());
     }
     out
 }
@@ -262,7 +263,11 @@ async fn proxy(State(rec): State<Arc<Recorder>>, req: Request) -> Response {
     }
     let mut out = Response::new(Body::from(resp_body));
     *out.status_mut() = status;
-    out.headers_mut().extend(resp_headers);
+    for (name, value) in resp_headers {
+        if let Some(name) = name {
+            out.headers_mut().append(name, value);
+        }
+    }
     out
 }
 
@@ -286,13 +291,12 @@ async fn record_request(
     }
     let line = line.to_string();
     let mut files = rec.files.lock().await;
-    files.lines += 1;
-    let lineno = files.lines;
     if let Err(e) = write_line(&mut files.jsonl, line.as_str()).await {
         eprintln!("qql record: cannot write {}: {e}", rec.out_label);
         return;
     }
-    rec.recorded.fetch_add(1, Ordering::Relaxed);
+    files.lines += 1;
+    let lineno = files.lines;
     let Some(qql) = files.qql.as_mut() else {
         return;
     };
@@ -307,7 +311,7 @@ async fn record_request(
         }
         Err(e) => {
             if let Err(e) =
-                write_line(qql, &format!("# ERROR {}:{lineno} {e}", rec.out_label)).await
+                write_line(qql, &format!("-- ERROR {}:{lineno} {e}", rec.out_label)).await
             {
                 eprintln!("qql record: cannot write QQL capture: {e}");
             }
@@ -347,11 +351,50 @@ async fn write_line(
     Ok(())
 }
 
-/// Count existing lines so `# ERROR <file:line>` numbers stay cumulative
-/// across appends. Missing/unreadable files start at zero.
-fn count_lines(path: &std::path::Path) -> Result<u64, std::io::Error> {
-    let data = std::fs::read(path)?;
-    Ok(data.iter().filter(|b| **b == b'\n').count() as u64)
+/// Count existing lines so `-- ERROR <file:line>` numbers stay cumulative
+/// across appends. Missing/unreadable files start at zero. Streams in 8 KiB
+/// chunks so large captures never sit fully in RAM, and stays async so the
+/// runtime is not blocked at startup.
+async fn count_lines(path: &std::path::Path) -> Result<u64, std::io::Error> {
+    use tokio::io::AsyncReadExt;
+    let mut file = match tokio::fs::File::open(path).await {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut buf = [0u8; 8192];
+    let mut lines = 0u64;
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        lines += buf[..n].iter().filter(|b| **b == b'\n').count() as u64;
+    }
+    Ok(lines)
+}
+
+/// Two paths name the same file when their canonical forms match, or when
+/// neither exists yet and their absolute forms match (`./x` vs `x`,
+/// symlinked parents). Falls back to `false` when neither comparison applies.
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    if a == b {
+        return true;
+    }
+    if let (Ok(ca), Ok(cb)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        return ca == cb;
+    }
+    absolutize(a) == absolutize(b)
+}
+
+/// Best-effort absolute path without touching the filesystem.
+fn absolutize(path: &std::path::Path) -> std::path::PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let mut cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    cwd.push(path);
+    cwd
 }
 
 /// Open (creating parents as needed) for appending.
@@ -380,7 +423,29 @@ fn error_response(status: StatusCode, message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{record_path, should_record};
+    use super::{forwarded, record_path, same_file, should_record};
+
+    #[test]
+    fn forwarded_preserves_repeated_headers() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.append("x-multi", "a".parse().unwrap());
+        headers.append("x-multi", "b".parse().unwrap());
+        let out = forwarded(&headers);
+        let values: Vec<_> = out.get_all("x-multi").iter().collect();
+        assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn same_file_matches_dot_qualified_paths() {
+        assert!(same_file(
+            std::path::Path::new("capture.jsonl"),
+            std::path::Path::new("./capture.jsonl")
+        ));
+        assert!(!same_file(
+            std::path::Path::new("capture.jsonl"),
+            std::path::Path::new("other.jsonl")
+        ));
+    }
 
     #[test]
     fn record_path_strips_query_context_and_trailing_slash() {

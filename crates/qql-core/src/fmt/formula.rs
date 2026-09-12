@@ -1,6 +1,6 @@
 //! Formatting for formula expressions.
 
-use crate::ast::{FormulaExpr, escape_string};
+use crate::ast::{FormulaExpr, escape_string, is_simple_ident};
 use crate::fmt::expr::{render_f64, render_name, render_value};
 use crate::fmt::filter::render_filter;
 use alloc::format;
@@ -28,8 +28,13 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
         FormulaExpr::Variable { name } => {
             if name.starts_with('?') {
                 "?".to_string()
-            } else {
+            } else if name.starts_with(':')
+                || is_simple_ident(name)
+                || (name.starts_with('$') && name.len() > 1 && is_simple_ident(&name[1..]))
+            {
                 name.clone()
+            } else {
+                format!("'{}'", escape_string(name))
             }
         }
         FormulaExpr::Sum { left, right } => format!(
@@ -128,8 +133,8 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
                 )
             }
         }
-        FormulaExpr::Datetime { value } => format!("datetime('{}')", escape_string(value)),
-        FormulaExpr::DatetimeKey { key } => format!("datetime_key('{}')", escape_string(key)),
+        FormulaExpr::Datetime { value } => format!("DATETIME('{}')", escape_string(value)),
+        FormulaExpr::DatetimeKey { key } => format!("DATETIME_KEY('{}')", escape_string(key)),
     };
     if precedence < min_precedence {
         format!("({})", rendered)

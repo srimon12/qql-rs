@@ -149,7 +149,7 @@ enum Command {
         #[arg(long, default_value = "capture.jsonl")]
         out: PathBuf,
         /// Optional QQL capture file (converted at record time; failures
-        /// become `# ERROR <file:line> <error>` comments)
+        /// become `-- ERROR <file:line> <error>` comments)
         #[arg(long)]
         qql_out: Option<PathBuf>,
     },
