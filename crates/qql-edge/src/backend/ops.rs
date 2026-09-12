@@ -230,6 +230,12 @@ impl QdrantOps for EdgeQdrant {
         if req.quantization_config.is_some() {
             return Err(EdgeUnsupported::AlterCollectionQuantization.error());
         }
+        if req.strict_mode_config.is_some() {
+            return Err(EdgeUnsupported::StrictMode.error());
+        }
+        if req.metadata.is_some() {
+            return Err(EdgeUnsupported::Metadata.error());
+        }
         let vector_hnsw = vector_hnsw_diffs(req)?;
         let shard = self.open_shard(collection_name).await?;
         if let Some(hnsw) = req.hnsw_config.as_ref() {

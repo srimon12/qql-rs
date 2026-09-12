@@ -64,3 +64,6 @@ vs-qdrant/node/**/node_modules/
 vs-qdrant/rust/target/
 vs-qdrant/data/legal_colbert_lens.json
 vs-qdrant/data/manifest.json
+audit/
+vs-qdrant-edge/results/
+vs-qdrant-edge/io_scale.py

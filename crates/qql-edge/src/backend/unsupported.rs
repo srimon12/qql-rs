@@ -47,6 +47,12 @@ pub enum EdgeUnsupported {
     PointReferenceQuery,
     /// Catch-all unknown REST route projection.
     Route { path_hint: &'static str },
+    /// `WITH WAL` (no per-collection WAL API in qdrant-edge).
+    Wal,
+    /// `WITH STRICT_MODE` (no strict mode policy in qdrant-edge).
+    StrictMode,
+    /// `WITH METADATA` (no collection metadata in qdrant-edge).
+    Metadata,
 }
 
 impl EdgeUnsupported {
@@ -68,6 +74,9 @@ impl EdgeUnsupported {
             Self::PointReferenceQuery => "QQL-EDGE-UNSUPPORTED-POINT-REF",
             Self::FormulaNary => "QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION",
             Self::Route { .. } => "QQL-EDGE-UNSUPPORTED-ROUTE",
+            Self::Wal => "QQL-EDGE-UNSUPPORTED-WAL",
+            Self::StrictMode => "QQL-EDGE-UNSUPPORTED-STRICT-MODE",
+            Self::Metadata => "QQL-EDGE-UNSUPPORTED-METADATA",
         }
     }
 
@@ -98,6 +107,9 @@ impl EdgeUnsupported {
             Self::PointReferenceQuery => "point-id query inputs without embedded vectors",
             Self::FormulaNary => "MAX / MIN / ACOSH formula functions",
             Self::Route { path_hint } => path_hint,
+            Self::Wal => "collection WITH WAL",
+            Self::StrictMode => "collection WITH STRICT_MODE",
+            Self::Metadata => "collection WITH METADATA",
         }
     }
 
@@ -150,6 +162,15 @@ impl EdgeUnsupported {
             }
             Self::FormulaNary => "qdrant-edge 0.8 Expression has no ACOSH / MAX / MIN variants",
             Self::Route { .. } => "this route has no qql-edge implementation",
+            Self::Wal => {
+                "qdrant-edge manages WAL segments via LocalExecutorOptions and has no per-collection WAL API"
+            }
+            Self::StrictMode => {
+                "qdrant-edge is an embedded local engine with no server strict-mode policy enforcement"
+            }
+            Self::Metadata => {
+                "qdrant-edge collection configs do not store arbitrary collection metadata"
+            }
         }
     }
 
@@ -159,6 +180,11 @@ impl EdgeUnsupported {
             Self::RecommendAverageVector => Some(
                 "Use STRATEGY best_score or sum_scores offline, or remote Qdrant for average_vector",
             ),
+            Self::Wal => Some("Use remote Qdrant (REST or gRPC) for per-collection WAL settings"),
+            Self::StrictMode => {
+                Some("Use remote Qdrant (REST or gRPC) for strict mode enforcement")
+            }
+            Self::Metadata => Some("Use remote Qdrant (REST or gRPC) for collection metadata"),
             _ => Some("Use remote Qdrant (REST or gRPC) for this feature"),
         }
     }

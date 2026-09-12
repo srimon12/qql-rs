@@ -19,6 +19,15 @@ pub(crate) fn build_edge_config(
     req: &CreateCollectionRequest,
     on_disk_payload: bool,
 ) -> Result<qdrant_edge::EdgeConfig, QqlError> {
+    if req.wal_config.is_some() {
+        return Err(EdgeUnsupported::Wal.error());
+    }
+    if req.strict_mode_config.is_some() {
+        return Err(EdgeUnsupported::StrictMode.error());
+    }
+    if req.metadata.is_some() {
+        return Err(EdgeUnsupported::Metadata.error());
+    }
     // A create-time `WITH PARAMS (on_disk_payload = …)` overrides the
     // executor-level default for this collection; every other param key is
     // rejected before we get here (see `unsupported::reject_collection_params`).

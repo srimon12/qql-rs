@@ -78,6 +78,95 @@ pub(crate) fn optimizers_config_from_plan(
     }
 }
 
+pub(crate) fn wal_config_from_plan(cfg: &qql_plan::types::WalConfig) -> qdrant::WalConfigDiff {
+    qdrant::WalConfigDiff {
+        wal_capacity_mb: cfg.capacity_mb,
+        wal_segments_ahead: cfg.segments_ahead,
+        wal_retain_closed: cfg.retain_closed,
+    }
+}
+
+pub(crate) fn strict_mode_config_from_plan(
+    cfg: &qql_plan::types::StrictModeConfig,
+) -> Result<qdrant::StrictModeConfig, QqlError> {
+    let multivector_config =
+        cfg.multivector_config
+            .as_ref()
+            .map(|mvc| qdrant::StrictModeMultivectorConfig {
+                multivector_config: mvc
+                    .vectors
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            qdrant::StrictModeMultivector {
+                                max_vectors: v.max_vectors,
+                            },
+                        )
+                    })
+                    .collect(),
+            });
+    let sparse_config = cfg
+        .sparse_config
+        .as_ref()
+        .map(|sc| qdrant::StrictModeSparseConfig {
+            sparse_config: sc
+                .vectors
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        qdrant::StrictModeSparse {
+                            max_length: v.max_length,
+                        },
+                    )
+                })
+                .collect(),
+        });
+
+    Ok(qdrant::StrictModeConfig {
+        enabled: cfg.enabled,
+        max_query_limit: cfg
+            .max_query_limit
+            .map(|n| u32_param(n, "max_query_limit"))
+            .transpose()?,
+        max_timeout: cfg
+            .max_timeout
+            .map(|n| u32_param(n, "max_timeout"))
+            .transpose()?,
+        unindexed_filtering_retrieve: cfg.unindexed_filtering_retrieve,
+        unindexed_filtering_update: cfg.unindexed_filtering_update,
+        search_max_hnsw_ef: cfg
+            .search_max_hnsw_ef
+            .map(|n| u32_param(n, "search_max_hnsw_ef"))
+            .transpose()?,
+        search_allow_exact: cfg.search_allow_exact,
+        search_max_oversampling: cfg.search_max_oversampling.map(|f| f as f32),
+        upsert_max_batchsize: cfg.upsert_max_batchsize,
+        search_max_batchsize: cfg.search_max_batchsize,
+        max_collection_vector_size_bytes: cfg.max_collection_vector_size_bytes,
+        read_rate_limit: cfg
+            .read_rate_limit
+            .map(|n| u32_param(n, "read_rate_limit"))
+            .transpose()?,
+        write_rate_limit: cfg
+            .write_rate_limit
+            .map(|n| u32_param(n, "write_rate_limit"))
+            .transpose()?,
+        max_collection_payload_size_bytes: cfg.max_collection_payload_size_bytes,
+        filter_max_conditions: cfg.filter_max_conditions,
+        condition_max_size: cfg.condition_max_size,
+        multivector_config,
+        sparse_config,
+        max_points_count: cfg.max_points_count,
+        max_payload_index_count: cfg.max_payload_index_count,
+        max_resident_memory_percent: cfg
+            .max_resident_memory_percent
+            .map(|n| u32_param(n, "max_resident_memory_percent"))
+            .transpose()?,
+    })
+}
+
 pub(crate) fn quantization_config_from_plan(
     cfg: &qql_plan::QuantizationConfig,
 ) -> Option<qdrant::QuantizationConfig> {

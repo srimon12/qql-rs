@@ -12,7 +12,13 @@ fn skill_examples_parse() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../skills/qql-skill/examples"
     );
-    let mut files: Vec<_> = std::fs::read_dir(dir)
+    let dir_path = std::path::Path::new(dir);
+    if !dir_path.exists() {
+        // When running tests from a packaged release or submodule where
+        // workspace skills/ is not vendored, skip gracefully.
+        return;
+    }
+    let mut files: Vec<_> = std::fs::read_dir(dir_path)
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().map(|e| e == "qql").unwrap_or(false))

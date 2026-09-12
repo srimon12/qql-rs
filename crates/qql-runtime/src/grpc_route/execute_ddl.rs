@@ -103,6 +103,29 @@ pub(crate) async fn execute_create_collection(
             qql_plan::ShardingMethod::Custom => qdrant::ShardingMethod::Custom as i32,
             qql_plan::ShardingMethod::Auto => qdrant::ShardingMethod::Auto as i32,
         }),
+        wal_config: request
+            .wal_config
+            .as_ref()
+            .map(|w| super::ddl::wal_config_from_plan(w)),
+        strict_mode_config: request
+            .strict_mode_config
+            .as_ref()
+            .map(|s| super::ddl::strict_mode_config_from_plan(s))
+            .transpose()?,
+        metadata: request
+            .metadata
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            crate::grpc_route::values::to_qdrant_value(v.clone()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         ..Default::default()
     };
     let resp = client
@@ -176,6 +199,25 @@ pub(crate) async fn execute_update_collection(
             .sparse_vectors
             .as_ref()
             .map(super::ddl::sparse_vectors_config_diff),
+        strict_mode_config: request
+            .strict_mode_config
+            .as_ref()
+            .map(|s| super::ddl::strict_mode_config_from_plan(s))
+            .transpose()?,
+        metadata: request
+            .metadata
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            crate::grpc_route::values::to_qdrant_value(v.clone()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         ..Default::default()
     };
     let resp = client

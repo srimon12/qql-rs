@@ -2,7 +2,7 @@
 
 use super::ddl::{
     hnsw_config_from_plan, quantization_config_from_plan, sparse_vectors_config_diff,
-    vector_params, vectors_config_diff,
+    strict_mode_config_from_plan, vector_params, vectors_config_diff, wal_config_from_plan,
 };
 use super::filter::to_match;
 use super::query::{
@@ -458,6 +458,39 @@ fn create_collection_vectors_and_hnsw() {
     let hnsw = hnsw_config_from_plan(hnsw_json);
     assert_eq!(hnsw.m, Some(32));
     assert_eq!(hnsw.ef_construct, Some(100));
+}
+
+/// CreateCollection → gRPC WAL + strict mode + metadata validation
+#[test]
+fn create_collection_wal_strict_mode_metadata() {
+    let stmt = Parser::parse(
+        "CREATE COLLECTION docs (dense VECTOR(384, COSINE)) \
+         WITH WAL (wal_capacity_mb = 64, wal_segments_ahead = 4) \
+         WITH STRICT_MODE (enabled = true, max_query_limit = 50) \
+         WITH METADATA (env = 'prod');",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let req = match &op {
+        qql_plan::PlannedOperation::CreateCollection { request, .. } => request,
+        other => panic!("expected CreateCollection, got {:?}", other),
+    };
+
+    let wal_json = req.wal_config.as_ref().expect("wal_config should be set");
+    let wal = wal_config_from_plan(wal_json);
+    assert_eq!(wal.wal_capacity_mb, Some(64));
+    assert_eq!(wal.wal_segments_ahead, Some(4));
+
+    let strict_json = req
+        .strict_mode_config
+        .as_ref()
+        .expect("strict_mode_config should be set");
+    let strict = strict_mode_config_from_plan(strict_json).unwrap();
+    assert_eq!(strict.enabled, Some(true));
+    assert_eq!(strict.max_query_limit, Some(50));
+
+    let metadata = req.metadata.as_ref().expect("metadata should be set");
+    assert_eq!(metadata.get("env").and_then(|v| v.as_str()), Some("prod"));
 }
 
 /// Upsert → gRPC point count + shard key
