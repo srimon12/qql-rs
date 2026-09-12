@@ -1,0 +1,41 @@
+-- 21. MMR diversification. Works with dense and sparse targets.
+QUERY MMR 'emergency triage' DIVERSITY 0.5 CANDIDATES 100
+  FROM docs
+  USING dense
+  LIMIT 10;
+
+-- 23. Quantization-aware search.
+QUERY TEXT 'quantum computing' FROM papers
+  USING dense
+  PARAMS (quantization = {ignore: false, rescore: true, oversampling: 2.0})
+  LIMIT 20;
+
+-- 24. ACORN search params on remote Qdrant.
+QUERY TEXT 'filtered product search' FROM products
+  USING dense
+  WHERE category = 'electronics' AND in_stock = true
+  PARAMS (hnsw_ef = 128, acorn = true, max_selectivity = 0.4)
+  LIMIT 20;
+
+-- 25. Request timeout and read consistency.
+QUERY TEXT 'incident response' FROM runbooks
+  USING dense
+  PARAMS (timeout = 30, consistency = majority, hnsw_ef = 64)
+  LIMIT 10;
+
+QUERY TEXT 'incident response' FROM runbooks
+  USING dense
+  PARAMS (consistency = 2)
+  LIMIT 10;
+
+-- 34. Single-RPC batch blocks.
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; };
+
+BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority);
+
+BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false;
+
+-- 16. Multi-query semicolon batch script.
+QUERY TEXT 'emergency triage' FROM docs USING dense LIMIT 5;
+QUERY TEXT 'cardiac arrest protocol' FROM docs USING dense LIMIT 5;
+QUERY TEXT 'neurological assessment' FROM docs USING dense LIMIT 5;

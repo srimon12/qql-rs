@@ -1,0 +1,19 @@
+-- 4. Grouped retrieval with cross-collection lookup.
+QUERY TEXT 'machine learning optimization' FROM research_papers
+  USING dense
+  WHERE year >= 2023
+  GROUP BY 'author_id' SIZE 5 LOOKUP FROM author_metadata
+  LIMIT 20;
+
+-- Grouped hits with payload and vector selectors on the join.
+QUERY TEXT 'news' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 20;
+
+-- Grouped page two uses OFFSET as group_offset.
+QUERY TEXT 'news' FROM docs
+  GROUP BY topic SIZE 5
+  LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense)
+  LIMIT 20 OFFSET 10;
+
+-- 37. Prefetch lookup routing to one shard.
+WITH a AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 50)
+QUERY FUSION RRF FROM docs PREFETCH (a LOOKUP FROM docs2 VECTOR dense SHARD 'acme') LIMIT 10;

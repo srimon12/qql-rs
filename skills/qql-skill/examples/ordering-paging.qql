@@ -1,0 +1,17 @@
+-- 5. Paginated browse with ORDER BY.
+QUERY ORDER BY created_at DESC FROM articles
+  WHERE status = 'published' AND category = 'engineering'
+  LIMIT 20;
+
+QUERY ORDER BY created_at DESC FROM articles
+  WHERE status = 'published' AND category = 'engineering'
+  LIMIT 20 OFFSET 20;
+
+-- 36. Scroll ordering and order paging origin.
+SCROLL FROM docs ORDER BY created_at DESC LIMIT 10;
+
+SCROLL FROM docs ORDER BY score DESC START FROM 100 LIMIT 10;
+
+SCROLL FROM docs WHERE status = 'active' AFTER 7 ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' SHARD 'acme' WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense) LIMIT 10;
+
+QUERY ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 20;

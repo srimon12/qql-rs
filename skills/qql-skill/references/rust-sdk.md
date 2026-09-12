@@ -1,6 +1,6 @@
 # Rust SDK (`qql-core`, `qql-plan`, `qql`) Reference & Examples
 
-Three crates, three responsibilities. Use only what you need.
+Three crates, three responsibilities. Use only what you need. Self-contained. Shared language rules live in `qql-query.md`, `qql-filters.md`, `qql-params.md`, `qql-embeddings.md`. This guide repeats the minimum needed to run alone.
 
 ## Dependencies
 

@@ -1,6 +1,6 @@
 # WebAssembly SDK (`qql-wasm`) Reference & Examples
 
-WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
+WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun). Self-contained. Shared language rules live in `qql-query.md`, `qql-filters.md`, `qql-params.md`, `qql-embeddings.md`. This guide repeats the minimum needed to run alone.
 
 Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).

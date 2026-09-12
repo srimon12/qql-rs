@@ -5,428 +5,202 @@ description: "Use QQL (Qdrant Query Language) to manage collections, upsert docu
 
 # QQL Skill
 
-Turn retrieval intent into **valid, current QQL** and correct SDK usage.
+Turn retrieval intent into valid, current QQL and correct SDK usage.
 
-## Proposition (read this first)
+QQL is the typed language plus plan IR for Qdrant.
 
-QQL is the **typed language + plan IR** for Qdrant:
+1. One grammar for search, hybrid, multivector, mutations, DDL, multitenancy.
+2. One plan (`PlannedOperation`). gRPC and REST are equal projections, not REST-first.
+3. Host isolation via `inject_filter` (AST). Routing via `SHARD '...'` or `stmt.shard_key`.
+4. Never invent syntax listed as open in `references/qql-gaps.md`.
 
-1. **One grammar** for search, hybrid, multivector, mutations, DDL, multitenancy.
-2. **One plan** (`PlannedOperation`) — gRPC and REST are equal projections, not REST-first.
-3. **Host isolation** via `inject_filter` (AST); **routing** via `SHARD '…'` or `stmt.shard_key`.
-4. **Never invent** syntax listed as open in [qql-gaps.md](references/qql-gaps.md).
+Human docs (product-facing): `docs/`. This skill is for agents writing QQL and SDK code.
 
-Human docs (product-facing): [`docs/`](../../docs/). This skill is for agents writing QQL/SDK code.
-
-## Reference Wiki
+## Reference wiki
 
 | Doc | When to open it |
 |-----|-----------------|
-| [qql-examples.md](references/qql-examples.md) | Golden QQL patterns (CTE, hybrid, rerank, formula, geo) |
-| [qql-multitenancy.md](references/qql-multitenancy.md) | `SHARD KEY` DDL vs `SHARD` routing vs `inject_filter` |
-| [inject-filter.md](references/inject-filter.md) | Fail-closed tenant / policy injection |
-| [qql-gaps.md](references/qql-gaps.md) | Open vs closed — **do not invent open syntax** |
-| [convert-capture.md](references/convert-capture.md) | `qql convert` / `qql record`: REST JSON → QQL, zero-code capture |
-| [qql-install.md](references/qql-install.md) | Install pyqql / nqql / CLI / edge |
-| [python-sdk.md](references/python-sdk.md) | `pyqql` |
-| [node-sdk.md](references/node-sdk.md) | `@veristamp/nqql` |
-| [wasm-sdk.md](references/wasm-sdk.md) | `qql-wasm` |
-| [rust-sdk.md](references/rust-sdk.md) | `qql-core` / `qql-plan` / `qql` |
+| [qql-query.md](references/qql-query.md) | All 13 `QUERY` forms, prefetch, fusion, rerank, formula, hybrid |
+| [qql-filters.md](references/qql-filters.md) | All 20 `FilterExpr` forms, logic, geo, text match |
+| [qql-mutations.md](references/qql-mutations.md) | `UPSERT`, `DELETE`, payload and vector mutations, conditional writes |
+| [qql-read.md](references/qql-read.md) | `SCROLL`, `COUNT`, `FACET`, `GROUP BY`, `BATCH`, ordering and paging |
+| [qql-ddl.md](references/qql-ddl.md) | Collections, indexes, shard keys, quotas, memory and quantization |
+| [qql-params.md](references/qql-params.md) | Placeholders, binding, prepared statements, inference options |
+| [qql-embeddings.md](references/qql-embeddings.md) | `USING` roles, dense and sparse and multi, BM25, CLIP, ColBERT |
+| [qql-multitenancy.md](references/qql-multitenancy.md) | `SHARD KEY` DDL versus `SHARD` routing versus `inject_filter` |
+| [inject-filter.md](references/inject-filter.md) | Fail-closed tenant and policy injection |
+| [convert-migration.md](references/convert-migration.md) | `qql convert` and `qql record`, cluster and edge migration, dump |
+| [cli.md](references/cli.md) | `qql` CLI, REPL, `exec` and `execute`, `explain` and `fmt`, `doctor` |
+| [qql-install.md](references/qql-install.md) | Install CLI and SDKs, backend version matrix |
+| [qql-gaps.md](references/qql-gaps.md) | Open versus closed. Do not invent open syntax |
+| [python-sdk.md](references/python-sdk.md) | `pyqql` full guide |
+| [node-sdk.md](references/node-sdk.md) | `@veristamp/nqql` full guide |
+| [wasm-sdk.md](references/wasm-sdk.md) | `qql-wasm` full guide |
+| [rust-sdk.md](references/rust-sdk.md) | `qql-core` and `qql-plan` and `qql` full guide |
 
-Runnable demos: `scripts/demo_*.py`. Repo examples: `examples/` (Berlin, SEC 10-K, medical, edge).
+Runnable QQL: `examples/`. Runnable Python demos: `scripts/demo_*.py`.
 
-## Intent Mapping
+## Intent map
 
-Translate user intent directly into QQL syntax:
+Translate intent directly into QQL. Full forms live in the references above.
 
-- Semantic similarity -> `QUERY 'text' FROM <collection> USING dense LIMIT <n>` (schema resolves dense; or `AS DENSE` offline)
-- Keyword / sparse retrieval -> `QUERY 'text' FROM <collection> USING sparse LIMIT <n>` (schema resolves sparse; or `AS SPARSE` offline)
-- Hybrid retrieval (dense + sparse) -> `QUERY TEXT 'text' FROM <collection> USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT <n>` (or front-form `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`)
-- Hybrid retrieval with DBSF fusion -> `QUERY TEXT 'text' FROM <collection> USING HYBRID DENSE dense SPARSE sparse FUSION DBSF LIMIT <n>`
-- Multivector / ColBERT nearest -> `QUERY TEXT 't' FROM <collection> USING colbert LIMIT <n>` when collection has multivector config; offline use `USING colbert AS MULTI`
-- Late-interaction rerank (ColBERT MaxSim) -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
-- Cross-encoder pair rerank -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY CROSS RERANK TEXT 't' MODEL 'bge-reranker-base' ON FIELD text FROM <collection> PREFETCH (c) LIMIT <n>`
-- Direct point retrieval by ID -> `QUERY POINTS (id1, id2, 'id3') FROM <collection>`
-- Recommendation by example -> `QUERY RECOMMEND POSITIVE (id1, id2) NEGATIVE (id3) STRATEGY average_vector FROM <collection> USING dense LIMIT <n>`
-- Context search -> `QUERY CONTEXT (POSITIVE POINT id1 NEGATIVE POINT id2) FROM <collection> USING dense LIMIT <n>`
-- Discovery search -> `QUERY DISCOVER TARGET POINT id1 CONTEXT (POSITIVE POINT id2 NEGATIVE POINT id3) FROM <collection> USING dense LIMIT <n>`
-- Relevance feedback search -> `QUERY RELEVANCE FEEDBACK TARGET 'query_text' FEEDBACK ((1, 0.9), (2, 0.1)) STRATEGY NAIVE (a=1.0, b=0.75, c=0.25) FROM <collection> USING dense LIMIT <n>`
-- Random sampling -> `QUERY SAMPLE RANDOM FROM <collection> LIMIT <n>`
-- Browse by payload field -> `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`
-- Multi-stage retrieval -> `WITH c1 AS (QUERY 't' USING dense LIMIT 100), c2 AS (QUERY 't' USING sparse LIMIT 100) QUERY FUSION RRF FROM <collection> PREFETCH (c1, c2) LIMIT <n>`
-- CLIP text→image -> `QUERY TEXT '…' MODEL 'Qdrant/clip-ViT-B-32-text' FROM <coll> USING image LIMIT <n>`
-- CLIP image query -> `QUERY IMAGE '/path.jpg' MODEL 'Qdrant/clip-ViT-B-32-vision' FROM <coll> USING image LIMIT <n>`
-- CLIP image upsert -> `UPSERT … USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image`
-- MMR diversification -> `QUERY MMR 'query_text' DIVERSITY 0.5 CANDIDATES 100 FROM <collection> USING dense LIMIT <n>`
-- Vector array literal search -> `QUERY [0.1, 0.2, ...] FROM <collection> USING dense LIMIT <n>` (implicit vector literal, `VECTOR` keyword optional)
-- Formula / Score shaping -> `QUERY FORMULA score + 0.3 * EXP_DECAY(published_at, TARGET = "2024-01-01T00:00:00Z", SCALE = 630720000) FROM <collection> USING dense LIMIT <n>`
-- In-database faceting (aggregations) -> `FACET <field> FROM <collection> [WHERE <filter>] [LIMIT <n>] [EXACT true]`
-- Single-RPC batch -> `BATCH { <stmt>; ... } [WAIT true|false] [PARAMS (timeout = <n>, consistency = majority)]` (members share one collection and one family, all queries or all mutations)
-- At-least-N filter -> `WHERE MIN SHOULD <n> (<filter>, ...)` (at least n operands hold, n >= 1)
-- Token and except match -> `WHERE <field> MATCH TOKENS '<text>'`, `WHERE <field> MATCH EXCEPT (<v>, ...)`
-- Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection> [WITH PAYLOAD ...] [WITH VECTOR ...]`
-- Prefetch lookup routing -> `PREFETCH (c LOOKUP FROM <coll> [VECTOR <name>] [SHARD <key>])`
-- Browse points -> `SCROLL FROM <collection> [AFTER <id>] [ORDER BY <key> [ASC|DESC] [START FROM <value>]] [WITH PAYLOAD ...] LIMIT <n>`
-- Point payload default -> `QUERY` includes point payloads by default (`WITH PAYLOAD true`). Use `WITH PAYLOAD false` to explicitly omit payloads.
-- Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
-- Conditional upsert -> `UPSERT INTO <collection> VALUES {...} [UPDATE FILTER <filter>] [UPDATE MODE insert_only|update_only|upsert]`
-- Nested payload write -> `UPDATE <collection> SET PAYLOAD = {...} [KEY '<path>'] [OVERWRITE] WHERE <filter>` (`OVERWRITE` alone runs only inside `BATCH`)
-- Delete points -> `DELETE FROM <collection> WHERE <filter>`
-- Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
-- Delete payload keys -> `DELETE PAYLOAD <key1, key2> FROM <collection> WHERE <filter>`
-- Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
-- Count points -> `COUNT FROM <collection> WHERE <filter>` (or `COUNT FROM <collection> WITH (exact = true)` for exact count)
-- Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M, placement = [1, 2], initial_state = 'Active')]`
-- Collection blocks -> `WITH WAL (...)` (create only), `WITH STRICT_MODE (...)`, `WITH METADATA (...)`
-- Text index stopwords -> `WITH (stopwords = 'english')` or `WITH (stopwords = {languages: [...], custom: [...]})`
-- Inference input -> `QUERY TEXT '…' [MODEL '…'] [OPTIONS {...}]`, `QUERY IMAGE '…' [MODEL '…'] [OPTIONS {...}]`, `QUERY OBJECT {...} [MODEL '…'] [OPTIONS {...}]`; per-point `vector: {text|image|object: ..., model: '…', options: {...}}`
-- Large integers -> bare digits above `i64::MAX` parse as unsigned (up to `u64::MAX`); formula datetimes render canonical uppercase `DATETIME(...)` / `DATETIME_KEY(...)` (lowercase still parses)
-- Drop shard key -> `DROP SHARD KEY '<key>' ON COLLECTION <name>`
-- Show shard keys -> `SHOW SHARD KEYS ON COLLECTION <name>`
-- Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
-- Keyword prefix filter -> `WHERE title MATCH PREFIX 'Comp'` (keyword index with `prefix = true`)
-- Deterministic ID-space sampling -> `WHERE SLICE (total, index)` e.g. `SLICE (4, 1)`
-- Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`
-- Cluster quotas (REST) -> `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;`
-- Memory placement + TurboQuant -> `WITH VECTOR (memory = 'cached', datatype = 'turbo4')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'`
-- Read affinity (host SDKs) -> `RestQdrant` / `GrpcQdrant` `.with_route_affinity(…)`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `client.setRouteAffinity(key)` → `X-Qdrant-Route-Affinity` (not QQL syntax)
+- Semantic search becomes `QUERY 'text' FROM c USING dense LIMIT n`.
+- Keyword search becomes `QUERY 'text' FROM c USING sparse LIMIT n`.
+- Hybrid becomes `QUERY TEXT 'text' FROM c USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT n`.
+- Multivector nearest becomes `QUERY TEXT 't' FROM c USING colbert LIMIT n`. Offline use `USING colbert AS MULTI`.
+- ColBERT rerank becomes `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM c USING colbert PREFETCH (c) LIMIT n`.
+- Cross-encoder rerank becomes `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY CROSS RERANK TEXT 't' MODEL 'bge-reranker-base' ON FIELD text FROM c PREFETCH (c) LIMIT n`.
+- Point fetch becomes `QUERY POINTS (id1, id2) FROM c`.
+- Recommend becomes `QUERY RECOMMEND POSITIVE (id1) NEGATIVE (id2) STRATEGY average_vector FROM c USING dense LIMIT n`.
+- Context becomes `QUERY CONTEXT (POSITIVE POINT id1 NEGATIVE POINT id2) FROM c USING dense LIMIT n`.
+- Discover becomes `QUERY DISCOVER TARGET POINT id1 CONTEXT (POSITIVE POINT id2 NEGATIVE POINT id3) FROM c USING dense LIMIT n`.
+- Relevance feedback becomes `QUERY RELEVANCE FEEDBACK TARGET TEXT 'text' FEEDBACK ((POINT 1, 0.9)) STRATEGY NAIVE (a=1.0, b=0.75, c=0.25) FROM c USING dense LIMIT n`.
+- Random sample becomes `QUERY SAMPLE RANDOM FROM c LIMIT n`.
+- Ordered browse becomes `QUERY ORDER BY field DESC FROM c LIMIT n`.
+- Multi-stage becomes `WITH a AS (...), b AS (...) QUERY FUSION RRF FROM c PREFETCH (a, b) LIMIT n`.
+- MMR becomes `QUERY MMR 'text' DIVERSITY 0.5 CANDIDATES 100 FROM c USING dense LIMIT n`.
+- Vector literal becomes `QUERY [0.1, 0.2] FROM c USING dense LIMIT n`. `VECTOR` keyword is optional.
+- Formula becomes `QUERY FORMULA score + 0.3 * EXP_DECAY(published_at, TARGET = "2024-01-01T00:00:00Z", SCALE = 630720000) FROM c USING dense LIMIT n`.
+- Facet becomes `FACET field FROM c WHERE filter LIMIT n EXACT true`.
+- Batch becomes `BATCH { stmt; stmt; }`. Members share one collection and one family.
+- Scroll becomes `SCROLL FROM c WHERE filter LIMIT n`.
+- Count becomes `COUNT FROM c WHERE filter`.
+- Upsert becomes `UPSERT INTO c VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`.
+- Conditional upsert becomes `UPSERT INTO c VALUES {...} UPDATE FILTER filter UPDATE MODE insert_only|update_only|upsert`.
+- Payload write becomes `UPDATE c SET PAYLOAD = {...} KEY 'a.b' OVERWRITE WHERE filter`. Lone `OVERWRITE` runs only inside `BATCH`.
+- Delete becomes `DELETE FROM c WHERE filter`.
+- Clear payload becomes `CLEAR PAYLOAD FROM c WHERE filter`.
+- Delete payload keys becomes `DELETE PAYLOAD k1, k2 FROM c WHERE filter`.
+- Delete vectors becomes `DELETE VECTOR name FROM c WHERE id = N`.
+- Grouped results append `GROUP BY field SIZE m LOOKUP FROM other WITH PAYLOAD INCLUDE (...) LIMIT n`.
+- Prefetch routing uses `PREFETCH (c LOOKUP FROM other VECTOR name SHARD 'key')`.
 
-## Canonical Grammar & Capabilities
+Payloads are included by default. `QUERY` returns payloads unless `WITH PAYLOAD false` strips them. Do not add redundant `WITH PAYLOAD true`.
 
-Language surface targets **Qdrant 1.19** / **QQL 1.5** features (quotas, memory placement,
-`MATCH PREFIX`, `SLICE`, IDF corpus, `turbo4`). Prefer forms below over legacy dual-write
-keys (`on_disk` / `always_ram`) for new scripts.
+## Clause order
 
-### Collection Management (DDL)
-```sql
-CREATE COLLECTION docs (
-  dense VECTOR(384, COSINE),
-  sparse SPARSE,
-  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
-) WITH HNSW (m = 16, ef_construct = 100);
-
--- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.5)
-CREATE COLLECTION docs_tiered (
-  dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
-    WITH HNSW (memory = 'cold')
-) WITH PARAMS (payload_memory = 'cold')
-  WITH QUANTIZATION (type = 'scalar', memory = 'cached');
-
-ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 32), VECTOR (memory = 'cached'));
-ALTER COLLECTION docs WITH PARAMS (replication_factor = 3);
-ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar', always_ram = true);
-
-CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
-CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
-CREATE INDEX ON COLLECTION docs FOR rating TYPE integer WITH (range = true);
--- Keyword prefix index for MATCH PREFIX filters
-CREATE INDEX ON COLLECTION docs FOR title TYPE keyword WITH (prefix = true, memory = 'cached');
-
-DROP INDEX ON COLLECTION docs FOR title;
-SHOW COLLECTIONS;
-SHOW COLLECTION docs;
-
--- Cluster-wide resource quotas (REST /quotas only — not gRPC, not edge)
-SHOW QUOTAS;
-SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
-
--- Shard key lifecycle for multi-tenant custom sharding
-CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
-CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');
-SHOW SHARD KEYS ON COLLECTION docs;
-DROP SHARD KEY 'acme' ON COLLECTION docs;
-
--- Collection WAL / strict mode / metadata blocks
-CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32);
-CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);
-CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team');
-
--- Single-RPC batch blocks (one collection, one family)
-BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; };
-BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; } PARAMS (timeout = 30, consistency = majority);
-BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false;
-
-DROP COLLECTION docs;
-```
-
-### Data Manipulation (DML)
-```sql
--- Upsert points with automated text embedding inference
-UPSERT INTO docs VALUES
-  {id: 1, text: 'Qdrant vector database', category: 'tech'},
-  {id: 2, text: 'Rust programming language', category: 'programming'}
-  USING DENSE MODEL 'all-minilm:l6-v2';
-
--- Explicit target payload field and named destination vector
-UPSERT INTO docs VALUES
-  {id: 1, text: 'primary text', title: 'Qdrant Overview', category: 'tech'}
-  USING DENSE MODEL 'all-minilm' ON FIELD title INTO title_vec;
-
--- Multiple target fields mapped to distinct named vectors
-UPSERT INTO docs VALUES
-  {id: 1, text: 'primary text', title: 'Qdrant Overview'}
-  USING
-    DENSE MODEL 'all-minilm' ON FIELD text INTO dense,
-    DENSE MODEL 'all-minilm' ON FIELD title INTO title_vec;
-
--- Update vector by point ID
-UPDATE docs SET VECTOR dense = [0.1, 0.2, 0.3] WHERE id = 1;
-UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2]}, {id: 2, vector: {dense: [0.3, 0.4]}};
-
--- Update payload metadata
-UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE category = 'tech';
-
--- Nested path write and full replace (OVERWRITE alone runs only inside BATCH)
-UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
-BATCH { UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1; UPDATE docs SET PAYLOAD = {b: 2} WHERE id = 2; };
-
--- Conditional upsert guards (either order, each at most once)
-UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active';
-UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;
-
--- Delete points
-DELETE FROM docs WHERE category = 'obsolete';
-
--- Clear payload from points
-CLEAR PAYLOAD FROM docs WHERE status = 'archived';
-
--- Delete specific vectors from points
-DELETE VECTOR colbert FROM docs WHERE id = 42;
-
--- Count points with filter
-COUNT FROM docs WHERE status = 'active';
-```
-
-### Universal Query Syntax
-Clauses must appear in the exact required order (enforced at parse time):
+Clauses must appear in this order. Parse fails otherwise.
 
 ```sql
-[WITH cte_name AS (QUERY ...), ...]
+[WITH c AS (QUERY ...), ...]
 QUERY <expression>
 FROM <collection>
 [USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
- | USING <vector_name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
-[PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>] [LOOKUP FROM <collection> [VECTOR <vector>] [SHARD <key>]], ...)]
-[WHERE <filter_expression>]
-[SHARD '<tenant_key>']
-[PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
-         indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>,
-         idf = 'global' | WHERE <filter>)]
-[SCORE THRESHOLD <number>]
-[GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection> [WITH PAYLOAD ...] [WITH VECTOR ...]]]
+ | USING <name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
+[PREFETCH (ref [WHERE <filter>] [SCORE THRESHOLD <n>] [LOOKUP FROM <c> [VECTOR <v>] [SHARD <key>]], ...)]
+[WHERE <filter>]
+[SHARD '<key>' | SHARD <int>]
+[PARAMS (...)]
+[SCORE THRESHOLD <n>]
+[GROUP BY <field> [SIZE <n>] [LOOKUP FROM <c> [WITH PAYLOAD ...] [WITH VECTOR ...]]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]
 [WITH VECTOR [true | false | (...)]]
 [LIMIT <n>]
-[OFFSET <n>];
+[OFFSET <n>]
 ```
 
-`SHARD` appears after `WHERE` and before `PARAMS`. Clause order violations produce parse errors.
+`SHARD` sits after `WHERE` and before `PARAMS`. `OFFSET` works with `GROUP BY` as `group_offset`.
 
-**Limits (see [qql-gaps.md](references/qql-gaps.md)):**
-
-- `OFFSET` **is** now supported with `GROUP BY` (maps to Qdrant's `group_offset`).
-- `MMR` now supports sparse vectors (`USING … AS SPARSE` with MMR is supported).
-- `max_selectivity` requires `acorn = true`; ACORN is supported on remote Qdrant and on edge (qdrant-edge 0.8+).
-- `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
-- `idf` is a search param for sparse IDF corpus scoping (remote + edge 0.8+).
-- Edge supports `GROUP BY` offline (qdrant-edge grouping driver); `LOOKUP FROM` stays remote-only.
-- `OVERWRITE` without `BATCH` fails closed (`QQL-REST-OVERWRITE-BATCH-ONLY`); a single merge write omits it.
-- `WAIT false` sends `?wait=false` explicitly on mutation routes and batch blocks. It never means omit the param.
-- `ORDER BY ... START FROM <value>` resumes ordering from that payload value (integer, float, datetime string, or placeholder).
-- Edge / gRPC have **no** quotas (`SHOW QUOTAS` / `SET QUOTA` are REST-only).
-- Dynamic shard: write `SHARD 'tenant'` in QQL, or set `stmt.shard_key = tenant` after parse (no `$bind` syntax).
-- Route affinity is **not** QQL syntax — a client transport option: Rust `with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity` (see [rust-sdk.md](references/rust-sdk.md)).
-
-**Vector roles (critical for embedding):**
+## Vector roles
 
 | Form | Behavior |
 |---|---|
-| `USING name` | Runtime looks up `name` on collection schema (dense / sparse / multivector). Names are **not** special-cased by spelling. |
-| `USING name AS DENSE` | Single dense embed (MiniLM, CLIP text, …) — one `Vec<f32>` |
-| `USING name AS SPARSE` | Sparse embed — wire-compatible BM25 (Qdrant `qdrant/bm25` token IDs; unit-weight queries, tf-saturated documents) |
-| `USING name AS MULTI` | Multivector / ColBERT bag → `[[f32,…],…]` via `embed_multi` (BGE-M3 ColBERT, not CLIP) |
-| `USING HYBRID …` | Expand text nearest → dense+sparse fusion (same AST as `QUERY HYBRID`) |
-| No `USING` | Schema must have exactly one compatible vector |
+| `USING name` | Runtime resolves `name` from collection schema. Names are never special-cased by spelling |
+| `USING name AS DENSE` | One dense vector. MiniLM, CLIP text, precomputed `VECTOR [...]` |
+| `USING name AS SPARSE` | Sparse vector. Wire-compatible BM25. Unit-weight queries, tf-saturated documents |
+| `USING name AS MULTI` | Multivector bag `[[f32]]` via `embed_multi`. BGE-M3 ColBERT, not CLIP |
+| `USING HYBRID ...` | Text expands to dense plus sparse fusion. Same AST as `QUERY HYBRID` |
+| No `USING` | Schema must hold exactly one compatible vector |
 
-Offline/embed-only paths without schema require an explicit `AS …`. Leaving kind unknown fails with `QQL-VECTOR-KIND` (never silent dense default for named targets).
+Offline or embed-only paths without schema require explicit `AS ...`. Unknown kind fails closed with `QQL-VECTOR-KIND`. There is no silent dense default.
 
-### Shard routing & multi-tenancy (two keywords)
+## Shard routing and multitenancy
 
 | Keyword | Kind | Meaning |
 |---------|------|---------|
-| `CREATE/DROP/SHOW SHARD KEY` | DDL | Define / list custom partition names |
-| `SHARD 'key'` on a statement | DML routing | Route **this** request (`shard_key` / `ShardKeySelector`) |
+| `CREATE` and `DROP` and `SHOW SHARD KEY` | DDL | Define and list custom partition names |
+| `SHARD 'key'` on a statement | DML routing | Route this request via `shard_key` and `ShardKeySelector` |
 
 ```sql
-CREATE COLLECTION sec10k HYBRID (dense VECTOR(384, COSINE), sparse SPARSE)
-WITH PARAMS (
-  shard_number = 8,
-  sharding_method = 'custom',
-  shard_keys = ['honeywell', 'ge', '3m', 'rtx']
-);
-CREATE INDEX ON COLLECTION sec10k FOR tenant_id TYPE keyword WITH (is_tenant = true);
-
--- Isolation (filter) + routing (SHARD) together
 QUERY TEXT 'supply chain risks' FROM sec10k USING dense
 WHERE tenant_id = 'honeywell'
 SHARD 'honeywell'
 LIMIT 10;
-
-UPSERT INTO sec10k VALUES {id: 1, text: '…', tenant_id: 'honeywell'} SHARD 'honeywell';
 ```
 
-- **Security:** host `inject_filter(…, "tenant_id", "=", tenant)` on untrusted QQL.  
-- **Routing:** prefer `SHARD '…'` in the query; or `stmt.shard_key = tenant` after parse.  
-- **No** `inject_shard_key` API. Full guide: [qql-multitenancy.md](references/qql-multitenancy.md).
+Security is `inject_filter(..., "tenant_id", "=", tenant)` on untrusted QQL. Routing is `SHARD '...'` in QQL or `stmt.shard_key = tenant` after parse. There is no `inject_shard_key`. Full guide is `references/qql-multitenancy.md`.
 
-### Filters (`WHERE` Clause)
-Supports standard comparison operators and predicates:
-- Comparisons: `=`, `!=`, `>`, `>=`, `<`, `<=`
-- Range: `BETWEEN <min> AND <max>`
-- Sets: `IN ('a', 'b')`, `NOT IN ('c', 'd')`
-- Null/Empty: `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`
-- Text Match: `MATCH 'term'`, `MATCH ANY ('term1', 'term2')`, `MATCH PHRASE 'exact phrase'`, `MATCH TOKENS 'text'` (any token), `MATCH EXCEPT ('a', 'b')` (none of the values)
-- At-least-N: `MIN SHOULD 2 (a = 1, b = 2)` (at least n operands hold, n >= 1)
-- Keyword prefix: `title MATCH PREFIX 'Comp'` (pair with keyword index `prefix = true`)
-- Deterministic slice: `SLICE (total, index)` e.g. `WHERE SLICE (4, 1)` — hash buckets over point IDs
-- Array / Vector: `HAS_VECTOR 'dense'`, `tags VALUES_COUNT >= 2`
-- Geo: `location GEO_BBOX { top_left: {lat: 52.5, lon: 13.4}, bottom_right: {lat: 52.4, lon: 13.5} }`
-- Geo radius: `location GEO_RADIUS { center: {lat: 48.85, lon: 2.35}, radius: 5000 }`
-- Nested: `NESTED('reviews', rating > 4)`
-- Logical: `AND`, `OR`, `NOT`
+Route affinity is not QQL syntax. It is a client transport option. Rust uses `with_route_affinity`, Python uses `Client(route_affinity=...)`, Node uses `{ routeAffinity }`, WASM uses `setRouteAffinity`.
 
-## Query planning & execution
-
-```
-source / host AST
-    │
-    ▼
-qql-core: parse + validation  →  Stmt
-    │
-    ▼
-prepare (runtime / WASM Client)
-  · schema topology → USING dense/sparse/multi
-  · embeddings (qql-embed) → Dense | Sparse | MultiDense
-    │
-    ▼
-qql-plan: plan() → PlannedOperation   ← single source of truth
-    │
-    ├── to_rest_route()     → REST JSON
-    ├── execute_grpc_route  → typed protobuf (no JSON for query vectors / IDs)
-    └── EdgeQdrant          → in-process
-```
-
-`filter` and `shard_key` are **siblings** on the request. gRPC uses `Filter` +
-`ShardKeySelector`; REST uses body `filter` + body `shard_key`. Neither puts
-routing inside the filter object.
-
-### Backend limits
-
-| Backend | Notes |
-|---------|--------|
-| REST | Full matrix including `SHOW QUOTAS` / `SET QUOTA` |
-| gRPC | Typed plan → proto; **no** public quota service (`QQL-GRPC-QUOTA`) |
-| Edge | No quotas; no custom shard-key admin; no `GROUP BY … LOOKUP FROM`; **GROUP BY**, **ACORN** + **IDF** on search params (edge 0.8+); global HNSW/optimizer and per-vector HNSW `ALTER COLLECTION`; optional multi/image/rerank hosts |
-| Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
-
-## Parameter Binding & Prepared Queries
-
-QQL provides type-safe parameter binding across all SDKs:
-- **Named Placeholders**: `:name` (e.g. `:category`, `:lim`, `:loc.lat`)
-- **Positional Placeholders**: `?` (sequential 1-to-1 mapping)
-- **Prepared Statements (Parse Once, Execute Many)**: Pre-parsed `Stmt` objects can be bound directly via `stmt.bind(params)`, compiled with `stmt.compile_route(params=...)`, or executed via `client.execute(stmt, params=...)` without re-lexing or re-parsing the query string.
-- **Nested & Scoped Parameters**:
-  - Dotted dictionary paths automatically bind nested keys (e.g. `{"loc": {"lat": 1.0, "lon": 2.0}}` binds `:loc.lat` and `:loc.lon`).
-  - Batch queries support statement-scoped parameter lists: `params=[dict0, dict1]` binds `dict0` to the first statement and `dict1` to the second.
-- **Vector Truncation for Logging**: `bind(query, params, truncate_vectors=True)` or `print(stmt)` renders compact vector previews (e.g. `[0.12, 0.34, ... (384 dims)]`) to keep logs and debug output clean.
-- **Host DX**: one `bind(query, params)` plus `Client.execute(..., params=...)`. Dict/object → named; list/array → positional. WASM takes a JS object/array, not a JSON string. Rust keeps typed `bind_named` / `bind_positional`.
-- **Grammar Rule**: `$` is an identifier character in QQL (`$category`, `$score`). **Never** use `$name` or `$1` as placeholders — only `:name` and `?`.
-- **Token Boundaries**: Colons in compact dicts (`{a:b}`, `{'a':b}`) are preserved as key-value separators. Write `{key: :val}` to bind dict values.
-- **RRF Parameters**: RRF hyper-parameters (`rrf_k`, `rrf_weights`) are configured via the query `PARAMS (...)` clause (e.g. `PARAMS (rrf_k = 60, rrf_weights = [0.8, 0.2])`), **never** `WITH (...)`.
-- **BM25 Default Model**: `USING bm25` automatically defaults `model` to `Qdrant/bm25` when unspecified.
-
-## CLI Reference
+## Planning and execution
 
 ```text
-qql [repl | connect]                         Interactive REPL (multiline, \f fmt, \d doctor, \e script)
-qql exec <query> [--json] [--quiet]          Execute a single QQL query
-qql execute <file.qql> [--stop-on-error]     Execute statements from file
-qql explain <query> [--json] [--quiet]       Show hierarchical ASCII tree execution plan
-qql convert [file.json] [--collection <name>]  Convert REST JSON to QQL
-qql record [--listen A] [--target B] [--out f] Record live traffic + QQL (feature: record)
-qql fmt [file.qql] [--check] [--write]        Format QQL source into canonical form
-qql dump <collection> <output.qql> [options]  Dump collection to QQL script
-qql doctor [--json] [--quiet]                 Check Qdrant connection health & model hosts
-qql --edge exec <query> [options]           Execute against local qdrant-edge
-qql config edge [options]                    Configure local qdrant-edge backend
-qql version                                   Show version
-
-Global: --url <URL> (overrides QDRANT_URL env, default http://localhost:6333)
+source or host AST
+  -> qql-core parses and validates into Stmt
+  -> runtime prepares: schema topology fills USING kinds, qql-embed resolves vectors
+  -> qql-plan plans into PlannedOperation
+  -> REST via to_rest_route, gRPC via typed proto conversion, edge in-process
 ```
 
-## Execution via SDKs
+`filter` and `shard_key` are siblings on the request. Neither nests routing inside the filter object.
 
-### Python (`pyqql`)
+| Backend | Notes |
+|---------|-------|
+| REST | Full matrix including `SHOW QUOTAS` and `SET QUOTA` |
+| gRPC | Typed plan to proto. No public quota service (`QQL-GRPC-QUOTA`) |
+| Edge | No quotas, no shard-key admin, no `GROUP BY ... LOOKUP FROM`. `GROUP BY` and ACORN and IDF work on edge 0.8 plus |
+
+## Parameters
+
+Named placeholders use `:name`. Positional placeholders use `?`. Dotted paths bind nested dicts. `{"loc": {"lat": 1.0}}` binds `:loc.lat`. Batch binds one param entry per statement. `bind(query, params, truncate_vectors=True)` keeps logs readable. `$name` is an identifier, never a placeholder. RRF tuning lives in `PARAMS (rrf_k = 60, rrf_weights = [...])`, never in `WITH (...)`. `USING bm25` defaults model to `Qdrant/bm25`. Full rules live in `references/qql-params.md`.
+
+## CLI
+
+```text
+qql exec <query> [--json]              Execute one QQL statement
+qql execute <file.qql>                 Execute a script file
+qql explain <query> [--json]           Print the plan tree, no I/O
+qql convert [file.json]                REST JSON to QQL
+qql record [--listen A] [--target B]   Capture live traffic plus QQL
+qql fmt [file.qql] [--check] [--write] Canonical formatter
+qql dump <coll> <out.qql>              Dump collection to QQL
+qql migrate <coll> [--to X]            Copy schema plus points, with verify and cutover
+qql doctor [--json]                    Connection health and model hosts
+qql connect | qql repl                 Interactive REPL
+qql edge bootstrap | qql --edge ...    Edge seed and local execution
+qql version                            Version
+```
+
+Global `--url` overrides `QDRANT_URL`. Default is `http://localhost:6333`. Full flags live in `references/cli.md`.
+
+## SDK quickstart
+
+Python, Node, WASM, and Rust share one binding contract. Dict and object bind named params. List and array bind positional params. WASM takes a JS object or array, never a JSON string. Rust keeps typed `bind_named` and `bind_positional`.
+
 ```python
 import pyqql
-
-embedder = pyqql.HttpEmbedder("http://localhost:11434/v1/embeddings", "all-minilm:l6-v2", 384)
-client = pyqql.Client("http://localhost:6333", embedder=embedder)
-
-# Standard execution
-report = client.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
-for hit in report.hits():  # Typed ScoredPoint objects with .id, .score, .payload, .text
-    print(hit.id, hit.score, hit.text)
-
-# Direct hits shortcut
-hits = client.execute_hits("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
-
-# Prepared statement execution (parse once, bind + execute repeatedly)
-stmt = pyqql.parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
-report = client.execute(stmt, params={"q": "chest pain", "cat": "medical", "lim": 10})
+client = pyqql.Client("http://localhost:6333")
+report = client.execute("QUERY 'search' FROM docs USING dense LIMIT 5")
+hits = report.hits()
 ```
 
-### Rust (`qql`)
-```rust
-use std::collections::HashMap;
-use qql::executor::{Executor, OnError};
-use qql_core::ast::Value;
-
-let exec = Executor::rest("http://localhost:6333", None).unwrap();
-
-// Parameterized execution with named parameters
-let mut params = HashMap::new();
-params.insert("q".into(), Value::Str("chest pain".into()));
-params.insert("lim".into(), Value::Int(10));
-let res = exec.execute_with_params(
-    "QUERY TEXT :q FROM docs LIMIT :lim",
-    &params,
-    OnError::Stop,
-).await.unwrap();
-```
-
-### Node.js (`nqql`)
 ```js
-const { Client, bind } = require('@veristamp/nqql');
+const { Client } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
-
-// Parameterized execution
-const result = await client.execute(
-  "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
-  { params: { q: "chest pain", cat: "medical", lim: 10 } }
-);
+const report = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 10");
 ```
 
-### WebAssembly (`qql-wasm`)
 ```js
-import init, { Client, bind, explain } from 'qql-wasm';
+import init, { Client } from 'qql-wasm';
 await init();
 const client = new Client("http://localhost:6333", null);
-
-// Offline binding & tree explanation
-const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "chest pain", lim: 10 });
-const plan = explain(bound);
-const result = await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
-  params: { q: "chest pain", lim: 10 },
-});
+const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 10");
 ```
+
+```rust
+use qql::executor::{Executor, OnError};
+let exec = Executor::rest("http://localhost:6333", None).unwrap();
+let res = exec.execute("QUERY 'search' FROM docs USING dense LIMIT 5", OnError::Stop).await.unwrap();
+```
+
+Each SDK reference is self-contained. Open only the one you need. Shared language rules live in `qql-query.md` and `qql-filters.md` and `qql-params.md`, repeated in SDK guides only where the guide needs them to run alone.
