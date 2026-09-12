@@ -56,14 +56,8 @@ launch/
 .agents/
 feedback.md
 
-# vs-qdrant harness (separate PR): never commit built bindings or generated results
-vs-qdrant/node/**/index.*.node
-vs-qdrant/node/**/index.node
-vs-qdrant/node/**/package-lock.json
-vs-qdrant/node/**/node_modules/
-vs-qdrant/rust/target/
-vs-qdrant/data/legal_colbert_lens.json
-vs-qdrant/data/manifest.json
+# Benchmarking harnesses and results (archived in bench/archive-head-to-head)
+/vs-qdrant/
+/vs-qdrant-edge/
 audit/
-vs-qdrant-edge/results/
-vs-qdrant-edge/io_scale.py
+

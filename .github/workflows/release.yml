@@ -507,6 +507,7 @@ jobs:
           publish_crate qql-core
           publish_crate qql-plan
           publish_crate qql-embed
+          publish_crate qql-convert
           publish_crate qql
           publish_crate qql-edge
           publish_crate qql-cli
