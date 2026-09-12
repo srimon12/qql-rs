@@ -347,8 +347,10 @@ where
             Ok(())
         }
         Stmt::UpdateVector(uv) => {
-            bind_point_id(&mut uv.point_id, &lookup, positional)?;
-            bind_vector_value(&mut uv.vector, &lookup, positional)?;
+            for point in &mut uv.points {
+                bind_point_id(&mut point.id, &lookup, positional)?;
+                bind_point_vectors(&mut point.vectors, &lookup, positional)?;
+            }
             bind_shard_key(&mut uv.shard_key, &lookup, positional)?;
             Ok(())
         }

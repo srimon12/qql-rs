@@ -16,8 +16,9 @@ LIMIT 10;
 -- Arbitrary sparse named vector
 QUERY 'keyword search' FROM docs USING lexical_v2 AS SPARSE LIMIT 10;
 
--- Vector input (pre-computed)
+-- Vector input (pre-computed), explicit and bare spellings
 QUERY VECTOR [0.1, 0.2, 0.3] FROM docs LIMIT 10;
+QUERY [0.4, 0.5, 0.6] FROM docs LIMIT 10;
 
 -- Point ID as similarity input
 QUERY POINT 42 FROM docs LIMIT 10;

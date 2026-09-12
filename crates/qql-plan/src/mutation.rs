@@ -1,5 +1,4 @@
 use crate::filter::{point_id_req_typed, top_level_filter, value_to_json};
-use crate::query::lower_vector_value;
 use crate::semantic::PlanShardKey;
 use crate::types::*;
 use qql_core::ast::{
@@ -68,17 +67,19 @@ pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
 }
 
 /// Lower `UPDATE … SET VECTOR` to the `PUT /points/vectors` request body.
+///
+/// One QQL statement maps to one wire request with `points` filled from the
+/// AST list — compact `WHERE id =` and `VALUES` both land here.
 pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorRequest {
-    let vector = if let Some(ref name) = stmt.vector_name {
-        PlanPointVectors::Named(vec![(name.clone(), lower_vector_value(&stmt.vector))])
-    } else {
-        PlanPointVectors::Unnamed(lower_vector_value(&stmt.vector))
-    };
     UpdateVectorRequest {
-        points: vec![UpdateVectorPoint {
-            id: PlanPointId::from(&stmt.point_id),
-            vector,
-        }],
+        points: stmt
+            .points
+            .iter()
+            .map(|point| UpdateVectorPoint {
+                id: PlanPointId::from(&point.id),
+                vector: PlanPointVectors::from(&point.vectors),
+            })
+            .collect(),
         shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
     }
 }

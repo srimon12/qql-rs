@@ -36,6 +36,18 @@ QUERY POINTS (1, 2) FROM docs LIMIT 10;
 -- @error QQL-VALIDATION-UPSERT-ID
 UPSERT INTO docs VALUES {text: 'hello'};
 
+-- @case update-vector-values-without-id
+-- @error QQL-VALIDATION-UPDATE-VECTOR
+UPDATE docs SET VECTOR VALUES {vector: [0.1, 0.2]};
+
+-- @case update-vector-values-without-vector
+-- @error QQL-VALIDATION-UPDATE-VECTOR
+UPDATE docs SET VECTOR VALUES {id: 1};
+
+-- @case update-vector-values-payload-key
+-- @error QQL-VALIDATION-UPDATE-VECTOR
+UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1], title: 'x'};
+
 -- @case idf-numeric
 -- @error QQL-VALIDATION-IDF
 QUERY 'x' FROM docs PARAMS (idf = 5) LIMIT 5;

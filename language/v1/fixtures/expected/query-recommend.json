@@ -346,6 +346,153 @@
         "score_threshold": 0.8,
         "shard_key": null
       }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Vector": {
+                  "Dense": [
+                    0.3,
+                    0.4
+                  ]
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Vector": {
+                  "Dense": [
+                    0.1,
+                    0.2
+                  ]
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": {
+              "kind": null,
+              "multi": false,
+              "name": "dense"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [],
+            "positive": [
+              {
+                "Vector": {
+                  "Dense": [
+                    0.5,
+                    0.6
+                  ]
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": {
+              "kind": null,
+              "multi": false,
+              "name": "dense"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Point": {
+                  "Number": 2
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Text": {
+                  "model": "e5",
+                  "text": "hello"
+                }
+              },
+              {
+                "Point": {
+                  "Number": 7
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": {
+              "kind": null,
+              "multi": false,
+              "name": "dense"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
     }
   ]
 }

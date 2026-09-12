@@ -17,7 +17,8 @@ Version sites owned by this script:
 - ``VERSION`` (root source of truth)
 - root ``Cargo.toml``: ``[workspace.package].version`` and the internal
   ``[workspace.dependencies]`` path entries (``qql-core``, ``qql-plan``,
-  ``qql-embed``, ``qql``, ``qql-edge``, ``pyqql-common``, ``nqql-common``)
+  ``qql-embed``, ``qql-convert``, ``qql``, ``qql-edge``, ``pyqql-common``,
+  ``nqql-common``)
 - crate manifests: internal path dependencies that pin a literal version
   (``qql-conformance``, ``qql-wasm``, …)
 - ``crates/{pyqql,pyqql-edge}/pyproject.toml`` ``[project].version``
@@ -58,6 +59,7 @@ PUBLIC_CRATES = (
     "qql-core",
     "qql-plan",
     "qql-embed",
+    "qql-convert",
     "qql-runtime",
     "qql-edge",
     "qql-cli",
@@ -81,6 +83,7 @@ INTERNAL_DEP_KEYS = (
     "qql-core",
     "qql-plan",
     "qql-embed",
+    "qql-convert",
     "qql",
     "qql-edge",
     "pyqql-common",

@@ -1,4 +1,4 @@
-use crate::ast::Stmt;
+use crate::ast::{PointId, PointVectors, Stmt};
 use crate::parser::Parser;
 
 #[test]
@@ -384,7 +384,36 @@ fn delete_by_filter() {
 #[test]
 fn update_vector() {
     let s = Parser::parse("UPDATE docs SET VECTOR dense = [0.3, 0.7] WHERE id = 'p1';").unwrap();
-    assert!(matches!(s, Stmt::UpdateVector(_)));
+    let Stmt::UpdateVector(u) = s else {
+        panic!("expected UpdateVector");
+    };
+    assert_eq!(u.points.len(), 1);
+    assert_eq!(u.points[0].id, PointId::String("p1".into()));
+}
+
+#[test]
+fn update_vector_named_map_and_values() {
+    let map = Parser::parse(
+        "UPDATE docs SET VECTOR = {dense: [0.1], sparse: {indices: [1], values: [0.5]}} WHERE id = 1;",
+    )
+    .unwrap();
+    let Stmt::UpdateVector(u) = map else {
+        panic!("expected UpdateVector");
+    };
+    assert_eq!(u.points.len(), 1);
+    match &u.points[0].vectors {
+        PointVectors::Named(entries) => assert_eq!(entries.len(), 2),
+        other => panic!("expected named map, got {other:?}"),
+    }
+
+    let batch = Parser::parse(
+        "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
+    )
+    .unwrap();
+    let Stmt::UpdateVector(u) = batch else {
+        panic!("expected UpdateVector");
+    };
+    assert_eq!(u.points.len(), 2);
 }
 
 #[test]

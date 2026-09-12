@@ -78,11 +78,15 @@ There are two `UPDATE` forms. The payload form sets `PAYLOAD` under any
 UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE <filter>;
 ```
 
-The vector form replaces a vector (optionally a named one) and targets exactly
-one point ID:
+The vector form replaces vectors on existing points. Compact `WHERE id =`
+targets one point (optionally one named vector, or a name map). `VALUES` is
+the batch form that maps 1:1 onto REST `PUT /points/vectors` and gRPC
+`UpdatePointVectors`:
 
 ```text
-UPDATE docs SET VECTOR [dense] = [0.2, 0.3, 0.4] WHERE id = <point_id>;
+UPDATE docs SET VECTOR dense = [0.2, 0.3, 0.4] WHERE id = <point_id>;
+UPDATE docs SET VECTOR = {dense: [0.2, 0.3], sparse: {indices: [1], values: [0.8]}} WHERE id = 42;
+UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2]}, {id: 2, vector: {dense: [0.3, 0.4]}};
 ```
 
 `DELETE PAYLOAD`, `DELETE VECTOR`, `DELETE`, and `CLEAR PAYLOAD` all require a
@@ -94,6 +98,8 @@ accident.
 UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE id = 42;
 
 UPDATE docs SET VECTOR dense = [0.2, 0.3, 0.4] WHERE id = 42;
+
+UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2]}, {id: 2, vector: {dense: [0.3, 0.4]}};
 
 DELETE PAYLOAD draft_notes FROM docs WHERE status = 'published';
 

@@ -11,7 +11,7 @@ This guide details the core rules, architecture, design philosophy, contract tes
 1. **Verify Before Declaring Done**:
    - `cargo check --workspace --all-targets`
    - `cargo clippy --workspace --all-targets -- -D warnings`
-   - `cargo test -p qql-core -p qql-plan -p qql-embed`
+   - `cargo test -p qql-core -p qql-plan -p qql-embed -p qql-convert`
    - `cargo fmt --check`
 
 2. **Memory Safety & Unsafe Code**:
@@ -41,6 +41,7 @@ qql/ (workspace root)
 │   ├── qql-core/         # Lexer, parser, typed AST, explain, filter injection
 │   ├── qql-plan/         # Fallible planner: AST → PlannedOperation; REST projection
 │   ├── qql-embed/        # Shared Embedder trait, wire-compatible BM25, resolve_embeddings (batch dense)
+│   ├── qql-convert/      # OpenAPI REST JSON → typed AST → canonical QQL (qql convert / qql record)
 │   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, HttpEmbedder
 │   ├── qql-edge/         # Local in-process executor: fastembed-rs + qdrant-edge
 │   ├── qql-cli/          # CLI binary and interactive REPL

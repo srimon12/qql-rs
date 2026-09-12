@@ -406,6 +406,8 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -414,6 +416,7 @@ dependencies = [
  "pin-project-lite",
  "serde_core",
  "sync_wrapper",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
@@ -4350,12 +4353,15 @@ dependencies = [
 name = "qql-cli"
 version = "0.4.0"
 dependencies = [
+ "axum",
  "clap",
  "mimalloc",
  "qql",
+ "qql-convert",
  "qql-core",
  "qql-edge",
  "qql-plan",
+ "reqwest",
  "rustyline",
  "serde",
  "serde_json",
@@ -4369,6 +4375,15 @@ version = "0.4.0"
 dependencies = [
  "pest",
  "pest_derive",
+ "qql-core",
+ "qql-plan",
+ "serde_json",
+]
+
+[[package]]
+name = "qql-convert"
+version = "0.4.0"
+dependencies = [
  "qql-core",
  "qql-plan",
  "serde_json",

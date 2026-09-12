@@ -92,6 +92,7 @@ jobs:
         run: >
           cargo clippy --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-convert
           --all-targets -- -D warnings
 
       - name: Clippy (private binding helper crates)
@@ -104,6 +105,16 @@ jobs:
         run: >
           cargo test --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-convert
+
+      # One cargo unit so feature unification (e.g. serde_json/preserve_order
+      # pulled in by jsonschema/fastembed) is the same as a workspace build.
+      # Native FFI and wasm-bindgen crates have their own jobs.
+      - name: Test (workspace, host crates)
+        run: >
+          cargo test --locked --workspace --all-targets
+          --exclude qql-wasm --exclude pyqql --exclude pyqql-edge
+          --exclude nqql --exclude nqql-edge
 
       - name: Test (private binding helper crates)
         run: >
@@ -178,6 +189,7 @@ jobs:
         run: >
           cargo check --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-convert
 
   docs:
     name: Docs
@@ -198,6 +210,7 @@ jobs:
         run: >
           cargo doc --locked --no-deps --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+          -p qql-convert
 
       - name: cargo doc (CLI, deny warnings)
         run: >
@@ -235,7 +248,7 @@ jobs:
       - name: Package dependents (list + archive only)
         run: |
           set -euo pipefail
-          for crate in qql-plan qql-embed qql qql-edge qql-cli; do
+          for crate in qql-plan qql-embed qql qql-edge qql-cli qql-convert; do
             cargo package --locked --no-verify --exclude-lockfile -p "$crate"
           done
 

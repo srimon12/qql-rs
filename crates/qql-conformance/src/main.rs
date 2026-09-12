@@ -564,11 +564,15 @@ mod grammar_gate {
     }
 
     fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+        collect_ext(dir, "qql", out);
+    }
+
+    fn collect_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                collect(&path, out);
-            } else if path.extension().is_some_and(|e| e == "qql") {
+                collect_ext(&path, ext, out);
+            } else if path.extension().is_some_and(|e| e == ext) {
                 out.push(path);
             }
         }
@@ -587,6 +591,32 @@ mod grammar_gate {
         assert!(
             failures.is_empty(),
             "{} valid fixture(s) are rejected by grammar.pest:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn canonical_format_snapshots_parse_under_the_grammar() {
+        // Canonical-format goldens are the text contract every formatter
+        // implementation must reproduce; a spelling the grammar rejects means
+        // grammar.pest lags the reference formatter (e.g. compact `QUERY
+        // [0.1, 0.2]` vectors or full recommend example inputs).
+        let formatted = spec_dir().join("fixtures/formatted");
+        let mut goldens = Vec::new();
+        collect_ext(&formatted, "txt", &mut goldens);
+        goldens.sort();
+        assert!(!goldens.is_empty(), "no canonical-format goldens found");
+        let mut failures = Vec::new();
+        for golden in goldens {
+            let source = std::fs::read_to_string(&golden).unwrap();
+            if QqlGrammar::parse(Rule::script, &source).is_err() {
+                failures.push(golden.display().to_string());
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} canonical format(s) are rejected by grammar.pest:\n{}",
             failures.len(),
             failures.join("\n")
         );
@@ -681,6 +711,15 @@ mod grammar_gate {
             "QUERY FORMULA MAX($score) DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
             "QUERY FORMULA MIN($score) DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
             "QUERY FORMULA MAX($score, 1.0, 2.0) DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
+            // Recommend example lists accept full query inputs (VECTOR / bare
+            // vector / TEXT / POINT / params); bare strings and integers stay
+            // point IDs, mirroring `parse_recommend_examples`.
+            "QUERY RECOMMEND POSITIVE (VECTOR [0.1], [0.2]) NEGATIVE (TEXT 'x', POINT 1) FROM docs USING dense LIMIT 5;",
+            "QUERY RECOMMEND POSITIVE ('pt-1', 2) NEGATIVE (:neg) FROM docs USING dense LIMIT 5;",
+            // Bare vector literals are accepted wherever a query input is
+            // expected, matching the canonical formatter's compact spelling.
+            "QUERY [0.1, 0.2] FROM docs LIMIT 5;",
+            "QUERY DISCOVER TARGET [0.1] CONTEXT (POSITIVE [0.2] NEGATIVE POINT 1) FROM docs USING dense LIMIT 5;",
         ];
 
         for source in both_reject {

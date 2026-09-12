@@ -153,15 +153,51 @@ pub(crate) fn render_delete_vector(statement: &DeleteVectorStmt) -> String {
 
 pub(crate) fn render_update_vector(statement: &UpdateVectorStmt) -> String {
     let mut out = format!("UPDATE {} SET VECTOR", render_name(&statement.collection));
-    if let Some(name) = &statement.vector_name {
-        let _ = write!(out, " {}", render_name(name));
+    if statement.points.len() == 1 {
+        let point = &statement.points[0];
+        match &point.vectors {
+            PointVectors::Named(entries) if entries.len() == 1 => {
+                let (name, value) = &entries[0];
+                let _ = write!(
+                    out,
+                    " {} = {} WHERE id = {}",
+                    render_name(name),
+                    render_vector_value(value),
+                    render_point_id(&point.id)
+                );
+            }
+            vectors => {
+                let _ = write!(
+                    out,
+                    " = {} WHERE id = {}",
+                    render_point_vectors(vectors),
+                    render_point_id(&point.id)
+                );
+            }
+        }
+    } else {
+        out.push_str(" VALUES");
+        let multiline = statement.points.len() > 1;
+        for (i, point) in statement.points.iter().enumerate() {
+            if multiline {
+                if i == 0 {
+                    out.push_str("\n  ");
+                } else {
+                    out.push_str(",\n  ");
+                }
+            } else if i > 0 {
+                out.push_str(", ");
+            } else {
+                out.push(' ');
+            }
+            let _ = write!(
+                out,
+                "{{id: {}, vector: {}}}",
+                render_point_id(&point.id),
+                render_point_vectors(&point.vectors)
+            );
+        }
     }
-    let _ = write!(
-        out,
-        " = {} WHERE id = {}",
-        render_vector_value(&statement.vector),
-        render_point_id(&statement.point_id)
-    );
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD {key}");
     }

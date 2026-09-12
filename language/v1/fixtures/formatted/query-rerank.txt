@@ -11,7 +11,7 @@ LIMIT 10;
 
 -- Rerank with vector input
 WITH
-  candidates AS (QUERY VECTOR [0.1, 0.2] USING dense LIMIT 100)
+  candidates AS (QUERY [0.1, 0.2] USING dense LIMIT 100)
 QUERY RERANK VECTOR [0.1, 0.2] MODEL 'reranker-v1'
 FROM docs
 USING colbert AS DENSE

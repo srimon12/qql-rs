@@ -99,7 +99,10 @@ export interface AnalysisResult {
     route: CompiledRoute | null;
     routes: CompiledRoute[];
     explain: string | null;
+    /** First error, kept for older IDE clients. Prefer `errors`. */
     error: AnalysisError | null;
+    /** Every recoverable diagnostic from panic-mode parse + plan. */
+    errors: AnalysisError[];
 }
 
 

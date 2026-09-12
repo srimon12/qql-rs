@@ -117,6 +117,8 @@ query_input = _{
     // Same dense role as TEXT; modality is image, not multivector.
     | ^"IMAGE" ~ (param | string) ~ (^"MODEL" ~ string)?
     | ^"VECTOR" ~ (param | vector_value)
+    // `VECTOR` is optional for array/object literals (`QUERY [0.1, 0.2] …`).
+    | vector_value
     | ^"POINT" ~ point_id
     | param
     | string
@@ -124,10 +126,14 @@ query_input = _{
 
 recommend = {
     ^"RECOMMEND"
-    ~ ^"POSITIVE" ~ point_id_list
-    ~ (^"NEGATIVE" ~ point_id_list)?
+    ~ ^"POSITIVE" ~ recommend_example_list
+    ~ (^"NEGATIVE" ~ recommend_example_list)?
     ~ (^"STRATEGY" ~ recommend_strategy)?
 }
+// A recommend example: bare strings/integers stay point IDs; every other
+// spelling is a full `query_input` (mirrors `parse_recommend_examples`).
+recommend_example_list = { "(" ~ recommend_example ~ ("," ~ recommend_example)* ~ ")" }
+recommend_example = _{ point_id | query_input }
 recommend_strategy = { ^"average_vector" | ^"best_score" | ^"sum_scores" }
 
 context = { ^"CONTEXT" ~ context_pairs }
@@ -427,8 +433,11 @@ delete_payload = {
 update = {
     ^"UPDATE" ~ collection ~ ^"SET"
     ~ (
-        ^"VECTOR" ~ vector_name? ~ "=" ~ (param | vector_value)
-        ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
+        ^"VECTOR" ~ (
+            ^"VALUES" ~ point_object ~ ("," ~ point_object)*
+            | vector_name? ~ "=" ~ (param | vector_value | object)
+              ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
+        )
         ~ (^"SHARD" ~ shard_key)?
         | ^"PAYLOAD" ~ "=" ~ (param | object)
         ~ ^"WHERE" ~ filter

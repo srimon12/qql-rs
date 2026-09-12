@@ -25,12 +25,19 @@ rest = ["qql/rest"]
 # Opt-in because FastEmbed and ONNX materially increase compile time and
 # the optimized CLI binary size.
 edge = ["qql-edge", "qql-edge/fastembed-local", "qql-edge/http-embedding"]
+record = ["dep:axum", "dep:reqwest", "tokio/net", "tokio/io-util"]
+# Transparent Qdrant REST recorder (`qql record`). Opt-in so default builds
+# stay lean: pulls the axum server + a direct reqwest client (both versions
+# already pinned in Cargo.lock via tonic / qql-rest).
 
 [dependencies]
+qql-convert = { workspace = true }
 qql-core = { workspace = true, features = ["serde", "json", "std"] }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true, optional = true }
+axum = { version = "0.8", optional = true, default-features = false, features = ["http1", "tokio"] }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls"] }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal", "time"] }
 serde = { workspace = true }

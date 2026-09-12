@@ -89,11 +89,15 @@ When using `qql migrate`, adhere to the following production rules:
 
 1. **Ensure Adequate Target Hardware**:
    Confirm the destination cluster has at least **2x the RAM** of the source dataset to accommodate segment buffering and concurrent HNSW building.
-2. **Leverage Fast-Bulk Protocol (`--fast-bulk`)**:
-   Keep `--fast-bulk` enabled (default) so `indexing_threshold` is raised during ingest. This prevents the optimizer from repeatedly building small HNSW graphs mid-stream.
+2. **Fast-bulk is on by default**:
+   `indexing_threshold` is raised during ingest, which prevents the optimizer
+   from repeatedly building small HNSW graphs mid-stream. Pass
+   `--no-fast-bulk` to keep indexing active during ingest (only worth it for
+   small collections where the restore round trip costs more than it saves).
 3. **Run from a Network-Adjacent Host**:
    Execute `qql migrate` from a machine located in the same cloud region / VPC as the clusters to minimize dual-hop latency and eliminate egress costs.
 4. **Use Checkpoints for Large Datasets**:
    Ensure `--checkpoint` is configured on durable storage. If a network interruption occurs, re-running with `--resume` picks up from the last committed window without re-upserting earlier points.
-5. **Execute Exact Verification (`--verify`)**:
-   Always verify final counts before cutting over client traffic.
+5. **Verification is on by default (`--no-verify` skips it)**:
+   Always verify final counts before cutting over client traffic. `--no-verify`
+   records an informational target count only.

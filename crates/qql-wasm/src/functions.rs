@@ -107,11 +107,20 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
 
 // ── Core: unified analyze ─────────────────────────────────────────
 
+fn err_json(err: &qql_core::error::QqlError) -> serde_json::Value {
+    serde_json::json!({
+        "code": err.code.as_ref(),
+        "message": err.message.as_ref(),
+        "start": err.span.map(|s| s.start),
+        "end": err.span.map(|s| s.end),
+    })
+}
+
 fn build_analyze_value(input: &str) -> serde_json::Value {
     let mut tokens = Vec::new();
     let lexer = Lexer::new(input);
     for token in lexer {
-        // The first lex error ends the token stream; `parse_all` below
+        // The first lex error ends the token stream; recovery parse below
         // reports it (never iterate with `flatten()` — it would silently
         // drop the error instead of stopping).
         let Ok(t) = token else { break };
@@ -124,55 +133,56 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
         }));
     }
 
-    let stmts_res = qql_plan::parse_and_plan(input);
-    match stmts_res {
-        Ok(stmts) => {
-            let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);
-            let routes_val: Vec<_> = stmts
-                .iter()
-                .filter_map(|s| {
-                    let compiled = routing::compile_statement(s).ok()?;
-                    Some(compiled_route_json(&compiled))
-                })
-                .collect();
-            let route_val = routes_val
-                .first()
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-
-            let explain_val = qql_core::explain::explain_nodes(&stmts);
-
-            serde_json::json!({
-                "valid": true,
-                "statements_count": stmts.len(),
-                "tokens": tokens,
-                "ast": ast_val,
-                "route": route_val,
-                "routes": routes_val,
-                "explain": explain_val,
-                "error": serde_json::Value::Null,
-            })
-        }
-        Err(err) => {
-            let err_json = serde_json::json!({
-                "code": err.code.as_ref(),
-                "message": err.message.as_ref(),
-                "start": err.span.map(|s| s.start),
-                "end": err.span.map(|s| s.end),
-            });
-
-            serde_json::json!({
-                "valid": false,
-                "statements_count": 0,
-                "tokens": tokens,
-                "ast": serde_json::Value::Null,
-                "route": serde_json::Value::Null,
-                "routes": [],
-                "explain": serde_json::Value::Null,
-                "error": err_json,
-            })
+    // `error` / `valid` stay on the fail-fast execution contract
+    // (`parse_and_plan`) so language-corpus `-- @error` codes and older
+    // clients keep seeing the first rejection. `errors` is the panic-mode
+    // recovery list for IDEs that want every span.
+    let fail_fast = qql_plan::parse_and_plan(input);
+    let recovered = Parser::parse_all_recovering(input);
+    let mut errors: Vec<serde_json::Value> = recovered.errors.iter().map(err_json).collect();
+    let stmts: Vec<_> = recovered
+        .statements
+        .into_iter()
+        .map(|(stmt, _)| stmt)
+        .collect();
+    let mut routes_val = Vec::new();
+    for stmt in &stmts {
+        match routing::compile_statement(stmt) {
+            Ok(compiled) => routes_val.push(compiled_route_json(&compiled)),
+            Err(err) => errors.push(err_json(&err)),
         }
     }
+    let fail_fast_error = fail_fast.as_ref().err().map(err_json);
+    if errors.is_empty()
+        && let Some(err) = fail_fast_error.clone()
+    {
+        errors.push(err);
+    }
+    let ast_val = if stmts.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null)
+    };
+    let explain_val = if stmts.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::String(qql_core::explain::explain_nodes(&stmts))
+    };
+    let route_val = routes_val
+        .first()
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "valid": fail_fast.is_ok(),
+        "statements_count": stmts.len(),
+        "tokens": tokens,
+        "ast": ast_val,
+        "route": route_val,
+        "routes": routes_val,
+        "explain": explain_val,
+        "error": fail_fast_error.unwrap_or(serde_json::Value::Null),
+        "errors": errors,
+    })
 }
 
 pub(crate) fn to_js_value<T: serde::Serialize>(val: &T) -> Result<JsValue, JsValue> {

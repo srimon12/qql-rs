@@ -658,6 +658,36 @@ impl TokenKind {
                 | Self::Eof
         )
     }
+
+    /// Keywords that open a top-level statement (`parse_stmt` match arms).
+    pub fn is_statement_start(&self) -> bool {
+        matches!(
+            self,
+            Self::Create
+                | Self::Alter
+                | Self::Drop
+                | Self::Show
+                | Self::Upsert
+                | Self::Scroll
+                | Self::Query
+                | Self::With
+                | Self::Delete
+                | Self::Clear
+                | Self::Update
+                | Self::Count
+                | Self::Facet
+                | Self::Set
+        )
+    }
+
+    /// Panic-mode sync tokens after a parse error.
+    ///
+    /// `WITH` is omitted: it is both a CTE opener and a clause (`WITH PAYLOAD`,
+    /// `WITH PARAMS`), so treating it as a boundary would split a query at the
+    /// clause. Missing-semicolon recovery still uses [`Self::is_statement_start`].
+    pub fn is_recovery_sync(&self) -> bool {
+        self.is_statement_start() && *self != Self::With
+    }
 }
 
 impl fmt::Display for TokenKind {

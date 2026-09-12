@@ -464,23 +464,24 @@ function currentDiagnostic(): Diagnostic[] {
 			},
 		];
 	}
-	if (result.valid || !result.error) return [];
-	const from =
-		result.error.start == null
-			? 0
-			: byteOffsetToPosition(source, result.error.start);
-	const rawTo =
-		result.error.end == null
-			? from + 1
-			: byteOffsetToPosition(source, result.error.end);
-	return [
-		{
+	if (result.valid) return [];
+	const extra = (result as { errors?: NonNullable<typeof result.error>[] })
+		.errors;
+	const analysisErrors =
+		extra && extra.length > 0 ? extra : result.error ? [result.error] : [];
+	if (analysisErrors.length === 0) return [];
+	return analysisErrors.map((err) => {
+		const from =
+			err.start == null ? 0 : byteOffsetToPosition(source, err.start);
+		const rawTo =
+			err.end == null ? from + 1 : byteOffsetToPosition(source, err.end);
+		return {
 			from: Math.min(from, source.length),
 			to: Math.min(Math.max(from + 1, rawTo), source.length),
-			severity: "error",
-			message: `${result.error.code}: ${result.error.message}`,
-		},
-	];
+			severity: "error" as const,
+			message: `${err.code}: ${err.message}`,
+		};
+	});
 }
 
 function selectedRoute(): CompiledRoute | null {

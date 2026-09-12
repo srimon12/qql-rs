@@ -1,0 +1,164 @@
+---
+title: "Convert REST JSON to QQL"
+description: "Capture live Qdrant REST traffic with qql record and rewrite it as QQL with qql convert — same requests, same results, no hand translation."
+sidebar:
+  order: 3
+---
+
+Existing Qdrant applications speak REST JSON. QQL can read that JSON and
+produce the equivalent QQL statements, so a migration or an onboarding step
+does not start with a rewrite by hand.
+
+Two commands do the work:
+
+- **`qql record`** captures live traffic from any SDK, dashboard, or script
+  by proxying it — the application keeps sending the same requests.
+- **`qql convert`** turns one captured request, or a bare Qdrant REST body,
+  into canonical QQL.
+
+## Capture live traffic (`qql record`)
+
+`qql record` is a transparent proxy. Point an application at its listen
+address instead of Qdrant and change nothing else; every request is forwarded
+to the real server unchanged, and each bodied `/collections/` request is
+appended to a JSONL capture.
+
+`qql record` is opt-in because it pulls in the proxy runtime:
+
+```bash
+cargo build --release -p qql-cli --features record
+```
+
+{% terminal title="Record once, convert after" %}
+# Qdrant stays where it is (default :6333); the app moves to :6334.
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
+  --out capture.jsonl --qql-out capture.qql
+
+# Then, with no recorder running:
+qql convert --collection docs capture.jsonl
+{% /terminal %}
+
+With `--qql-out`, each captured request is converted as it arrives, so
+`capture.qql` is ready when the recording stops. Requests that cannot be
+converted are written as `# ERROR` annotations and never interrupt
+forwarding.
+
+Defaults are chosen so a bare `qql record` works with a local Qdrant: Qdrant
+keeps serving on `127.0.0.1:6333`, and the recorder listens on
+`127.0.0.1:6334` so the application only needs its base URL changed:
+
+```bash
+qql record
+```
+
+Query strings are forwarded and captured as a `"query"` object so `WAIT`,
+`timeout`, and `consistency` survive conversion. Bodies are buffered in
+memory per request, which is fine for interactive captures and large batched
+upserts, but this is a development tool, not a production proxy. Bodyless
+collection and quota routes (`SHOW`, `DROP COLLECTION`, `DROP INDEX`) are
+recorded too.
+
+## Convert a request (`qql convert`)
+
+`qql convert` reads a wrapped request, or a bare Qdrant body, from a file or
+stdin and prints canonical QQL.
+
+{% terminal title="Convert a search request" %}
+qql convert search.json
+cat search.json | qql convert
+{% /terminal %}
+
+A wrapped request carries the endpoint, so the collection is derived from
+the path:
+
+```json
+{
+  "method": "POST",
+  "path": "/collections/docs/points/query",
+  "body": {
+    "query": { "nearest": [0.1, 0.2] },
+    "using": "dense",
+    "limit": 5,
+    "filter": { "must": [{ "key": "status", "match": { "value": "active" } }] }
+  }
+}
+```
+
+{% qqlExample title="Converted nearest query" %}
+```sql
+QUERY [0.1, 0.2]
+FROM docs
+USING dense
+WHERE status = 'active'
+LIMIT 5;
+```
+{% /qqlExample %}
+
+A bare body has no path to derive the collection from. Pass it explicitly
+with `--collection`:
+
+{% terminal title="Bare body with an explicit collection" %}
+echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
+# QUERY POINTS (1, 'point-2') FROM docs;
+{% /terminal %}
+
+Without `--collection`, a bare body fails with `MissingCollection` rather
+than inventing a collection name.
+
+## What is covered
+
+Conversion is part of the same contract as execution: Qdrant's OpenAPI
+schema describes each request, QQL's typed AST is the shared request model,
+and QQL's own formatter renders the output. The converter therefore emits
+the same statements the runtime plans, including every clause QQL supports.
+
+| Request | QQL |
+|---|---|
+| `POST .../points/query`, `.../query/groups` | `QUERY` (including formula, fusion, prefetch, and grouped forms) |
+| `POST .../points/scroll`, `.../points/count`, `.../facet` | `SCROLL`, `COUNT`, `FACET` |
+| `POST .../points`, `.../points/delete` | `QUERY POINTS`, `DELETE` |
+| `POST .../points/payload`, `payload/clear`, `payload/delete` | `UPDATE … SET PAYLOAD`, `CLEAR PAYLOAD`, `DELETE PAYLOAD` |
+| `PUT .../points/vectors`, `POST .../points/vectors/delete` | `UPDATE … SET VECTOR`, `DELETE VECTOR` |
+| `PUT .../points` | `UPSERT` |
+| `PUT|PATCH|DELETE /collections/{name}` | `CREATE COLLECTION`, `ALTER COLLECTION`, `DROP COLLECTION` |
+| `PUT .../index`, `DELETE .../index/{field}` | `CREATE INDEX`, `DROP INDEX` |
+| shard keys, quotas, `SHOW` metadata | `CREATE` / `DROP SHARD KEY`, `SET QUOTA`, `SHOW …` |
+
+Filter conversion is structural: `must` → `AND`, `should` → `OR`,
+`must_not` → `NOT`, and `match`, `range`, `geo_bounding_box`,
+`geo_radius`, `geo_polygon`, `has_id`, `is_empty`, and `is_null` lower onto
+their typed QQL predicates.
+
+## Why the output can be trusted
+
+- **One emitter.** The converter decodes JSON into the typed AST and prints
+  it with `qql fmt`'s formatter. It never builds QQL by string
+  concatenation, so canonical output always re-parses.
+- **Contract tests.** The covered routes are asserted against
+  `crates/qql-runtime/openapi.json` at test time, and every converted
+  statement is re-planned and compared against the REST route the runtime
+  would have produced from the original QQL.
+- **Typed failures.** Inputs QQL cannot represent fail with a specific
+  error and a field path (`UnsupportedEndpoint`, `UndecodableBody`,
+  `InvalidField`, `InvalidJson`) instead of dropping a clause or emitting
+  placeholder text.
+
+{% aside type="note" title="Converted output is normal QQL" %}
+There is no compatibility mode. The output uses the same statements as any
+hand-written QQL, runs with `qql exec` or `qql execute`, and can be fed to
+`qql check` for staged triage before executing.
+{% /aside %}
+
+## A migration path in practice
+
+1. **Capture** the requests the application actually sends
+   (`qql record --out capture.jsonl`).
+2. **Convert** them (`qql convert --collection <name> capture.jsonl`) and
+   review the file; it is plain QQL.
+3. **Check** representative statements (`qql check "<statement>"`).
+4. **Move** data with [Cluster migration](/docs/operations/cluster-migration/)
+   when the target is a new cluster, or **replay** the script with
+   `qql execute`.
+
+Related references: [CLI](/docs/tools/cli/),
+[QQL vs raw Qdrant JSON API](/docs/guides/qql-vs-qdrant-json/).

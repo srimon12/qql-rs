@@ -519,6 +519,21 @@ mod tests {
     }
 
     #[test]
+    fn update_vector_values_fills_the_wire_point_list() {
+        let stmt = Parser::parse(
+            "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
+        )
+        .unwrap();
+        let op = plan::plan(&stmt).unwrap();
+        let PlannedOperation::UpdateVectors { request, .. } = &op else {
+            panic!("expected UpdateVectors");
+        };
+        assert_eq!(request.points.len(), 2);
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        assert_eq!(body["points"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
     fn mutation_shard_keys_lower_and_project() {
         let cases = [
             ("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 't1';", "t1"),
@@ -845,6 +860,7 @@ mod tests {
             "UPSERT INTO docs VALUES {id: 1, title: 'hello'};",
             "DELETE FROM docs WHERE status = 'inactive';",
             "UPDATE docs SET VECTOR = [0.1, 0.2] WHERE id = 1;",
+            "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
             "UPDATE docs SET PAYLOAD = {x: 1} WHERE id = 1;",
             "CREATE COLLECTION docs (d VECTOR(128, COSINE));",
             "ALTER COLLECTION docs WITH HNSW (m = 16);",

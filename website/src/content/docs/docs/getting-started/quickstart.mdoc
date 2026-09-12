@@ -107,3 +107,23 @@ qql execute quickstart.qql
 Use `qql explain "QUERY ..."` to inspect a plan without sending it to Qdrant.
 Use `qql check "QUERY ..."` to triage format, explain, embedder dim, vector
 topology, and backend health in one pass.
+
+## Already have a Qdrant application?
+
+You do not have to rewrite existing SDK calls by hand. `qql record` proxies a
+live application and captures what it sends, and `qql convert` turns that
+captured REST JSON into the QQL statements above.
+
+{% terminal title="Capture live traffic, then convert" %}
+cargo build --release -p qql-cli --features record
+
+# Qdrant keeps its address; point the app at the recorder.
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
+  --out capture.jsonl --qql-out capture.qql
+
+# Review the captured requests as QQL.
+qql convert --collection docs capture.jsonl
+{% /terminal %}
+
+See [Operations > Convert REST JSON](/docs/operations/convert/) for the
+wrapped/bare input formats, coverage, and limits.

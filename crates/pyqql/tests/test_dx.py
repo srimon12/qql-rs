@@ -18,7 +18,7 @@ class TestDxImprovements(unittest.TestCase):
 
         bound = stmt.bind({"v": [0.1, 0.2, 0.3], "lim": 5})
         self.assertEqual(
-            str(bound), "QUERY VECTOR [0.1, 0.2, 0.3] FROM test_coll LIMIT 5"
+            str(bound), "QUERY [0.1, 0.2, 0.3] FROM test_coll LIMIT 5"
         )
 
         route = stmt.compile_route(params={"v": [0.1, 0.2, 0.3], "lim": 5})

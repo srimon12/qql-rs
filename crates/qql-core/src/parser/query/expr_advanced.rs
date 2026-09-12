@@ -14,17 +14,10 @@ impl<'a> AstLowerer<'a> {
     pub(crate) fn parse_recommend(&mut self) -> Result<QueryExpr, QqlError> {
         self.expect(TokenKind::Recommend)?;
         self.expect_word("POSITIVE")?;
-        let positive = self
-            .parse_point_id_list()?
-            .into_iter()
-            .map(QueryInput::Point)
-            .collect();
+        let positive = self.parse_recommend_examples()?;
         let negative = if self.peek_word("NEGATIVE")? {
             self.advance()?;
-            self.parse_point_id_list()?
-                .into_iter()
-                .map(QueryInput::Point)
-                .collect()
+            self.parse_recommend_examples()?
         } else {
             Vec::new()
         };
@@ -41,6 +34,38 @@ impl<'a> AstLowerer<'a> {
             using: None,
             prefetch: Vec::new(),
         })
+    }
+
+    /// Parse a `RECOMMEND` example list.
+    ///
+    /// Bare strings and integers keep their historical meaning of point IDs;
+    /// every other spelling (`VECTOR […]`, `TEXT '…'`, `POINT n`, `?`, `:`)
+    /// is a full query input, mirroring `fmt::render_recommend_input`.
+    fn parse_recommend_examples(&mut self) -> Result<Vec<QueryInput>, QqlError> {
+        self.expect(TokenKind::Lparen)?;
+        let mut examples = Vec::new();
+        if self.peek()?.kind == TokenKind::Rparen {
+            return Err(QqlError::parse(
+                "QQL-PARSE-POINT-IDS",
+                "recommend example list cannot be empty",
+                self.peek()?.span,
+            ));
+        }
+        loop {
+            let example = match self.peek()?.kind {
+                TokenKind::String | TokenKind::Integer => self
+                    .parse_point_id("recommend example list")
+                    .map(QueryInput::Point)?,
+                _ => self.parse_query_input()?,
+            };
+            examples.push(example);
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+        }
+        self.expect(TokenKind::Rparen)?;
+        Ok(examples)
     }
 
     pub(crate) fn parse_recommend_strategy(&mut self) -> Result<RecommendStrategy, QqlError> {
