@@ -685,6 +685,14 @@ function runAnalysis(source: string): void {
 		state.analysis = analyzeWithPolicy(source);
 	} catch (error) {
 		const message = formatError(error);
+		// The synthetic fallback must satisfy the current AnalysisResult shape:
+		// `errors` is the primary diagnostic list; `error` is kept for older clients.
+		const diagnostic = {
+			code: "QQL-WASM",
+			message,
+			start: null,
+			end: null,
+		};
 		state.analysis = {
 			source,
 			result: {
@@ -695,12 +703,8 @@ function runAnalysis(source: string): void {
 				route: null,
 				routes: [],
 				explain: null,
-				error: {
-					code: "QQL-WASM",
-					message,
-					start: null,
-					end: null,
-				},
+				error: diagnostic,
+				errors: [diagnostic],
 			},
 			effectiveAst: null,
 			effectiveRoutes: [],
