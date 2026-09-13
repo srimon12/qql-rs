@@ -14,7 +14,7 @@
 //!    docs and blogs (full URLs and an `HTTP/x` suffix are accepted).
 //! 5. **`curl` command** — a pasted invocation (`-X`, `-d`, `--header`, …,
 //!    multi-line continuations, several commands). Shell-dynamic constructs
-//!    (`$VAR`, `@file`, pipes) fail closed; see [`snippet`].
+//!    (`$VAR`, `@file`, pipes) fail closed;
 //!
 //! Markdown fences around any of the above are stripped as paste noise.
 //!
