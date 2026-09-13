@@ -6,7 +6,7 @@ export const hero = {
 	eyebrow: "Open source · MIT · v0.4.0",
 	specimenTitle: "search.qql",
 	specimenMeta: "QQL · MIT",
-	specimenRoute: "POST /collections/docs/points/query",
+	specimenRoute: "POST /collections/medical/points/query",
 	specimenStatus: "200 · 1.2ms",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
 	secondaryCta: {

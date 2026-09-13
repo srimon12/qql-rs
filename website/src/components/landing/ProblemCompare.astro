@@ -493,7 +493,7 @@ const lines = (source: string) => source.trim().split("\n").length;
           {FORMATS.map((f, idx) => (
             <button
               type="button"
-              class="rounded-full border border-[var(--sl-color-gray-5)] px-3 py-1 font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white"
+              class="inline-flex min-h-8 items-center rounded-full border border-[var(--sl-color-gray-5)] px-3 py-1.5 font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white"
               data-format={f.id}
               aria-pressed={idx === 0 ? "true" : "false"}
             >
@@ -652,9 +652,10 @@ const lines = (source: string) => source.trim().split("\n").length;
       fromB: number,
       toB: number,
       render: (a: number, b: number) => string,
+      isInstant = false,
     ) => {
       if (!el) return;
-      if (firstSync || reduceMotion.matches || (fromA === toA && fromB === toB)) {
+      if (isInstant || firstSync || reduceMotion.matches || (fromA === toA && fromB === toB)) {
         el.textContent = render(toA, toB);
         return;
       }
@@ -692,6 +693,7 @@ const lines = (source: string) => source.trim().split("\n").length;
           shownTargetLines || targetLines,
           targetLines,
           (a, b) => `This example: ${a} lines vs ${b} in ${label}`,
+          instant,
         );
       }
       shownQqlLines = qqlLines;

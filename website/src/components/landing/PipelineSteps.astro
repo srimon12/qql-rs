@@ -15,10 +15,10 @@ const { heading, sub, steps } = Astro.props;
       <p class="m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{sub}</p>
     </header>
 
-    <ol class="mt-10 grid list-none grid-cols-1 gap-px overflow-hidden border-y border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-4">
+    <ol class="mt-10 grid list-none grid-cols-1 gap-px overflow-hidden border-y border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-2 lg:grid-cols-4">
       {
-        steps.map((item, stepIndex) => (
-          <li class="reveal bg-[var(--sl-color-bg)] p-5 sm:p-6" style={`--d:${Math.min(stepIndex, 2) * 40}ms`}>
+        steps.map((item) => (
+          <li class="bg-[var(--sl-color-bg)] p-5 sm:p-6">
             <span class="font-mono text-[0.6875rem] tracking-[0.12em] text-[var(--sl-color-gray-3)]">{item.step}</span>
             <h3 class="mt-2 mb-0 text-[1.05rem] font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">{item.title}</h3>
             <p class="mt-2 mb-0 text-sm leading-relaxed text-[var(--sl-color-gray-2)]">{item.detail}</p>

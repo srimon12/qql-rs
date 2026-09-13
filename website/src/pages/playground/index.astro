@@ -88,7 +88,7 @@ const pageDescription =
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta name="description" content={pageDescription} />
     <meta
@@ -263,7 +263,7 @@ const pageDescription =
             <span class="hidden md:inline">endpoint </span>
             <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong>
           </span>
-          <span class="min-w-0 truncate">
+          <span class="hidden min-w-0 truncate sm:inline">
             <span class="hidden md:inline">embeddings </span>
             <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-embed>MiniLM (browser)</strong>
           </span>

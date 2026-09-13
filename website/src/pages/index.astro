@@ -227,7 +227,7 @@ FROM papers LIMIT 10;`;
     <SiteFooter />
 
     <script>
-      document.addEventListener("DOMContentLoaded", () => {
+      const initReveal = () => {
         const observer = new IntersectionObserver(
           (entries) => {
             for (const entry of entries) {
@@ -237,10 +237,16 @@ FROM papers LIMIT 10;`;
               }
             }
           },
-          { threshold: 0.1, rootMargin: "0px 0px -10% 0px" },
+          { threshold: 0.05, rootMargin: "0px 0px 50px 0px" },
         );
         document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
-      });
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initReveal);
+      } else {
+        initReveal();
+      }
     </script>
   </body>
 </html>

@@ -116,10 +116,11 @@ const nav: NavItem[] = [
       if (ticking) return;
       ticking = true;
       requestAnimationFrame(() => {
+        const isOpen = menuToggle?.getAttribute("aria-expanded") === "true";
         const y = Math.max(0, window.scrollY);
         const delta = y - lastScrollY;
         header.classList.toggle("is-scrolled", y > 10);
-        if (y < 80) {
+        if (isOpen || y < 80) {
           header.classList.remove("is-hidden");
         } else if (delta > 6) {
           header.classList.add("is-hidden");
@@ -153,6 +154,13 @@ const nav: NavItem[] = [
   const menuToggle = document.querySelector<HTMLElement>("[data-menu-toggle]");
   const mobileMenu = document.querySelector<HTMLElement>("[data-mobile-menu]");
   if (menuToggle && mobileMenu) {
+    const closeMenu = () => {
+      menuToggle.setAttribute("aria-expanded", "false");
+      mobileMenu.setAttribute("hidden", "");
+      menuToggle.querySelector(".icon-burger")?.classList.remove("hidden");
+      menuToggle.querySelector(".icon-close")?.classList.add("hidden");
+    };
+
     menuToggle.addEventListener("click", () => {
       const open = menuToggle.getAttribute("aria-expanded") === "true";
       menuToggle.setAttribute("aria-expanded", String(!open));
@@ -161,6 +169,17 @@ const nav: NavItem[] = [
       const close = menuToggle.querySelector(".icon-close");
       burger?.classList.toggle("hidden", !open);
       close?.classList.toggle("hidden", open);
+    });
+
+    mobileMenu.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", closeMenu);
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && menuToggle.getAttribute("aria-expanded") === "true") {
+        closeMenu();
+        menuToggle.focus();
+      }
     });
   }
 </script>

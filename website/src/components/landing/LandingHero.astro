@@ -48,8 +48,8 @@ const {
         <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
       </div>
 
-      <div class="mt-5 flex items-center gap-3">
-        <code id="hero-install-cmd" class="min-w-0 truncate font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</code>
+      <div class="mt-6 flex max-w-full items-center justify-between gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-3 py-2">
+        <code id="hero-install-cmd" class="min-w-0 overflow-x-auto font-mono text-[0.75rem] text-[var(--sl-color-gray-2)] whitespace-nowrap scrollbar-none" title="curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</code>
         <CopyButton
           id="hero-copy-btn"
           target="#hero-install-cmd"
@@ -71,9 +71,9 @@ const {
         <pre class="m-0"><code><slot /></code></pre>
       </div>
 
-      <div class="code-card__foot">
-        <span>{specimenRoute}</span>
-        <span>{specimenStatus}</span>
+      <div class="code-card__foot flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span class="min-w-0 truncate">{specimenRoute}</span>
+        <span class="shrink-0">{specimenStatus}</span>
       </div>
     </figure>
   </div>

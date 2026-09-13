@@ -26,8 +26,8 @@ const { heading, sub, installs, footHref, footLabel } = Astro.props;
 
     <ul class="mt-10 grid list-none grid-cols-1 gap-px overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-2 lg:grid-cols-3">
       {
-        installs.map((item, cellIndex) => (
-          <li class="reveal flex min-w-0 flex-col gap-3 bg-[var(--sl-color-bg)] p-5" style={`--d:${Math.min(cellIndex, 2) * 40}ms`}>
+        installs.map((item) => (
+          <li class="flex min-w-0 flex-col gap-3 bg-[var(--sl-color-bg)] p-5">
             <div class="flex items-center justify-between gap-3">
               <h3 class="m-0 text-base font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">{item.name}</h3>
               <a class="link font-mono text-[0.6875rem]" href={item.href}>Docs →</a>
