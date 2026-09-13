@@ -9,11 +9,11 @@ Proves, in order:
    HNSW (m=16, ef_construct=100) and a bulk-friendly indexing_threshold
    (20000 > 8000 points, so HNSW builds once at the end).
 2. INGEST all 8000 berlin points purely through
-   ``qql exec "UPSERT INTO <coll> VALUES :rows WAIT true"``. Python only
+   ``qql run "UPSERT INTO <coll> VALUES :rows WAIT true"``. Python only
    shapes JSON params-files from the three corpus files; every write goes
    through the CLI binary.
 3. VERIFY source reads (COUNT, FACET, dense/sparse/hybrid/filtered QUERY,
-   SCROLL) via ``qql exec``.
+   SCROLL) via ``qql run``.
 4. DRY-RUN ``qql migrate`` (prints the plan: custom sharding, preserved
    quantization, 12 CREATE SHARD KEY statements).
 5. MIGRATE src -> dst with ``--shard-key-field district`` on a multi-node
@@ -23,7 +23,7 @@ Proves, in order:
 6. VERIFY target + tenant isolation (COUNT/FACET parity, SHOW SHARD KEYS,
    SHARD-routed SCROLL/COUNT/FACET/QUERY/UPDATE, top-k parity).
 7. DUMP the sharded target with ``qql dump`` and replay the script into a
-   fresh collection with ``qql execute`` (round-trip proof for sharded
+   fresh collection with ``qql run`` (round-trip proof for sharded
    dumps: CREATE SHARD KEY statements + SHARD-routed UPSERT batches).
 
 Prerequisites: multi-node Qdrant on :6333/:7333/:8333, a built ``qql``
@@ -114,15 +114,15 @@ class Qql:
             raise Fail(f"qql {' '.join(args)} failed:\n{proc.stdout}\n{proc.stderr}")
         return proc
 
-    def exec(self, sql: str, params_file: str | None = None, quiet: bool = False) -> dict:
-        args = ["exec", sql]
+    def run_sql(self, sql: str, params_file: str | None = None, quiet: bool = False) -> dict:
+        args = ["run", sql]
         if params_file:
             args += ["--params-file", params_file]
         if quiet:
             args += ["--quiet"]
         else:
             args += ["--json"]
-        proc = self.run(*args)
+        proc = Qql.run(self, *args)
         if quiet:
             return {}
         return json.loads(proc.stdout)
@@ -133,7 +133,7 @@ class Qql:
             sql += f" WHERE {where}"
         if shard:
             sql += f" SHARD '{shard}'"
-        data = self.exec(sql + ";")["results"][0]["data"]
+        data = self.run_sql(sql + ";")["results"][0]["data"]
         if not isinstance(data, dict) or "count" not in data:
             raise Fail(f"could not read count from {data}")
         return int(data["count"])
@@ -161,9 +161,9 @@ def check_prereqs(qql: Qql) -> None:
 
 def create_source(qql: Qql) -> None:
     say(f"1/7 CREATE {SRC} (demo config + turbo-1.5 + bulk HNSW/optimizers)")
-    qql.run("exec", f"DROP COLLECTION {SRC};", check=False)
+    qql.run("run", f"DROP COLLECTION {SRC};", check=False)
     # Demo config mirrors vs-qdrant/python/qql_scenarios.py::create_berlin.
-    qql.exec(
+    qql.run_sql(
         f"CREATE COLLECTION {SRC} "
         "(dense VECTOR(384, COSINE) WITH HNSW (m = 16, ef_construct = 100), bm25 SPARSE) "
         "WITH QUANTIZATION (type = 'turbo', bits = 1.5, always_ram = true) "
@@ -172,7 +172,7 @@ def create_source(qql: Qql) -> None:
         quiet=True,
     )
     for field, kind in (("district", "keyword"), ("price", "float"), ("guests", "integer")):
-        qql.exec(f"CREATE INDEX ON COLLECTION {SRC} FOR {field} TYPE {kind};", quiet=True)
+        qql.run_sql(f"CREATE INDEX ON COLLECTION {SRC} FOR {field} TYPE {kind};", quiet=True)
     ok("source created (turbo-1.5 + indexing_threshold=20000)")
 
 
@@ -186,7 +186,7 @@ def load_corpus() -> tuple[list[dict], list[list[float]], list[dict]]:
 
 
 def ingest(qql: Qql, batch: int, tmp: Path) -> None:
-    say(f"2/7 INGEST {POINTS} pts via 'qql exec UPSERT … VALUES :rows'")
+    say(f"2/7 INGEST {POINTS} pts via 'qql run UPSERT … VALUES :rows'")
     docs, dense, sparse = load_corpus()
     t0 = time.perf_counter()
     params_file = tmp / "batch.json"
@@ -196,7 +196,7 @@ def ingest(qql: Qql, batch: int, tmp: Path) -> None:
             for k in range(start, min(start + batch, len(docs)))
         ]
         params_file.write_text(json.dumps({"rows": rows}))
-        qql.exec(f"UPSERT INTO {SRC} VALUES :rows WAIT true", str(params_file), quiet=True)
+        qql.run_sql(f"UPSERT INTO {SRC} VALUES :rows WAIT true", str(params_file), quiet=True)
         if (start // batch) % 10 == 0:
             print(f"  {start + len(rows)}/{len(docs)}", flush=True)
     dt = time.perf_counter() - t0
@@ -221,29 +221,29 @@ def write_query_vectors(tmp: Path) -> dict[str, Path]:
 
 
 def verify_source(qql: Qql, tmp: Path) -> None:
-    say("3/7 VERIFY source reads (all via qql exec)")
+    say("3/7 VERIFY source reads (all via qql run)")
     if qql.count(SRC) != POINTS:
         raise Fail("src count drifted")
     if qql.count(SRC, "price < 150.0") != EXPECT_CHEAP:
         raise Fail(f"filtered COUNT price<150 drifted (want {EXPECT_CHEAP})")
     vecs = write_query_vectors(tmp)
-    top = qql.exec(f"QUERY :dv FROM {SRC} USING dense LIMIT 3;", str(vecs["dense"]))["results"][0][
+    top = qql.run_sql(f"QUERY :dv FROM {SRC} USING dense LIMIT 3;", str(vecs["dense"]))["results"][0][
         "data"
     ]
     if top[0]["id"] != EXPECT_TOP_ID:
         raise Fail(f"doc-0 vector must return id {EXPECT_TOP_ID} top-1, got {top[0]['id']}")
-    qql.exec(f"QUERY :sv FROM {SRC} USING bm25 LIMIT 3;", str(vecs["sparse"]))
-    qql.exec(
+    qql.run_sql(f"QUERY :sv FROM {SRC} USING bm25 LIMIT 3;", str(vecs["sparse"]))
+    qql.run_sql(
         f"WITH d AS (QUERY :dv FROM {SRC} USING dense PARAMS (hnsw_ef = 128) LIMIT 50), "
         f"s AS (QUERY :sv FROM {SRC} USING bm25 LIMIT 50) "
         f"QUERY FUSION RRF FROM {SRC} PREFETCH (d, s) LIMIT 3;",
         str(vecs["hybrid"]),
     )
-    qql.exec(
+    qql.run_sql(
         f"QUERY :dv FROM {SRC} USING dense WHERE price < 150.0 AND guests >= 2 LIMIT 3;",
         str(vecs["dense"]),
     )
-    qql.exec(f"SCROLL FROM {SRC} LIMIT 3;")
+    qql.run_sql(f"SCROLL FROM {SRC} LIMIT 3;")
     ok("source reads green")
 
 
@@ -258,7 +258,7 @@ def dry_run(qql: Qql) -> None:
 def migrate(qql: Qql, batch: int, workers: int) -> None:
     say(f"5/7 MIGRATE {SRC} -> {DST} with --shard-key-field {SHARD_FIELD}")
     t0 = time.perf_counter()
-    qql.run(
+    qql.run_sql(
         "migrate", SRC, "--to", DST, "--shard-key-field", SHARD_FIELD,
         "--recreate", "--restart", "--workers", str(workers), "--batch-size", str(batch),
         live=True,
@@ -267,7 +267,7 @@ def migrate(qql: Qql, batch: int, workers: int) -> None:
 
 
 def facet_map(qql: Qql, collection: str) -> dict:
-    data = qql.exec(f"FACET district FROM {collection} LIMIT 20 EXACT true;")["results"][0]["data"]
+    data = qql.run_sql(f"FACET district FROM {collection} LIMIT 20 EXACT true;")["results"][0]["data"]
     return {hit["value"]: hit["count"] for hit in data}
 
 
@@ -279,7 +279,7 @@ def verify_target(qql: Qql, tmp: Path) -> None:
     if facet_map(qql, SRC) != facet_map(qql, DST):
         raise Fail("FACET parity src != dst")
     ok("FACET parity src == dst")
-    keys = qql.exec(f"SHOW SHARD KEYS ON COLLECTION {DST};")["results"][0]["data"][
+    keys = qql.run_sql(f"SHOW SHARD KEYS ON COLLECTION {DST};")["results"][0]["data"][
         "shard_keys"
     ]
     if len(keys) != EXPECT_DISTRICTS:
@@ -289,11 +289,11 @@ def verify_target(qql: Qql, tmp: Path) -> None:
         raise Fail(f"SHARD Mitte count drifted (want {EXPECT_MITTE})")
     ok(f"COUNT SHARD 'Mitte' = {EXPECT_MITTE}")
     vecs = write_query_vectors(tmp)
-    qql.exec(f"SCROLL FROM {DST} SHARD 'Mitte' LIMIT 3;")
-    qql.exec(f"FACET district FROM {DST} SHARD 'Mitte' LIMIT 5 EXACT true;")
-    qql.exec(f"QUERY :dv FROM {DST} USING dense SHARD 'Spandau' LIMIT 3;", str(vecs["dense"]))
+    qql.run_sql(f"SCROLL FROM {DST} SHARD 'Mitte' LIMIT 3;")
+    qql.run_sql(f"FACET district FROM {DST} SHARD 'Mitte' LIMIT 5 EXACT true;")
+    qql.run_sql(f"QUERY :dv FROM {DST} USING dense SHARD 'Spandau' LIMIT 3;", str(vecs["dense"]))
     # Writes to custom-sharded collections must carry SHARD (Qdrant requirement).
-    qql.exec(
+    qql.run_sql(
         f"UPDATE {DST} SET PAYLOAD = {{'rating': 4.5}} "
         f"WHERE district = 'Mitte' SHARD 'Mitte' WAIT true;",
         quiet=True,
@@ -303,13 +303,13 @@ def verify_target(qql: Qql, tmp: Path) -> None:
     ok("UPDATE … SHARD 'Mitte' ok (float = filter works)")
     src_top = [
         h["id"]
-        for h in qql.exec(f"QUERY :dv FROM {SRC} USING dense LIMIT 5;", str(vecs["dense"]))[
+        for h in qql.run_sql(f"QUERY :dv FROM {SRC} USING dense LIMIT 5;", str(vecs["dense"]))[
             "results"
         ][0]["data"]
     ]
     dst_top = [
         h["id"]
-        for h in qql.exec(f"QUERY :dv FROM {DST} USING dense LIMIT 5;", str(vecs["dense"]))[
+        for h in qql.run_sql(f"QUERY :dv FROM {DST} USING dense LIMIT 5;", str(vecs["dense"]))[
             "results"
         ][0]["data"]
     ]
@@ -327,9 +327,9 @@ def dump_round_trip(qql: Qql, batch: int, tmp: Path) -> None:
         raise Fail("dump must emit CREATE SHARD KEY + SHARD-routed UPSERTs")
     replay_file = tmp / "rst.qql"
     replay_file.write_text(script.replace(DST, RST))
-    qql.run("exec", f"DROP COLLECTION {RST};", check=False)
+    qql.run("run", f"DROP COLLECTION {RST};", check=False)
     print("  replaying dump script (~30s, output parsed at the end)…", flush=True)
-    proc = qql.run("execute", "--stop-on-error", str(replay_file))
+    proc = qql.run("run", "--stop-on-error", str(replay_file))
     summary = json.loads(proc.stdout)
     if summary.get("failed"):
         raise Fail(f"replay failed: {proc.stdout}")
@@ -339,7 +339,7 @@ def dump_round_trip(qql: Qql, batch: int, tmp: Path) -> None:
     if facet_map(qql, DST) != facet_map(qql, RST):
         raise Fail("FACET parity dst != rst")
     ok("round-trip parity dst == rst (COUNT + FACET)")
-    qql.run("exec", f"DROP COLLECTION {RST};", check=False)
+    qql.run("run", f"DROP COLLECTION {RST};", check=False)
 
 
 def main() -> int:
@@ -361,8 +361,8 @@ def main() -> int:
         qql = Qql(newest_qql(args.qql), args.url)
         if args.clean:
             say(f"DROP {SRC} and {DST}")
-            qql.run("exec", f"DROP COLLECTION {SRC};", check=False)
-            qql.run("exec", f"DROP COLLECTION {DST};", check=False)
+            qql.run("run", f"DROP COLLECTION {SRC};", check=False)
+            qql.run("run", f"DROP COLLECTION {DST};", check=False)
             print("cleaned.")
             return 0
         with tempfile.TemporaryDirectory(prefix="qql-berlin-") as td:

@@ -45,7 +45,7 @@ CLI operations are organized into three distinct tiers:
 | Tier | Focus | Connectivity | Primary commands |
 |---|---|---|---|
 | **Tier 1: Offline & CI** | Source text, syntax, AST, formatting | 100% offline (no backend needed) | `qql lint`, `qql fmt`, `qql explain`, `qql convert` |
-| **Tier 2: Live Query** | Single statement execution and triage | Requires target backend | `qql run` (`exec`/`execute`), `qql doctor "<query>"` (`check`) |
+| **Tier 2: Live Query** | Single statement execution and triage | Requires target backend | `qql run`, `qql doctor "<query>"` (`check`) |
 | **Tier 3: Cluster & Tooling** | Cluster health, config, data migration, REPL | Requires target backend | `qql setup`, `qql config`, `qql doctor`, `qql repl`, `qql dump`, `qql migrate` |
 
 {% qqlExample title="Executable input" %}
@@ -61,7 +61,8 @@ qql explain "QUERY 'quantum' FROM papers USING dense LIMIT 5"
 
 # Tier 2: Run inline queries or script files with smart detection
 qql run "SHOW COLLECTIONS"
-qql run search.qql -p category=papers
+qql run search.qql
+qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=database -p lim=5
 qql doctor "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
 
 # Tier 3: Setup, cluster diagnostics, and interactive shell
@@ -82,6 +83,7 @@ Static analysis and plan verification for QQL scripts. Scans a file or recursive
 
 - **Syntax Error Recovery**: Parses all statements in a file, recovering past errors to report every syntax mistake in one run.
 - **Plan Validation**: Compiles statements through the query planner to catch structural, naming, and clause conflicts.
+- **Parameter Binding**: `-p key=value` / `--params-file <path>` bind `:name` / `?` placeholders before the plan check, exactly as `run` would. Without flags, a leading `-- qql-params: {...}` (or `[...]`) header — single-line JSON in the first 10 lines — supplies the values instead.
 - **Idiom Rules**: Flags anti-patterns such as redundant `WITH PAYLOAD true` clauses (payloads are included by default in QQL).
 - **Formatting Validation**: Checks whether the file conforms to canonical QQL formatting.
 - **Codeframe Display**: Renders terminal codeframes with file names, line numbers, and exact error locations.
@@ -158,7 +160,7 @@ See [Operations > Convert REST JSON](/docs/operations/convert/) for full details
 
 These commands execute statements or troubleshoot individual query issues against a running backend.
 
-### `qql run` (aliases: `qql exec`, `qql execute`)
+### `qql run`
 
 Smart query runner that automatically detects whether the input argument is an inline query string or an existing `.qql` script file.
 
@@ -270,7 +272,7 @@ Interactive REPL shell with multiline continuation prompts (`qql...> `), live sy
 | `fmt <qql>`, `\f <qql>` | Format QQL into canonical syntax |
 | `doctor`, `\d` | Run backend and embedder health diagnostics |
 | `explain <query>` | Show the hierarchical ASCII execution plan tree |
-| `execute <file>`, `\e <file>` | Run a `.qql` script file statement-by-statement with timing |
+| `run <file>`, `\e <file>` | Run a `.qql` script file statement-by-statement with timing |
 | `\param [key=value \| clear]`, `\p` | Inspect, set, or clear session-scoped parameter bindings |
 | `dump <collection> <output.qql>` | Dump collection schema and vectors to `.qql` |
 | `exit`, `quit`, `\q`, `:q` | Leave the shell |

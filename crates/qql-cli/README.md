@@ -21,14 +21,17 @@ Binary: `target/release/qql`.
 
 | Command | Role |
 |---------|------|
-| `qql exec "…"` | One statement (`--json`, `--quiet`, `--param`, `--params-file`) |
-| `qql execute file.qql` | Script |
+| `qql lint [path]` | Offline syntax + plan check, `--fix` autofix, `--json` for CI |
+| `qql run "…"` | One statement (`--json`, `--quiet`, `--param`, `--params-file`) |
+| `qql run file.qql` | Script (`--stop-on-error`) |
 | `qql explain "…"` | Plan without Qdrant |
-| `qql connect` | REPL |
+| `qql repl` | REPL (alias: `connect`) |
+| `qql doctor ["…"]` | Health + embed host snapshot, or 5-stage query triage (alias: `check`) |
+| `qql setup` | Connection wizard → `~/.qql/config.json` (`0600`) |
+| `qql config …` | Persistent settings (`show`, `get`, `set`, `path`, `edge`) |
 | `qql convert [file.json]` | REST JSON → QQL |
-| `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql execute`) |
+| `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql run`) |
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
-| `qql doctor` | Health + embed host snapshot |
 | `qql record` | Transparent REST recorder → JSONL + QQL (needs `--features record`) |
 | `qql --edge …` | Use configured local edge backend |
 | `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
@@ -36,10 +39,10 @@ Binary: `target/release/qql`.
 | `qql version` | Version |
 
 ```bash
-qql exec "SHOW COLLECTIONS"
-qql exec --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
-qql exec "QUERY TEXT :q FROM docs LIMIT :lim" -p q=ml -p lim=5
-qql exec "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
+qql run "SHOW COLLECTIONS"
+qql run --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
+qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=ml -p lim=5
+qql run "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
 
@@ -52,8 +55,8 @@ qql migrate docs --to docs --restart   # discard a checkpoint and start over
 qql migrate docs --to docs_v2 --cutover docs --shard-key-field tenant_id --on-missing-shard-key skip
 
 # Cluster quotas (Qdrant ≥ 1.19, REST only — use :6333, not gRPC :6334)
-qql exec "SHOW QUOTAS"
-qql exec "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true"
+qql run "SHOW QUOTAS"
+qql run "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true"
 ```
 
 ## Configuration
@@ -105,7 +108,7 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `MULTI_EMBED_URL` / `MULTI_EMBED_KEY` / `MULTI_EMBED_MODEL` / `MULTI_EMBED_DIM` | `--multi-embed-*` | — | Multi/ColBERT HTTP endpoint |
 | `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | `--image-embed-*` | — | Image/CLIP HTTP endpoint |
 
-Global: `qql --url http://host:6333 exec "…"`.
+Global: `qql --url http://host:6333 run "…"`.
 
 ### Edge
 
@@ -117,7 +120,7 @@ qql config edge \
   --embed-model all-minilm:l6-v2 \
   --embed-dim 384
 
-qql --edge exec "QUERY TEXT 'search' FROM docs USING dense LIMIT 5"
+qql --edge run "QUERY TEXT 'search' FROM docs USING dense LIMIT 5"
 qql --edge doctor
 qql edge optimize docs
 qql edge bootstrap docs --from http://localhost:6333

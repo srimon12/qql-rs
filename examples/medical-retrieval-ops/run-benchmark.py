@@ -37,7 +37,7 @@ QQL_BIN = os.environ.get("QQL_BIN", "/data/codebases/qql-rs/target/debug/qql")
 
 
 def run_statement(statement: str) -> dict[str, object]:
-    raw = subprocess.check_output([QQL_BIN, "exec", "--quiet", "--json", statement], text=True)
+    raw = subprocess.check_output([QQL_BIN, "run", "--quiet", "--json", statement], text=True)
     payload = json.loads(raw)
     if not payload.get("ok"):
         raise SystemExit(raw)

@@ -126,8 +126,8 @@ pub async fn run_repl(
                 continue;
             }
 
-            if let Some(args) = cut_command_prefix(trimmed, "execute")
-                .or_else(|| cut_command_prefix(trimmed, "\\e"))
+            if let Some(args) =
+                cut_command_prefix(trimmed, "run").or_else(|| cut_command_prefix(trimmed, "\\e"))
             {
                 let _ = rl.add_history_entry(trimmed);
                 match crate::script::read_script(&args) {
@@ -164,7 +164,7 @@ pub async fn run_repl(
                         }
                         let elapsed = start.elapsed();
                         crate::output::print_success(&format!(
-                            "Executed script '{}' ({} succeeded, {} failed in {:.2?})",
+                            "Ran script '{}' ({} succeeded, {} failed in {:.2?})",
                             args, ok_count, fail_count, elapsed
                         ));
                     }
@@ -360,7 +360,7 @@ fn print_repl_help() {
   \x1b[36mparam [k=v]\x1b[0m, \x1b[36m\\p\x1b[0m    Set, inspect, or clear session query parameters\n\
   \x1b[36mfmt <qql>\x1b[0m, \x1b[36m\\f\x1b[0m      Format QQL into canonical syntax\n\
   \x1b[36mexplain <qql>\x1b[0m     Show hierarchical tree query execution plan\n\
-  \x1b[36mexecute <file>\x1b[0m, \x1b[36m\\e\x1b[0m Execute a .qql script file against Qdrant\n\
+  \x1b[36mrun <file>\x1b[0m, \x1b[36m\\e\x1b[0m      Run a .qql script file against Qdrant\n\
   \x1b[36mdump <name> <file>\x1b[0m Dump collection schema and points to .qql\n\
   \x1b[36mexit\x1b[0m, \x1b[36mquit\x1b[0m, \x1b[36m\\q\x1b[0m    Exit the shell\n\
 \n\x1b[1mKeyboard Shortcuts:\x1b[0m\n\

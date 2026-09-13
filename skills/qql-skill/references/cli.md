@@ -25,7 +25,7 @@ echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.jsonl --qql-out capture.qql
 ```
 
-- `lint`: Static analysis and plan verification for QQL scripts. Recovers past syntax errors, compiles plans, flags redundant `WITH PAYLOAD true`, renders codeframes, and autofixes with `--fix` / `--write`.
+- `lint`: Static analysis and plan verification for QQL scripts. Recovers past syntax errors, compiles plans, flags redundant `WITH PAYLOAD true`, renders codeframes, and autofixes with `--fix` / `--write`. Binds `:name` / `?` via `-p`/`--params-file` or a `-- qql-params: {...}` header. Bare `qql lint` checks the working tree (pipes feed stdin).
 - `fmt`: Canonicalizes QQL. `--check` verifies formatting in CI. `--write` rewrites in place.
 - `explain`: Prints hierarchical ASCII plan tree with zero Qdrant I/O. Accepts `-p`/`--param` and `--params-file`.
 - `convert`: Translates REST JSON into typed QQL.
@@ -35,15 +35,16 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.
 
 ```bash
 qql run "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
-qql run script.qql -p category=papers
-qql exec "SHOW COLLECTIONS"
-qql execute script.qql --stop-on-error
+qql run script.qql
+qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=hello -p lim=5
+qql run "SHOW COLLECTIONS"
+qql run script.qql --stop-on-error
 qql doctor "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
 qql check "QUERY 'hello' FROM docs USING dense LIMIT 5"
 ```
 
-- `run`: Smart runner. Automatically detects whether the argument is an inline query string or a `.qql` script file.
-- `exec` and `execute`: Aliases for running an inline string or file respectively.
+- `run`: Smart runner. Automatically detects whether the argument is an inline query string or a `.qql` script file. `-p`/`--params-file` bind inline-query placeholders only (rejected with script files).
+- `run` is the only execution spelling: inline string or `.qql` file, auto-detected.
 - `doctor "<query>"` (alias `check`): 5-stage live triage loop (format, offline plan, embedder probe, vector topology, backend health). Exits non-zero on first failure. Note: requires live backend reachability.
 
 ### Tier 3: Cluster operations & setup

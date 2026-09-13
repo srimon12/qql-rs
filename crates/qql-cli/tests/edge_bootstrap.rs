@@ -45,7 +45,7 @@ fn edge_bootstrap_seeds_from_remote_shard_snapshot() {
         command.args([
             "--url",
             &url,
-            "exec",
+            "run",
             &format!("CREATE COLLECTION {collection} (dense VECTOR(4, COSINE));"),
         ]);
         command
@@ -57,7 +57,7 @@ fn edge_bootstrap_seeds_from_remote_shard_snapshot() {
         command.args([
             "--url",
             &url,
-            "exec",
+            "run",
             &format!(
                 "UPSERT INTO {collection} VALUES \
                  {{id: 1, vector: {{dense: [0.1, 0.2, 0.3, 0.4]}}}}, \
@@ -133,7 +133,7 @@ fn edge_bootstrap_seeds_from_remote_shard_snapshot() {
         command.args([
             "--url",
             &url,
-            "exec",
+            "run",
             &format!("DROP COLLECTION {collection};"),
         ]);
         command

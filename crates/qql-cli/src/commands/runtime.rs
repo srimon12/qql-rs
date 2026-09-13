@@ -85,7 +85,7 @@ pub(crate) async fn probe_embed_dim(
     embedder.probe_dimension("qql doctor probe").await
 }
 
-/// Explain a query, binding `params` on the AST — the same binding `exec`
+/// Explain a query, binding `params` on the AST — the same binding `run`
 /// uses — so placeholders (`:rows`, `:q`, `?`) explain exactly as executed.
 pub(crate) fn explain_query_bound(
     query: &str,

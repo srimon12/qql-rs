@@ -162,7 +162,7 @@ pub async fn handle_setup(opts: SetupOptions) -> Result<(), Box<dyn std::error::
     println!("\nYou are ready! Try:");
     println!("  • \x1b[36mqql repl\x1b[0m              (interactive shell)");
     println!("  • \x1b[36mqql doctor\x1b[0m            (full connectivity & embedder diagnostics)");
-    println!("  • \x1b[36mqql exec \"SHOW COLLECTIONS\"\x1b[0m");
+    println!("  • \x1b[36mqql run \"SHOW COLLECTIONS\"\x1b[0m");
     Ok(())
 }
 

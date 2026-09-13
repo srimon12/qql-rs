@@ -1,12 +1,12 @@
 ---
 title: "Dump and restore"
-description: "Export a collection to a replayable .qql script with qql dump and restore it with qql execute."
+description: "Export a collection to a replayable .qql script with qql dump and restore it with qql run."
 sidebar:
   order: 1
 ---
 
 `qql dump` exports one collection as schema plus points in a plain `.qql`
-script. Restore is a replay: `qql execute` runs the file statement by
+script. Restore is a replay: `qql run` runs the file statement by
 statement. Nothing in the file is a stub. Vectors are literal values, so the
 script replans and replays on any cluster that accepts the schema.
 
@@ -99,7 +99,7 @@ the first failing statement instead of continuing through the rest of the
 file.
 
 {% terminal title="Restore a dump" %}
-qql execute docs.qql --stop-on-error
+qql run docs.qql --stop-on-error
 {% /terminal %}
 
 The runner prints a JSON summary with `ok`, `command`, `path`,

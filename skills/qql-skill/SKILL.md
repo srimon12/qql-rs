@@ -157,16 +157,18 @@ Named placeholders use `:name`. Positional placeholders use `?`. Dotted paths bi
 ## CLI
 
 ```text
-qql exec <query> [--json]              Execute one QQL statement
-qql execute <file.qql>                 Execute a script file
+qql lint [path] [--fix] [--json]       Offline syntax + plan check with autofix
+qql run <query|file.qql> [--json]      Run one statement or a script
 qql explain <query> [--json]           Print the plan tree, no I/O
+qql doctor [query] [--json]            Cluster health, or 5-stage triage (alias: check)
+qql setup [--url U] [--yes]            Connection wizard -> ~/.qql/config.json (0600)
+qql config show|get|set|path           Inspect persistent settings
 qql convert [file.json]                REST JSON to QQL
 qql record [--listen A] [--target B]   Capture live traffic plus QQL
 qql fmt [file.qql] [--check] [--write] Canonical formatter
 qql dump <coll> <out.qql>              Dump collection to QQL
 qql migrate <coll> [--to X]            Copy schema plus points, with verify and cutover
-qql doctor [--json]                    Connection health and model hosts
-qql connect | qql repl                 Interactive REPL
+qql repl (alias: connect)              Interactive REPL
 qql edge bootstrap | qql --edge ...    Edge seed and local execution
 qql version                            Version
 ```

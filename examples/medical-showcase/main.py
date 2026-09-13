@@ -23,7 +23,7 @@ COL = "medical_showcase"
 
 def qql_exec(stmt: str) -> dict:
     # Prefer JSON without --quiet so successful DDL always emits a report body.
-    r = subprocess.run([QQL, "exec", "--json", stmt], capture_output=True, text=True)
+    r = subprocess.run([QQL, "run", "--json", stmt], capture_output=True, text=True)
     out = (r.stdout or "").strip()
     if not out:
         raise RuntimeError(r.stderr or f"exit {r.returncode}")

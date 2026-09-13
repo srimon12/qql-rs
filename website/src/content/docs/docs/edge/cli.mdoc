@@ -17,20 +17,20 @@ command to route it to the in-process backend instead of `QDRANT_URL`:
 
 | Command | Remote form | Edge form |
 |---|---|---|
-| Run one statement or script | `qql exec "…"` | `qql --edge exec "…"` |
-| Run a `.qql` file | `qql execute file.qql` | `qql --edge execute file.qql` |
-| Interactive REPL | `qql connect` | `qql --edge connect` |
+| Run one statement or script | `qql run "…"` | `qql --edge run "…"` |
+| Run a `.qql` file | `qql run file.qql` | `qql --edge run file.qql` |
+| Interactive REPL | `qql repl` | `qql --edge repl` |
 | Export a collection | `qql dump docs out.qql` | `qql --edge dump docs out.qql` |
 | Health check | `qql doctor` | `qql --edge doctor` |
 | Merge segments / build indexes | — | `qql edge optimize docs` |
 | Seed from a remote shard snapshot | — | `qql edge bootstrap docs --from http://host:6333` |
 
 {% terminal title="Edge examples" %}
-qql --edge exec "SHOW COLLECTIONS"
-qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"
-qql --edge execute first-local.qql
+qql --edge run "SHOW COLLECTIONS"
+qql --edge run "QUERY 'hello' FROM docs USING dense LIMIT 5"
+qql --edge run first-local.qql
 qql --edge dump docs backup.qql
-qql --edge connect
+qql --edge repl
 qql edge optimize docs
 qql edge bootstrap docs --from http://localhost:6333
 {% /terminal %}

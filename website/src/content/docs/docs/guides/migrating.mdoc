@@ -441,8 +441,8 @@ No migration needed. These additions replace common workarounds.
   connection with `execute`, `executemany`, `fetchone`, `fetchmany`,
   `fetchall`, `nextset`, iteration, `description`, and `rowcount`. `commit()`
   is a documented no-op; `rollback()` raises `NotSupportedError`.
-- **CLI**: `--param key=value` / `--params-file <path>` on `qql exec` and
-  `qql explain`, a `\param` REPL command, `qql check` staged triage, `qql
+- **CLI**: `--param key=value` / `--params-file <path>` on `qql run` and
+  `qql explain`, a `\param` REPL command, `qql doctor "<query>"` (alias `check`) staged triage, `qql
   migrate` for cluster-to-cluster moves, and sharded `qql dump` output that
   round-trips `CREATE SHARD KEY` plus per-shard `SHARD`-routed upserts.
 - **Embedder parity**: Python `HttpEmbedder` gains the multi, image, and rerank

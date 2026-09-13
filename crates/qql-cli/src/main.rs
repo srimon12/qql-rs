@@ -1,4 +1,4 @@
-//! `qql` — Qdrant Query Language CLI: query exec, scripts, explain, REPL,
+//! `qql` — Qdrant Query Language CLI: query runs, scripts, explain, REPL,
 //! REST→QQL conversion, collection dump, cluster migrate, formatting, and
 //! edge configuration.
 use clap::Parser;
@@ -52,19 +52,26 @@ enum Command {
         #[arg(long)]
         embed_dim: Option<usize>,
         /// Run non-interactively without prompting
-        #[arg(long, short = 'y')]
+        #[arg(long, short = 'y', visible_alias = "yes")]
         non_interactive: bool,
     },
     /// Lint QQL source files or statements (offline: syntax recovery, plan check, autofix)
     Lint {
-        /// Path to .qql file, directory, or inline statement (or stdin if omitted)
+        /// Path to .qql file, directory, or inline statement (working tree when
+        /// interactive with no target, stdin when piped)
         file: Option<String>,
-        /// Check formatting and syntax without writing; exit non-zero if issues found
-        #[arg(long)]
+        /// Check-only mode (the default): report issues without writing; exit non-zero if found
+        #[arg(long, conflicts_with = "fix")]
         check: bool,
         /// Automatically apply safe fixes (duplicate clauses, redundant payload, canonical formatting)
         #[arg(long, aliases = ["write", "fix"])]
         fix: bool,
+        /// Parameter in key=value format (can be specified multiple times)
+        #[arg(long = "param", short = 'p')]
+        params: Vec<String>,
+        /// Path to JSON file containing parameter map or positional array
+        #[arg(long = "params-file")]
+        params_file: Option<PathBuf>,
         /// Output diagnostics as JSON
         #[arg(long)]
         json: bool,
@@ -72,9 +79,8 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
     },
-    /// Execute a QQL query string or script file
-    #[command(alias = "run")]
-    Exec {
+    /// Run a QQL query string or script file against the backend
+    Run {
         /// QQL query string or path to .qql script file
         query: String,
         /// Parameter in key=value format (can be specified multiple times)
@@ -90,14 +96,6 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
         /// Stop on first error when executing a script file
-        #[arg(long)]
-        stop_on_error: bool,
-    },
-    /// Execute multiple QQL queries from a file
-    Execute {
-        /// Path to .qql script file
-        file: String,
-        /// Stop on first error
         #[arg(long)]
         stop_on_error: bool,
     },
@@ -134,7 +132,7 @@ enum Command {
         /// Path to .qql file (or stdin if omitted)
         file: Option<String>,
         /// Check formatting without writing; exit non-zero if changes are needed
-        #[arg(long)]
+        #[arg(long, conflicts_with = "write")]
         check: bool,
         /// Write the formatted output back to the file
         #[arg(long)]
@@ -161,6 +159,7 @@ enum Command {
         command: Box<EdgeCommand>,
     },
     /// Check Qdrant connection health or triage a specific query
+    #[command(visible_alias = "check")]
     Doctor {
         /// Optional query string to triage (format, plan, embed probe, topology, doctor)
         query: Option<String>,
@@ -193,23 +192,6 @@ enum Command {
         /// become `-- ERROR <file:line> <error>` comments)
         #[arg(long)]
         qql_out: Option<PathBuf>,
-    },
-    /// Triage one statement: format, explain, embed probe, topology, doctor
-    Check {
-        /// QQL query string (e.g., "QUERY 'hello' FROM docs LIMIT 5")
-        query: String,
-        /// Parameter in key=value format (can be specified multiple times)
-        #[arg(long = "param", short = 'p')]
-        params: Vec<String>,
-        /// Path to JSON file containing parameter map or positional array
-        #[arg(long = "params-file")]
-        params_file: Option<PathBuf>,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-        /// Quiet mode
-        #[arg(long, short)]
-        quiet: bool,
     },
     /// Configure persistent CLI settings
     Config {
@@ -512,7 +494,7 @@ enum EdgeCommand {
     },
 }
 
-/// Named/positional params for `qql exec`. Bound on the AST (not string-spliced)
+/// Named/positional params for `qql run`. Bound on the AST (not string-spliced)
 /// so `UPSERT … VALUES :rows` can take a JSON array of point objects.
 fn collect_exec_params(
     params: &[String],
@@ -643,6 +625,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|| (!config.url.trim().is_empty()).then_some(config.url.clone()))
         .unwrap_or_else(|| "http://localhost:6333".to_string());
 
+    // SAFETY: Called at process startup in single-threaded `run()` before any tasks
+    // or threads are spawned. Ensures CLI `--api-key` propagates to any component
+    // reading `QDRANT_API_KEY` from the environment.
+    if let Some(ref key) = cli.api_key {
+        unsafe {
+            std::env::set_var("QDRANT_API_KEY", key);
+        }
+    }
+
     match cli.command.unwrap_or(Command::Repl) {
         Command::Setup {
             embed_url,
@@ -665,10 +656,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             file,
             check,
             fix,
+            params,
+            params_file,
             json,
             quiet,
-        } => commands::handle_lint(file.as_deref(), check, fix, json, quiet),
-        Command::Exec {
+        } => {
+            let lint_params = collect_exec_params(&params, params_file.as_ref())?;
+            commands::handle_lint(
+                file.as_deref(),
+                check,
+                fix,
+                lint_params.as_ref(),
+                json,
+                quiet,
+            )
+        }
+        Command::Run {
             query,
             params,
             params_file,
@@ -688,10 +691,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await
         }
-        Command::Execute {
-            file,
-            stop_on_error,
-        } => commands::handle_execute_file(&url, use_edge, &file, stop_on_error).await,
         Command::Explain {
             query,
             params,
@@ -923,16 +922,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await
         .map_err(|e| e as Box<dyn std::error::Error>),
-        Command::Check {
-            query,
-            params,
-            params_file,
-            json,
-            quiet,
-        } => {
-            let check_params = collect_exec_params(&params, params_file.as_ref())?;
-            commands::handle_check(&url, use_edge, &query, check_params.as_ref(), json, quiet).await
-        }
         Command::Config { command } => match *command {
             ConfigCommand::Show { json } => commands::handle_config_show(json),
             ConfigCommand::Get { key } => commands::handle_config_get(&key),
@@ -1037,7 +1026,7 @@ mod tests {
     #[test]
     fn test_explain_binds_rows_params() {
         // Whole-point placeholders bind on the AST, so explain accepts the
-        // same `:rows` batch files as exec (no string splicing).
+        // same `:rows` batch files as run (no string splicing).
         let params = serde_json::json!({"rows": [{"id": 1}]});
         commands::handle_explain(
             "UPSERT INTO docs VALUES :rows WAIT true;",
