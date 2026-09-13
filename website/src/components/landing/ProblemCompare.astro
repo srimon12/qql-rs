@@ -1,5 +1,6 @@
 ---
 import { Code } from "@astrojs/starlight/components";
+import CopyButton from "@qql/ui/CopyButton.astro";
 
 interface Props {
 	heading: string;
@@ -527,16 +528,7 @@ const lines = (source: string) => source.trim().split("\n").length;
                 <span class="min-w-0 truncate text-[var(--sl-color-gray-3)]">universal query</span>
                 <span class="flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">
                   {lines(preset.qql)} lines
-                  <button
-                    type="button"
-                    class="link inline-flex items-center gap-1"
-                    data-copy-target={`qql-${preset.id}`}
-                    title="Copy QQL"
-                    aria-label="Copy QQL code"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                    <span class="landing-copy-feedback font-mono text-[0.65rem]">Copied</span>
-                  </button>
+                  <CopyButton target={`#qql-${preset.id}`} variant="icon" title="Copy QQL" ariaLabel="Copy QQL code" />
                 </span>
               </div>
               <div class="code-flat landing-compare__code-wrapper" id={`qql-${preset.id}`}>
@@ -559,16 +551,12 @@ const lines = (source: string) => source.trim().split("\n").length;
                     <span class="min-w-0 truncate text-[var(--sl-color-gray-3)]">{f.badge}</span>
                     <span class="flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">
                       {lines(preset.codes[f.id])} lines
-                      <button
-                        type="button"
-                        class="link inline-flex items-center gap-1"
-                        data-copy-target={`raw-${preset.id}-${f.id}`}
+                      <CopyButton
+                        target={`#raw-${preset.id}-${f.id}`}
+                        variant="icon"
                         title={`Copy ${f.label} code`}
-                        aria-label={`Copy ${f.label} code`}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                        <span class="landing-copy-feedback font-mono text-[0.65rem]">Copied</span>
-                      </button>
+                        ariaLabel={`Copy ${f.label} code`}
+                      />
                     </span>
                   </div>
                   <div class="code-flat landing-compare__code-wrapper" id={`raw-${preset.id}-${f.id}`}>
@@ -620,7 +608,6 @@ const lines = (source: string) => source.trim().split("\n").length;
     const stat = root.querySelector("[data-stat]");
     const reduction = root.querySelector("[data-reduction]");
     const play = root.querySelector<HTMLAnchorElement>("[data-play]");
-    const copyBtns = [...root.querySelectorAll<HTMLButtonElement>("[data-copy-target]")];
     const codePanes = [...root.querySelectorAll<HTMLElement>(".landing-compare__code-wrapper pre")];
 
     const formatLabels: Record<string, string> = {
@@ -772,32 +759,7 @@ const lines = (source: string) => source.trim().split("\n").length;
       });
     });
 
-    // Copy to clipboard — success and failure both reach pointer users via
-    // the feedback badge and assistive-tech users via the button's label.
-    copyBtns.forEach((btn) => {
-      const feedback = btn.querySelector(".landing-copy-feedback");
-      const originalLabel = btn.getAttribute("aria-label") ?? "Copy";
-      const flash = (message: string, ok: boolean) => {
-        if (feedback) feedback.textContent = message;
-        btn.classList.add("is-copied");
-        btn.setAttribute("aria-label", ok ? "Copied" : "Copy failed");
-        setTimeout(() => {
-          btn.classList.remove("is-copied");
-          if (feedback) feedback.textContent = "Copied";
-          btn.setAttribute("aria-label", originalLabel);
-        }, 2000);
-      };
-      btn.addEventListener("click", () => {
-        const targetId = btn.dataset.copyTarget;
-        if (!targetId) return;
-        const targetEl = document.getElementById(targetId);
-        if (!targetEl) return;
-        navigator.clipboard.writeText(targetEl.innerText.trim()).then(
-          () => flash("Copied", true),
-          () => flash("Copy failed", false),
-        );
-      });
-    });
+    // Copy buttons are owned by @qql/ui CopyButton (data-copy-target).
 
     syncScrollable();
     sync(true);

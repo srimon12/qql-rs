@@ -7,7 +7,6 @@ import sitemap from "@astrojs/sitemap";
 import starlight from "@astrojs/starlight";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
-import starlightCopyButton from "starlight-copy-button";
 import starlightLlmsTxt from "starlight-llms-txt";
 
 const SITE_URL = "https://qql.veristamp.in";
@@ -125,16 +124,17 @@ export default defineConfig(
 						qqlCodeTheme("qql-dark", "dark", syntaxDark, "#1c1b19"),
 						qqlCodeTheme("qql-light", "light", syntaxLight, "#fbfaf5"),
 					],
+					// The site ships its own copy button (@qql/ui CopyButton +
+					// scripts/copy.ts) on every code frame and docs page; EC's
+					// built-in button is redundant.
+					frames: { showCopyToClipboardButton: false },
 					shiki: {
 						// Reuse the VS Code TextMate grammar so documentation and editor
 						// highlighting recognize the same QQL vocabulary.
 						langs: [qqlGrammar],
 					},
 				},
-				plugins: [
-					starlightCopyButton(),
-					starlightLlmsTxt({ projectName: "QQL" }),
-				],
+				plugins: [starlightLlmsTxt({ projectName: "QQL" })],
 				title: "QQL Documentation",
 				favicon: "/favicon.ico",
 				description:

@@ -8,6 +8,8 @@
 		"./types": "./src/types.ts",
 		"./styles.css": "./src/styles/styles.css",
 		"./ec-theme.css": "./src/styles/ec-theme.css",
+		"./copy": "./src/scripts/copy.ts",
+		"./CopyButton.astro": "./src/components/CopyButton.astro",
 		"./DocsFooter.astro": "./src/components/DocsFooter.astro",
 		"./DocsHeader.astro": "./src/components/DocsHeader.astro",
 		"./BrandMark.astro": "./src/components/BrandMark.astro",

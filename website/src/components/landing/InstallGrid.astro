@@ -1,4 +1,6 @@
 ---
+import CopyButton from "@qql/ui/CopyButton.astro";
+
 interface Props {
 	heading: string;
 	sub: string;
@@ -32,15 +34,11 @@ const { heading, sub, installs, footHref, footLabel } = Astro.props;
             </div>
             <div class="flex items-center gap-3">
               <code class="min-w-0 flex-1 truncate font-mono text-[0.72rem] text-[var(--sl-color-gray-2)]" title={item.cmd}>{item.cmd}</code>
-              <button
-                type="button"
-                class="link install-copy shrink-0 font-mono text-[0.65rem]"
-                data-install-copy
-                data-copy={item.cmd}
-                aria-label={`Copy the ${item.name} install command`}
-              >
-                Copy
-              </button>
+              <CopyButton
+                text={item.cmd}
+                class="shrink-0"
+                ariaLabel={`Copy the ${item.name} install command`}
+              />
             </div>
             {item.note && <p class="m-0 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)]">{item.note}</p>}
           </li>
@@ -57,27 +55,3 @@ const { heading, sub, installs, footHref, footLabel } = Astro.props;
     }
   </div>
 </section>
-
-<script>
-  document.querySelectorAll<HTMLButtonElement>("[data-install-copy]").forEach((button) => {
-    const label = button.textContent?.trim() ?? "Copy";
-    button.addEventListener("click", () => {
-      navigator.clipboard.writeText(button.dataset.copy ?? "").then(
-        () => {
-          button.textContent = "Copied";
-          button.classList.add("is-copied");
-          setTimeout(() => {
-            button.textContent = label;
-            button.classList.remove("is-copied");
-          }, 1600);
-        },
-        () => {
-          button.textContent = "Failed";
-          setTimeout(() => {
-            button.textContent = label;
-          }, 1600);
-        },
-      );
-    });
-  });
-</script>

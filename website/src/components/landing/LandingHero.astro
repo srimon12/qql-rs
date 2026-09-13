@@ -1,4 +1,6 @@
 ---
+import CopyButton from "@qql/ui/CopyButton.astro";
+
 interface Props {
 	headline: string;
 	lede: string;
@@ -48,16 +50,13 @@ const {
 
       <div class="mt-5 flex items-center gap-3">
         <code id="hero-install-cmd" class="min-w-0 truncate font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</code>
-        <button
-          type="button"
-          class="link inline-flex shrink-0 items-center gap-1.5 font-mono text-[0.7rem]"
+        <CopyButton
           id="hero-copy-btn"
+          target="#hero-install-cmd"
           title="Copy install command"
-          aria-label="Copy install command"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-          <span class="landing-copy-label">Copy</span>
-        </button>
+          ariaLabel="Copy install command"
+          class="shrink-0"
+        />
       </div>
     </div>
 
@@ -79,31 +78,3 @@ const {
     </figure>
   </div>
 </section>
-
-<script>
-  const copyBtn = document.getElementById("hero-copy-btn");
-  const cmdEl = document.getElementById("hero-install-cmd");
-  const heroCopyLabel = "Copy install command";
-  if (copyBtn && cmdEl) {
-    const label = copyBtn.querySelector(".landing-copy-label");
-    const flash = (text: string, ok: boolean) => {
-      copyBtn.classList.toggle("is-copied", ok);
-      if (label) label.textContent = text;
-      copyBtn.setAttribute(
-        "aria-label",
-        ok ? `Copied. ${heroCopyLabel}` : `Copy failed. ${heroCopyLabel}`,
-      );
-      setTimeout(() => {
-        copyBtn.classList.remove("is-copied");
-        if (label) label.textContent = "Copy";
-        copyBtn.setAttribute("aria-label", heroCopyLabel);
-      }, 2000);
-    };
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(cmdEl.innerText.trim()).then(
-        () => flash("Copied", true),
-        () => flash("Copy failed", false),
-      );
-    });
-  }
-</script>

@@ -192,7 +192,6 @@ body:not(.app-shell) :is(h1, h2) {
 .code-flat .expressive-code pre { background: transparent; border: 0; box-shadow: none; margin: 0; padding: 0; }
 .code-flat .expressive-code pre { overflow-x: auto; scrollbar-width: none; }
 .code-flat .expressive-code pre > code { padding-block: 0.75rem; font-size: 0.75rem; line-height: 1.65; }
-.code-flat .expressive-code .copy { display: none; }
 .terminal-wrap .expressive-code pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
 
 /* ── Landing ────────────────────────────────────────────────────────────── */
@@ -236,9 +235,21 @@ html.js .reveal.is-in { opacity: 1; transform: none; }
 :root[data-theme="light"] .cta-band__foot { color: #8b887e; }
 :root[data-theme="light"] .cta-band .btn--ghost { border-color: #3a3833; color: #f6f4ee; }
 :root[data-theme="light"] .cta-band .btn--ghost:hover { border-color: #5c5a52; background: #1c1b19; }
-.landing-copy-feedback { display: none; }
-.is-copied .landing-copy-feedback { display: inline; }
-#hero-copy-btn.is-copied, .install-copy.is-copied { color: var(--q-ok); }
+/* Copy buttons: one component for every surface (see scripts/copy.ts). */
+.copy-btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0; border: 0; background: none; color: var(--sl-color-gray-3); font-family: var(--sl-font-mono); font-size: 0.72rem; cursor: pointer; transition: color 160ms; }
+.copy-btn:hover { color: var(--sl-color-white); }
+.copy-btn[data-copied] { color: var(--q-ok); }
+.copy-btn[data-copied] .copy-btn__icon--copy { display: none; }
+.copy-btn[data-copied] .copy-btn__icon--check { display: block; }
+.copy-btn[data-copied-failed] { color: var(--q-bad); }
+.copy-btn__icon { width: 0.85rem; height: 0.85rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.copy-btn__icon--check { display: none; }
+.copy-btn--icon .copy-btn__label { display: none; }
+.copy-btn--frame { position: absolute; top: 0.5rem; right: 0.5rem; z-index: 2; padding: 0.28rem; border: 1px solid transparent; border-radius: 6px; }
+.copy-btn--frame:hover { border-color: var(--sl-color-gray-5); background: var(--sl-color-bg); }
+.copy-btn--page { padding: 0.4rem 0.75rem; border: 1px solid var(--sl-color-gray-5); border-radius: var(--q-r-sm); background: var(--sl-color-gray-6); }
+.copy-btn--page:hover { border-color: var(--sl-color-gray-4); }
+.docs-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 
 /* ── Site chrome (landing + playground) ─────────────────────────────────── */
 .site-header {

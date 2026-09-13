@@ -149,3 +149,10 @@ for (let i = 0; i < pathSegments.length; i++) {
     />
   )
 }
+
+<script>
+  import { mountDocsCopy } from "@qql/ui/copy";
+
+  mountDocsCopy();
+  document.addEventListener("astro:page-load", () => mountDocsCopy());
+</script>
