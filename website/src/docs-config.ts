@@ -25,7 +25,7 @@ export const footerConfig: DocsFooterConfig = {
 			title: "Product",
 			items: [
 				{
-					label: "Getting Started",
+					label: "Start",
 					href: `${APPS.docs.url}/getting-started/`,
 				},
 				{ label: "Guides", href: `${APPS.docs.url}/guides/` },

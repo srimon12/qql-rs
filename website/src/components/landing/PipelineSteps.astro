@@ -19,7 +19,7 @@ const { heading, sub, steps } = Astro.props;
       {
         steps.map((item) => (
           <li class="bg-[var(--sl-color-bg)] p-5 sm:p-6">
-            <span class="font-mono text-[0.6875rem] tracking-[0.12em] text-[var(--sl-color-gray-3)]">{item.step}</span>
+            <span class="font-mono text-[0.6875rem] font-semibold tracking-[0.12em] text-[var(--sl-color-accent-high)]">{item.step}</span>
             <h3 class="mt-2 mb-0 text-[1.05rem] font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">{item.title}</h3>
             <p class="mt-2 mb-0 text-sm leading-relaxed text-[var(--sl-color-gray-2)]">{item.detail}</p>
           </li>
