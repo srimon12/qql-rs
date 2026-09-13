@@ -62,7 +62,8 @@ pub async fn run_repl(
 
             if lower == "doctor" || lower == "\\d" {
                 let _ = rl.add_history_entry(trimmed);
-                let _ = crate::commands::handle_doctor(url, use_edge, false, false).await;
+                let _ =
+                    crate::commands::handle_doctor(url, use_edge, None, None, false, false).await;
                 continue;
             }
 

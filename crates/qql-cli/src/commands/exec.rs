@@ -4,6 +4,24 @@ use super::runtime::{executor, explain_query_bound};
 use crate::output;
 use crate::script;
 
+pub async fn handle_run_smart(
+    url: &str,
+    use_edge: bool,
+    query_or_file: &str,
+    params: Option<&serde_json::Value>,
+    stop_on_error: bool,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let p = std::path::Path::new(query_or_file);
+    let is_file = p.is_file() || (!query_or_file.contains('\n') && query_or_file.ends_with(".qql"));
+    if is_file {
+        handle_execute_file(url, use_edge, query_or_file, stop_on_error).await
+    } else {
+        handle_exec(url, use_edge, query_or_file, params, json, quiet).await
+    }
+}
+
 pub async fn handle_exec(
     url: &str,
     use_edge: bool,

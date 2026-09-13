@@ -16,11 +16,12 @@ Command-flag reference here; if you don't know which command you need, start at 
 
 ## Global flags
 
-The two flags below apply to every subcommand.
+The flags below apply across all subcommands.
 
 | Flag | Purpose |
 |---|---|
-| `--url <URL>` | Qdrant endpoint. Overrides `QDRANT_URL` when supplied; defaults to `http://localhost:6333`. |
+| `--url <URL>` | Qdrant endpoint. Overrides `QDRANT_URL` and `~/.qql/config.json`; defaults to `http://localhost:6333`. |
+| `--api-key <KEY>` | Qdrant API key. Overrides `QDRANT_API_KEY` and `~/.qql/config.json`. |
 | `--edge` | Execute supported commands against the configured in-process edge backend. Requires an edge-enabled build. |
 
 {% aside type="note" title="gRPC endpoint selection" %}
@@ -28,25 +29,24 @@ A URL containing `:6334` selects the gRPC transport when the CLI was built with
 the `grpc` feature. Otherwise the REST transport is used.
 {% /aside %}
 
-## Command reference
+## Configuration precedence
 
-| Command | Purpose |
-|---|---|
-| `qql [repl\|connect]` | Interactive REPL shell with multiline continuation and live diagnostics (default when run without arguments in a TTY) |
-| `qql exec "<query>"` | Execute one statement or an inline semicolon-delimited script (`--json` for JSON output, `-q`/`--quiet`; `--param key=value` / `--params-file params.json` bind `:name` / `?` on the AST) |
-| `qql execute file.qql` | Execute a script file (`--stop-on-error`; prints a JSON summary `{ok, command, path, succeeded, failed, message}`) |
-| `qql explain "<query>"` | Show the hierarchical execution plan tree without a backend (ASCII tree; JSON with `--json`; accepts the same `--param` / `--params-file` bindings) |
-| `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file; `--collection` names the collection for bare bodies — see Operations > [Convert REST JSON](/docs/operations/convert/)) |
-| `qql record` | Transparent REST recorder: proxy a live app, forward requests unchanged, append wrapped JSONL + converted QQL (opt-in `--features record` build) |
-| `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
-| `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; see Operations > [Dump and restore](/docs/operations/backup-restore/)) |
-| `qql migrate <collection>` | Copy schema + points to another cluster or collection (see below) |
-| `qql doctor` | Check backend reachability, probe the embedder dim, and compare it against EMBED_DIM and collection vector sizes (`--json`) |
-| `qql check "<query>"` | Triage one statement in order: format, offline explain, embed dim probe, USING topology, backend doctor (one line per stage; `--json`) |
-| `qql config edge` | Configure persistent edge settings (see below) |
-| `qql edge optimize <collection>` | Run the qdrant-edge optimizers (merge segments, build HNSW/sparse indexes); prints counts before/after (`--json`) |
-| `qql edge bootstrap <collection> --from <url>` | Seed a local edge collection from a remote Qdrant shard snapshot (`--shard-id`, `--force`, `--json`) |
-| `qql version` | Print version as JSON |
+QQL resolves server endpoints and credentials using the following hierarchy (highest to lowest precedence):
+
+1. **CLI flags**: `--url <URL>` and `--api-key <KEY>` passed directly on the command line.
+2. **Environment variables**: `QDRANT_URL` and `QDRANT_API_KEY`.
+3. **User configuration**: `~/.qql/config.json` (managed via `qql setup` or `qql config set`).
+4. **Default fallback**: `http://localhost:6333` with no API key.
+
+## Three-tier mental model
+
+CLI operations are organized into three distinct tiers:
+
+| Tier | Focus | Connectivity | Primary commands |
+|---|---|---|---|
+| **Tier 1: Offline & CI** | Source text, syntax, AST, formatting | 100% offline (no backend needed) | `qql lint`, `qql fmt`, `qql explain`, `qql convert` |
+| **Tier 2: Live Query** | Single statement execution and triage | Requires target backend | `qql run` (`exec`/`execute`), `qql doctor "<query>"` (`check`) |
+| **Tier 3: Cluster & Tooling** | Cluster health, config, data migration, REPL | Requires target backend | `qql setup`, `qql config`, `qql doctor`, `qql repl`, `qql dump`, `qql migrate` |
 
 {% qqlExample title="Executable input" %}
 ```sql
@@ -54,20 +54,246 @@ SHOW COLLECTIONS;
 ```
 {% /qqlExample %}
 
-{% terminal title="Execute, explain, and diagnose" %}
-qql exec "SHOW COLLECTIONS"
-qql exec --json "SHOW COLLECTIONS"
+{% terminal title="Everyday CLI usage across tiers" %}
+# Tier 1: Lint offline before committing
+qql lint ./queries/ --fix
 qql explain "QUERY 'quantum' FROM papers USING dense LIMIT 5"
-qql exec "QUERY TEXT :q FROM docs LIMIT :lim" -p q=text-search -p lim=5
-qql exec "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
-qql doctor --json
-qql check "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
-qql version
+
+# Tier 2: Run inline queries or script files with smart detection
+qql run "SHOW COLLECTIONS"
+qql run search.qql -p category=papers
+qql doctor "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+
+# Tier 3: Setup, cluster diagnostics, and interactive shell
+qql setup
+qql doctor
+qql repl
 {% /terminal %}
 
-## Migrate a collection
+---
 
-`qql migrate <collection>` copies schema and points to another cluster or collection. Use `--target-url` for a remote target and `--to` to rename.
+## Tier 1: Offline & CI Tools
+
+These commands perform static analysis, formatting, and AST transformations completely offline. They never initiate network connections.
+
+### `qql lint`
+
+Static analysis and plan verification for QQL scripts. Scans a file or recursively walks a directory (defaults to current directory if omitted).
+
+- **Syntax Error Recovery**: Parses all statements in a file, recovering past errors to report every syntax mistake in one run.
+- **Plan Validation**: Compiles statements through the query planner to catch structural, naming, and clause conflicts.
+- **Idiom Rules**: Flags anti-patterns such as redundant `WITH PAYLOAD true` clauses (payloads are included by default in QQL).
+- **Formatting Validation**: Checks whether the file conforms to canonical QQL formatting.
+- **Codeframe Display**: Renders terminal codeframes with file names, line numbers, and exact error locations.
+- **Autofix**: `--fix` (or `--write`) automatically applies canonical formatting and removes redundant clauses in place.
+- **Machine Output**: `--json` produces structured JSON reports for CI pipelines.
+
+{% terminal title="Lint files and autofix" %}
+# Lint current directory
+qql lint
+
+# Lint specific file or folder
+qql lint queries/search.qql
+qql lint ./scripts/
+
+# Automatically fix formatting and redundant clauses
+qql lint --fix
+qql lint --write queries/
+
+# Machine-readable JSON for CI
+qql lint --json
+{% /terminal %}
+
+### `qql fmt`
+
+Format QQL source into canonical style. Reads from a file or from stdin.
+
+- `--check`: Exits with code `1` if the file requires formatting without writing changes.
+- `--write`: Re-formats the file in place.
+
+{% terminal title="Format QQL source" %}
+# Format and print to stdout
+qql fmt query.qql
+cat query.qql | qql fmt
+
+# CI verification
+qql fmt --check query.qql
+
+# Format in place
+qql fmt --write query.qql
+{% /terminal %}
+
+### `qql explain`
+
+Inspect the hierarchical execution plan tree offline without sending requests to Qdrant.
+
+- Accepts inline query strings.
+- `--param key=value` (or `-p`): Binds named parameters (`:key`).
+- `--params-file <path>`: Binds parameters from a JSON file.
+- `--json`: Emits the plan tree as structured JSON.
+
+{% terminal title="Inspect execution plan" %}
+qql explain "QUERY 'quantum' FROM papers USING dense LIMIT 5"
+qql explain "QUERY TEXT :q FROM docs LIMIT :lim" -p q=search -p lim=10
+qql explain --json "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+{% /terminal %}
+
+### `qql convert` & `qql record`
+
+Convert Qdrant REST JSON payloads to idiomatic QQL statements.
+
+- `qql convert [file.json]`: Reads JSON from a file or stdin and renders canonical QQL. Use `--collection <name>` for bare request bodies.
+- `qql record`: Transparent proxy that records live application traffic to JSONL and produces converted QQL scripts (requires `--features record`).
+
+{% terminal title="Convert REST JSON" %}
+qql convert search.json
+cat payload.json | qql convert --collection docs
+{% /terminal %}
+
+See [Operations > Convert REST JSON](/docs/operations/convert/) for full details and examples.
+
+---
+
+## Tier 2: Live Query Execution & Triage
+
+These commands execute statements or troubleshoot individual query issues against a running backend.
+
+### `qql run` (aliases: `qql exec`, `qql execute`)
+
+Smart query runner that automatically detects whether the input argument is an inline query string or an existing `.qql` script file.
+
+- **Inline Query**: If the argument does not exist as a file, `qql run` treats it as an inline QQL string.
+- **Script File**: If the argument points to a `.qql` file, `qql run` executes the file statement-by-statement.
+- **Parameter Binding**: Supports `-p key=value` / `--param key=value` and `--params-file <path>`.
+- **Output Options**: `--json` outputs structured JSON results; `-q`/`--quiet` suppresses banners.
+- **Script Options**: `--stop-on-error` halts execution on the first failing statement.
+
+{% terminal title="Run queries and scripts" %}
+# Run inline statement
+qql run "SHOW COLLECTIONS"
+
+# Run inline query with parameters
+qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=database -p lim=5
+
+# Run a .qql script file
+qql run migrations/seed.qql --stop-on-error
+
+# Run with JSON output
+qql run --json "COUNT docs"
+{% /terminal %}
+
+### `qql doctor "<query>"` (alias: `qql check "<query>"`)
+
+When a query fails or produces unexpected results, `qql doctor "<query>"` (or `qql check "<query>"`) provides staged triage in 5 sequential steps:
+
+1. **Format Check**: Verifies query syntax and canonical formatting.
+2. **Offline Explain**: Validates planner AST lowering.
+3. **Embedder Probe**: Tests embedder endpoint reachability and dimension when `USING` text embedding.
+4. **Vector Topology Check**: Validates vector names and dimensions against the live collection schema.
+5. **Backend Doctor**: Tests backend connectivity and authentication.
+
+{% aside type="caution" title="Offline lint vs. live query triage" %}
+`qql lint` is 100% offline and verifies syntax and plan structure without needing a backend. In contrast, `qql doctor "<query>"` / `qql check "<query>"` verifies live cluster and embedder state. If your Qdrant cluster is unreachable, `qql doctor "<query>"` will exit non-zero at the connectivity stage even for a syntactically valid query.
+{% /aside %}
+
+{% terminal title="Triage a query" %}
+qql doctor "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+qql doctor "QUERY 'neural search' FROM docs USING dense LIMIT 5"
+qql check --json "QUERY [0.1, 0.2] FROM docs LIMIT 1"
+{% /terminal %}
+
+---
+
+## Tier 3: Cluster Operations & Setup
+
+These commands manage cluster configuration, cluster health, data migrations, and interactive sessions.
+
+### `qql setup`
+
+Interactive onboarding wizard that configures connection endpoints and credentials.
+
+- Prompts for Qdrant URL (defaults to `http://localhost:6333`).
+- Prompts for optional Qdrant API key.
+- Prompts for optional OpenAI-compatible text embedding URL and model.
+- Writes persistent configuration to `~/.qql/config.json` with secure permissions (`0600`).
+- Supports non-interactive flags: `--url <URL>`, `--api-key <KEY>`, `--yes` (accept defaults).
+
+{% terminal title="Run setup wizard" %}
+# Interactive setup
+qql setup
+
+# Non-interactive script setup
+qql setup --url http://localhost:6333 --yes
+{% /terminal %}
+
+### `qql config`
+
+Inspect and update CLI settings stored in `~/.qql/config.json`.
+
+| Subcommand | Purpose |
+|---|---|
+| `qql config show` | Print current configuration, config file location, and active URL resolution |
+| `qql config get <key>` | Get a specific configuration value (e.g. `url`, `api_key`) |
+| `qql config set <key> <val>` | Update a specific configuration value in `~/.qql/config.json` |
+| `qql config path` | Print the absolute path to `~/.qql/config.json` |
+| `qql config edge` | Manage persistent edge backend settings (`<config_dir>/edge.json`) |
+
+{% terminal title="Manage configuration" %}
+qql config show
+qql config set url http://192.168.1.50:6333
+qql config set api-key my-secret-key
+qql config get url
+qql config path
+{% /terminal %}
+
+### `qql doctor`
+
+Run cluster-wide health diagnostics without requiring a query.
+
+- Probes Qdrant reachability and authentication status.
+- Probes configured text embedding endpoints (`EMBED_URL`).
+- Inspects all collections and checks for dimension mismatches against the embedder.
+- `--json`: Emits diagnostic results as machine-readable JSON.
+
+{% terminal title="Cluster health check" %}
+qql doctor
+qql doctor --json
+{% /terminal %}
+
+### `qql repl` (aliases: `qql connect`, or bare `qql` in a TTY)
+
+Interactive REPL shell with multiline continuation prompts (`qql...> `), live syntax completeness detection, and tabular formatting.
+
+| Built-in command | Purpose |
+|---|---|
+| `help`, `\h`, `?` | Show available statements and built-in commands |
+| `fmt <qql>`, `\f <qql>` | Format QQL into canonical syntax |
+| `doctor`, `\d` | Run backend and embedder health diagnostics |
+| `explain <query>` | Show the hierarchical ASCII execution plan tree |
+| `execute <file>`, `\e <file>` | Run a `.qql` script file statement-by-statement with timing |
+| `\param [key=value \| clear]`, `\p` | Inspect, set, or clear session-scoped parameter bindings |
+| `dump <collection> <output.qql>` | Dump collection schema and vectors to `.qql` |
+| `exit`, `quit`, `\q`, `:q` | Leave the shell |
+
+`Ctrl-D` exits the shell; `Ctrl-C` cancels the current multiline buffer.
+
+{% terminal title="Start the REPL" %}
+qql repl
+qql> QUERY 'vector databases'
+qql...>   FROM docs
+qql...>   USING dense
+qql...>   LIMIT 5;
+qql> \f query text 'quantum' from papers limit 10
+QUERY 'quantum' FROM papers LIMIT 10;
+qql> \q
+{% /terminal %}
+
+### `qql dump` & `qql migrate`
+
+Data movement utilities for collections.
+
+- `qql dump <collection> <output.qql>`: Exports collection schema and points into a portable `.qql` script (`--batch-size N`, default 100). See [Dump and restore](/docs/operations/backup-restore/).
+- `qql migrate <collection>`: Copies schema and points directly to another collection or remote cluster.
 
 {% terminal title="Preview, run, and resume a migration" %}
 qql migrate docs --to docs_copy --dry-run
@@ -84,21 +310,23 @@ qql migrate docs --to docs_copy --resume
 | `--shard-key-field <field>` | Route each point by its payload value |
 | `--resume`, `--restart`, `--cutover <alias>` | Resume recovery or point an alias at the target |
 
-The full operator guide lives at [Cluster migration](/docs/operations/cluster-migration/) and dump detail at [Dump and restore](/docs/operations/backup-restore/).
+Full migration details live at [Cluster migration](/docs/operations/cluster-migration/).
 
-## Configuring the edge backend
+---
 
-`qql config edge` writes persistent settings for the in-process edge backend to
-`<config_dir>/edge.json` (mode `0600`). The edge executor reads this file every
-time you run a command with `--edge`. Updates are merged: only the flags you
-pass are written, and keys you did not set (including unknown/future ones) are
-preserved.
+## Edge Backend Commands
+
+When built with the `edge` feature (`cargo build --release -p qql-cli --features edge`), the CLI can execute queries and manage embedded local collections without a network server.
+
+### Configuring Edge (`qql config edge`)
+
+`qql config edge` writes persistent settings to `<config_dir>/edge.json` (mode `0600`). Updates merge cleanly with existing settings.
 
 | Flag | Purpose |
 |---|---|
 | `--data-dir` | Directory for persistent qdrant-edge data |
 | `--in-memory` / `--on-disk` | Keep payloads in RAM / persist them to disk |
-| `--wal-segment-mb N` | WAL segment capacity in MiB (seeds new shards; a persisted value wins; also exposed by the Python/Node edge SDKs) |
+| `--wal-segment-mb N` | WAL segment capacity in MiB |
 | `--embedder fastembed\|http` | Embedding backend (default `fastembed`) |
 | `--model` | Local FastEmbed dense model name or alias |
 | `--sparse-model` | Offline sparse model for fastembed (e.g. `splade`, `bge-m3`) |
@@ -107,92 +335,35 @@ preserved.
 | `--reranker-model` | Offline cross-encoder model (e.g. `bge-reranker-base`) |
 | `--cache-dir` | Directory for downloaded FastEmbed models |
 | `--show-download-progress` / `--no-show-download-progress` | Show / hide model download progress |
-| `--embed-url` | OpenAI-compatible embedding endpoint for the HTTP backend |
-| `--embed-key` | API key for the HTTP embedding backend |
-| `--embed-model` | Model name sent to the HTTP backend (default `nomic-embed-text`) |
+| `--embed-url` | OpenAI-compatible embedding endpoint for HTTP embedder |
+| `--embed-key` | API key for HTTP embedding backend |
+| `--embed-model` | Model name sent to HTTP backend (default `nomic-embed-text`) |
 | `--embed-dim` | Expected HTTP embedding dimension (default `768`) |
-| `--multi-embed-url` / `--multi-embed-key` / `--multi-embed-model` / `--multi-embed-dim` | Optional multi/ColBERT HTTP embedding endpoint |
-| `--image-embed-url` / `--image-embed-key` / `--image-embed-model` / `--image-embed-dim` | Optional image/CLIP vision HTTP embedding endpoint |
 
-Validation: `--embedder http` requires `--embed-url`, and `--embed-dim` must be
-greater than zero. After saving, the command prints
-`Use it with: qql --edge exec "SHOW COLLECTIONS"`.
-
-{% terminal title="Configure the edge backend with an HTTP embedder" %}
+{% terminal title="Configure edge backend" %}
 qql config edge --embedder http \
   --embed-url http://localhost:11434/v1/embeddings \
   --embed-model all-minilm:l6-v2 \
   --embed-dim 384
 {% /terminal %}
 
-## Using the edge backend
+### Using Edge Operations
 
-The edge backend is an OPT-IN build: it is compiled into the CLI only when the
-`edge` feature is enabled.
-
-{% terminal title="Build the edge-enabled CLI" %}
-cargo build --release -p qql-cli --features edge
-{% /terminal %}
-
-Once configured, every operational command accepts `--edge`:
+Once configured, add `--edge` to operational commands:
 
 {% terminal title="Edge commands" %}
-qql --edge exec "QUERY 'local search' FROM docs USING dense LIMIT 10"
+qql --edge run "QUERY 'local search' FROM docs USING dense LIMIT 10"
 qql --edge doctor
-qql --edge connect
-qql --edge execute script.qql
-qql --edge dump listings out.qql
-qql edge optimize listings
-qql edge bootstrap listings --from http://localhost:6333
+qql --edge repl
+qql edge optimize docs
+qql edge bootstrap docs --from http://localhost:6333
 {% /terminal %}
 
-{% qqlExample title="Query the edge backend" %}
-```sql
-QUERY 'quiet apartment near transit'
-FROM listings
-USING dense
-WHERE location GEO_RADIUS {center: {lat: 52.52, lon: 13.405}, radius: 5000.0}
-WITH PAYLOAD INCLUDE (name, neighbourhood, price)
-LIMIT 10;
-```
-{% /qqlExample %}
+See [the edge backend overview](/docs/edge/) and [the edge CLI reference](/docs/edge/cli/).
 
-{% aside type="note" title="Edge capability surface" %}
-The edge backend deliberately implements a smaller query subset than a Qdrant
-cluster: no custom `SHARD` routing, shard-key DDL, or cross-collection
-`LOOKUP FROM`. See [the
-edge backend overview](/docs/edge/) and [the edge CLI reference](/docs/edge/cli/).
-{% /aside %}
+---
 
-## Interactive REPL
-
-`qql repl` (or `qql connect`, or simply `qql` when invoked in a terminal) starts the interactive shell. The REPL supports multiline statement buffers with continuation prompts (`qql...> `), live syntax completeness detection, and psql-style aligned tables.
-
-| Built-in | Purpose |
-|---|---|
-| `help`, `\h`, `?` | Show available statements and built-in commands |
-| `fmt <qql>`, `\f <qql>` | Format QQL into canonical syntax |
-| `doctor`, `\d` | Run backend and embedder health diagnostics |
-| `explain <query>` | Show the hierarchical ASCII execution plan tree |
-| `execute <file>`, `\e <file>` | Run a `.qql` script file statement-by-statement with timing |
-| `\param [key=value \| clear]`, `\p` | Inspect, set, or clear session-scoped parameter bindings applied to later statements |
-| `dump <collection> <output.qql>` | Dump a collection (schema + vectors + payload) to `.qql` |
-| `exit`, `quit`, `\q`, `:q` | Leave the shell |
-
-`Ctrl-D` exits the shell; `Ctrl-C` cancels the current multiline buffer.
-
-{% terminal title="Start the REPL" %}
-qql repl
-qql> QUERY 'vector databases'
-qql...>   FROM docs
-qql...>   USING dense
-qql...>   LIMIT 5;
-qql> \f query text 'quantum' from papers limit 10
-QUERY 'quantum' FROM papers LIMIT 10;
-qql> \q
-{% /terminal %}
-
-## Environment variables
+## Environment Variables
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -222,31 +393,3 @@ qql> \q
 | `QQL_EDGE_RERANKER_MODEL` | unset | edge reranker model |
 | `QQL_EDGE_CACHE_DIR` | unset | edge FastEmbed model cache |
 | `QQL_EDGE_ON_DISK` | `true` | persist payloads to disk (`true`/`false`) |
-
-## Converting REST JSON to QQL
-
-`qql convert` reads a Qdrant REST JSON payload from a file, or from stdin when
-no file is given, and prints the equivalent canonical QQL statements. It
-accepts a wrapped request `{method, path, body}` — the collection is derived
-from the path — or a bare body with `--collection <name>`.
-
-{% terminal title="Convert a search request" %}
-qql convert search.json
-cat search.json | qql convert --collection docs
-{% /terminal %}
-
-To capture what a live application actually sends, run `qql record` (requires
-a build with `--features record`): it proxies Qdrant unchanged and writes a
-wrapped JSONL capture plus an optional converted QQL file.
-
-{% terminal title="Record live traffic, then convert" %}
-cargo build --release -p qql-cli --features record
-qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
-  --out capture.jsonl --qql-out capture.qql
-qql convert --collection docs capture.jsonl
-{% /terminal %}
-
-The converter decodes JSON into the typed AST and renders it with the same
-formatter as `qql fmt`, so output always re-parses, and covers every
-statement route the runtime plans. The full coverage table, guarantees, and
-limits live in [Operations > Convert REST JSON](/docs/operations/convert/).
