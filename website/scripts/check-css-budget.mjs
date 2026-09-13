@@ -3,7 +3,10 @@
 //   1. exactly one non-excluded stylesheet lives in packages/ui/src/styles;
 //   2. that file stays <= 500 lines;
 //   3. no other authored .css file exists under src/ or packages/*;
-//   4. the wiring file src/styles/global.css stays <= 15 lines.
+//   4. the wiring file src/styles/global.css stays <= 15 lines;
+//   5. every var(--q-*) reference in site source resolves to a token defined
+//      in styles.css (a renamed token otherwise fails silently at runtime,
+//      e.g. the --syntax-* -> --q-sx-* move that killed editor highlighting).
 // Usage: node scripts/check-css-budget.mjs
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -38,6 +41,19 @@ function walk(dir, out = []) {
 		if (entry.isDirectory()) {
 			if (!IGNORED_DIRS.has(entry.name)) walk(join(dir, entry.name), out);
 		} else if (entry.name.endsWith(".css")) {
+			out.push(join(dir, entry.name));
+		}
+	}
+	return out;
+}
+
+function walkSources(dir, out = []) {
+	if (!existsSync(dir)) return out;
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (entry.isDirectory()) {
+			if (!IGNORED_DIRS.has(entry.name))
+				walkSources(join(dir, entry.name), out);
+		} else if (/\.(ts|astro)$/.test(entry.name)) {
 			out.push(join(dir, entry.name));
 		}
 	}
@@ -81,6 +97,26 @@ if (wiringLines > WIRING_BUDGET) {
 	failures.push(
 		`src/styles/global.css is ${wiringLines} lines, over the ${WIRING_BUDGET}-line wiring budget`,
 	);
+}
+
+const stylesCss = readFileSync(join(stylesDir, "styles.css"), "utf8");
+const definedTokens = new Set(
+	[...stylesCss.matchAll(/--q-[a-z0-9-]+(?=\s*:)/g)].map((match) => match[0]),
+);
+for (const file of [
+	...walkSources(join(root, "src")),
+	...walkSources(join(root, "packages")),
+]) {
+	const rel = relative(root, file).split("\\").join("/");
+	for (const match of readFileSync(file, "utf8").matchAll(
+		/var\(\s*(--(?:q|qql|syntax)-[a-z0-9-]+)/g,
+	)) {
+		if (!definedTokens.has(match[1])) {
+			failures.push(
+				`${rel} references undefined token ${match[1]}; define it in styles.css or use a real token`,
+			);
+		}
+	}
 }
 
 if (failures.length > 0) {
