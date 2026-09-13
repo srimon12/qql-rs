@@ -115,9 +115,7 @@ export default defineConfig(
 		prefetch: false,
 
 		integrations: [
-			sitemap({
-				filter: (page) => !page.includes("/docs/landing/"),
-			}),
+			sitemap(),
 			starlight({
 				expressiveCode: {
 					themes: [

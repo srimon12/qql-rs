@@ -1,9 +1,12 @@
 ---
 title: "Edge Rust"
-description: "Embed local QQL execution in a Rust service with the qql-edge crate."
+description: "Embed in-process QQL execution in a Rust service with the qql-edge crate: local HNSW storage plus optional on-device ONNX embeddings."
 sidebar:
   order: 3
+  label: "Rust (edge)"
 ---
+
+> Remote Qdrant version: [Rust SDK](/docs/sdks/rust/).
 
 The `qql-edge` crate combines the `qql` runtime executor with `qdrant-edge`
 (in-process HNSW) and, optionally, `fastembed-rs` (local ONNX embeddings).
