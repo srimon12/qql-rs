@@ -2,30 +2,28 @@
 interface Props {
 	heading: string;
 	body: string;
+	eyebrow: string;
 	primaryCta: { label: string; href: string };
 	secondaryCta: { label: string; href: string };
 }
 
-const { heading, body, primaryCta, secondaryCta } = Astro.props;
+const { heading, body, eyebrow, primaryCta, secondaryCta } = Astro.props;
 ---
 
-<section class="cta-band" aria-labelledby="cta-heading">
-  <div class="shell reveal py-[clamp(3rem,6vw,4.5rem)]">
-    <div class="flex flex-col items-start justify-between gap-8 lg:flex-row lg:items-end">
-      <div class="max-w-[34rem]">
-        <h2 id="cta-heading" class="h-section m-0">{heading}</h2>
-        <p class="cta-band__lede m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{body}</p>
-        <p class="cta-band__foot m-0 mt-6 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
-          no cluster · no signup · MIT
-        </p>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <a class="btn btn--primary" href={primaryCta.href}>
-          {primaryCta.label}
-          <span aria-hidden="true">→</span>
-        </a>
-        <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
-      </div>
+<section class="cta-band" aria-labelledby="cta-heading" style="border-top: 1px solid color-mix(in srgb, var(--sl-color-accent) 40%, transparent); background: color-mix(in srgb, var(--sl-color-accent) 6%, var(--sl-color-gray-6))">
+  <div class="shell reveal mx-auto max-w-[40rem] py-[clamp(4rem,8vw,6rem)] text-center">
+    <p class="mono-label mono-label--accent m-0">{eyebrow}</p>
+    <h2 id="cta-heading" class="h-section m-0 mt-4">{heading}</h2>
+    <p class="m-0 mx-auto mt-4 max-w-[30rem] text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{body}</p>
+    <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+      <a class="btn btn--primary" href={primaryCta.href}>
+        {primaryCta.label}
+        <span aria-hidden="true">→</span>
+      </a>
+      <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
     </div>
+    <p class="m-0 mt-8 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
+      Same parser, every runtime
+    </p>
   </div>
 </section>

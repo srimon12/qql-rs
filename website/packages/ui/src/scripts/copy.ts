@@ -194,6 +194,7 @@ function mountCodeFrameButtons(): void {
 		".expressive-code .frame",
 	)) {
 		if (frame.querySelector(".copy-btn")) continue;
+		if (frame.closest("[data-copy-managed]")) continue;
 		const btn = createCopyButton({
 			variant: "icon",
 			extraClass: "copy-btn--frame",

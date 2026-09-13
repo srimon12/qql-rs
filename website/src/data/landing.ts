@@ -2,7 +2,7 @@
 
 export const hero = {
 	headline: "SQL for Qdrant.",
-	lede: "One declarative statement for hybrid search, filters, mutations, and schema — running everywhere Qdrant does.",
+	lede: "One declarative statement for hybrid search, filters, mutations and schema. Runs everywhere Qdrant does.",
 	eyebrow: "Open source · MIT · v0.4.0",
 	specimenTitle: "search.qql",
 	specimenMeta: "QQL · MIT",
@@ -19,13 +19,13 @@ export const stats = [
 	{ value: "12", label: "Query forms" },
 	{ value: "276", label: "Conformance statements" },
 	{ value: "6", label: "Runtimes & tools" },
-	{ value: "1.4MB", label: "WASM" },
+	{ value: "2.5 MB", label: "WASM parser, in-browser" },
 ] as const;
 
-// WASM size = release browser pack crates/qql-wasm/pkg/qql_wasm_bg.wasm
-// (wasm-pack release with wasm-opt). Rebuild + re-verify when the wasm
-// crate changes; do not quote gzipped transfer size unless measured.
-export const wasmNote = "1.9 MB parser, in-browser" as const;
+// WASM size = shipped bytes in website/.wasm/qql-wasm/qql_wasm_bg.wasm
+// (plain wasm-pack release, no wasm-opt step in build-playground-wasm.mjs).
+// Re-measure and re-verify when the wasm crate changes.
+export const wasmNote = "2.5 MB parser, in-browser" as const;
 
 export const problem = {
 	heading: "Same query. No boilerplate.",
@@ -97,8 +97,9 @@ export const getStarted = {
 } as const;
 
 export const cta = {
-	heading: "Run a query in the browser.",
-	body: "The playground runs the real WASM parser in your browser. No cluster, no signup.",
+	heading: "Parse a query in the browser.",
+	eyebrow: "WASM parser · MIT",
+	body: "The playground runs the real WASM parser locally: tokens, AST, plan and wire JSON. Point it at Docker or your Qdrant URL to execute.",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
 	secondaryCta: { label: "Read the docs", href: "/docs/" },
 } as const;
@@ -113,10 +114,10 @@ export const faq = {
 		},
 		{
 			question: "Which runtimes ship today?",
-			// ~1.9 MB = release browser pack crates/qql-wasm/pkg/qql_wasm_bg.wasm
-			// (wasm-pack release with wasm-opt); re-verify on wasm crate changes.
+			// ~2.5 MB = shipped website/.wasm/qql-wasm/qql_wasm_bg.wasm
+			// (plain wasm-pack release); re-verify on wasm crate changes.
 			answer:
-				"Rust crates, native Python and Node.js bindings, a ~1.9 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
+				"Rust crates, native Python and Node.js bindings, a ~2.5 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
 		},
 		{
 			question: "How does multitenancy work?",
@@ -136,7 +137,7 @@ export const faq = {
 		{
 			question: "Can I try it without a cluster?",
 			answer:
-				"Yes. The playground runs the real WASM parser in the browser. qql-edge runs the pipeline with local HNSW storage and ONNX embeddings.",
+				"The WASM parser runs fully offline in the browser. To execute, point the playground at Docker or your Qdrant URL, or run qql-edge for local HNSW storage.",
 		},
 	],
 } as const;

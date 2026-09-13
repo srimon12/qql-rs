@@ -4,6 +4,7 @@ import "@fontsource-variable/geist-mono";
 import "@fontsource/newsreader/latin-300.css";
 import "@fontsource/newsreader/latin-400.css";
 import "../styles/global.css";
+import FaqList from "../components/FaqList.astro";
 import CtaBand from "../components/landing/CtaBand.astro";
 import InstallGrid from "../components/landing/InstallGrid.astro";
 import LandingHero from "../components/landing/LandingHero.astro";
@@ -12,9 +13,10 @@ import PipelineSteps from "../components/landing/PipelineSteps.astro";
 import ProblemCompare from "../components/landing/ProblemCompare.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
-import { ANALYTICS, APPS, SITE } from "../config/site";
+import { ANALYTICS, APPS, SITE, SOCIAL } from "../config/site";
 import {
 	cta,
+	faq,
 	getStarted,
 	hero,
 	language,
@@ -25,7 +27,7 @@ import {
 
 const pageTitle = "QQL: SQL for Qdrant vector search";
 const pageDescription =
-	"QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
+	"QQL is to Qdrant what SQL is to Postgres — one declarative language for hybrid search, filters, and mutations across Rust, Python, Node.js, WASM, and edge.";
 
 // The documentation verifier parses every `verifiedQql` String.raw template
 // (see scripts/verify-qql-docs.mjs), so the marker must stay despite none of
@@ -73,9 +75,11 @@ FROM papers LIMIT 10;`;
     <title>{pageTitle}</title>
     <meta name="description" content={pageDescription} />
     <meta
-      name="keywords"
-      content="QQL, Qdrant, vector search, hybrid search, SQL for vector database, Qdrant SQL, Reciprocal Rank Fusion, RRF, multitenancy, filter injection, pyqql, nqql, qql-edge, WASM, Veristamp"
+      name="robots"
+      content="index, follow, max-image-preview:large"
     />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f4ed" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141413" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -85,7 +89,10 @@ FROM papers LIMIT 10;`;
     <meta property="og:url" content={`${APPS.home.url}/`} />
     <meta property="og:description" content={pageDescription} />
     <meta property="og:site_name" content="QQL" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:image" content={`${APPS.home.url}/open-graph/home.png`} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="QQL — SQL for Qdrant vector search" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -94,6 +101,7 @@ FROM papers LIMIT 10;`;
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
     <meta name="twitter:image" content={`${APPS.home.url}/open-graph/home.png`} />
+    <meta name="twitter:image:alt" content="QQL — SQL for Qdrant vector search" />
     <script is:inline>
       (() => {
         document.documentElement.classList.add("js");
@@ -124,11 +132,20 @@ FROM papers LIMIT 10;`;
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         name: "QQL",
+        url: `${APPS.home.url}/`,
+        version: "0.4.0",
         operatingSystem: "Linux, macOS, Windows, Web",
         applicationCategory: "DeveloperApplication",
         description: pageDescription,
         codeRepository: APPS.github.url,
+        installUrl: APPS.github.url,
         license: "https://opensource.org/license/mit",
+        featureList: [
+          "Hybrid search with RRF fusion",
+          "Declarative filtering and mutations",
+          "Multitenancy via filter injection and shard routing",
+          "In-browser WASM parser",
+        ],
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
         publisher: {
           "@type": "Organization",
@@ -143,14 +160,30 @@ FROM papers LIMIT 10;`;
       set:html={JSON.stringify({
         "@context": "https://schema.org",
         "@type": "WebSite",
+        "@id": `${APPS.home.url}/#website`,
         name: "QQL",
         url: APPS.home.url,
+        inLanguage: "en",
         description: pageDescription,
+        sameAs: [SOCIAL.github, SOCIAL.twitter],
         publisher: {
           "@type": "Organization",
           name: SITE.org,
           url: "https://veristamp.in",
         },
+      })}
+    />
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: faq.items.map((item) => ({
+          "@type": "Question",
+          name: item.question,
+          acceptedAnswer: { "@type": "Answer", text: item.answer },
+        })),
       })}
     />
   </head>
@@ -208,9 +241,21 @@ FROM papers LIMIT 10;`;
         footLabel={getStarted.footLabel}
       />
 
+      <section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(3rem,6vw,4.5rem)]" aria-labelledby="faq-heading">
+        <div class="shell">
+          <header class="max-w-[44rem] reveal">
+            <h2 id="faq-heading" class="h-section m-0">{faq.heading}</h2>
+          </header>
+          <div class="reveal">
+            <FaqList />
+          </div>
+        </div>
+      </section>
+
       <CtaBand
         heading={cta.heading}
         body={cta.body}
+        eyebrow={cta.eyebrow}
         primaryCta={cta.primaryCta}
         secondaryCta={cta.secondaryCta}
       />

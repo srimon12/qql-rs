@@ -325,6 +325,7 @@ const lines = (source: string) => source.trim().split("\n").length;
 const scenarios: {
 	id: string;
 	label: string;
+	hint: string;
 	qql: string;
 	codes: Record<FormatId, string>;
 	qqlNote: string;
@@ -333,6 +334,7 @@ const scenarios: {
 	{
 		id: "hybrid",
 		label: "Hybrid RRF",
+		hint: "Dense + Sparse",
 		qql: hybridQql,
 		codes: {
 			rest: restHybrid,
@@ -347,6 +349,7 @@ const scenarios: {
 	{
 		id: "tenant",
 		label: "Shard + filter",
+		hint: "Multi-tenancy",
 		qql: tenantQql,
 		codes: {
 			rest: restTenant,
@@ -361,6 +364,7 @@ const scenarios: {
 	{
 		id: "filters",
 		label: "Boolean filters",
+		hint: "Compound logic",
 		qql: filtersQql,
 		codes: {
 			rest: restFilters,
@@ -400,9 +404,12 @@ const DEFAULT_FORMAT: FormatId = "rest";
               aria-selected={idx === 0 ? "true" : "false"}
               tabindex={idx === 0 ? 0 : -1}
               data-scenario={scenario.id}
-              class="app-action min-h-9 px-3.5 py-2 text-[0.75rem] aria-selected:bg-[var(--sl-color-gray-7)] aria-selected:text-[var(--sl-color-white)]"
+              class="app-action min-h-9 px-3.5 py-2 text-[0.75rem]"
             >
               {scenario.label}
+              <span class="hidden rounded-full border border-[var(--sl-color-gray-5)] px-1.5 py-px font-mono text-[0.625rem] font-medium tracking-wide text-[var(--sl-color-gray-3)] sm:inline-block" aria-hidden="true">
+                {scenario.hint}
+              </span>
             </button>
           ))}
         </div>
@@ -419,7 +426,7 @@ const DEFAULT_FORMAT: FormatId = "rest";
             data-target={format.id}
             aria-pressed={format.id === DEFAULT_FORMAT ? "true" : "false"}
             title={`${format.label} (${format.badge})`}
-            class="app-action min-h-8 px-3 py-1.5 text-[0.75rem] aria-pressed:bg-[var(--sl-color-gray-7)] aria-pressed:text-[var(--sl-color-white)]"
+            class="app-action min-h-8 px-3 py-1.5 text-[0.75rem]"
           >
             {format.label}
           </button>
@@ -449,6 +456,7 @@ const DEFAULT_FORMAT: FormatId = "rest";
             <div class="grid items-start gap-4 lg:grid-cols-2">
               {FORMATS.map((format, fIdx) => (
                 <article
+                  data-copy-managed
                   class="code-card flex min-w-0 flex-col"
                   data-target-pane={format.id}
                   hidden={fIdx !== 0}
@@ -481,7 +489,7 @@ const DEFAULT_FORMAT: FormatId = "rest";
                 </article>
               ))}
 
-              <article class="code-card flex min-w-0 flex-col border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))] max-lg:order-first">
+              <article data-copy-managed class="code-card flex min-w-0 flex-col border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))] max-lg:order-first">
                 <header class="code-card__head">
                   <span class="mono-label mono-label--accent">QQL</span>
                   <span class="code-card__meta min-w-0 truncate">universal query</span>

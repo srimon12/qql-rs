@@ -1,5 +1,6 @@
 ---
 import { Code } from "@astrojs/starlight/components";
+import CopyButton from "./CopyButton.astro";
 
 interface Props {
 	title?: string;
@@ -9,7 +10,13 @@ const { title = "Terminal" } = Astro.props;
 
 const html = await Astro.slots.render("default");
 const rawText = html
-	.replace(/<br\s*\/?>/gi, "\n")
+	.replace(
+		/<span[^>]*class="[^"]*\bsr-only\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+		"",
+	)
+	.replace(/<h([1-6])\b[^>]*>/gi, (_, n) => `\n${"#".repeat(Number(n))} `)
+	.replace(/<\/h[1-6]>/gi, "\n")
+	.replace(/<br\s*\/?>/gi, "\\\n")
 	.replace(/<\/p>/gi, "\n")
 	.replace(/<\/div>/gi, "\n")
 	.replace(/<[^>]*>/g, "")
@@ -18,15 +25,28 @@ const rawText = html
 	.replace(/&amp;/g, "&")
 	.replace(/&quot;/g, '"')
 	.replace(/&#39;/g, "'")
+	.replace(/\n{3,}/g, "\n\n")
 	.trim();
 ---
 
-<div class="not-content code-flat terminal-wrap my-6 overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)]">
-  <div class="flex h-9 items-center gap-2.5 border-b border-[var(--sl-color-gray-5)] px-3.5">
-    <span class="h-3 w-px bg-[var(--sl-color-accent)]" aria-hidden="true"></span>
-    <span class="font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]">{title}</span>
+<div class="not-content code-flat terminal-wrap premium-card relative my-6 overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)]" data-copy-managed>
+  <div class="flex h-9 items-center justify-between border-b border-[var(--sl-color-gray-5)] px-3.5">
+    <span class="flex w-[46px] gap-2" aria-hidden="true">
+      <span class="h-[10px] w-[10px] rounded-full bg-[#ff5f56]"></span>
+      <span class="h-[10px] w-[10px] rounded-full bg-[#ffbd2e]"></span>
+      <span class="h-[10px] w-[10px] rounded-full bg-[#27c93f]"></span>
+    </span>
+    <span class="flex-1 text-center font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]">{title}</span>
+    <span class="w-[46px]" aria-hidden="true"></span>
   </div>
-  <div class="px-4">
+  <div class="relative px-4">
+    <CopyButton
+      text={rawText}
+      variant="icon"
+      class="copy-btn--frame"
+      title="Copy terminal command"
+      ariaLabel="Copy terminal command"
+    />
     <Code code={rawText} lang="bash" frame="none" />
   </div>
 </div>

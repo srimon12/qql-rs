@@ -1,5 +1,6 @@
 ---
 import { Code } from "@astrojs/starlight/components";
+import CopyButton from "@qql/ui/CopyButton.astro";
 
 interface Props {
 	heading: string;
@@ -49,11 +50,19 @@ const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
     </header>
 
     <div class="mt-10 grid gap-5 lg:grid-cols-2">
-      <article class="code-card lg:col-span-2">
+      <article class="code-card lg:col-span-2" data-copy-managed>
         <header class="code-card__head">
           <span class="code-card__tick" aria-hidden="true"></span>
           <span class="mono-label">{featured.kind}</span>
-          <a class="link font-mono text-[0.6875rem]" href={featuredHref}>Try in playground →</a>
+          <span class="flex shrink-0 items-center gap-2">
+            <a class="link font-mono text-[0.6875rem]" href={featuredHref}>Try in playground →</a>
+            <CopyButton
+              text={featured.code}
+              variant="icon"
+              title={`Copy ${featured.kind} query`}
+              ariaLabel={`Copy ${featured.kind} query`}
+            />
+          </span>
         </header>
         <div class="code-flat px-4">
           <Code code={featured.code} lang="qql" frame="none" />
@@ -65,11 +74,19 @@ const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
 
       {
         samples.map((sample, idx) => (
-          <article class:list={["code-card", idx === 0 && "border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))]"]}>
+          <article data-copy-managed class:list={["code-card", idx === 0 && "border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))]"]}>
             <header class="code-card__head">
               <span class="code-card__tick" aria-hidden="true"></span>
               <span class="mono-label">{sample.kind}</span>
-              <a class="link font-mono text-[0.6875rem]" href={sample.href}>Try in playground →</a>
+              <span class="flex shrink-0 items-center gap-2">
+                <a class="link font-mono text-[0.6875rem]" href={sample.href}>Try in playground →</a>
+                <CopyButton
+                  text={sample.code}
+                  variant="icon"
+                  title={`Copy ${sample.kind} query`}
+                  ariaLabel={`Copy ${sample.kind} query`}
+                />
+              </span>
             </header>
             <div class="code-flat overflow-x-auto px-4 [mask-image:linear-gradient(to_right,#000_92%,transparent)]">
               <Code code={sample.code} lang="qql" frame="none" />
