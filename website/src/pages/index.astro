@@ -171,22 +171,14 @@ FROM papers LIMIT 10;`;
         specimenRoute={hero.specimenRoute}
         specimenStatus={hero.specimenStatus}
         specimenQql={verifiedQqlHero}
-      >
-        <span class="sx-kw">QUERY</span> <span class="sx-str">'chest pain'</span>{" "}
-        <span class="sx-kw">FROM</span> <span class="sx-id">medical</span><br />
-        <span class="sx-kw">USING</span> <span class="sx-id">dense</span><br />
-        <span class="sx-kw">WHERE</span> <span class="sx-id">department</span>{" "}
-        <span class="sx-op">=</span> <span class="sx-str">'cardio'</span><br />
-        <span class="sx-kw">SHARD</span> <span class="sx-str">'hospital-east'</span><br />
-        <span class="sx-kw">LIMIT</span> <span class="sx-num">5</span><span class="sx-op">;</span>
-      </LandingHero>
+        stats={stats}
+      />
 
       <ProblemCompare
         heading={problem.heading}
         sub={problem.sub}
         guideHref={problem.guideHref}
         guideLabel={problem.guideLabel}
-        stats={stats}
         hybridQql={verifiedQqlCompareHybrid}
         tenantQql={verifiedQqlCompareTenant}
         filtersQql={verifiedQqlCompareFilters}

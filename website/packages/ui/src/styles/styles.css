@@ -159,13 +159,6 @@ body:not(.app-shell) :is(h1, h2) {
 }
 .code-card__tick { width: 1px; height: 12px; background: var(--sl-color-accent); }
 .code-card__meta { font-size: 0.6875rem; color: var(--sl-color-gray-3); }
-.code-card__body {
-	padding: 0.9rem 1.1rem;
-	overflow-x: auto;
-	font-family: var(--sl-font-mono);
-	font-size: 0.8125rem;
-	line-height: 1.7;
-}
 .code-card__foot {
 	display: flex;
 	align-items: center;
@@ -178,13 +171,6 @@ body:not(.app-shell) :is(h1, h2) {
 	font-size: 0.6875rem;
 	color: var(--sl-color-gray-3);
 }
-.code-card--link { transition: border-color 160ms; }
-.code-card--link:hover { border-color: color-mix(in srgb, var(--sl-color-accent) 35%, var(--sl-color-gray-5)); }
-.sx-kw { color: var(--q-sx-keyword); font-weight: 600; }
-.sx-op { color: var(--q-sx-operator); }
-.sx-str { color: var(--q-sx-string); }
-.sx-num { color: var(--q-sx-number); }
-.sx-id { color: var(--q-sx-name); }
 
 /* Expressive-code neutralization for specimens that sit inside our cards. */
 .code-flat .expressive-code,
@@ -219,8 +205,6 @@ body:not(.app-shell) :is(h1, h2) {
 .ping { width: 0.4rem; height: 0.4rem; border-radius: 999px; background: var(--sl-color-accent); position: relative; }
 .ping::after { content: ""; position: absolute; inset: -0.2rem; border-radius: 999px; border: 1px solid var(--sl-color-accent); animation: ping 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
 @keyframes ping { 0% { transform: scale(0.6); opacity: 1; } 70%, 100% { transform: scale(1.6); opacity: 0; } }
-.hero-bleed { margin-right: 0; }
-@media (min-width: 80rem) { .hero-bleed { margin-right: calc((min(100vw - 2rem, 88rem) - min(100vw - 2rem, 72rem)) / -2); } }
 .reveal { opacity: 1; }
 html.js .reveal {
 	opacity: 0;
@@ -383,23 +367,7 @@ body.app-shell .site-footer { display: none; }
 .app-chip__value { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; color: var(--sl-color-gray-2); }
 .app-chip:hover .app-chip__value { color: var(--sl-color-gray-1); }
 .app-chip__caret { flex-shrink: 0; color: var(--sl-color-gray-3); font-size: 0.85rem; line-height: 1; }
-.app-chip--status { cursor: default; }
 @media (max-width: 40rem) { .app-chip { gap: 0.35rem; padding: 0 0.5rem; font-size: 0.6875rem; } }
-.app-chip--status:hover { border-color: var(--sl-color-gray-5); background: var(--sl-color-gray-6); color: var(--sl-color-gray-1); }
-.app-chip__fallback { display: none; }
-[data-connected-dot].is-failed ~ [data-connected-label] { display: none; }
-[data-connected-dot].is-failed ~ .app-chip__fallback { display: inline; }
-/* <40rem: chips carry complete words only. The JS-written labels stay in the
-   DOM as sr-only content for the live region; short state words are swapped by
-   the dot classes, and the long failed-state fallback yields to telemetry. */
-.app-chip__short { display: none; }
-@media (max-width: 40rem) {
-	[data-connected-dot].is-failed ~ [data-connected-label] { display: inline; }
-	[data-connected-dot].is-failed ~ .app-chip__fallback { display: none; }
-	[data-runtime-dot]:not(.is-ready):not(.is-failed) ~ .app-chip__short--loading,
-	[data-runtime-dot].is-ready ~ .app-chip__short--ready,
-	[data-runtime-dot].is-failed ~ .app-chip__short--failed { display: inline; }
-}
 .app-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-height: 1.75rem; padding: 0 0.5rem; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--sl-color-gray-2); font-family: var(--sl-font-mono); font-size: 0.7rem; font-weight: 500; white-space: nowrap; cursor: pointer; transition: border-color 120ms, background-color 120ms, color 120ms; }
 .app-action > svg { width: 0.875rem; height: 0.875rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .app-action:hover { border-color: var(--sl-color-gray-5); background: var(--sl-color-bg); color: var(--sl-color-white); }

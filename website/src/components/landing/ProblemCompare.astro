@@ -10,7 +10,6 @@ interface Props {
 	hybridQql: string;
 	tenantQql: string;
 	filtersQql: string;
-	stats: readonly { value: string; label: string }[];
 }
 
 const {
@@ -21,12 +20,13 @@ const {
 	hybridQql,
 	tenantQql,
 	filtersQql,
-	stats,
 } = Astro.props;
 
-// ── Scenario 1: Hybrid Search (Dense + Sparse RRF) ─────────────────────────
-// Vectors are display-truncated to (…) so the line-count story reads at a
-// glance; the QQL pane is the real 7-line statement.
+// Every native pane is display-truncated to (…) — the QQL pane is the real
+// statement. Native panes inline precomputed vectors from an out-of-band
+// embedding step QQL resolves in-process; line counts exclude that pipeline
+// on both sides. No pane exceeds ~28 lines (dev inlined 300-float vectors,
+// which caused the 416px layout shift this replaces).
 
 const restHybrid = `{
   "prefetch": [
@@ -63,14 +63,7 @@ const pythonHybrid = `results = client.query_points(
         models.Prefetch(
             query=[[-0.83, 0.32, …, 0.83]],
             using="dense_vec",
-            filter=models.Filter(must=[
-                models.FieldCondition(
-                    key="status",
-                    match=models.MatchValue(
-                        value="active"
-                    ),
-                )
-            ]),
+            filter=status_filter,
             limit=100,
         ),
         models.Prefetch(
@@ -79,14 +72,7 @@ const pythonHybrid = `results = client.query_points(
                 values=[0.72, 1.34, 0.41],
             ),
             using="bm25_vec",
-            filter=models.Filter(must=[
-                models.FieldCondition(
-                    key="status",
-                    match=models.MatchValue(
-                        value="active"
-                    ),
-                )
-            ]),
+            filter=status_filter,
             limit=100,
         ),
     ],
@@ -99,21 +85,13 @@ const tsHybrid = `const results = await client.query("docs", {
     {
       query: [[-0.83, 0.32, …, 0.83]],
       using: "dense_vec",
-      filter: {
-        must: [
-          { key: "status", match: { value: "active" } },
-        ],
-      },
+      filter: { must: [{ key: "status", match: { value: "active" } }] },
       limit: 100,
     },
     {
       query: { indices: [3719, 12808, 41172], values: [0.72, 1.34, 0.41] },
       using: "bm25_vec",
-      filter: {
-        must: [
-          { key: "status", match: { value: "active" } },
-        ],
-      },
+      filter: { must: [{ key: "status", match: { value: "active" } }] },
       limit: 100,
     },
   ],
@@ -125,7 +103,7 @@ const rustHybrid = `let response = client.query(
     QueryPointsBuilder::new("docs")
         .add_prefetch(
             PrefetchQueryBuilder::default()
-                .query(Query::new_nearest(vec![-0.83, 0.32, …, 0.83]))
+                .query(Query::new_nearest(vec![-0.83, 0.32, /* …, */ 0.83]))
                 .using("dense_vec")
                 .filter(active_filter.clone())
                 .limit(100u64),
@@ -148,31 +126,21 @@ const goHybrid = `res, err := client.Query(ctx, &qdrant.QueryPoints{
     CollectionName: "docs",
     Prefetch: []*qdrant.PrefetchQuery{
         {
-            Query: qdrant.NewQueryDense([]float32{-0.83, 0.32, …, 0.83}),
+            Query: qdrant.NewQueryDense([]float32{-0.83, 0.32 /* …, */, 0.83}),
             Using: qdrant.Ptr("dense_vec"),
-            Filter: &qdrant.Filter{
-                Must: []*qdrant.Condition{
-                    qdrant.NewMatch("status", "active"),
-                },
-            },
+            Filter: statusFilter,
             Limit: qdrant.Ptr(uint64(100)),
         },
         {
             Query: qdrant.NewQuerySparse([]uint32{3719, 12808, 41172}, []float32{0.72, 1.34, 0.41}),
             Using: qdrant.Ptr("bm25_vec"),
-            Filter: &qdrant.Filter{
-                Must: []*qdrant.Condition{
-                    qdrant.NewMatch("status", "active"),
-                },
-            },
+            Filter: statusFilter,
             Limit: qdrant.Ptr(uint64(100)),
         },
     },
     Query: qdrant.NewQueryFusion(qdrant.Fusion_RRF),
     Limit: qdrant.Ptr(uint64(10)),
 })`;
-
-// ── Scenario 2: Tenant Shard + Filter ──────────────────────────────────────
 
 const restTenant = `{
   "shard_key": "tenant-corp-99",
@@ -193,14 +161,9 @@ const pythonTenant = `results = client.query_points(
     collection_name="filings",
     shard_key_selector="tenant-corp-99",
     query=dense_vector,
-    query_filter=models.Filter(
-        must=[
-            models.FieldCondition(
-                key="department",
-                match=models.MatchValue(value="finance"),
-            ),
-        ]
-    ),
+    query_filter=models.Filter(must=[
+        models.FieldCondition(key="department", match=models.MatchValue(value="finance")),
+    ]),
     limit=5,
     with_payload=True,
 )`;
@@ -208,11 +171,7 @@ const pythonTenant = `results = client.query_points(
 const tsTenant = `const results = await client.query("filings", {
   shardKey: "tenant-corp-99",
   query: denseVector,
-  filter: {
-    must: [
-      { key: "department", match: { value: "finance" } },
-    ],
-  },
+  filter: { must: [{ key: "department", match: { value: "finance" } }] },
   limit: 5,
   withPayload: true,
 });`;
@@ -221,9 +180,7 @@ const rustTenant = `let response = client.query(
     QueryPointsBuilder::new("filings")
         .shard_key_selector("tenant-corp-99")
         .query(Query::new_nearest(dense_vector))
-        .filter(Filter::must([
-            Condition::matches("department", "finance"),
-        ]))
+        .filter(Filter::must([Condition::matches("department", "finance")]))
         .limit(5u64)
         .with_payload(true),
 ).await?;`;
@@ -231,21 +188,15 @@ const rustTenant = `let response = client.query(
 const goTenant = `res, err := client.Query(ctx, &qdrant.QueryPoints{
     CollectionName: "filings",
     ShardKeySelector: &qdrant.ShardKeySelector{
-        ShardKeys: []*qdrant.ShardKey{
-            qdrant.NewShardKey("tenant-corp-99"),
-        },
+        ShardKeys: []*qdrant.ShardKey{qdrant.NewShardKey("tenant-corp-99")},
     },
     Query: qdrant.NewQueryNearest(denseVector),
     Filter: &qdrant.Filter{
-        Must: []*qdrant.Condition{
-            qdrant.NewMatch("department", "finance"),
-        },
+        Must: []*qdrant.Condition{qdrant.NewMatch("department", "finance")},
     },
-    Limit:       qdrant.Ptr(uint64(5)),
+    Limit: qdrant.Ptr(uint64(5)),
     WithPayload: qdrant.NewWithPayload(true),
 })`;
-
-// ── Scenario 3: Boolean Filters ────────────────────────────────────────────
 
 const restFilters = `{
   "query": { "nearest": "dense_vec" },
@@ -267,30 +218,14 @@ const restFilters = `{
 const pythonFilters = `results = client.query_points(
     collection_name="products",
     query=product_vector,
-    query_filter=models.Filter(
-        must=[
-            models.Filter(
-                should=[
-                    models.FieldCondition(
-                        key="category",
-                        match=models.MatchValue(value="hardware"),
-                    ),
-                    models.FieldCondition(
-                        key="category",
-                        match=models.MatchValue(value="tools"),
-                    ),
-                ]
-            ),
-            models.FieldCondition(
-                key="price",
-                range=models.Range(lte=1200.0),
-            ),
-            models.FieldCondition(
-                key="in_stock",
-                match=models.MatchValue(value=True),
-            ),
-        ]
-    ),
+    query_filter=models.Filter(must=[
+        models.Filter(should=[
+            models.FieldCondition(key="category", match=models.MatchValue(value="hardware")),
+            models.FieldCondition(key="category", match=models.MatchValue(value="tools")),
+        ]),
+        models.FieldCondition(key="price", range=models.Range(lte=1200.0)),
+        models.FieldCondition(key="in_stock", match=models.MatchValue(value=True)),
+    ]),
     limit=20,
 )`;
 
@@ -316,10 +251,7 @@ const rustFilters = `let filter = Filter::must([
         Condition::matches("category", "hardware"),
         Condition::matches("category", "tools"),
     ]),
-    Condition::range("price", Range {
-        lte: Some(1200.0),
-        ..Default::default()
-    }),
+    Condition::range("price", Range { lte: Some(1200.0), ..Default::default() }),
     Condition::matches("in_stock", true),
 ]);
 
@@ -341,9 +273,7 @@ const goFilters = `res, err := client.Query(ctx, &qdrant.QueryPoints{
                     qdrant.NewMatch("category", "tools"),
                 },
             }),
-            qdrant.NewRange("price", &qdrant.Range{
-                Lte: qdrant.Ptr(1200.0),
-            }),
+            qdrant.NewRange("price", &qdrant.Range{Lte: qdrant.Ptr(1200.0)}),
             qdrant.NewMatch("in_stock", true),
         },
     },
@@ -352,52 +282,58 @@ const goFilters = `res, err := client.Query(ctx, &qdrant.QueryPoints{
 
 const FORMATS = [
 	{
+		id: "rest",
+		label: "REST JSON",
+		lang: "json",
+		badge: "POST /points/query",
+		warn: "Hand-built JSON · vectors inlined by hand",
+	},
+	{
 		id: "python",
 		label: "Python",
 		lang: "python",
 		badge: "qdrant-client",
-		warn: "Nested model graph · vectors embedded out-of-band",
+		warn: "Nested model graph · vectors inlined by hand",
 	},
 	{
 		id: "typescript",
 		label: "TypeScript",
 		lang: "typescript",
-		badge: "@qdrant/js-client-rest",
-		warn: "Nested request objects · vectors embedded out-of-band",
+		badge: "js-client-rest",
+		warn: "Nested request objects · vectors inlined by hand",
 	},
 	{
 		id: "rust",
 		label: "Rust",
 		lang: "rust",
 		badge: "qdrant-client crate",
-		warn: "Builder + protobuf plumbing · vectors embedded out-of-band",
+		warn: "Builder plumbing · vectors inlined by hand",
 	},
 	{
 		id: "go",
 		label: "Go",
 		lang: "go",
 		badge: "go-client/qdrant",
-		warn: "Protobuf request graph · vectors embedded out-of-band",
-	},
-	{
-		id: "rest",
-		label: "REST JSON",
-		lang: "json",
-		badge: "HTTP REST API",
-		warn: "Hand-built JSON · dense vector inlined by hand",
+		warn: "Protobuf request graph · vectors inlined by hand",
 	},
 ] as const;
 
-const presets = [
+type FormatId = (typeof FORMATS)[number]["id"];
+
+const lines = (source: string) => source.trim().split("\n").length;
+
+const scenarios: {
+	id: string;
+	label: string;
+	qql: string;
+	codes: Record<FormatId, string>;
+	qqlNote: string;
+	playgroundHref: string;
+}[] = [
 	{
 		id: "hybrid",
-		title: "Hybrid RRF",
-		badge: "Dense + Sparse",
+		label: "Hybrid RRF",
 		qql: hybridQql,
-		playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
-		honesty:
-			"Native panes carry precomputed dense vectors from an out-of-band embedding step the official SDKs can't express. QQL resolves TEXT and BM25 in-process. Line counts exclude that pipeline on both sides.",
-		footNote: "Fuses dense + sparse inside Qdrant",
 		codes: {
 			rest: restHybrid,
 			python: pythonHybrid,
@@ -405,16 +341,13 @@ const presets = [
 			rust: rustHybrid,
 			go: goHybrid,
 		},
+		qqlNote: "Dense plus sparse fused in one statement",
+		playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
 	},
 	{
 		id: "tenant",
-		title: "Shard + filter",
-		badge: "Multi-tenancy",
+		label: "Shard + filter",
 		qql: tenantQql,
-		playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
-		honesty:
-			"dense_vector arrives precomputed from an out-of-band embedding step the official SDKs can't express. QQL resolves TEXT in-process. Line counts exclude that pipeline on both sides.",
-		footNote: "Shard-routed, filter pushed down",
 		codes: {
 			rest: restTenant,
 			python: pythonTenant,
@@ -422,16 +355,13 @@ const presets = [
 			rust: rustTenant,
 			go: goTenant,
 		},
+		qqlNote: "Shard-routed, filter pushed down",
+		playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
 	},
 	{
 		id: "filters",
-		title: "Boolean filters",
-		badge: "Compound logic",
+		label: "Boolean filters",
 		qql: filtersQql,
-		playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
-		honesty:
-			"productVector arrives precomputed from an out-of-band embedding step the official SDKs can't express. QQL resolves TEXT in-process. Line counts exclude that pipeline on both sides.",
-		footNote: "Boolean tree lowered to one filter",
 		codes: {
 			rest: restFilters,
 			python: pythonFilters,
@@ -439,300 +369,220 @@ const presets = [
 			rust: rustFilters,
 			go: goFilters,
 		},
+		qqlNote: "Boolean tree lowered to one filter",
+		playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
 	},
-] as const;
+];
 
-const lines = (source: string) => source.trim().split("\n").length;
+const DEFAULT_FORMAT: FormatId = "rest";
 ---
 
-<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(4rem,8vw,6.5rem)]" aria-labelledby="problem-heading">
+<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(3rem,6vw,4.5rem)]" aria-labelledby="problem-heading">
   <div class="shell">
     <header class="max-w-[44rem] reveal">
       <h2 id="problem-heading" class="h-section m-0">{heading}</h2>
       <p class="m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{sub}</p>
     </header>
 
-    <div class="mt-10" data-compare>
-      {/* ── Scenario tabs ── */}
-      <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-        <div class="flex flex-wrap gap-1" role="tablist" aria-label="Query scenarios">
-          {presets.map((preset, idx) => (
+    <div class="mt-8 reveal" data-compare>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div
+          class="inline-flex max-w-full flex-wrap gap-1 rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-1"
+          role="tablist"
+          aria-label="Query scenarios"
+        >
+          {scenarios.map((scenario, idx) => (
             <button
               type="button"
               role="tab"
-              id={`compare-tab-${preset.id}`}
-              class="flex flex-col gap-0.5 border-b-2 border-transparent px-3 py-2.5 text-left text-[var(--sl-color-gray-2)] transition-colors hover:text-[var(--sl-color-gray-1)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)]"
+              id={`compare-tab-${scenario.id}`}
+              aria-controls={`compare-panel-${scenario.id}`}
               aria-selected={idx === 0 ? "true" : "false"}
-              aria-controls={`compare-panel-${preset.id}`}
               tabindex={idx === 0 ? 0 : -1}
-              data-preset={preset.id}
+              data-scenario={scenario.id}
+              class="app-action min-h-9 px-3.5 py-2 text-[0.75rem] aria-selected:bg-[var(--sl-color-gray-7)] aria-selected:text-[var(--sl-color-white)]"
             >
-              <span class="text-sm font-medium">{preset.title}</span>
-              <span class="mono-label text-[0.625rem]">{preset.badge}</span>
+              {scenario.label}
             </button>
           ))}
         </div>
-
-        <div class="flex items-center gap-4 pb-2.5">
-          <span class="hidden font-mono text-[0.7rem] text-[var(--sl-color-gray-3)] md:inline" data-stat>
-            This example: {lines(presets[0].qql)} lines vs {lines(presets[0].codes.python)} in Python
-          </span>
-          <span class="font-mono text-[0.7rem] text-[var(--sl-color-gray-3)]" data-reduction>
-            −{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.python)) * 100)}%
-          </span>
-          <a class="link font-mono text-[0.7rem]" data-play href={presets[0].playgroundHref}>
-            Open in playground →
-          </a>
-        </div>
+        <a class="link font-mono text-[0.75rem]" data-play href={scenarios[0].playgroundHref}>
+          Open in playground →
+        </a>
       </div>
 
-      {/* ── Format switcher ── */}
-      <div class="flex flex-wrap items-center gap-2 border-y border-[var(--sl-color-gray-5)] py-3">
-        <span class="mono-label mr-1">Against</span>
-        <div class="flex flex-wrap gap-1.5" role="group" aria-label="Target language comparison">
-          {FORMATS.map((f, idx) => (
-            <button
-              type="button"
-              class="inline-flex min-h-8 items-center rounded-full border border-[var(--sl-color-gray-5)] px-3 py-1.5 font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white"
-              data-format={f.id}
-              aria-pressed={idx === 0 ? "true" : "false"}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+      <div class="mt-3 flex flex-wrap items-center gap-1" role="group" aria-label="Target client">
+        <span class="mono-label mr-1">Target</span>
+        {FORMATS.map((format) => (
+          <button
+            type="button"
+            data-target={format.id}
+            aria-pressed={format.id === DEFAULT_FORMAT ? "true" : "false"}
+            title={`${format.label} (${format.badge})`}
+            class="app-action min-h-8 px-3 py-1.5 text-[0.75rem] aria-pressed:bg-[var(--sl-color-gray-7)] aria-pressed:text-[var(--sl-color-white)]"
+          >
+            {format.label}
+          </button>
+        ))}
       </div>
 
-      {/* ── Scenario panels ── */}
-      {presets.map((preset, idx) => (
-        <div
-          id={`compare-panel-${preset.id}`}
-          role="tabpanel"
-          aria-labelledby={`compare-tab-${preset.id}`}
-          data-panel={preset.id}
-          data-play={preset.playgroundHref}
-          data-qql-lines={lines(preset.qql)}
-          data-rest-lines={lines(preset.codes.rest)}
-          data-python-lines={lines(preset.codes.python)}
-          data-typescript-lines={lines(preset.codes.typescript)}
-          data-rust-lines={lines(preset.codes.rust)}
-          data-go-lines={lines(preset.codes.go)}
-          hidden={idx !== 0}
-          class="pt-6"
-        >
-          <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
-            {/* Left: the declarative statement */}
-            <div class="code-card min-w-0">
-              <div class="code-card__head">
-                <span class="mono-label mono-label--accent">QQL</span>
-                <span class="min-w-0 truncate text-[var(--sl-color-gray-3)]">universal query</span>
-                <span class="flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">
-                  {lines(preset.qql)} lines
-                  <CopyButton target={`#qql-${preset.id}`} variant="icon" title="Copy QQL" ariaLabel="Copy QQL code" />
-                </span>
-              </div>
-              <div class="code-flat landing-compare__code-wrapper" id={`qql-${preset.id}`}>
-                <Code code={preset.qql} lang="qql" frame="none" />
-              </div>
-              <div class="code-card__foot">
-                <span class="flex items-center gap-1.5">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                  {preset.footNote}
-                </span>
-              </div>
-            </div>
-
-            {/* Right: the verbose native client */}
-            <div class="min-w-0">
-              {FORMATS.map((f, fIdx) => (
-                <div class="code-card" data-raw={f.id} hidden={fIdx !== 0}>
-                  <div class="code-card__head">
-                    <span class="mono-label mono-label--accent">{f.label}</span>
-                    <span class="min-w-0 truncate text-[var(--sl-color-gray-3)]">{f.badge}</span>
-                    <span class="flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">
-                      {lines(preset.codes[f.id])} lines
+      {scenarios.map((scenario, idx) => {
+        const qqlLines = lines(scenario.qql);
+        const targetLines = lines(scenario.codes[DEFAULT_FORMAT]);
+        const reduction = Math.round((1 - qqlLines / targetLines) * 100);
+        return (
+          <div
+            id={`compare-panel-${scenario.id}`}
+            role="tabpanel"
+            aria-labelledby={`compare-tab-${scenario.id}`}
+            data-panel={scenario.id}
+            data-play={scenario.playgroundHref}
+            data-qql-lines={qqlLines}
+            data-rest-lines={lines(scenario.codes.rest)}
+            data-python-lines={lines(scenario.codes.python)}
+            data-typescript-lines={lines(scenario.codes.typescript)}
+            data-rust-lines={lines(scenario.codes.rust)}
+            data-go-lines={lines(scenario.codes.go)}
+            hidden={idx !== 0}
+            class="mt-5"
+          >
+            <div class="grid items-start gap-4 lg:grid-cols-2">
+              {FORMATS.map((format, fIdx) => (
+                <article
+                  class="code-card flex min-w-0 flex-col"
+                  data-target-pane={format.id}
+                  hidden={fIdx !== 0}
+                >
+                  <header class="code-card__head">
+                    <span class="mono-label">{format.label}</span>
+                    <span class="code-card__meta min-w-0 truncate">{format.badge}</span>
+                    <span class="flex shrink-0 items-center gap-2 tabular-nums">
+                      <span>{lines(scenario.codes[format.id])} lines</span>
                       <CopyButton
-                        target={`#raw-${preset.id}-${f.id}`}
+                        target={`#cmp-target-${scenario.id}-${format.id}`}
                         variant="icon"
-                        title={`Copy ${f.label} code`}
-                        ariaLabel={`Copy ${f.label} code`}
+                        title={`Copy ${format.label} code`}
+                        ariaLabel={`Copy ${format.label} code`}
                       />
                     </span>
+                  </header>
+                  <div
+                    class="code-flat h-[16rem] max-h-[16rem] min-h-0 overflow-auto px-4 [mask-image:linear-gradient(to_bottom,#000_88%,transparent)] lg:h-[22rem] lg:max-h-[22rem] [&_pre]:wrap-normal"
+                    id={`cmp-target-${scenario.id}-${format.id}`}
+                    tabindex="0"
+                    role="region"
+                    aria-label={`${format.label} ${scenario.label} code, scrollable`}
+                  >
+                    <Code code={scenario.codes[format.id]} lang={format.lang} frame="none" />
                   </div>
-                  <div class="code-flat landing-compare__code-wrapper" id={`raw-${preset.id}-${f.id}`}>
-                    <Code code={preset.codes[f.id]} lang={f.lang} frame="none" />
-                  </div>
-                  <div class="code-card__foot">
-                    <span class="flex items-center gap-1.5">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                      {f.warn}
-                    </span>
-                  </div>
-                </div>
+                  <footer class="code-card__foot">
+                    <span class="min-w-0 truncate">{format.warn}</span>
+                  </footer>
+                </article>
               ))}
+
+              <article class="code-card flex min-w-0 flex-col border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))] max-lg:order-first">
+                <header class="code-card__head">
+                  <span class="mono-label mono-label--accent">QQL</span>
+                  <span class="code-card__meta min-w-0 truncate">universal query</span>
+                  <span class="flex shrink-0 items-center gap-2 tabular-nums">
+                    <span>{qqlLines} lines</span>
+                    <CopyButton
+                      target={`#cmp-qql-${scenario.id}`}
+                      variant="icon"
+                      title="Copy QQL"
+                      ariaLabel="Copy QQL code"
+                    />
+                  </span>
+                </header>
+                <div
+                  class="code-flat h-[16rem] max-h-[16rem] min-h-0 overflow-auto px-4 [mask-image:linear-gradient(to_bottom,#000_88%,transparent)] lg:h-[22rem] lg:max-h-[22rem] [&_pre]:wrap-normal"
+                  id={`cmp-qql-${scenario.id}`}
+                  tabindex="0"
+                  role="region"
+                  aria-label={`QQL ${scenario.label} code, scrollable`}
+                >
+                  <Code code={scenario.qql} lang="qql" frame="none" />
+                </div>
+                <footer class="code-card__foot">
+                  <span class="min-w-0 truncate">{scenario.qqlNote}</span>
+                  <span
+                    class="shrink-0 font-semibold text-[var(--sl-color-accent-high)] tabular-nums"
+                    data-reduction
+                  >
+                    −{reduction}%
+                  </span>
+                </footer>
+              </article>
             </div>
           </div>
+        );
+      })}
 
-          <p class="m-0 mt-4 text-xs leading-5 text-[var(--sl-color-gray-3)]" role="note">{preset.honesty}</p>
-        </div>
-      ))}
+      <p class="m-0 mt-4 max-w-[52rem] text-xs leading-5 text-[var(--sl-color-gray-3)]" role="note">
+        Native panes inline precomputed vectors from an out-of-band embedding step the
+        SDKs and REST API can't express; QQL resolves text in-process. All panes are
+        truncated (…); line counts exclude that pipeline on both sides.
+      </p>
 
-      <div class="mt-8 flex flex-wrap items-baseline justify-between gap-3 border-t border-[var(--sl-color-gray-5)] pt-5">
+      <div class="mt-6 flex flex-wrap items-baseline justify-between gap-3 border-t border-[var(--sl-color-gray-5)] pt-5">
         <p class="m-0 text-sm text-[var(--sl-color-gray-2)]">
           Declarative queries compile directly to optimized Qdrant REST and gRPC payloads with zero runtime overhead.
         </p>
         <a class="link text-sm" href={guideHref}>{guideLabel} →</a>
       </div>
     </div>
-
-    {/* Proof ruler: replaces the old stats strip. */}
-    <dl class="reveal mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-3">
-      {
-        stats.map((item) => (
-          <div class="bg-[var(--sl-color-bg)] px-5 py-5">
-            <dt class="mono-label m-0">{item.label}</dt>
-            <dd class="m-0 mt-2 font-mono text-[1.75rem] leading-none tabular-nums text-[var(--sl-color-white)]">{item.value}</dd>
-          </div>
-        ))
-      }
-    </dl>
   </div>
 </section>
 
 <script>
   const root = document.querySelector<HTMLElement>("[data-compare]");
   if (root) {
-    const tabs = [...root.querySelectorAll<HTMLButtonElement>("[data-preset]")];
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>("[data-scenario]")];
     const panels = [...root.querySelectorAll<HTMLElement>("[data-panel]")];
-    const formatBtns = [...root.querySelectorAll<HTMLButtonElement>("[data-format]")];
-    const stat = root.querySelector("[data-stat]");
-    const reduction = root.querySelector("[data-reduction]");
+    const targets = [...root.querySelectorAll<HTMLButtonElement>("[data-target]")];
     const play = root.querySelector<HTMLAnchorElement>("[data-play]");
-    const codePanes = [...root.querySelectorAll<HTMLElement>(".landing-compare__code-wrapper pre")];
 
-    const formatLabels: Record<string, string> = {
-      rest: "REST JSON",
-      python: "Python SDK",
-      typescript: "TypeScript SDK",
-      rust: "Rust SDK",
-      go: "Go SDK",
-    };
+    // Instant swap between fixed-height panes: the grid never changes size,
+    // so content below the comparator does not shift. Only the active
+    // scenario panel and the active target pane are unhidden.
+    let format = "rest";
 
-    const balance = root.querySelector<HTMLInputElement>("[data-balance]");
-    const balanceReadout = root.querySelector("[data-balance-readout]");
-
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    let format = "python";
-    // Last rendered numbers, so tab/format switches count from truth.
-    let shownQqlLines = 0;
-    let shownTargetLines = 0;
-    let firstSync = true;
-
-    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
-
-    const tween = (duration: number, render: (eased: number) => void) => {
-      if (reduceMotion.matches) {
-        render(1);
-        return;
-      }
-      const start = performance.now();
-      const tick = (now: number) => {
-        const t = Math.min(1, (now - start) / duration);
-        render(easeOut(t));
-        if (t < 1) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    };
-
-    const countPair = (
-      el: Element | null,
-      fromA: number,
-      toA: number,
-      fromB: number,
-      toB: number,
-      render: (a: number, b: number) => string,
-      isInstant = false,
-    ) => {
-      if (!el) return;
-      if (isInstant || firstSync || reduceMotion.matches || (fromA === toA && fromB === toB)) {
-        el.textContent = render(toA, toB);
-        return;
-      }
-      tween(380, (eased) => {
-        el.textContent = render(
-          Math.round(fromA + (toA - fromA) * eased),
-          Math.round(fromB + (toB - fromB) * eased),
-        );
-      });
-    };
-
-    // Scrollable code regions must stay keyboard-reachable (WCAG 2.1): long
-    // target lines sit behind horizontal scroll, so focus them when they
-    // actually overflow and leave short ones out of the tab order.
-    const syncScrollable = () => {
-      for (const pre of codePanes) {
-        pre.tabIndex = pre.scrollWidth > pre.clientWidth + 1 ? 0 : -1;
+    const applyFormat = (panel: HTMLElement) => {
+      panel
+        .querySelectorAll<HTMLElement>("[data-target-pane]")
+        .forEach((pane) => {
+          pane.hidden = pane.dataset.targetPane !== format;
+        });
+      const badge = panel.querySelector("[data-reduction]");
+      if (badge) {
+        const qqlLines = Number(panel.dataset.qqlLines ?? "0");
+        const targetLines = Number(panel.dataset[`${format}Lines`] ?? "0");
+        if (qqlLines > 0 && targetLines > qqlLines) {
+          badge.textContent = `−${Math.round((1 - qqlLines / targetLines) * 100)}%`;
+        }
       }
     };
 
-    const activePanel = () => panels.find((panel) => !panel.hidden) ?? panels[0];
+    const activePanel = () =>
+      panels.find((panel) => !panel.hidden) ?? panels[0];
 
-    const sync = (instant = false) => {
-      const panel = activePanel();
-      const qqlLines = Number(panel.dataset.qqlLines ?? "5");
-      const targetLinesAttr = `${format}Lines`;
-      const targetLines = Number(panel.dataset[targetLinesAttr] ?? "20");
-
-      if (stat) {
-        const label = formatLabels[format] ?? format.toUpperCase();
-        countPair(
-          stat,
-          shownQqlLines || qqlLines,
-          qqlLines,
-          shownTargetLines || targetLines,
-          targetLines,
-          (a, b) => `This example: ${a} lines vs ${b} in ${label}`,
-          instant,
-        );
+    const activate = (id: string) => {
+      for (const tab of tabs) {
+        const on = tab.dataset.scenario === id;
+        tab.setAttribute("aria-selected", String(on));
+        tab.tabIndex = on ? 0 : -1;
       }
-      shownQqlLines = qqlLines;
-      shownTargetLines = targetLines;
-
-      if (reduction && targetLines > qqlLines) {
-        const pct = Math.round((1 - qqlLines / targetLines) * 100);
-        reduction.textContent = `−${pct}%`;
-      }
-
-      if (play && panel.dataset.play) {
-        play.href = panel.dataset.play;
-      }
-
-      root.querySelectorAll<HTMLElement>("[data-raw]").forEach((pane) => {
-        pane.hidden = pane.dataset.raw !== format;
-      });
-
-      firstSync = false;
-      syncScrollable();
-    };
-
-    // Preset / Scenario tabs (roving tabindex + arrow-key nav per APG tabs)
-    const activatePreset = (tab: HTMLButtonElement) => {
-      const id = tab.dataset.preset;
-      tabs.forEach((item) => {
-        const on = item === tab;
-        item.classList.toggle("is-active", on);
-        item.setAttribute("aria-selected", String(on));
-        item.tabIndex = on ? 0 : -1;
-      });
-      panels.forEach((panel) => {
+      for (const panel of panels) {
         panel.hidden = panel.dataset.panel !== id;
-      });
-      sync();
+      }
+      const active = activePanel();
+      applyFormat(active);
+      if (play && active?.dataset.play) play.href = active.dataset.play;
     };
 
     tabs.forEach((tab, idx) => {
-      tab.addEventListener("click", () => activatePreset(tab));
+      tab.addEventListener("click", () => activate(tab.dataset.scenario ?? ""));
       tab.addEventListener("keydown", (event) => {
         let next: number | null = null;
         if (event.key === "ArrowRight") next = (idx + 1) % tabs.length;
@@ -742,41 +592,20 @@ const lines = (source: string) => source.trim().split("\n").length;
         if (next === null) return;
         event.preventDefault();
         tabs[next].focus();
-        activatePreset(tabs[next]);
+        activate(tabs[next].dataset.scenario ?? "");
       });
     });
 
-    // Language Format Button Click
-    formatBtns.forEach((btn) => {
+    targets.forEach((btn) => {
       btn.addEventListener("click", () => {
-        const next = btn.dataset.format;
+        const next = btn.dataset.target;
         if (!next) return;
         format = next;
-        formatBtns.forEach((item) => {
-          const on = item === btn;
-          item.classList.toggle("is-active", on);
-          item.setAttribute("aria-pressed", String(on));
-        });
-        sync();
+        for (const item of targets) {
+          item.setAttribute("aria-pressed", String(item === btn));
+        }
+        applyFormat(activePanel());
       });
     });
-
-    // Copy buttons are owned by @qql/ui CopyButton (data-copy-target).
-
-    syncScrollable();
-    sync(true);
-    window.addEventListener("resize", syncScrollable);
-
-    // Pane-balance slider was removed; the null-checked lookup stays so the
-    // component script keeps working if the control returns.
-    if (balance) {
-      const applyBalance = () => {
-        const value = Number(balance.value);
-        root.style.setProperty("--cq-pct", `${value}%`);
-        if (balanceReadout) balanceReadout.textContent = `${value} / ${100 - value}`;
-      };
-      balance.addEventListener("input", applyBalance);
-      applyBalance();
-    }
   }
 </script>

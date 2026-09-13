@@ -162,68 +162,61 @@ const pageDescription =
     >
       <h1 class="sr-only">QQL Playground</h1>
 
-      {/* ── Toolbar: four controls, bench chrome (44px) ── */}
+      {/* ── Status bar: 28px, single role=status source — telemetry first, current detail second ── */}
       <div
-        class="flex h-11 min-w-0 shrink-0 items-center gap-1 border-b border-[var(--sl-color-gray-5)] px-2 sm:gap-1.5 sm:px-3"
-        role="toolbar"
-        aria-label="Playground toolbar"
+        class="app-statusbar flex h-7 min-w-0 shrink-0 items-center gap-x-3 overflow-hidden border-b border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]"
+        data-status-panel
+        role="status"
+        aria-live="polite"
+        aria-label="Backend status"
       >
-        <span
-          class="app-chip app-chip--status min-w-0 max-sm:shrink-0 sm:flex-initial"
-          data-mode-offline
-          data-mode-connected
-          role="status"
-          aria-live="polite"
-          title="Parsing and planning run in this browser. Execution needs a reachable Qdrant."
-        >
-          <span
-            class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
-            data-runtime-dot
-            aria-hidden="true"></span>
-          <span class="app-chip__short app-chip__short--loading" aria-hidden="true">WASM loading</span>
-          <span class="app-chip__short app-chip__short--ready" aria-hidden="true">WASM ready</span>
-          <span class="app-chip__short app-chip__short--failed" aria-hidden="true">WASM failed</span>
-          <span class="min-w-0 truncate max-sm:sr-only" data-runtime-status dir="rtl">Loading current WASM…</span>
-          <span class="hidden shrink-0 text-[var(--sl-color-gray-5)] sm:inline" aria-hidden="true">·</span>
+        <span class="flex min-w-0 items-center gap-1.5 lg:shrink-0">
           <span
             class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
             data-connected-dot
             aria-hidden="true"></span>
-          <span class="min-w-0 truncate max-sm:sr-only" data-connected-label>Connected: not checked</span>
-          <span class="app-chip__fallback min-w-0 truncate">No Qdrant: offline analysis still works</span>
+          <span class="min-w-0 truncate">
+            <span class="hidden md:inline">endpoint </span>
+            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong>
+          </span>
         </span>
-
         <button
-          class="app-chip min-w-0 max-w-[7rem] sm:max-w-[16rem]"
-          type="button"
-          data-open-presets
-          title="Load a conformance fixture"
-        >
-          <span class="app-chip__label hidden sm:inline">Example</span>
-          <span class="app-chip__value" data-active-fixture>{landingLabel}</span>
-          <span class="app-chip__caret" aria-hidden="true">▾</span>
-        </button>
-
-        <button
-          class="app-chip min-w-0 max-w-[8.75rem] sm:max-w-none"
+          class="app-action hidden min-h-6 shrink-0 gap-1.5 px-1.5 sm:inline-flex"
           type="button"
           data-open-settings
           title="Edit the Qdrant URL and embeddings"
         >
-          <span class="app-chip__label hidden sm:inline">Connection</span>
-          <span class="app-chip__value" data-connection-value>localhost:6333 · MiniLM</span>
-          <span class="app-chip__caret" aria-hidden="true">▾</span>
+          <span class="app-chip__label">Connection</span>
+          <span class="max-w-40 truncate" data-connection-value>localhost:6333 · MiniLM</span>
         </button>
-
+        <span class="hidden min-w-0 items-center gap-1.5 md:flex lg:shrink-0">
+          <span
+            class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
+            data-runtime-dot
+            aria-hidden="true"></span>
+          <span class="min-w-0 truncate">
+            <span class="hidden xl:inline">engine </span>
+            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-wasm>Loading WASM</strong>
+          </span>
+        </span>
+        <span class="hidden min-w-0 truncate lg:inline">
+          <span class="hidden xl:inline">embeddings </span>
+          <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-embed>MiniLM (browser)</strong>
+        </span>
+        <span class="hidden min-w-0 truncate xl:inline">
+          example <strong class="font-medium text-[var(--sl-color-gray-1)]" data-active-fixture>{landingLabel}</strong>
+        </span>
+        <span class="sr-only" data-runtime-status>Loading current WASM…</span>
+        <span class="sr-only" data-connected-label>Connected: not checked</span>
+        <span class="hidden min-w-0 flex-1 truncate sm:block" data-status-detail hidden></span>
         <a
-          class="app-chip ml-auto shrink-0 px-2"
+          class="app-action ml-auto hidden shrink-0 px-1.5 sm:inline-flex"
           href="/docs/"
           data-docs-backlink
           hidden
           title="Back to the docs page that opened this query"
         >
-          <span class="hidden sm:inline">Docs</span>
-          <span aria-hidden="true">→</span>
+          Docs <span aria-hidden="true">→</span>
         </a>
       </div>
 
@@ -248,31 +241,6 @@ const pageDescription =
           </div>
           <InspectorPanel />
         </div>
-      </div>
-
-      {/* ── Status bar: 28px, telemetry first, current detail second ── */}
-      <div
-        class="app-statusbar flex h-7 min-w-0 shrink-0 items-center gap-x-4 overflow-hidden border-t border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]"
-        data-status-panel
-        role="status"
-        aria-live="polite"
-        aria-label="Backend status"
-      >
-        <span class="flex min-w-0 items-center gap-x-3 lg:shrink-0">
-          <span class="min-w-0 truncate">
-            <span class="hidden md:inline">endpoint </span>
-            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong>
-          </span>
-          <span class="hidden min-w-0 truncate sm:inline">
-            <span class="hidden md:inline">embeddings </span>
-            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-embed>MiniLM (browser)</strong>
-          </span>
-          <span class="min-w-0 truncate">
-            <span class="hidden md:inline">engine </span>
-            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-wasm>Loading WASM</strong>
-          </span>
-        </span>
-        <span class="hidden min-w-0 flex-1 truncate sm:block" data-status-detail hidden></span>
       </div>
     </main>
 

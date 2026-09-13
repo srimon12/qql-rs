@@ -1,4 +1,5 @@
 ---
+import { Code } from "@astrojs/starlight/components";
 import CopyButton from "@qql/ui/CopyButton.astro";
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 	specimenRoute: string;
 	specimenStatus: string;
 	specimenQql: string;
+	stats: readonly { value: string; label: string }[];
 }
 
 const {
@@ -25,56 +27,91 @@ const {
 	specimenRoute,
 	specimenStatus,
 	specimenQql,
+	stats,
 } = Astro.props;
+
+const installCmd =
+	"curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh";
+
+const heroLines = specimenQql.trim().split("\n");
 ---
 
 <section class="relative overflow-x-clip">
   <div class="hero-grid" aria-hidden="true"></div>
-  <div class="shell relative grid gap-12 pt-14 pb-16 lg:grid-cols-[minmax(0,34rem)_minmax(0,30rem)] lg:justify-between lg:gap-14 lg:pt-16 lg:pb-24">
-    <div class="min-w-0 max-w-[34rem]">
-      <p class="mono-label m-0 flex items-center gap-2.5">
+  <div class="shell relative grid items-center gap-10 pt-14 pb-10 text-left lg:grid-cols-[1.05fr_0.95fr] lg:pt-20 lg:pb-12">
+    <div class="min-w-0">
+      <p class="mono-label reveal m-0 flex items-center gap-2.5">
         <span class="ping" aria-hidden="true"></span>
         {eyebrow}
       </p>
-      <h1 id="hero-headline" class="h-display m-0 mt-5">{headline}</h1>
-      <p class="m-0 mt-5 text-[1.125rem] leading-[1.6] text-[var(--sl-color-gray-2)]">
+      <h1 id="hero-headline" class="h-display reveal m-0 mt-5" style="--d:70ms">{headline}</h1>
+      <p class="reveal m-0 mt-5 max-w-[36rem] text-[1.125rem] leading-[1.6] text-[var(--sl-color-gray-2)]" style="--d:140ms">
         {lede}
       </p>
-      <div class="mt-7 flex flex-wrap items-center gap-3">
+      <div class="reveal mt-7 flex flex-wrap items-center gap-3" style="--d:210ms">
         <a class="btn btn--primary" href={primaryCta.href}>
           {primaryCta.label}
           <span aria-hidden="true">→</span>
         </a>
         <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
       </div>
+    </div>
 
-      <div class="mt-6 flex max-w-full items-center justify-between gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-3 py-2">
-        <code id="hero-install-cmd" class="min-w-0 overflow-x-auto font-mono text-[0.75rem] text-[var(--sl-color-gray-2)] whitespace-nowrap scrollbar-none" title="curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</code>
+    <figure class="code-card reveal min-w-0" style="--d:280ms" aria-label="Example QQL query">
+      <figcaption class="code-card__head">
+        <span class="flex items-center gap-1.5 text-[var(--sl-color-gray-4)]" aria-hidden="true">
+          <span class="h-2.5 w-2.5 rounded-full bg-current opacity-60"></span>
+          <span class="h-2.5 w-2.5 rounded-full bg-current opacity-60"></span>
+          <span class="h-2.5 w-2.5 rounded-full bg-current opacity-60"></span>
+        </span>
+        <span class="min-w-0 truncate">{specimenTitle}</span>
+        <span class="code-card__meta">{specimenMeta}</span>
+      </figcaption>
+
+      <div class="flex items-center gap-3 border-b border-[var(--sl-color-gray-5)] px-3 py-2">
+        <span class="shrink-0 font-mono text-[0.75rem] text-[var(--sl-color-gray-4)]" aria-hidden="true">$</span>
+        <code class="min-w-0 flex-1 truncate font-mono text-[0.75rem] text-[var(--sl-color-gray-2)]" title={installCmd}>{installCmd}</code>
         <CopyButton
-          id="hero-copy-btn"
-          target="#hero-install-cmd"
+          text={installCmd}
           title="Copy install command"
           ariaLabel="Copy install command"
           class="shrink-0"
         />
       </div>
-    </div>
 
-    <figure class="code-card hero-bleed min-w-0 self-start" aria-label={specimenQql}>
-      <figcaption class="code-card__head">
-        <span class="code-card__tick" aria-hidden="true"></span>
-        <span>{specimenTitle}</span>
-        <span class="code-card__meta">{specimenMeta}</span>
-      </figcaption>
-
-      <div class="code-card__body">
-        <pre class="m-0"><code><slot /></code></pre>
+      <div class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 px-4">
+        <div class="flex select-none flex-col py-3 text-right font-mono text-[0.75rem] leading-[1.65] text-[var(--sl-color-gray-4)]" aria-hidden="true">
+          {heroLines.map((_, i) => <span>{String(i + 1).padStart(2, "0")}</span>)}
+        </div>
+        <div class="code-flat min-w-0">
+          <Code code={specimenQql} lang="qql" frame="none" />
+        </div>
       </div>
 
-      <div class="code-card__foot flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <span class="min-w-0 truncate">{specimenRoute}</span>
-        <span class="shrink-0">{specimenStatus}</span>
+      <div class="code-card__foot">
+        <span class="flex min-w-0 items-center gap-2">
+          <span class="shrink-0 rounded-full border border-[color-mix(in_srgb,var(--q-ok)_55%,transparent)] px-2 py-0.5 font-semibold text-[var(--q-ok)]">200 OK</span>
+          <span class="min-w-0 truncate">{specimenRoute}</span>
+        </span>
+        <span class="hidden shrink-0 items-center gap-3 sm:flex">
+          <span class="inline-flex items-center gap-1"><span class="text-[var(--q-ok)]" aria-hidden="true">✓</span> AST verified</span>
+          <span class="inline-flex items-center gap-1"><span class="text-[var(--q-ok)]" aria-hidden="true">✓</span> Shard-routed</span>
+          <span class="tabular-nums">{specimenStatus}</span>
+        </span>
       </div>
     </figure>
+  </div>
+
+  <div class="shell relative pb-14 lg:pb-20">
+    <dl class="reveal m-0 grid grid-cols-2 border-y border-[var(--sl-color-gray-5)] p-0 lg:grid-cols-4" style="--d:340ms" aria-label="QQL at a glance">
+      {
+        stats.map((item) => (
+          <div class="min-w-0 border-[var(--sl-color-gray-5)] px-5 py-4 max-lg:even:border-l max-lg:[&:nth-child(n+3)]:border-t lg:[&:not(:first-child)]:border-l">
+            <dt class="mono-label m-0">{item.label}</dt>
+            <dd class="m-0 mt-1 truncate font-mono text-[1.375rem] leading-none tabular-nums text-[var(--sl-color-white)]">{item.value}</dd>
+          </div>
+        ))
+      }
+    </dl>
   </div>
 </section>

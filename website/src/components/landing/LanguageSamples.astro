@@ -41,7 +41,7 @@ const samples = [
 const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
 ---
 
-<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(4rem,8vw,6.5rem)]" aria-labelledby="language-heading">
+<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(3rem,6vw,4.5rem)]" aria-labelledby="language-heading">
   <div class="shell">
     <header class="max-w-[44rem] reveal">
       <h2 id="language-heading" class="h-section m-0">{heading}</h2>
@@ -64,18 +64,18 @@ const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
       </article>
 
       {
-        samples.map((sample) => (
-          <article class="code-card">
+        samples.map((sample, idx) => (
+          <article class:list={["code-card", idx === 0 && "border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))]"]}>
             <header class="code-card__head">
               <span class="code-card__tick" aria-hidden="true"></span>
               <span class="mono-label">{sample.kind}</span>
               <a class="link font-mono text-[0.6875rem]" href={sample.href}>Try in playground →</a>
             </header>
-            <div class="code-flat px-4">
+            <div class="code-flat overflow-x-auto px-4 [mask-image:linear-gradient(to_right,#000_92%,transparent)]">
               <Code code={sample.code} lang="qql" frame="none" />
             </div>
             <div class="code-card__foot">
-              <span>{sample.caption}</span>
+              <span class="min-w-0 truncate">{sample.caption}</span>
             </div>
           </article>
         ))
