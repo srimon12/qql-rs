@@ -1,0 +1,24 @@
+---
+interface Props {
+	name: string;
+	type: string;
+	required?: boolean;
+}
+
+const { name, type, required = false } = Astro.props;
+---
+
+<div class="not-content my-6 rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-5">
+  <div class="mb-3.5 flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-[var(--sl-color-gray-5)] pb-2.5">
+    <div class="flex flex-wrap items-center gap-3">
+      <span class="font-mono text-[0.85rem] font-medium text-[var(--sl-color-gray-1)]">{name}</span>
+      <span class="font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]">{type}</span>
+    </div>
+    <span class="rounded-full border border-[var(--sl-color-gray-5)] px-2 py-0.5 font-mono text-[0.65rem] uppercase tracking-[0.05em] text-[var(--sl-color-gray-3)]">
+      {required ? "required" : "optional"}
+    </span>
+  </div>
+  <div class="text-sm leading-relaxed text-[var(--sl-color-gray-2)] [&>p]:m-0">
+    <slot />
+  </div>
+</div>

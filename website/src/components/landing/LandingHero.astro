@@ -7,6 +7,8 @@ interface Props {
 	secondaryCta: { label: string; href: string };
 	specimenTitle: string;
 	specimenMeta: string;
+	specimenRoute: string;
+	specimenStatus: string;
 	specimenQql: string;
 }
 
@@ -18,92 +20,61 @@ const {
 	secondaryCta,
 	specimenTitle,
 	specimenMeta,
+	specimenRoute,
+	specimenStatus,
 	specimenQql,
 } = Astro.props;
 ---
 
-<section class="landing-hero" aria-labelledby="hero-headline">
-  <div class="landing-hero__backdrop" aria-hidden="true"></div>
-  <div class="landing-shell landing-hero__grid">
-    <div class="landing-hero__copy">
-      <p class="landing-hero__eyebrow">
-        <span class="landing-hero__eyebrow-dot" aria-hidden="true"></span>
+<section class="relative overflow-x-clip">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="shell relative grid gap-12 pt-14 pb-16 lg:grid-cols-[minmax(0,34rem)_minmax(0,30rem)] lg:justify-between lg:gap-14 lg:pt-16 lg:pb-24">
+    <div class="min-w-0 max-w-[34rem]">
+      <p class="mono-label m-0 flex items-center gap-2.5">
+        <span class="ping" aria-hidden="true"></span>
         {eyebrow}
       </p>
-      <h1 id="hero-headline">{headline}</h1>
-      <p class="landing-hero__lede">{lede}</p>
-      <div class="landing-hero__actions">
-        <a class="landing-btn landing-btn--primary" href={primaryCta.href}>
+      <h1 id="hero-headline" class="h-display m-0 mt-5">{headline}</h1>
+      <p class="m-0 mt-5 text-[1.125rem] leading-[1.6] text-[var(--sl-color-gray-2)]">
+        {lede}
+      </p>
+      <div class="mt-7 flex flex-wrap items-center gap-3">
+        <a class="btn btn--primary" href={primaryCta.href}>
           {primaryCta.label}
-          <span class="landing-btn__arrow" aria-hidden="true">→</span>
+          <span aria-hidden="true">→</span>
         </a>
-        <a class="landing-btn landing-btn--ghost" href={secondaryCta.href}>
-          {secondaryCta.label}
-        </a>
+        <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
       </div>
-    </div>
 
-    <figure class="landing-code-card" aria-label={specimenQql}>
-      <figcaption class="landing-code-card__head">
-        <div class="landing-code-card__window-controls" aria-hidden="true">
-          <span class="landing-window-dot landing-window-dot--red"></span>
-          <span class="landing-window-dot landing-window-dot--amber"></span>
-          <span class="landing-window-dot landing-window-dot--green"></span>
-        </div>
-        <div class="landing-code-card__tab-active">
-          <svg class="landing-code-card__tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-          <span class="landing-code-card__file">{specimenTitle}</span>
-        </div>
-        <span class="landing-code-card__meta">{specimenMeta}</span>
-      </figcaption>
-
-      {/* ── Command Strip with Copy ── */}
-      <div class="landing-code-card__cmd-bar">
-        <div class="landing-code-card__cmd-text">
-          <span class="landing-code-card__prompt">$</span>
-          <span class="landing-code-card__cmd" id="hero-install-cmd">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</span>
-        </div>
+      <div class="mt-5 flex items-center gap-3">
+        <code id="hero-install-cmd" class="min-w-0 truncate font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</code>
         <button
           type="button"
-          class="landing-code-card__copy-btn"
+          class="link inline-flex shrink-0 items-center gap-1.5 font-mono text-[0.7rem]"
           id="hero-copy-btn"
           title="Copy install command"
           aria-label="Copy install command"
         >
-          <svg class="landing-copy-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
           <span class="landing-copy-label">Copy</span>
         </button>
       </div>
+    </div>
 
-      {/* ── Code Area with Line Numbers Gutter ── */}
-      <div class="landing-code-card__body">
-        <div class="landing-code-card__gutter" aria-hidden="true">
-          <div>01</div>
-          <div>02</div>
-          <div>03</div>
-          <div>04</div>
-          <div>05</div>
-          <div>06</div>
-        </div>
-        <pre class="landing-code-card__pre"><code><slot /></code></pre>
+    <figure class="code-card hero-bleed min-w-0 self-start" aria-label={specimenQql}>
+      <figcaption class="code-card__head">
+        <span class="code-card__tick" aria-hidden="true"></span>
+        <span>{specimenTitle}</span>
+        <span class="code-card__meta">{specimenMeta}</span>
+      </figcaption>
+
+      <div class="code-card__body">
+        <pre class="m-0"><code><slot /></code></pre>
       </div>
 
-      {/* ── Telemetry Footer ── */}
-      <div class="landing-code-card__telemetry">
-        <div class="landing-code-card__status">
-          <span class="landing-telemetry-badge">200 OK</span>
-          <span class="landing-telemetry-latency">1.2ms</span>
-        </div>
-        <div class="landing-code-card__metrics">
-          <span class="landing-metric-item">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            AST verified by qql-core
-          </span>
-          <span class="landing-metric-item">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            Shard-routed
-          </span>
-        </div>
+      <div class="code-card__foot">
+        <span>{specimenRoute}</span>
+        <span>{specimenStatus}</span>
       </div>
     </figure>
   </div>

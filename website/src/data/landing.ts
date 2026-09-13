@@ -2,10 +2,12 @@
 
 export const hero = {
 	headline: "SQL for Qdrant.",
-	lede: "QQL is to Qdrant what SQL is to Postgres. One query for hybrid search, filters, and schema.",
+	lede: "QQL is to Qdrant what SQL is to Postgres. One statement for hybrid search, filters, and schema. The same source in Rust, Python, Node, WASM, and the CLI.",
 	eyebrow: "Open source · MIT · v0.4.0",
 	specimenTitle: "search.qql",
 	specimenMeta: "QQL · MIT",
+	specimenRoute: "POST /collections/docs/points/query",
+	specimenStatus: "200 · 1.2ms",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
 	secondaryCta: {
 		label: "Quickstart",
@@ -17,15 +19,16 @@ export const stats = [
 	{ value: "12", label: "Query forms" },
 	{ value: "276", label: "Conformance statements" },
 	{ value: "6", label: "Runtimes & tools" },
-	// WASM size = release browser pack crates/qql-wasm/pkg/qql_wasm_bg.wasm
-	// (wasm-pack release with wasm-opt). Rebuild + re-verify when the wasm
-	// crate changes; do not quote gzipped transfer size unless measured.
-	{ value: "1.9 MB", label: "WASM parser, in-browser" },
 ] as const;
+
+// WASM size = release browser pack crates/qql-wasm/pkg/qql_wasm_bg.wasm
+// (wasm-pack release with wasm-opt). Rebuild + re-verify when the wasm
+// crate changes; do not quote gzipped transfer size unless measured.
+export const wasmNote = "1.9 MB parser, in-browser" as const;
 
 export const problem = {
 	heading: "Same query. No boilerplate.",
-	sub: "Pick REST JSON or any SDK client. The QQL stays a few lines.",
+	sub: "Pick a REST payload or any SDK client. The QQL statement stays a few lines.",
 	guideHref: "/docs/guides/qql-vs-qdrant-json/",
 	guideLabel: "Full comparison in the docs",
 } as const;
@@ -63,14 +66,14 @@ export const pipeline = {
 
 export const language = {
 	heading: "One grammar. The whole surface.",
-	sub: "Hybrid retrieval, faceting, formula scoring, recommendations — twelve query forms over one typed grammar.",
+	sub: "Hybrid retrieval, faceting, and formula scoring. Twelve query forms over one typed grammar.",
 	footHref: "/docs/language/",
 	footLabel: "Language reference",
 } as const;
 
 export const getStarted = {
-	heading: "Install",
-	sub: "CLI, Python, Node, Rust, WASM, and VS Code.",
+	heading: "One statement. Every runtime.",
+	sub: "Same plan, six surfaces: CLI, Python, Node, Rust, WASM, and VS Code.",
 	installs: [
 		{
 			name: "CLI",
@@ -80,7 +83,12 @@ export const getStarted = {
 		{ name: "Python", cmd: "pip install pyqql", href: "/docs/sdks/python/" },
 		{ name: "Node.js", cmd: "npm i @veristamp/nqql", href: "/docs/sdks/node/" },
 		{ name: "Rust", cmd: "cargo add qql qql-core", href: "/docs/sdks/rust/" },
-		{ name: "WASM", cmd: "npm i qql-wasm", href: "/docs/sdks/wasm/" },
+		{
+			name: "WASM",
+			cmd: "npm i qql-wasm",
+			href: "/docs/sdks/wasm/",
+			note: wasmNote,
+		},
 		{ name: "VS Code", cmd: "srimon12.qql-lang", href: "/docs/tools/editors/" },
 	],
 	footHref: "/docs/getting-started/quickstart/",
@@ -88,8 +96,8 @@ export const getStarted = {
 } as const;
 
 export const cta = {
-	heading: "One query. Every runtime.",
-	body: "The playground runs the real WASM parser in your browser — no cluster, no signup.",
+	heading: "Run a query in the browser.",
+	body: "The playground runs the real WASM parser in your browser. No cluster, no signup.",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
 	secondaryCta: { label: "Read the docs", href: "/docs/" },
 } as const;

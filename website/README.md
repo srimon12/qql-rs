@@ -11,7 +11,10 @@ Astro + Starlight site for QQL:
 ## Packages
 
 - `@qql/website` — this app
-- `@qql/ui-docs` — vendored docs UI (from Veristamp `ui-docs`; local until shared package)
+- `@qql/ui` — the shared UI package: one authored `styles.css` (≤500 lines, enforced by
+  `scripts/check-css-budget.mjs`), shared Astro components, and the docs types. This repo is
+  its source of truth; private consumers (Veristamp) take it from here, never the reverse.
+  See `packages/ui/README.md`.
 
 ## Develop / build (all pnpm lives here)
 

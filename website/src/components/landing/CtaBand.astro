@@ -9,21 +9,22 @@ interface Props {
 const { heading, body, primaryCta, secondaryCta } = Astro.props;
 ---
 
-<section class="landing-section" aria-labelledby="cta-heading">
-  <div class="landing-shell landing-fade-up">
-    <div class="landing-cta__inner">
-      <div>
-        <h2 id="cta-heading">{heading}</h2>
-        <p class="landing-cta__body">{body}</p>
+<section class="cta-band" aria-labelledby="cta-heading">
+  <div class="shell reveal py-[clamp(4rem,8vw,6.5rem)]">
+    <div class="flex flex-col items-start justify-between gap-8 lg:flex-row lg:items-end">
+      <div class="max-w-[34rem]">
+        <h2 id="cta-heading" class="h-section m-0">{heading}</h2>
+        <p class="cta-band__lede m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{body}</p>
+        <p class="cta-band__foot m-0 mt-6 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
+          no cluster · no signup · MIT
+        </p>
       </div>
-      <div class="landing-cta__actions">
-        <a class="landing-btn landing-btn--primary" href={primaryCta.href}>
+      <div class="flex flex-wrap gap-3">
+        <a class="btn btn--primary" href={primaryCta.href}>
           {primaryCta.label}
-          <span class="landing-btn__arrow" aria-hidden="true">→</span>
+          <span aria-hidden="true">→</span>
         </a>
-        <a class="landing-btn landing-btn--ghost" href={secondaryCta.href}>
-          {secondaryCta.label}
-        </a>
+        <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
       </div>
     </div>
   </div>

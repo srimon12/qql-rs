@@ -1,8 +1,7 @@
 @layer base, starlight, theme, components, utilities;
-
 @import "@astrojs/starlight-tailwind";
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
-
-@import "@qql/ui-docs/global.css";
-@import "./ec-theme.css";
+/* Authored CSS lives in @qql/ui; see packages/ui/README.md. */
+@import "@qql/ui/ec-theme.css";
+@import "@qql/ui/styles.css";

@@ -11,7 +11,7 @@ export default defineMarkdocConfig({
 			},
 		},
 		techBadge: {
-			render: component("@qql/ui-docs/TechBadge.astro"),
+			render: component("@qql/ui/TechBadge.astro"),
 			attributes: {
 				name: { type: String, required: true },
 				variant: { type: String },
@@ -19,7 +19,7 @@ export default defineMarkdocConfig({
 			},
 		},
 		apiField: {
-			render: component("@qql/ui-docs/ApiField.astro"),
+			render: component("@qql/ui/ApiField.astro"),
 			attributes: {
 				name: { type: String, required: true },
 				type: { type: String, required: true },
@@ -27,35 +27,26 @@ export default defineMarkdocConfig({
 			},
 		},
 		glassCard: {
-			render: component("@qql/ui-docs/GlassCard.astro"),
+			render: component("@qql/ui/GlassCard.astro"),
 			attributes: {
 				title: { type: String },
 			},
 		},
-		kbd: {
-			render: component("@qql/ui-docs/Kbd.astro"),
-			attributes: {
-				keyName: { type: String, required: true },
-			},
-		},
 		qqlExample: {
-			render: component("@qql/ui-docs/QqlExample.astro"),
+			render: component("@qql/ui/QqlExample.astro"),
 			attributes: {
 				title: { type: String },
 			},
 		},
 		terminal: {
-			render: component("@qql/ui-docs/Terminal.astro"),
+			render: component("@qql/ui/Terminal.astro"),
 			attributes: {
 				title: { type: String },
 			},
 		},
-		packageManager: {
-			render: component("@qql/ui-docs/PackageManager.astro"),
-			attributes: {
-				cmd: { type: String, required: true },
-				dev: { type: Boolean, default: false },
-			},
+		faqList: {
+			render: component("./src/components/FaqList.astro"),
+			attributes: {},
 		},
 	},
 });

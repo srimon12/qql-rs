@@ -4,22 +4,17 @@ import "@fontsource-variable/geist-mono";
 import "@fontsource/newsreader/latin-300.css";
 import "@fontsource/newsreader/latin-400.css";
 import "../styles/global.css";
-import "@qql/ui-docs/chrome.css";
-import "@qql/ui-docs/landing.css";
 import CtaBand from "../components/landing/CtaBand.astro";
-import FaqList from "../components/landing/FaqList.astro";
 import InstallGrid from "../components/landing/InstallGrid.astro";
 import LandingHero from "../components/landing/LandingHero.astro";
 import LanguageSamples from "../components/landing/LanguageSamples.astro";
 import PipelineSteps from "../components/landing/PipelineSteps.astro";
 import ProblemCompare from "../components/landing/ProblemCompare.astro";
-import StatsStrip from "../components/landing/StatsStrip.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import { ANALYTICS, APPS, SITE } from "../config/site";
 import {
 	cta,
-	faq,
 	getStarted,
 	hero,
 	language,
@@ -68,18 +63,6 @@ const verifiedQqlFacet = String.raw`FACET room_type FROM stays WHERE price < 150
 const verifiedQqlFormula = String.raw`QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
   DEFAULTS (score = 0.0, popularity = 0)
 FROM papers LIMIT 10;`;
-
-const verifiedQqlGrouped = String.raw`QUERY 'incident'
-FROM runbooks
-USING dense
-GROUP BY service SIZE 3 LOOKUP FROM services
-WITH PAYLOAD INCLUDE (title, service)
-LIMIT 10;`;
-
-const verifiedQqlRecommend = String.raw`QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score
-FROM products
-USING dense
-LIMIT 10;`;
 ---
 
 <!doctype html>
@@ -159,19 +142,6 @@ LIMIT 10;`;
       type="application/ld+json"
       set:html={JSON.stringify({
         "@context": "https://schema.org",
-        "@type": "FAQPage",
-        mainEntity: faq.items.map((item) => ({
-          "@type": "Question",
-          name: item.question,
-          acceptedAnswer: { "@type": "Answer", text: item.answer },
-        })),
-      })}
-    />
-    <script
-      is:inline
-      type="application/ld+json"
-      set:html={JSON.stringify({
-        "@context": "https://schema.org",
         "@type": "WebSite",
         name: "QQL",
         url: APPS.home.url,
@@ -185,11 +155,11 @@ LIMIT 10;`;
     />
   </head>
 
-  <body class="landing-body">
-    <div class="landing-noise" aria-hidden="true"></div>
+  <body class="landing-body overflow-x-clip">
+    <div class="grain" aria-hidden="true"></div>
     <SiteHeader active="home" />
 
-    <main id="main-content">
+    <main id="main-content" class="relative z-[1]">
       <LandingHero
         headline={hero.headline}
         lede={hero.lede}
@@ -198,24 +168,25 @@ LIMIT 10;`;
         secondaryCta={hero.secondaryCta}
         specimenTitle={hero.specimenTitle}
         specimenMeta={hero.specimenMeta}
+        specimenRoute={hero.specimenRoute}
+        specimenStatus={hero.specimenStatus}
         specimenQql={verifiedQqlHero}
       >
-        <span class="kw">QUERY</span> <span class="str">'chest pain'</span><br />
-        <span class="kw">FROM</span> <span class="id">medical</span><br />
-        <span class="kw">USING</span> <span class="id">dense</span><br />
-        <span class="kw">WHERE</span> <span class="id">department</span>{" "}
-        <span class="op">=</span> <span class="str">'cardio'</span><br />
-        <span class="kw">SHARD</span> <span class="str">'hospital-east'</span><br />
-        <span class="kw">LIMIT</span> <span class="num">5</span><span class="op">;</span>
+        <span class="sx-kw">QUERY</span> <span class="sx-str">'chest pain'</span>{" "}
+        <span class="sx-kw">FROM</span> <span class="sx-id">medical</span><br />
+        <span class="sx-kw">USING</span> <span class="sx-id">dense</span><br />
+        <span class="sx-kw">WHERE</span> <span class="sx-id">department</span>{" "}
+        <span class="sx-op">=</span> <span class="sx-str">'cardio'</span><br />
+        <span class="sx-kw">SHARD</span> <span class="sx-str">'hospital-east'</span><br />
+        <span class="sx-kw">LIMIT</span> <span class="sx-num">5</span><span class="sx-op">;</span>
       </LandingHero>
-
-      <StatsStrip stats={stats} />
 
       <ProblemCompare
         heading={problem.heading}
         sub={problem.sub}
         guideHref={problem.guideHref}
         guideLabel={problem.guideLabel}
+        stats={stats}
         hybridQql={verifiedQqlCompareHybrid}
         tenantQql={verifiedQqlCompareTenant}
         filtersQql={verifiedQqlCompareFilters}
@@ -235,8 +206,6 @@ LIMIT 10;`;
         hybridQql={verifiedQqlHybrid}
         facetQql={verifiedQqlFacet}
         formulaQql={verifiedQqlFormula}
-        groupedQql={verifiedQqlGrouped}
-        recommendQql={verifiedQqlRecommend}
       />
 
       <InstallGrid
@@ -246,8 +215,6 @@ LIMIT 10;`;
         footHref={getStarted.footHref}
         footLabel={getStarted.footLabel}
       />
-
-      <FaqList heading={faq.heading} items={faq.items} />
 
       <CtaBand
         heading={cta.heading}
@@ -265,16 +232,14 @@ LIMIT 10;`;
           (entries) => {
             for (const entry of entries) {
               if (entry.isIntersecting) {
-                entry.target.classList.add("landing-visible");
+                entry.target.classList.add("is-in");
                 observer.unobserve(entry.target);
               }
             }
           },
-          { threshold: 0.08 },
+          { threshold: 0.1, rootMargin: "0px 0px -10% 0px" },
         );
-        document
-          .querySelectorAll(".landing-fade-up")
-          .forEach((el) => observer.observe(el));
+        document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
       });
     </script>
   </body>

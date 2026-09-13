@@ -1,0 +1,68 @@
+---
+import LanguageSelect from "virtual:starlight/components/LanguageSelect";
+import Search from "virtual:starlight/components/Search";
+import SocialIcons from "virtual:starlight/components/SocialIcons";
+import config from "virtual:starlight/user-config";
+import type { DocsHeaderConfig } from "../types";
+import BrandMark from "./BrandMark.astro";
+import ThemeToggle from "./ThemeToggle.astro";
+
+interface Props {
+	docsConfig: DocsHeaderConfig;
+}
+
+const { docsConfig } = Astro.props;
+
+const shouldRenderSearch =
+	config.pagefind ||
+	config.components.Search !== "@astrojs/starlight/components/Search.astro";
+
+const currentPath = Astro.url.pathname;
+---
+
+<div class="flex h-full items-center justify-between gap-4 lg:grid lg:grid-cols-[auto_1fr_auto]">
+  <div class="flex min-w-0 items-center gap-5">
+    <a class="brand" href="/">
+      <span class="brand__mark" aria-hidden="true">
+        <BrandMark />
+      </span>
+      <span class="brand__name">QQL</span>
+      <span class="hidden rounded-full border border-[var(--sl-color-gray-5)] px-2 py-0.5 font-mono text-[0.56rem] font-bold uppercase tracking-[0.14em] text-[var(--sl-color-gray-3)] sm:inline-block">Docs</span>
+    </a>
+  </div>
+
+  <nav class="sl-hidden lg:sl-flex items-center justify-center">
+    {docsConfig.navItems.map((item) => {
+      const isExternal = item.external || item.href.startsWith("http");
+      const pathname = isExternal ? "" : new URL(item.href, "http://localhost").pathname;
+      const isActive = !isExternal && currentPath.startsWith(pathname) && item.name === "Docs";
+      return (
+        <a
+          href={item.href}
+          class:list={["docs-nav-link", isActive && "is-active"]}
+          aria-current={isActive ? "page" : undefined}
+          {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        >
+          {item.name}
+        </a>
+      );
+    })}
+  </nav>
+
+  <div class="sl-flex print:hidden items-center gap-4">
+    <div class="search-container">
+      {shouldRenderSearch && <Search />}
+    </div>
+    <div class="sl-hidden md:sl-flex items-center gap-4">
+      <SocialIcons />
+    </div>
+    <div class="sl-flex items-center gap-2">
+      <div class="sl-hidden md:sl-flex">
+        <ThemeToggle />
+      </div>
+      <div class="sl-hidden md:sl-flex">
+        <LanguageSelect />
+      </div>
+    </div>
+  </div>
+</div>

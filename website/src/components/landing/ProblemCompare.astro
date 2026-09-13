@@ -9,6 +9,7 @@ interface Props {
 	hybridQql: string;
 	tenantQql: string;
 	filtersQql: string;
+	stats: readonly { value: string; label: string }[];
 }
 
 const {
@@ -19,14 +20,17 @@ const {
 	hybridQql,
 	tenantQql,
 	filtersQql,
+	stats,
 } = Astro.props;
 
 // ── Scenario 1: Hybrid Search (Dense + Sparse RRF) ─────────────────────────
+// Vectors are display-truncated to (…) so the line-count story reads at a
+// glance; the QQL pane is the real 7-line statement.
 
 const restHybrid = `{
   "prefetch": [
     {
-      "query": { "nearest": [[-0.8341, 0.3246, 0.8082, 0.5827, -0.1808, 0.4981, 0.5986, 0.2889, -0.6872, -0.0107, -0.4604, -0.8198, -0.0454, -0.6500, 0.8162, 0.0493, -0.5883, -0.4003, -0.4453, -0.5332, -0.4828, -0.2249, 0.2747, -0.6625, 0.4591, 0.4512, 0.7914, -0.0895, -0.1859, 0.8409, -0.6285, -0.3860, 0.3781, 0.8227, 0.3000, -0.4750, -0.2491, -0.7190, -0.1459, 0.1496, -0.2711, -0.5102, -0.1721, 0.1021, 0.2094, -0.1980, -0.4571, 0.4044, 0.3838, -0.2662, -0.2421, -0.1941, -0.6848, 0.3947, 0.4648, -0.7211, -0.0207, 0.7768, -0.2160, -0.2854, -0.5785, -0.2012, -0.5811, -0.0887, 0.8375, -0.1985, 0.4698, -0.8024, -0.6266, -0.4051, -0.7371, 0.7423, 0.4752, 0.4108, 0.8600, 0.8091, 0.0810, 0.1070, -0.8834, 0.8925, -0.3868, 0.4119, -0.6004, -0.2988, -0.5928, 0.0096, -0.4165, -0.5491, 0.1028, 0.3863, 0.7679, -0.1669, 0.1026, -0.1855, 0.3284, 0.3623, 0.8886, 0.4558, -0.4087, 0.2459, 0.5371, -0.7318, 0.5787, 0.8731, -0.3596, 0.0157, -0.8949, 0.7609, -0.0526, -0.4481, -0.5893, 0.8038, 0.0857, -0.1079, 0.2876, -0.6757, -0.3795, -0.3590, -0.3351, -0.8739, 0.6963, -0.5127, 0.5271, -0.7124, 0.4026, -0.1012, 0.8255, 0.1209, -0.6608, 0.1335, 0.6894, -0.7431, 0.1662, 0.3492, 0.0026, 0.6724, -0.5163, 0.1192, -0.6100, 0.3680, -0.6964, 0.0909, 0.0911, -0.7368, 0.3913, 0.2379, 0.1775, 0.1234, -0.4802, -0.6878, -0.7407, -0.1625, -0.2609, -0.4566, -0.3065, 0.6959, 0.1161, 0.5673, 0.6054, 0.2438, 0.3655, -0.3528, -0.0855, 0.1712, 0.4866, 0.7373, 0.6785, -0.5811, 0.6893, -0.0188, 0.0782, 0.7779, 0.7505, -0.3548, -0.0727, 0.8252, 0.6773, -0.3570, -0.2251, -0.8019, -0.0521, 0.6419, 0.7384, -0.1708, 0.8343, 0.1367, -0.2210, 0.0294, -0.8128, 0.8492, 0.3767, -0.5884, -0.4776, -0.3096, 0.1900, -0.7208, 0.6574, 0.7838, 0.5785, -0.5399, 0.7687, 0.0258, -0.4163, -0.6368, -0.3419, -0.0798, 0.8841, -0.1439, -0.7492, 0.1326, 0.2094, -0.4157, 0.6982, -0.2057, -0.8270, 0.6790, -0.6730, 0.2420, -0.1563, 0.7184, 0.0630, -0.6098, 0.5560, -0.5983, -0.6118, 0.6540, 0.0345, -0.2249, 0.8647, 0.2693, 0.0244, -0.2381, 0.8427, 0.3350, 0.4102, -0.0237, 0.4774, -0.2903, -0.2092, -0.1882, -0.6338, 0.4168, -0.2032, -0.8167, -0.0136, 0.6793, 0.6732, -0.3174, -0.3135, -0.3831, 0.6144, -0.6832, -0.2752, -0.4907, -0.7504, 0.0081, -0.4762, -0.3763, -0.3290, -0.5452, -0.4550, -0.4135, 0.7944, -0.3652, -0.0298, 0.6177, 0.8923, 0.6495, -0.6935, -0.3569, 0.4642, 0.8011, -0.8194, 0.6292, -0.2940, -0.6487, -0.7162, 0.6119, -0.8726, -0.7868, 0.7347, 0.4605, -0.6201, -0.7322, -0.7746, -0.0443, -0.5352, -0.7299, 0.2014, -0.0395, -0.3664, 0.7825, 0.8095, -0.3525, 0.7014, 0.5005, 0.6860, -0.7118, -0.2468, -0.2400, 0.8205, 0.8799, -0.3923, -0.0674, -0.6379, -0.1494, 0.3477, -0.6358, -0.5239, 0.2454, -0.2236, 0.3264, 0.8809, -0.2056, -0.1808, -0.1165, 0.2244, -0.0888, -0.0678, 0.8932, 0.0652, 0.3398, -0.5071, 0.3285, -0.3375, 0.8246, -0.5066, -0.5879, -0.1779, -0.7927, -0.8859, 0.2667, -0.8810, -0.7357, -0.4215, -0.3594, 0.7692, 0.7786, 0.8194, 0.8126, -0.1926, 0.5191, -0.5197, -0.7328, -0.8382, 0.1507, -0.7349, 0.6664, 0.6189, 0.5664, 0.5433, 0.0061, -0.1789, -0.4579, 0.3197, 0.7012, 0.5952, 0.4326, 0.6730, -0.7355, 0.0795, 0.7076, 0.6974, -0.4046, -0.3944, 0.6549, 0.3090, -0.2132, 0.1870, -0.3696, 0.7735, 0.7250, 0.1846, 0.4912, 0.7893, -0.4209, -0.7256, 0.7370, -0.1497, 0.5222, -0.7619, -0.0348, 0.2766, -0.0836]] },
+      "query": { "nearest": [[-0.83, 0.32, …, 0.83]] },
       "using": "dense_vec",
       "filter": {
         "must": [{
@@ -56,7 +60,7 @@ const pythonHybrid = `results = client.query_points(
     collection_name="docs",
     prefetch=[
         models.Prefetch(
-            query=[[-0.8341, 0.3246, 0.8082, 0.5827, -0.1808, 0.4981, 0.5986, 0.2889, -0.6872, -0.0107, -0.4604, -0.8198, -0.0454, -0.6500, 0.8162, 0.0493, -0.5883, -0.4003, -0.4453, -0.5332, -0.4828, -0.2249, 0.2747, -0.6625, 0.4591, 0.4512, 0.7914, -0.0895, -0.1859, 0.8409, -0.6285, -0.3860, 0.3781, 0.8227, 0.3000, -0.4750, -0.2491, -0.7190, -0.1459, 0.1496, -0.2711, -0.5102, -0.1721, 0.1021, 0.2094, -0.1980, -0.4571, 0.4044, 0.3838, -0.2662, -0.2421, -0.1941, -0.6848, 0.3947, 0.4648, -0.7211, -0.0207, 0.7768, -0.2160, -0.2854, -0.5785, -0.2012, -0.5811, -0.0887, 0.8375, -0.1985, 0.4698, -0.8024, -0.6266, -0.4051, -0.7371, 0.7423, 0.4752, 0.4108, 0.8600, 0.8091, 0.0810, 0.1070, -0.8834, 0.8925, -0.3868, 0.4119, -0.6004, -0.2988, -0.5928, 0.0096, -0.4165, -0.5491, 0.1028, 0.3863, 0.7679, -0.1669, 0.1026, -0.1855, 0.3284, 0.3623, 0.8886, 0.4558, -0.4087, 0.2459, 0.5371, -0.7318, 0.5787, 0.8731, -0.3596, 0.0157, -0.8949, 0.7609, -0.0526, -0.4481, -0.5893, 0.8038, 0.0857, -0.1079, 0.2876, -0.6757, -0.3795, -0.3590, -0.3351, -0.8739, 0.6963, -0.5127, 0.5271, -0.7124, 0.4026, -0.1012, 0.8255, 0.1209, -0.6608, 0.1335, 0.6894, -0.7431, 0.1662, 0.3492, 0.0026, 0.6724, -0.5163, 0.1192, -0.6100, 0.3680, -0.6964, 0.0909, 0.0911, -0.7368, 0.3913, 0.2379, 0.1775, 0.1234, -0.4802, -0.6878, -0.7407, -0.1625, -0.2609, -0.4566, -0.3065, 0.6959, 0.1161, 0.5673, 0.6054, 0.2438, 0.3655, -0.3528, -0.0855, 0.1712, 0.4866, 0.7373, 0.6785, -0.5811, 0.6893, -0.0188, 0.0782, 0.7779, 0.7505, -0.3548, -0.0727, 0.8252, 0.6773, -0.3570, -0.2251, -0.8019, -0.0521, 0.6419, 0.7384, -0.1708, 0.8343, 0.1367, -0.2210, 0.0294, -0.8128, 0.8492, 0.3767, -0.5884, -0.4776, -0.3096, 0.1900, -0.7208, 0.6574, 0.7838, 0.5785, -0.5399, 0.7687, 0.0258, -0.4163, -0.6368, -0.3419, -0.0798, 0.8841, -0.1439, -0.7492, 0.1326, 0.2094, -0.4157, 0.6982, -0.2057, -0.8270, 0.6790, -0.6730, 0.2420, -0.1563, 0.7184, 0.0630, -0.6098, 0.5560, -0.5983, -0.6118, 0.6540, 0.0345, -0.2249, 0.8647, 0.2693, 0.0244, -0.2381, 0.8427, 0.3350, 0.4102, -0.0237, 0.4774, -0.2903, -0.2092, -0.1882, -0.6338, 0.4168, -0.2032, -0.8167, -0.0136, 0.6793, 0.6732, -0.3174, -0.3135, -0.3831, 0.6144, -0.6832, -0.2752, -0.4907, -0.7504, 0.0081, -0.4762, -0.3763, -0.3290, -0.5452, -0.4550, -0.4135, 0.7944, -0.3652, -0.0298, 0.6177, 0.8923, 0.6495, -0.6935, -0.3569, 0.4642, 0.8011, -0.8194, 0.6292, -0.2940, -0.6487, -0.7162, 0.6119, -0.8726, -0.7868, 0.7347, 0.4605, -0.6201, -0.7322, -0.7746, -0.0443, -0.5352, -0.7299, 0.2014, -0.0395, -0.3664, 0.7825, 0.8095, -0.3525, 0.7014, 0.5005, 0.6860, -0.7118, -0.2468, -0.2400, 0.8205, 0.8799, -0.3923, -0.0674, -0.6379, -0.1494, 0.3477, -0.6358, -0.5239, 0.2454, -0.2236, 0.3264, 0.8809, -0.2056, -0.1808, -0.1165, 0.2244, -0.0888, -0.0678, 0.8932, 0.0652, 0.3398, -0.5071, 0.3285, -0.3375, 0.8246, -0.5066, -0.5879, -0.1779, -0.7927, -0.8859, 0.2667, -0.8810, -0.7357, -0.4215, -0.3594, 0.7692, 0.7786, 0.8194, 0.8126, -0.1926, 0.5191, -0.5197, -0.7328, -0.8382, 0.1507, -0.7349, 0.6664, 0.6189, 0.5664, 0.5433, 0.0061, -0.1789, -0.4579, 0.3197, 0.7012, 0.5952, 0.4326, 0.6730, -0.7355, 0.0795, 0.7076, 0.6974, -0.4046, -0.3944, 0.6549, 0.3090, -0.2132, 0.1870, -0.3696, 0.7735, 0.7250, 0.1846, 0.4912, 0.7893, -0.4209, -0.7256, 0.7370, -0.1497, 0.5222, -0.7619, -0.0348, 0.2766, -0.0836]],
+            query=[[-0.83, 0.32, …, 0.83]],
             using="dense_vec",
             filter=models.Filter(must=[
                 models.FieldCondition(
@@ -92,7 +96,7 @@ const pythonHybrid = `results = client.query_points(
 const tsHybrid = `const results = await client.query("docs", {
   prefetch: [
     {
-      query: [[-0.8341, 0.3246, 0.8082, 0.5827, -0.1808, 0.4981, 0.5986, 0.2889, -0.6872, -0.0107, -0.4604, -0.8198, -0.0454, -0.6500, 0.8162, 0.0493, -0.5883, -0.4003, -0.4453, -0.5332, -0.4828, -0.2249, 0.2747, -0.6625, 0.4591, 0.4512, 0.7914, -0.0895, -0.1859, 0.8409, -0.6285, -0.3860, 0.3781, 0.8227, 0.3000, -0.4750, -0.2491, -0.7190, -0.1459, 0.1496, -0.2711, -0.5102, -0.1721, 0.1021, 0.2094, -0.1980, -0.4571, 0.4044, 0.3838, -0.2662, -0.2421, -0.1941, -0.6848, 0.3947, 0.4648, -0.7211, -0.0207, 0.7768, -0.2160, -0.2854, -0.5785, -0.2012, -0.5811, -0.0887, 0.8375, -0.1985, 0.4698, -0.8024, -0.6266, -0.4051, -0.7371, 0.7423, 0.4752, 0.4108, 0.8600, 0.8091, 0.0810, 0.1070, -0.8834, 0.8925, -0.3868, 0.4119, -0.6004, -0.2988, -0.5928, 0.0096, -0.4165, -0.5491, 0.1028, 0.3863, 0.7679, -0.1669, 0.1026, -0.1855, 0.3284, 0.3623, 0.8886, 0.4558, -0.4087, 0.2459, 0.5371, -0.7318, 0.5787, 0.8731, -0.3596, 0.0157, -0.8949, 0.7609, -0.0526, -0.4481, -0.5893, 0.8038, 0.0857, -0.1079, 0.2876, -0.6757, -0.3795, -0.3590, -0.3351, -0.8739, 0.6963, -0.5127, 0.5271, -0.7124, 0.4026, -0.1012, 0.8255, 0.1209, -0.6608, 0.1335, 0.6894, -0.7431, 0.1662, 0.3492, 0.0026, 0.6724, -0.5163, 0.1192, -0.6100, 0.3680, -0.6964, 0.0909, 0.0911, -0.7368, 0.3913, 0.2379, 0.1775, 0.1234, -0.4802, -0.6878, -0.7407, -0.1625, -0.2609, -0.4566, -0.3065, 0.6959, 0.1161, 0.5673, 0.6054, 0.2438, 0.3655, -0.3528, -0.0855, 0.1712, 0.4866, 0.7373, 0.6785, -0.5811, 0.6893, -0.0188, 0.0782, 0.7779, 0.7505, -0.3548, -0.0727, 0.8252, 0.6773, -0.3570, -0.2251, -0.8019, -0.0521, 0.6419, 0.7384, -0.1708, 0.8343, 0.1367, -0.2210, 0.0294, -0.8128, 0.8492, 0.3767, -0.5884, -0.4776, -0.3096, 0.1900, -0.7208, 0.6574, 0.7838, 0.5785, -0.5399, 0.7687, 0.0258, -0.4163, -0.6368, -0.3419, -0.0798, 0.8841, -0.1439, -0.7492, 0.1326, 0.2094, -0.4157, 0.6982, -0.2057, -0.8270, 0.6790, -0.6730, 0.2420, -0.1563, 0.7184, 0.0630, -0.6098, 0.5560, -0.5983, -0.6118, 0.6540, 0.0345, -0.2249, 0.8647, 0.2693, 0.0244, -0.2381, 0.8427, 0.3350, 0.4102, -0.0237, 0.4774, -0.2903, -0.2092, -0.1882, -0.6338, 0.4168, -0.2032, -0.8167, -0.0136, 0.6793, 0.6732, -0.3174, -0.3135, -0.3831, 0.6144, -0.6832, -0.2752, -0.4907, -0.7504, 0.0081, -0.4762, -0.3763, -0.3290, -0.5452, -0.4550, -0.4135, 0.7944, -0.3652, -0.0298, 0.6177, 0.8923, 0.6495, -0.6935, -0.3569, 0.4642, 0.8011, -0.8194, 0.6292, -0.2940, -0.6487, -0.7162, 0.6119, -0.8726, -0.7868, 0.7347, 0.4605, -0.6201, -0.7322, -0.7746, -0.0443, -0.5352, -0.7299, 0.2014, -0.0395, -0.3664, 0.7825, 0.8095, -0.3525, 0.7014, 0.5005, 0.6860, -0.7118, -0.2468, -0.2400, 0.8205, 0.8799, -0.3923, -0.0674, -0.6379, -0.1494, 0.3477, -0.6358, -0.5239, 0.2454, -0.2236, 0.3264, 0.8809, -0.2056, -0.1808, -0.1165, 0.2244, -0.0888, -0.0678, 0.8932, 0.0652, 0.3398, -0.5071, 0.3285, -0.3375, 0.8246, -0.5066, -0.5879, -0.1779, -0.7927, -0.8859, 0.2667, -0.8810, -0.7357, -0.4215, -0.3594, 0.7692, 0.7786, 0.8194, 0.8126, -0.1926, 0.5191, -0.5197, -0.7328, -0.8382, 0.1507, -0.7349, 0.6664, 0.6189, 0.5664, 0.5433, 0.0061, -0.1789, -0.4579, 0.3197, 0.7012, 0.5952, 0.4326, 0.6730, -0.7355, 0.0795, 0.7076, 0.6974, -0.4046, -0.3944, 0.6549, 0.3090, -0.2132, 0.1870, -0.3696, 0.7735, 0.7250, 0.1846, 0.4912, 0.7893, -0.4209, -0.7256, 0.7370, -0.1497, 0.5222, -0.7619, -0.0348, 0.2766, -0.0836]],
+      query: [[-0.83, 0.32, …, 0.83]],
       using: "dense_vec",
       filter: {
         must: [
@@ -120,7 +124,7 @@ const rustHybrid = `let response = client.query(
     QueryPointsBuilder::new("docs")
         .add_prefetch(
             PrefetchQueryBuilder::default()
-                .query(Query::new_nearest(vec![-0.8341, 0.3246, 0.8082, 0.5827, -0.1808, 0.4981, 0.5986, 0.2889, -0.6872, -0.0107, -0.4604, -0.8198, -0.0454, -0.6500, 0.8162, 0.0493, -0.5883, -0.4003, -0.4453, -0.5332, -0.4828, -0.2249, 0.2747, -0.6625, 0.4591, 0.4512, 0.7914, -0.0895, -0.1859, 0.8409, -0.6285, -0.3860, 0.3781, 0.8227, 0.3000, -0.4750, -0.2491, -0.7190, -0.1459, 0.1496, -0.2711, -0.5102, -0.1721, 0.1021, 0.2094, -0.1980, -0.4571, 0.4044, 0.3838, -0.2662, -0.2421, -0.1941, -0.6848, 0.3947, 0.4648, -0.7211, -0.0207, 0.7768, -0.2160, -0.2854, -0.5785, -0.2012, -0.5811, -0.0887, 0.8375, -0.1985, 0.4698, -0.8024, -0.6266, -0.4051, -0.7371, 0.7423, 0.4752, 0.4108, 0.8600, 0.8091, 0.0810, 0.1070, -0.8834, 0.8925, -0.3868, 0.4119, -0.6004, -0.2988, -0.5928, 0.0096, -0.4165, -0.5491, 0.1028, 0.3863, 0.7679, -0.1669, 0.1026, -0.1855, 0.3284, 0.3623, 0.8886, 0.4558, -0.4087, 0.2459, 0.5371, -0.7318, 0.5787, 0.8731, -0.3596, 0.0157, -0.8949, 0.7609, -0.0526, -0.4481, -0.5893, 0.8038, 0.0857, -0.1079, 0.2876, -0.6757, -0.3795, -0.3590, -0.3351, -0.8739, 0.6963, -0.5127, 0.5271, -0.7124, 0.4026, -0.1012, 0.8255, 0.1209, -0.6608, 0.1335, 0.6894, -0.7431, 0.1662, 0.3492, 0.0026, 0.6724, -0.5163, 0.1192, -0.6100, 0.3680, -0.6964, 0.0909, 0.0911, -0.7368, 0.3913, 0.2379, 0.1775, 0.1234, -0.4802, -0.6878, -0.7407, -0.1625, -0.2609, -0.4566, -0.3065, 0.6959, 0.1161, 0.5673, 0.6054, 0.2438, 0.3655, -0.3528, -0.0855, 0.1712, 0.4866, 0.7373, 0.6785, -0.5811, 0.6893, -0.0188, 0.0782, 0.7779, 0.7505, -0.3548, -0.0727, 0.8252, 0.6773, -0.3570, -0.2251, -0.8019, -0.0521, 0.6419, 0.7384, -0.1708, 0.8343, 0.1367, -0.2210, 0.0294, -0.8128, 0.8492, 0.3767, -0.5884, -0.4776, -0.3096, 0.1900, -0.7208, 0.6574, 0.7838, 0.5785, -0.5399, 0.7687, 0.0258, -0.4163, -0.6368, -0.3419, -0.0798, 0.8841, -0.1439, -0.7492, 0.1326, 0.2094, -0.4157, 0.6982, -0.2057, -0.8270, 0.6790, -0.6730, 0.2420, -0.1563, 0.7184, 0.0630, -0.6098, 0.5560, -0.5983, -0.6118, 0.6540, 0.0345, -0.2249, 0.8647, 0.2693, 0.0244, -0.2381, 0.8427, 0.3350, 0.4102, -0.0237, 0.4774, -0.2903, -0.2092, -0.1882, -0.6338, 0.4168, -0.2032, -0.8167, -0.0136, 0.6793, 0.6732, -0.3174, -0.3135, -0.3831, 0.6144, -0.6832, -0.2752, -0.4907, -0.7504, 0.0081, -0.4762, -0.3763, -0.3290, -0.5452, -0.4550, -0.4135, 0.7944, -0.3652, -0.0298, 0.6177, 0.8923, 0.6495, -0.6935, -0.3569, 0.4642, 0.8011, -0.8194, 0.6292, -0.2940, -0.6487, -0.7162, 0.6119, -0.8726, -0.7868, 0.7347, 0.4605, -0.6201, -0.7322, -0.7746, -0.0443, -0.5352, -0.7299, 0.2014, -0.0395, -0.3664, 0.7825, 0.8095, -0.3525, 0.7014, 0.5005, 0.6860, -0.7118, -0.2468, -0.2400, 0.8205, 0.8799, -0.3923, -0.0674, -0.6379, -0.1494, 0.3477, -0.6358, -0.5239, 0.2454, -0.2236, 0.3264, 0.8809, -0.2056, -0.1808, -0.1165, 0.2244, -0.0888, -0.0678, 0.8932, 0.0652, 0.3398, -0.5071, 0.3285, -0.3375, 0.8246, -0.5066, -0.5879, -0.1779, -0.7927, -0.8859, 0.2667, -0.8810, -0.7357, -0.4215, -0.3594, 0.7692, 0.7786, 0.8194, 0.8126, -0.1926, 0.5191, -0.5197, -0.7328, -0.8382, 0.1507, -0.7349, 0.6664, 0.6189, 0.5664, 0.5433, 0.0061, -0.1789, -0.4579, 0.3197, 0.7012, 0.5952, 0.4326, 0.6730, -0.7355, 0.0795, 0.7076, 0.6974, -0.4046, -0.3944, 0.6549, 0.3090, -0.2132, 0.1870, -0.3696, 0.7735, 0.7250, 0.1846, 0.4912, 0.7893, -0.4209, -0.7256, 0.7370, -0.1497, 0.5222, -0.7619, -0.0348, 0.2766, -0.0836]))
+                .query(Query::new_nearest(vec![-0.83, 0.32, …, 0.83]))
                 .using("dense_vec")
                 .filter(active_filter.clone())
                 .limit(100u64),
@@ -143,7 +147,7 @@ const goHybrid = `res, err := client.Query(ctx, &qdrant.QueryPoints{
     CollectionName: "docs",
     Prefetch: []*qdrant.PrefetchQuery{
         {
-            Query: qdrant.NewQueryDense([]float32{-0.8341, 0.3246, 0.8082, 0.5827, -0.1808, 0.4981, 0.5986, 0.2889, -0.6872, -0.0107, -0.4604, -0.8198, -0.0454, -0.6500, 0.8162, 0.0493, -0.5883, -0.4003, -0.4453, -0.5332, -0.4828, -0.2249, 0.2747, -0.6625, 0.4591, 0.4512, 0.7914, -0.0895, -0.1859, 0.8409, -0.6285, -0.3860, 0.3781, 0.8227, 0.3000, -0.4750, -0.2491, -0.7190, -0.1459, 0.1496, -0.2711, -0.5102, -0.1721, 0.1021, 0.2094, -0.1980, -0.4571, 0.4044, 0.3838, -0.2662, -0.2421, -0.1941, -0.6848, 0.3947, 0.4648, -0.7211, -0.0207, 0.7768, -0.2160, -0.2854, -0.5785, -0.2012, -0.5811, -0.0887, 0.8375, -0.1985, 0.4698, -0.8024, -0.6266, -0.4051, -0.7371, 0.7423, 0.4752, 0.4108, 0.8600, 0.8091, 0.0810, 0.1070, -0.8834, 0.8925, -0.3868, 0.4119, -0.6004, -0.2988, -0.5928, 0.0096, -0.4165, -0.5491, 0.1028, 0.3863, 0.7679, -0.1669, 0.1026, -0.1855, 0.3284, 0.3623, 0.8886, 0.4558, -0.4087, 0.2459, 0.5371, -0.7318, 0.5787, 0.8731, -0.3596, 0.0157, -0.8949, 0.7609, -0.0526, -0.4481, -0.5893, 0.8038, 0.0857, -0.1079, 0.2876, -0.6757, -0.3795, -0.3590, -0.3351, -0.8739, 0.6963, -0.5127, 0.5271, -0.7124, 0.4026, -0.1012, 0.8255, 0.1209, -0.6608, 0.1335, 0.6894, -0.7431, 0.1662, 0.3492, 0.0026, 0.6724, -0.5163, 0.1192, -0.6100, 0.3680, -0.6964, 0.0909, 0.0911, -0.7368, 0.3913, 0.2379, 0.1775, 0.1234, -0.4802, -0.6878, -0.7407, -0.1625, -0.2609, -0.4566, -0.3065, 0.6959, 0.1161, 0.5673, 0.6054, 0.2438, 0.3655, -0.3528, -0.0855, 0.1712, 0.4866, 0.7373, 0.6785, -0.5811, 0.6893, -0.0188, 0.0782, 0.7779, 0.7505, -0.3548, -0.0727, 0.8252, 0.6773, -0.3570, -0.2251, -0.8019, -0.0521, 0.6419, 0.7384, -0.1708, 0.8343, 0.1367, -0.2210, 0.0294, -0.8128, 0.8492, 0.3767, -0.5884, -0.4776, -0.3096, 0.1900, -0.7208, 0.6574, 0.7838, 0.5785, -0.5399, 0.7687, 0.0258, -0.4163, -0.6368, -0.3419, -0.0798, 0.8841, -0.1439, -0.7492, 0.1326, 0.2094, -0.4157, 0.6982, -0.2057, -0.8270, 0.6790, -0.6730, 0.2420, -0.1563, 0.7184, 0.0630, -0.6098, 0.5560, -0.5983, -0.6118, 0.6540, 0.0345, -0.2249, 0.8647, 0.2693, 0.0244, -0.2381, 0.8427, 0.3350, 0.4102, -0.0237, 0.4774, -0.2903, -0.2092, -0.1882, -0.6338, 0.4168, -0.2032, -0.8167, -0.0136, 0.6793, 0.6732, -0.3174, -0.3135, -0.3831, 0.6144, -0.6832, -0.2752, -0.4907, -0.7504, 0.0081, -0.4762, -0.3763, -0.3290, -0.5452, -0.4550, -0.4135, 0.7944, -0.3652, -0.0298, 0.6177, 0.8923, 0.6495, -0.6935, -0.3569, 0.4642, 0.8011, -0.8194, 0.6292, -0.2940, -0.6487, -0.7162, 0.6119, -0.8726, -0.7868, 0.7347, 0.4605, -0.6201, -0.7322, -0.7746, -0.0443, -0.5352, -0.7299, 0.2014, -0.0395, -0.3664, 0.7825, 0.8095, -0.3525, 0.7014, 0.5005, 0.6860, -0.7118, -0.2468, -0.2400, 0.8205, 0.8799, -0.3923, -0.0674, -0.6379, -0.1494, 0.3477, -0.6358, -0.5239, 0.2454, -0.2236, 0.3264, 0.8809, -0.2056, -0.1808, -0.1165, 0.2244, -0.0888, -0.0678, 0.8932, 0.0652, 0.3398, -0.5071, 0.3285, -0.3375, 0.8246, -0.5066, -0.5879, -0.1779, -0.7927, -0.8859, 0.2667, -0.8810, -0.7357, -0.4215, -0.3594, 0.7692, 0.7786, 0.8194, 0.8126, -0.1926, 0.5191, -0.5197, -0.7328, -0.8382, 0.1507, -0.7349, 0.6664, 0.6189, 0.5664, 0.5433, 0.0061, -0.1789, -0.4579, 0.3197, 0.7012, 0.5952, 0.4326, 0.6730, -0.7355, 0.0795, 0.7076, 0.6974, -0.4046, -0.3944, 0.6549, 0.3090, -0.2132, 0.1870, -0.3696, 0.7735, 0.7250, 0.1846, 0.4912, 0.7893, -0.4209, -0.7256, 0.7370, -0.1497, 0.5222, -0.7619, -0.0348, 0.2766, -0.0836}),
+            Query: qdrant.NewQueryDense([]float32{-0.83, 0.32, …, 0.83}),
             Using: qdrant.Ptr("dense_vec"),
             Filter: &qdrant.Filter{
                 Must: []*qdrant.Condition{
@@ -351,35 +355,35 @@ const FORMATS = [
 		label: "Python",
 		lang: "python",
 		badge: "qdrant-client",
-		warn: "Nested model graph · Vectors embedded out-of-band",
+		warn: "Nested model graph · vectors embedded out-of-band",
 	},
 	{
 		id: "typescript",
 		label: "TypeScript",
 		lang: "typescript",
 		badge: "@qdrant/js-client-rest",
-		warn: "Nested request objects · Vectors embedded out-of-band",
+		warn: "Nested request objects · vectors embedded out-of-band",
 	},
 	{
 		id: "rust",
 		label: "Rust",
 		lang: "rust",
 		badge: "qdrant-client crate",
-		warn: "Builder + protobuf plumbing · Vectors embedded out-of-band",
+		warn: "Builder + protobuf plumbing · vectors embedded out-of-band",
 	},
 	{
 		id: "go",
 		label: "Go",
 		lang: "go",
 		badge: "go-client/qdrant",
-		warn: "Protobuf request graph · Vectors embedded out-of-band",
+		warn: "Protobuf request graph · vectors embedded out-of-band",
 	},
 	{
 		id: "rest",
 		label: "REST JSON",
 		lang: "json",
 		badge: "HTTP REST API",
-		warn: "Hand-built JSON · 384-float vector pasted inline",
+		warn: "Hand-built JSON · dense vector inlined by hand",
 	},
 ] as const;
 
@@ -391,14 +395,8 @@ const presets = [
 		qql: hybridQql,
 		playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
 		honesty:
-			"Native panes paste precomputed 384-float vectors from an out-of-band embedding pipeline the official SDKs can't express — QQL resolves TEXT + BM25 in-process. Line counts exclude that pipeline on both sides.",
-		footNote: "1 declarative statement · Planned client-side, fused in Qdrant",
-		planSteps: [
-			{ glyph: "↳", text: "Prefetch 1: dense_vec nearest (limit: 100)" },
-			{ glyph: "↳", text: "Prefetch 2: bm25_vec sparse (limit: 100)" },
-			{ glyph: "⚡", text: "Fusion: Reciprocal Rank Fusion (RRF)" },
-			{ glyph: "✓", text: "Filter pushed down (status = 'active')" },
-		],
+			"Native panes carry precomputed dense vectors from an out-of-band embedding step the official SDKs can't express. QQL resolves TEXT and BM25 in-process. Line counts exclude that pipeline on both sides.",
+		footNote: "Fuses dense + sparse inside Qdrant",
 		codes: {
 			rest: restHybrid,
 			python: pythonHybrid,
@@ -414,17 +412,8 @@ const presets = [
 		qql: tenantQql,
 		playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
 		honesty:
-			"dense_vector arrives precomputed from an out-of-band embedding step the official SDKs can't express — QQL resolves TEXT in-process. Line counts exclude that pipeline on both sides.",
-		footNote: "1 declarative statement · Shard-routed, filter pushed down",
-		planSteps: [
-			{
-				glyph: "↳",
-				text: "Shard routing: 'tenant-corp-99' (direct partition)",
-			},
-			{ glyph: "↳", text: "Dense retrieval: nearest vector (limit: 5)" },
-			{ glyph: "✓", text: "Tenant isolation: department = 'finance'" },
-			{ glyph: "⚡", text: "Zero cross-shard network broadcast" },
-		],
+			"dense_vector arrives precomputed from an out-of-band embedding step the official SDKs can't express. QQL resolves TEXT in-process. Line counts exclude that pipeline on both sides.",
+		footNote: "Shard-routed, filter pushed down",
 		codes: {
 			rest: restTenant,
 			python: pythonTenant,
@@ -440,20 +429,8 @@ const presets = [
 		qql: filtersQql,
 		playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
 		honesty:
-			"productVector arrives precomputed from an out-of-band embedding step the official SDKs can't express — QQL resolves TEXT in-process. Line counts exclude that pipeline on both sides.",
-		footNote: "1 declarative statement · Boolean tree lowered to one filter",
-		planSteps: [
-			{ glyph: "↳", text: "Query vector: nearest candidates (limit: 20)" },
-			{ glyph: "↳", text: "Should filter: category IN ('hardware', 'tools')" },
-			{
-				glyph: "↳",
-				text: "Range & match: price <= 1200.0 AND in_stock = true",
-			},
-			{
-				glyph: "⚡",
-				text: "Optimized boolean filter tree lowered to Qdrant REST",
-			},
-		],
+			"productVector arrives precomputed from an out-of-band embedding step the official SDKs can't express. QQL resolves TEXT in-process. Line counts exclude that pipeline on both sides.",
+		footNote: "Boolean tree lowered to one filter",
 		codes: {
 			rest: restFilters,
 			python: pythonFilters,
@@ -467,228 +444,170 @@ const presets = [
 const lines = (source: string) => source.trim().split("\n").length;
 ---
 
-<section class="landing-section" aria-labelledby="problem-heading">
-  <div class="landing-shell landing-fade-up">
-    <header class="landing-section__head">
-      <h2 id="problem-heading">{heading}</h2>
-      <p class="landing-section__sub">{sub}</p>
+<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(4rem,8vw,6.5rem)]" aria-labelledby="problem-heading">
+  <div class="shell">
+    <header class="max-w-[44rem] reveal">
+      <h2 id="problem-heading" class="h-section m-0">{heading}</h2>
+      <p class="m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{sub}</p>
     </header>
 
-    <div class="landing-compare" data-compare>
-      {/* ── Scenario Tabs Header ── */}
-      <div class="landing-compare__tabs" role="tablist" aria-label="Query scenarios">
-        {
-          presets.map((preset, idx) => (
+    <div class="mt-10" data-compare>
+      {/* ── Scenario tabs ── */}
+      <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div class="flex flex-wrap gap-1" role="tablist" aria-label="Query scenarios">
+          {presets.map((preset, idx) => (
             <button
               type="button"
               role="tab"
               id={`compare-tab-${preset.id}`}
-              class:list={["landing-compare__tab", { "is-active": idx === 0 }]}
+              class="flex flex-col gap-0.5 border-b-2 border-transparent px-3 py-2.5 text-left text-[var(--sl-color-gray-2)] transition-colors hover:text-[var(--sl-color-gray-1)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)]"
               aria-selected={idx === 0 ? "true" : "false"}
               aria-controls={`compare-panel-${preset.id}`}
               tabindex={idx === 0 ? 0 : -1}
               data-preset={preset.id}
             >
-              <span class="landing-compare__tab-title">{preset.title}</span>
-              <span class="landing-compare__tab-badge">{preset.badge}</span>
+              <span class="text-sm font-medium">{preset.title}</span>
+              <span class="mono-label text-[0.625rem]">{preset.badge}</span>
             </button>
-          ))
-        }
-      </div>
-
-      {/* ── Format Switcher Toolbar ── */}
-      <div class="landing-compare__toolbar">
-        <div class="landing-compare__modes" role="group" aria-label="Target language comparison">
-          {
-            FORMATS.map((f, idx) => (
-              <button
-                type="button"
-                class:list={[{ "is-active": idx === 0 }]}
-                data-format={f.id}
-                aria-pressed={idx === 0 ? "true" : "false"}
-              >
-                {f.label}
-              </button>
-            ))
-          }
+          ))}
         </div>
 
-        <label
-          class="landing-compare__balance"
-          for="compare-balance"
-          title="Resize the QQL / native panes"
-        >
-          <span class="landing-compare__balance-label">Pane balance</span>
-          <input
-            id="compare-balance"
-            class="landing-compare__balance-input"
-            type="range"
-            min="30"
-            max="65"
-            value="44"
-            step="1"
-            data-balance
-            aria-describedby="compare-balance-readout"
-          />
-          <output
-            id="compare-balance-readout"
-            class="landing-compare__balance-readout"
-            data-balance-readout
-            for="compare-balance"
-          >
-            44 / 56
-          </output>
-        </label>
-
-        <div class="landing-compare__toolbar-right">
-          <div
-            class="landing-compare__stats-badge"
-            data-stat-container
-            title="This example's snippet lines only — the strip below shows whole benchmark-app LOC instead; embedding pipeline excluded on both sides"
-          >
-            <span class="landing-compare__stat" data-stat>
-              This example: {lines(presets[0].qql)} lines vs {lines(presets[0].codes.python)} in Python
-            </span>
-            <span class="landing-compare__reduction" data-reduction>
-              −{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.python)) * 100)}%
-            </span>
-          </div>
-
-          <a class="landing-compare__try" data-play href={presets[0].playgroundHref}>
+        <div class="flex items-center gap-4 pb-2.5">
+          <span class="hidden font-mono text-[0.7rem] text-[var(--sl-color-gray-3)] md:inline" data-stat>
+            This example: {lines(presets[0].qql)} lines vs {lines(presets[0].codes.python)} in Python
+          </span>
+          <span class="font-mono text-[0.7rem] text-[var(--sl-color-gray-3)]" data-reduction>
+            −{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.python)) * 100)}%
+          </span>
+          <a class="link font-mono text-[0.7rem]" data-play href={presets[0].playgroundHref}>
             Open in playground →
           </a>
         </div>
       </div>
 
-      {/* ── Scenario Panels ── */}
-      {
-        presets.map((preset, idx) => (
-          <div
-            class="landing-compare__panel"
-            id={`compare-panel-${preset.id}`}
-            role="tabpanel"
-            aria-labelledby={`compare-tab-${preset.id}`}
-            data-panel={preset.id}
-            data-play={preset.playgroundHref}
-            data-qql-lines={lines(preset.qql)}
-            data-rest-lines={lines(preset.codes.rest)}
-            data-python-lines={lines(preset.codes.python)}
-            data-typescript-lines={lines(preset.codes.typescript)}
-            data-rust-lines={lines(preset.codes.rust)}
-            data-go-lines={lines(preset.codes.go)}
-            hidden={idx !== 0}
-          >
-            <p class="landing-compare__honesty" role="note">{preset.honesty}</p>
-            <div class="landing-compare__split">
-              {/* Left Pane: Declarative QQL + Compiled Plan */}
-              <div class="landing-compare__pane landing-compare__pane--qql">
-                <header class="landing-compare__pane-head">
-                  <div class="landing-compare__pane-title-group">
-                    <span class="landing-compare__tag-qql">QQL</span>
-                    <span class="landing-compare__pane-label">Universal SQL</span>
-                  </div>
-                  <div class="landing-compare__pane-meta">
-                    <span class="landing-compare__line-pill">{lines(preset.qql)} lines</span>
-                    <button
-                      type="button"
-                      class="landing-compare__copy-btn"
-                      data-copy-target={`qql-${preset.id}`}
-                      title="Copy QQL"
-                      aria-label="Copy QQL code"
-                    >
-                      <svg class="landing-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                      <span class="landing-copy-feedback">Copied</span>
-                    </button>
-                  </div>
-                </header>
+      {/* ── Format switcher ── */}
+      <div class="flex flex-wrap items-center gap-2 border-y border-[var(--sl-color-gray-5)] py-3">
+        <span class="mono-label mr-1">Against</span>
+        <div class="flex flex-wrap gap-1.5" role="group" aria-label="Target language comparison">
+          {FORMATS.map((f, idx) => (
+            <button
+              type="button"
+              class="rounded-full border border-[var(--sl-color-gray-5)] px-3 py-1 font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white"
+              data-format={f.id}
+              aria-pressed={idx === 0 ? "true" : "false"}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-                <div class="landing-compare__code-wrapper" id={`qql-${preset.id}`}>
-                  <Code code={preset.qql} lang="qql" frame="none" />
-                </div>
-
-                {/* ── Engine Plan Breakdown balancing the height ── */}
-                <div class="landing-compare__plan-box">
-                  <div class="landing-compare__plan-header">
-                    <span class="landing-compare__plan-title">Engine Plan Breakdown</span>
-                    <span class="landing-compare__plan-time">plan · local, no I/O</span>
-                  </div>
-                  <ul class="landing-compare__plan-items">
-                    {
-                      preset.planSteps.map((step) => (
-                        <li class="landing-compare__plan-item">
-                          <span class="landing-compare__plan-glyph">{step.glyph}</span>
-                          <span class="landing-compare__plan-text">{step.text}</span>
-                        </li>
-                      ))
-                    }
-                  </ul>
-                </div>
-
-                <footer class="landing-compare__pane-foot landing-compare__pane-foot--success">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                  <span>{preset.footNote}</span>
-                </footer>
+      {/* ── Scenario panels ── */}
+      {presets.map((preset, idx) => (
+        <div
+          id={`compare-panel-${preset.id}`}
+          role="tabpanel"
+          aria-labelledby={`compare-tab-${preset.id}`}
+          data-panel={preset.id}
+          data-play={preset.playgroundHref}
+          data-qql-lines={lines(preset.qql)}
+          data-rest-lines={lines(preset.codes.rest)}
+          data-python-lines={lines(preset.codes.python)}
+          data-typescript-lines={lines(preset.codes.typescript)}
+          data-rust-lines={lines(preset.codes.rust)}
+          data-go-lines={lines(preset.codes.go)}
+          hidden={idx !== 0}
+          class="pt-6"
+        >
+          <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+            {/* Left: the declarative statement */}
+            <div class="code-card min-w-0">
+              <div class="code-card__head">
+                <span class="mono-label mono-label--accent">QQL</span>
+                <span class="min-w-0 truncate text-[var(--sl-color-gray-3)]">universal query</span>
+                <span class="flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">
+                  {lines(preset.qql)} lines
+                  <button
+                    type="button"
+                    class="link inline-flex items-center gap-1"
+                    data-copy-target={`qql-${preset.id}`}
+                    title="Copy QQL"
+                    aria-label="Copy QQL code"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                    <span class="landing-copy-feedback font-mono text-[0.65rem]">Copied</span>
+                  </button>
+                </span>
               </div>
-
-              {/* Right Pane: Verbose Native Qdrant in Selected Language */}
-              <div class="landing-compare__stack">
-                {
-                  FORMATS.map((f, fIdx) => (
-                    <div
-                      class="landing-compare__pane landing-compare__pane--target"
-                      data-raw={f.id}
-                      hidden={fIdx !== 0}
-                    >
-                      <header class="landing-compare__pane-head">
-                        <div class="landing-compare__pane-title-group">
-                          <span class="landing-compare__tag-target">{f.label}</span>
-                          <span class="landing-compare__pane-badge">{f.badge}</span>
-                        </div>
-                        <div class="landing-compare__pane-meta">
-                          <span class="landing-compare__line-pill">
-                            {lines(preset.codes[f.id])} lines
-                          </span>
-                          <button
-                            type="button"
-                            class="landing-compare__copy-btn"
-                            data-copy-target={`raw-${preset.id}-${f.id}`}
-                            title={`Copy ${f.label} code`}
-                            aria-label={`Copy ${f.label} code`}
-                          >
-                            <svg class="landing-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                            <span class="landing-copy-feedback">Copied</span>
-                          </button>
-                        </div>
-                      </header>
-
-                      <div class="landing-compare__code-wrapper landing-compare__code-wrapper--target" id={`raw-${preset.id}-${f.id}`}>
-                        <Code code={preset.codes[f.id]} lang={f.lang} frame="none" />
-                      </div>
-
-                      <footer class="landing-compare__pane-foot landing-compare__pane-foot--warn">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                        <span>{f.warn}</span>
-                      </footer>
-                    </div>
-                  ))
-                }
+              <div class="code-flat landing-compare__code-wrapper" id={`qql-${preset.id}`}>
+                <Code code={preset.qql} lang="qql" frame="none" />
+              </div>
+              <div class="code-card__foot">
+                <span class="flex items-center gap-1.5">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                  {preset.footNote}
+                </span>
               </div>
             </div>
+
+            {/* Right: the verbose native client */}
+            <div class="min-w-0">
+              {FORMATS.map((f, fIdx) => (
+                <div class="code-card" data-raw={f.id} hidden={fIdx !== 0}>
+                  <div class="code-card__head">
+                    <span class="mono-label mono-label--accent">{f.label}</span>
+                    <span class="min-w-0 truncate text-[var(--sl-color-gray-3)]">{f.badge}</span>
+                    <span class="flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">
+                      {lines(preset.codes[f.id])} lines
+                      <button
+                        type="button"
+                        class="link inline-flex items-center gap-1"
+                        data-copy-target={`raw-${preset.id}-${f.id}`}
+                        title={`Copy ${f.label} code`}
+                        aria-label={`Copy ${f.label} code`}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        <span class="landing-copy-feedback font-mono text-[0.65rem]">Copied</span>
+                      </button>
+                    </span>
+                  </div>
+                  <div class="code-flat landing-compare__code-wrapper" id={`raw-${preset.id}-${f.id}`}>
+                    <Code code={preset.codes[f.id]} lang={f.lang} frame="none" />
+                  </div>
+                  <div class="code-card__foot">
+                    <span class="flex items-center gap-1.5">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      {f.warn}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p class="m-0 mt-4 text-xs leading-5 text-[var(--sl-color-gray-3)]" role="note">{preset.honesty}</p>
+        </div>
+      ))}
+
+      <div class="mt-8 flex flex-wrap items-baseline justify-between gap-3 border-t border-[var(--sl-color-gray-5)] pt-5">
+        <p class="m-0 text-sm text-[var(--sl-color-gray-2)]">
+          Declarative queries compile directly to optimized Qdrant REST and gRPC payloads with zero runtime overhead.
+        </p>
+        <a class="link text-sm" href={guideHref}>{guideLabel} →</a>
+      </div>
+    </div>
+
+    {/* Proof ruler: replaces the old stats strip. */}
+    <dl class="reveal mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-3">
+      {
+        stats.map((item) => (
+          <div class="bg-[var(--sl-color-bg)] px-5 py-5">
+            <dt class="mono-label m-0">{item.label}</dt>
+            <dd class="m-0 mt-2 font-mono text-[1.75rem] leading-none tabular-nums text-[var(--sl-color-white)]">{item.value}</dd>
           </div>
         ))
       }
-
-      {/* ── Comparison footer note & guide link ── */}
-      <div class="landing-compare__foot">
-        <p class="landing-compare__foot-text">
-          Declarative queries compile directly to optimized Qdrant REST and gRPC payloads with zero runtime overhead.
-        </p>
-        <a class="landing-compare__foot-link" href={guideHref}>
-          {guideLabel} →
-        </a>
-      </div>
-
-    </div>
+    </dl>
   </div>
 </section>
 
@@ -884,8 +803,8 @@ const lines = (source: string) => source.trim().split("\n").length;
     sync(true);
     window.addEventListener("resize", syncScrollable);
 
-    // Pane-balance slider: resizes the QQL / native split via an inherited
-    // custom property (desktop two-column layout only; hidden below it).
+    // Pane-balance slider was removed; the null-checked lookup stays so the
+    // component script keeps working if the control returns.
     if (balance) {
       const applyBalance = () => {
         const value = Number(balance.value);

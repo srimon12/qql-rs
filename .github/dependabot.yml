@@ -37,7 +37,7 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
 
-  # ── npm: website (Astro app plus ui-docs package) ───────────
+  # ── npm: website (Astro app plus ui package) ────────────────
   - package-ecosystem: npm
     directory: "/website"
     target-branch: dev
