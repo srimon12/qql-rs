@@ -3,8 +3,8 @@
 
 Runs in CI: parse → hybrid CTE as text → tenant isolation → bind →
 compile → `:rows` ingest shape. Live execution (`Client.execute`,
-`Client.upsert_many`) needs a server and is covered by the vs-qdrant
-harness, not here.
+`Client.upsert_many`) needs a server and is covered by live integration
+tests, not here.
 """
 
 import pyqql

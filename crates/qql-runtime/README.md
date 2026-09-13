@@ -51,7 +51,7 @@ encoder via `HttpEmbedderOptions { bm25_k1, bm25_b, bm25_avg_len, .. }` (or
 query weights stay unit, server-side inference is untouched, and vectors
 already written keep their weights — re-ingest to apply. Unset = Qdrant
 defaults (`1.2 / 0.75 / 256`); invalid values fail closed with
-`QQL-VALIDATION-CONFIG`. Full host-surface table: [qql-embed README](../qql-embed/README.md#tuning-k1-b-avg_len).
+`QQL-VALIDATION-CONFIG`. Full host-surface table: [qql-embed README](https://github.com/srimon12/qql-rs/blob/main/crates/qql-embed/README.md#tuning-k1-b-avg_len).
 
 ## QdrantOps
 
@@ -129,7 +129,7 @@ Hosts should still `inject_filter` untrusted QQL. Routing is request-level
 
 ## Docs
 
-- [AGENTS.md](../../AGENTS.md) · [qql-plan](../qql-plan/README.md) · [qql-embed](../qql-embed/README.md) · [Syntax](../../docs/syntax.md)
+- [AGENTS.md](https://github.com/srimon12/qql-rs/blob/main/AGENTS.md) · [qql-plan](https://github.com/srimon12/qql-rs/blob/main/crates/qql-plan/README.md) · [qql-embed](https://github.com/srimon12/qql-rs/blob/main/crates/qql-embed/README.md) · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)
 
 ## Test
 

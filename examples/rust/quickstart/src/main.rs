@@ -2,8 +2,8 @@
 //!
 //! Runs in CI: parse → hybrid CTE as text → tenant isolation → bind → the
 //! `:rows` ingest shape. Live execution (`Executor::execute`,
-//! `Executor::upsert_many`) needs a server and is covered by the vs-qdrant
-//! harness, not here.
+//! `Executor::upsert_many`) needs a server and is covered by live integration
+//! tests, not here.
 
 use qql_core::ast::{ComparisonOp, Value};
 use qql_core::params::bind_stmt;

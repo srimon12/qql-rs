@@ -78,4 +78,4 @@ IDF works: `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')
 
 ## Docs
 
-- [qql-edge](../qql-edge/README.md) · [Gaps](../../skills/qql-skill/references/qql-gaps.md) · [Syntax](../../docs/syntax.md)
+- [qql-edge](https://github.com/srimon12/qql-rs/blob/main/crates/qql-edge/README.md) · [Gaps](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-gaps.md) · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)

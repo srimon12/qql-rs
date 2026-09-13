@@ -65,6 +65,25 @@ echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
 QUERY POINTS (1, 'point-2') FROM docs;
 ```
 
+## Paste shapes: HTTP snippets and curl
+
+Docs and blogs print `METHOD /path` plus a JSON body, or full `curl` commands — neither is the wrapped envelope. `convert` accepts both pastes directly (offline, no connection). Snippets take full URLs and an `HTTP/x` suffix; curl takes `-X`, `-d`/`--data*`/`--json`, `--header`, `\`-continuations, and several commands. A missing `-X` infers the method (`--data` implies POST, else GET). Fences strip as paste noise.
+
+```bash
+# Snippet exactly as docs print it
+qql convert <<'EOF'
+POST /collections/docs/points/query
+{"query": {"nearest": [0.1, 0.2]}, "using": "dense", "limit": 5}
+EOF
+
+# curl exactly as terminal history has it
+curl -X POST http://localhost:6333/collections/docs/points/count \
+  -H 'Content-Type: application/json' \
+  -d '{"exact": true}' | qql convert
+```
+
+Fail-closed paste rules: `$VAR` / `$(…)` / backticks, `--data @file`, pipes, `--data-urlencode` / `--config` / `-T`, and placeholder collections (`<your-collection>`, `{collection_name}`) all error with a typed `ConvertError` instead of emitting QQL that cannot re-parse. Replace placeholders and variables with literal values before converting.
+
 ## Coverage and contract facts
 
 Output uses the same formatter as `qql fmt`. Every emitted statement re-parses and is canonical.

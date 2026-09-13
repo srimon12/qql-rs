@@ -3,7 +3,7 @@
 Transport-free QQL frontend: lexer, parser, typed AST, validation,
 `inject_filter`, and explain. **No I/O, no Qdrant JSON.**
 
-Canonical grammar: [`language/v1/grammar.pest`](../../language/v1/grammar.pest)
+Canonical grammar: [`language/v1/grammar.pest`](https://github.com/srimon12/qql-rs/blob/main/language/v1/grammar.pest)
 → `qql-grammar-gen` → checked-in `grammar/` (do not edit by hand).
 
 ## Proposition
@@ -110,7 +110,7 @@ stmt.set_shard_key(Some("org_99".into()));
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [inject_filter](../../docs/inject_filter.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [inject_filter](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md) · [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md)
 
 ## Test
 

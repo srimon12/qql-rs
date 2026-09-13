@@ -81,9 +81,10 @@ enum Command {
     /// Start interactive REPL connected to Qdrant
     #[command(alias = "repl")]
     Connect,
-    /// Convert REST JSON payload to QQL
+    /// Convert REST JSON, HTTP snippets, or curl commands to QQL (offline — no connection)
     Convert {
-        /// Path to JSON file (or stdin if omitted)
+        /// Path to input file (or stdin if omitted): wrapped JSON, bare body,
+        /// JSONL capture, `METHOD /path` snippet, or `curl` command(s)
         file: Option<String>,
         /// Collection name for bare bodies (required when the JSON has no path)
         #[arg(long)]
