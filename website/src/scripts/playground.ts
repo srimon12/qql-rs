@@ -6,7 +6,7 @@ import {
 	lintGutter,
 } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import initQql, {
 	analyze,
@@ -57,6 +57,19 @@ function formatError(error: unknown): string {
 	} catch {
 		return String(error);
 	}
+}
+
+function humanizeExecutionError(error: unknown, qdrantUrl: string): string {
+	const raw = formatError(error);
+	if (
+		error instanceof TypeError ||
+		/failed to fetch|networkerror|load failed|network request failed|connection refused/i.test(
+			raw,
+		)
+	) {
+		return `Qdrant unreachable at ${connectionHost(qdrantUrl)} — check connection`;
+	}
+	return raw;
 }
 
 function pretty(value: unknown): string {
@@ -580,7 +593,7 @@ function renderOutputs(): void {
 	const ast = analysis?.effectiveAst?.[state.selectedStatement] ?? null;
 	const responseOutput =
 		state.executionError != null
-			? { ok: false, error: state.executionError }
+			? `Run failed: ${state.executionError}`
 			: state.response;
 
 	const values: Record<Exclude<InspectorTab, "plan">, unknown> = {
@@ -685,6 +698,14 @@ function runAnalysis(source: string): void {
 		state.analysis = analyzeWithPolicy(source);
 	} catch (error) {
 		const message = formatError(error);
+		// The synthetic fallback must satisfy the current AnalysisResult shape:
+		// `errors` is the primary diagnostic list; `error` is kept for older clients.
+		const diagnostic = {
+			code: "QQL-WASM",
+			message,
+			start: null,
+			end: null,
+		};
 		state.analysis = {
 			source,
 			result: {
@@ -695,12 +716,8 @@ function runAnalysis(source: string): void {
 				route: null,
 				routes: [],
 				explain: null,
-				error: {
-					code: "QQL-WASM",
-					message,
-					start: null,
-					end: null,
-				},
+				error: diagnostic,
+				errors: [diagnostic],
 			},
 			effectiveAst: null,
 			effectiveRoutes: [],
@@ -1218,7 +1235,7 @@ async function executeQuery(): Promise<void> {
 			state.response.ok ? "success" : "error",
 		);
 	} catch (error) {
-		state.executionError = formatError(error);
+		state.executionError = humanizeExecutionError(error, settings.qdrantUrl);
 		if (state.metrics) state.metrics.executeMs = performance.now() - started;
 		setRuntime("Execution failed.", "failed");
 		switchInspectorTab("response");
@@ -1340,6 +1357,9 @@ const editor = new EditorView({
 				},
 			]),
 			EditorView.lineWrapping,
+			placeholder(
+				"QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;\n-- Nothing leaves this tab until you run.",
+			),
 			EditorView.updateListener.of((update) => {
 				if (!update.docChanged) return;
 				activeFixture.textContent = "Custom query";

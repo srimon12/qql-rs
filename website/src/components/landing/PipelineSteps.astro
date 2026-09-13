@@ -8,20 +8,20 @@ interface Props {
 const { heading, sub, steps } = Astro.props;
 ---
 
-<section class="landing-section" aria-labelledby="pipeline-heading">
-  <div class="landing-shell landing-fade-up">
-    <header class="landing-section__head">
-      <h2 id="pipeline-heading">{heading}</h2>
-      <p class="landing-section__sub">{sub}</p>
+<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(3rem,6vw,4.5rem)]" aria-labelledby="pipeline-heading">
+  <div class="shell">
+    <header class="max-w-[44rem] reveal">
+      <h2 id="pipeline-heading" class="h-section m-0">{heading}</h2>
+      <p class="m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{sub}</p>
     </header>
 
-    <ol class="landing-pipeline">
+    <ol class="mt-10 grid list-none grid-cols-1 gap-px overflow-hidden border-y border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-2 lg:grid-cols-4">
       {
         steps.map((item) => (
-          <li class="landing-pipeline__step">
-            <span class="landing-pipeline__num">{item.step}</span>
-            <h3 class="landing-pipeline__title">{item.title}</h3>
-            <p class="landing-pipeline__detail">{item.detail}</p>
+          <li class="bg-[var(--sl-color-bg)] p-5 sm:p-6">
+            <span class="font-mono text-[0.6875rem] tracking-[0.12em] text-[var(--sl-color-gray-3)]">{item.step}</span>
+            <h3 class="mt-2 mb-0 text-[1.05rem] font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">{item.title}</h3>
+            <p class="mt-2 mb-0 text-sm leading-relaxed text-[var(--sl-color-gray-2)]">{item.detail}</p>
           </li>
         ))
       }

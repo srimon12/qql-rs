@@ -45,15 +45,50 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # Same shared key as CI's docs-validation wasm build: identical crate,
+      # profile, and target, so deploys reuse CI-warmed artifacts. Cargo
+      # fingerprints still force a rebuild whenever sources actually change —
+      # the cache only skips redundant work, it can never serve stale output.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: docs-wasm-stable
+          cache-on-failure: true
+
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.15.0
 
+      - name: Install website dependencies
+        working-directory: website
+        run: pnpm install --frozen-lockfile
+
+      # OG PNGs + content-hash manifest. Restored before `pnpm check` so
+      # `generate:og` regenerates only changed slugs (usually zero). Cache
+      # lives outside git: no repo bloat, keyed on inputs so a stale hit is
+      # impossible — a docs edit misses and regenerates just that slug.
+      - name: Restore OG image cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            website/public/open-graph
+            website/.cache/og-manifest.json
+          key: og-${{ runner.os }}-${{ hashFiles('website/scripts/generate-og.mjs', 'website/src/config/site.ts', 'website/src/content/docs/**') }}
+          restore-keys: |
+            og-${{ runner.os }}-
+
+      # wasm-pack's own download cache (wasm-bindgen binaries). Restored after
+      # install because `node_modules` is recreated by pnpm.
+      - name: Restore wasm-pack cache
+        uses: actions/cache@v4
+        with:
+          path: website/node_modules/.cache/qql-docs-wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'crates/qql-wasm/**') }}
+          restore-keys: |
+            wasm-pack-${{ runner.os }}-
+
       - name: Validate documentation and build website
         working-directory: website
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm check
+        run: pnpm check
 
       - name: Deploy
         uses: cloudflare/wrangler-action@v3

@@ -4,19 +4,16 @@ import "@fontsource-variable/geist-mono";
 import "@fontsource/newsreader/latin-300.css";
 import "@fontsource/newsreader/latin-400.css";
 import "../styles/global.css";
-import "@qql/ui-docs/chrome.css";
-import "@qql/ui-docs/landing.css";
+import FaqList from "../components/FaqList.astro";
 import CtaBand from "../components/landing/CtaBand.astro";
-import FaqList from "../components/landing/FaqList.astro";
 import InstallGrid from "../components/landing/InstallGrid.astro";
 import LandingHero from "../components/landing/LandingHero.astro";
 import LanguageSamples from "../components/landing/LanguageSamples.astro";
 import PipelineSteps from "../components/landing/PipelineSteps.astro";
 import ProblemCompare from "../components/landing/ProblemCompare.astro";
-import StatsStrip from "../components/landing/StatsStrip.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
-import { ANALYTICS, APPS, SITE } from "../config/site";
+import { ANALYTICS, APPS, SITE, SOCIAL } from "../config/site";
 import {
 	cta,
 	faq,
@@ -30,7 +27,7 @@ import {
 
 const pageTitle = "QQL: SQL for Qdrant vector search";
 const pageDescription =
-	"QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
+	"QQL is to Qdrant what SQL is to Postgres — one declarative language for hybrid search, filters, and mutations across Rust, Python, Node.js, WASM, and edge.";
 
 // The documentation verifier parses every `verifiedQql` String.raw template
 // (see scripts/verify-qql-docs.mjs), so the marker must stay despite none of
@@ -68,18 +65,6 @@ const verifiedQqlFacet = String.raw`FACET room_type FROM stays WHERE price < 150
 const verifiedQqlFormula = String.raw`QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
   DEFAULTS (score = 0.0, popularity = 0)
 FROM papers LIMIT 10;`;
-
-const verifiedQqlGrouped = String.raw`QUERY 'incident'
-FROM runbooks
-USING dense
-GROUP BY service SIZE 3 LOOKUP FROM services
-WITH PAYLOAD INCLUDE (title, service)
-LIMIT 10;`;
-
-const verifiedQqlRecommend = String.raw`QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score
-FROM products
-USING dense
-LIMIT 10;`;
 ---
 
 <!doctype html>
@@ -90,9 +75,11 @@ LIMIT 10;`;
     <title>{pageTitle}</title>
     <meta name="description" content={pageDescription} />
     <meta
-      name="keywords"
-      content="QQL, Qdrant, vector search, hybrid search, SQL for vector database, Qdrant SQL, Reciprocal Rank Fusion, RRF, multitenancy, filter injection, pyqql, nqql, qql-edge, WASM, Veristamp"
+      name="robots"
+      content="index, follow, max-image-preview:large"
     />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f4ed" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141413" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -102,7 +89,10 @@ LIMIT 10;`;
     <meta property="og:url" content={`${APPS.home.url}/`} />
     <meta property="og:description" content={pageDescription} />
     <meta property="og:site_name" content="QQL" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:image" content={`${APPS.home.url}/open-graph/home.png`} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="QQL — SQL for Qdrant vector search" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -111,6 +101,7 @@ LIMIT 10;`;
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
     <meta name="twitter:image" content={`${APPS.home.url}/open-graph/home.png`} />
+    <meta name="twitter:image:alt" content="QQL — SQL for Qdrant vector search" />
     <script is:inline>
       (() => {
         document.documentElement.classList.add("js");
@@ -141,12 +132,40 @@ LIMIT 10;`;
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         name: "QQL",
+        url: `${APPS.home.url}/`,
+        version: "0.4.0",
         operatingSystem: "Linux, macOS, Windows, Web",
         applicationCategory: "DeveloperApplication",
         description: pageDescription,
         codeRepository: APPS.github.url,
+        installUrl: APPS.github.url,
         license: "https://opensource.org/license/mit",
+        featureList: [
+          "Hybrid search with RRF fusion",
+          "Declarative filtering and mutations",
+          "Multitenancy via filter injection and shard routing",
+          "In-browser WASM parser",
+        ],
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        publisher: {
+          "@type": "Organization",
+          name: SITE.org,
+          url: "https://veristamp.in",
+        },
+      })}
+    />
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": `${APPS.home.url}/#website`,
+        name: "QQL",
+        url: APPS.home.url,
+        inLanguage: "en",
+        description: pageDescription,
+        sameAs: [SOCIAL.github, SOCIAL.twitter],
         publisher: {
           "@type": "Organization",
           name: SITE.org,
@@ -167,29 +186,13 @@ LIMIT 10;`;
         })),
       })}
     />
-    <script
-      is:inline
-      type="application/ld+json"
-      set:html={JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "WebSite",
-        name: "QQL",
-        url: APPS.home.url,
-        description: pageDescription,
-        publisher: {
-          "@type": "Organization",
-          name: SITE.org,
-          url: "https://veristamp.in",
-        },
-      })}
-    />
   </head>
 
-  <body class="landing-body">
-    <div class="landing-noise" aria-hidden="true"></div>
+  <body class="landing-body overflow-x-clip">
+    <div class="grain" aria-hidden="true"></div>
     <SiteHeader active="home" />
 
-    <main id="main-content">
+    <main id="main-content" class="relative z-[1]">
       <LandingHero
         headline={hero.headline}
         lede={hero.lede}
@@ -198,18 +201,11 @@ LIMIT 10;`;
         secondaryCta={hero.secondaryCta}
         specimenTitle={hero.specimenTitle}
         specimenMeta={hero.specimenMeta}
+        specimenRoute={hero.specimenRoute}
+        specimenStatus={hero.specimenStatus}
         specimenQql={verifiedQqlHero}
-      >
-        <span class="kw">QUERY</span> <span class="str">'chest pain'</span><br />
-        <span class="kw">FROM</span> <span class="id">medical</span><br />
-        <span class="kw">USING</span> <span class="id">dense</span><br />
-        <span class="kw">WHERE</span> <span class="id">department</span>{" "}
-        <span class="op">=</span> <span class="str">'cardio'</span><br />
-        <span class="kw">SHARD</span> <span class="str">'hospital-east'</span><br />
-        <span class="kw">LIMIT</span> <span class="num">5</span><span class="op">;</span>
-      </LandingHero>
-
-      <StatsStrip stats={stats} />
+        stats={stats}
+      />
 
       <ProblemCompare
         heading={problem.heading}
@@ -235,8 +231,6 @@ LIMIT 10;`;
         hybridQql={verifiedQqlHybrid}
         facetQql={verifiedQqlFacet}
         formulaQql={verifiedQqlFormula}
-        groupedQql={verifiedQqlGrouped}
-        recommendQql={verifiedQqlRecommend}
       />
 
       <InstallGrid
@@ -247,11 +241,21 @@ LIMIT 10;`;
         footLabel={getStarted.footLabel}
       />
 
-      <FaqList heading={faq.heading} items={faq.items} />
+      <section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(3rem,6vw,4.5rem)]" aria-labelledby="faq-heading">
+        <div class="shell">
+          <header class="max-w-[44rem] reveal">
+            <h2 id="faq-heading" class="h-section m-0">{faq.heading}</h2>
+          </header>
+          <div class="reveal">
+            <FaqList />
+          </div>
+        </div>
+      </section>
 
       <CtaBand
         heading={cta.heading}
         body={cta.body}
+        eyebrow={cta.eyebrow}
         primaryCta={cta.primaryCta}
         secondaryCta={cta.secondaryCta}
       />
@@ -260,22 +264,26 @@ LIMIT 10;`;
     <SiteFooter />
 
     <script>
-      document.addEventListener("DOMContentLoaded", () => {
+      const initReveal = () => {
         const observer = new IntersectionObserver(
           (entries) => {
             for (const entry of entries) {
               if (entry.isIntersecting) {
-                entry.target.classList.add("landing-visible");
+                entry.target.classList.add("is-in");
                 observer.unobserve(entry.target);
               }
             }
           },
-          { threshold: 0.08 },
+          { threshold: 0.05, rootMargin: "0px 0px 50px 0px" },
         );
-        document
-          .querySelectorAll(".landing-fade-up")
-          .forEach((el) => observer.observe(el));
-      });
+        document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initReveal);
+      } else {
+        initReveal();
+      }
     </script>
   </body>
 </html>

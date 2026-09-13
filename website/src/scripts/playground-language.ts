@@ -60,11 +60,11 @@ export const qqlCompletion = autocompletion({
 
 export const qqlHighlighting = syntaxHighlighting(
 	HighlightStyle.define([
-		{ tag: tags.keyword, color: "var(--syntax-keyword)", fontWeight: "650" },
-		{ tag: tags.string, color: "var(--syntax-string)" },
-		{ tag: [tags.number, tags.bool], color: "var(--syntax-number)" },
-		{ tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
-		{ tag: tags.operator, color: "var(--syntax-operator)" },
-		{ tag: tags.variableName, color: "var(--syntax-name)" },
+		{ tag: tags.keyword, color: "var(--q-sx-keyword)", fontWeight: "650" },
+		{ tag: tags.string, color: "var(--q-sx-string)" },
+		{ tag: [tags.number, tags.bool], color: "var(--q-sx-number)" },
+		{ tag: tags.comment, color: "var(--q-sx-comment)", fontStyle: "italic" },
+		{ tag: tags.operator, color: "var(--q-sx-operator)" },
+		{ tag: tags.variableName, color: "var(--q-sx-name)" },
 	]),
 );

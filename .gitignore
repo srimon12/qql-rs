@@ -33,7 +33,7 @@ dist-site/
 website/dist/
 website/.astro/
 website/node_modules/
-
+.firecrawl
 crates/nqql/index.*.node
 crates/nqql/index.node
 crates/nqql/native.d.ts

@@ -19,27 +19,22 @@ transport is swapped for an embedded one.
 ## Why edge
 
 {% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
-
 {% glassCard title="Zero infrastructure" %}
 No Docker, no server process, no ports, no API keys. A Python script, a Node
 service, or a Rust binary can own a local vector index.
 {% /glassCard %}
-
 {% glassCard title="Fully offline" %}
 With the local ONNX embedder, inference happens on your CPU. Great for demos,
 CI, air-gapped tools, and single-node products.
 {% /glassCard %}
-
 {% glassCard title="Same language, same plans" %}
 Statements compile to the same IR and produce the same typed `ExecData` report as the
 REST and gRPC backends. What you write in the playground is what edge executes.
 {% /glassCard %}
-
 {% glassCard title="Honest capability errors" %}
 Cluster-only features fail loudly with stable `QQL-EDGE-UNSUPPORTED-*` codes
 and a "use remote Qdrant" hint. Edge never silently drops a clause.
 {% /glassCard %}
-
 {% /grid %}
 
 ## Architecture

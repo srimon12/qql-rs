@@ -2,6 +2,7 @@
 import StarlightHead from "@astrojs/starlight/components/Head.astro";
 import type { StarlightRouteData } from "@astrojs/starlight/route-data";
 import { APPS, SITE } from "../config/site";
+import { faq } from "../data/landing";
 
 /** Structural view of what this component actually reads off an entry. */
 interface EntryLike {
@@ -24,6 +25,21 @@ const rawId = entry?.id
 	: "docs";
 const canonicalUrl = new URL(Astro.url.pathname, APPS.home.url).href;
 const ogImageUrl = `${APPS.home.url}/open-graph/${rawId}.png`;
+
+// Starlight renders `<page title> | <site title>`. The docs home page title
+// already says "QQL documentation", so the suffix duplicated it. Collapse the
+// two only for that exact case; every other page keeps "Page | QQL Documentation".
+const SITE_TITLE = "QQL Documentation";
+const head = (
+	starlightRoute as { head?: { tag: string; content?: string }[] } | undefined
+)?.head;
+const titleTag = head?.find((tag) => tag.tag === "title");
+if (
+	titleTag?.content?.toLowerCase() === `${title} | ${SITE_TITLE}`.toLowerCase()
+) {
+	titleTag.content = title;
+}
+const isFaqPage = rawId === "docs/faq";
 
 // Compute breadcrumbs hierarchy cleanly without duplicate "docs" segment
 const cleanDocPath = rawId.replace(/^docs\/?/, "");
@@ -115,3 +131,28 @@ for (let i = 0; i < pathSegments.length; i++) {
     })),
   })}
 />
+
+{
+  isFaqPage && (
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: faq.items.map((item) => ({
+          "@type": "Question",
+          name: item.question,
+          acceptedAnswer: { "@type": "Answer", text: item.answer },
+        })),
+      })}
+    />
+  )
+}
+
+<script>
+  import { mountDocsCopy } from "@qql/ui/copy";
+
+  mountDocsCopy();
+  document.addEventListener("astro:page-load", () => mountDocsCopy());
+</script>

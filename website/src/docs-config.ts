@@ -1,4 +1,4 @@
-import type { DocsFooterConfig, DocsHeaderConfig } from "@qql/ui-docs/types";
+import type { DocsFooterConfig, DocsHeaderConfig } from "@qql/ui/types";
 import { APPS, SITE } from "./config/site";
 
 export const headerConfig: DocsHeaderConfig = {

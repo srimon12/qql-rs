@@ -1,0 +1,71 @@
+---
+import EditLink from "virtual:starlight/components/EditLink";
+import LastUpdated from "virtual:starlight/components/LastUpdated";
+import Pagination from "virtual:starlight/components/Pagination";
+import config from "virtual:starlight/user-config";
+import type { DocsFooterConfig } from "../types";
+
+interface Props {
+	docsConfig: DocsFooterConfig;
+}
+
+const { docsConfig } = Astro.props;
+---
+
+<footer class="docs-footer sl-flex relative z-40 flex-col gap-6 bg-[var(--sl-color-bg)]">
+  <div class="sl-flex mt-12 flex-wrap justify-between gap-x-12 gap-y-3 text-sm text-[var(--sl-color-gray-3)]">
+    <EditLink />
+    <LastUpdated />
+  </div>
+  <Pagination />
+
+  {
+    config.credits && (
+      <a class="mx-auto flex items-center gap-2 py-6 text-xs text-[var(--sl-color-gray-3)] no-underline hover:text-[var(--sl-color-white)]" href="https://starlight.astro.build">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        {Astro.locals.t('builtWithStarlight.label')}
+      </a>
+    )
+  }
+
+  <div class="mt-12 border-t border-[var(--sl-color-gray-5)] pt-12">
+    <div class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-[1.6fr_1fr_1fr_1fr]">
+      <div class="flex flex-col items-start gap-3">
+        <a class="font-mono text-[1.05rem] font-semibold tracking-[0.02em] text-[var(--sl-color-white)] no-underline" href={docsConfig.brand.href}>
+          {docsConfig.brand.name}
+        </a>
+        <p class="m-0 max-w-[26ch] text-xs leading-relaxed text-[var(--sl-color-gray-3)]">
+          {docsConfig.brand.tagline}
+        </p>
+      </div>
+
+      {docsConfig.columns.map((col) => (
+        <div class="flex flex-col gap-2.5">
+          <span class="mb-1 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">{col.title}</span>
+          {col.items.map((item) =>
+            item.disabled ? (
+              <span class="text-sm text-[var(--sl-color-gray-4)]">{item.label}</span>
+            ) : (
+              <a
+                class="w-fit text-sm text-[var(--sl-color-gray-2)] no-underline hover:text-[var(--sl-color-white)] hover:underline"
+                href={item.href}
+                {...(item.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+              >
+                {item.label}
+              </a>
+            )
+          )}
+        </div>
+      ))}
+    </div>
+
+    <div class="mt-12 flex flex-wrap justify-between gap-3 border-t border-[var(--sl-color-gray-5)] pt-6 text-xs text-[var(--sl-color-gray-3)]">
+      <span>{docsConfig.bottom?.copyright}</span>
+      {docsConfig.bottom?.note && (
+        <span class="font-mono text-[0.6875rem]">{docsConfig.bottom.note}</span>
+      )}
+    </div>
+  </div>
+</footer>
