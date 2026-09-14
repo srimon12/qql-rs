@@ -13,7 +13,7 @@
 //      images.
 //
 // The SVG template below is byte-identical to the retired route: same
-// escaping, wrapping, layout, and `sharp().png({ quality: 90 })` encoding.
+// escaping, wrapping, layout, and lossless `sharp().png()` encoding.
 // Bump TEMPLATE_VERSION when the design changes to force a full regeneration.
 //
 // Usage: node scripts/generate-og.mjs
@@ -39,7 +39,7 @@ const outDir = join(websiteRoot, "public", "open-graph");
 const manifestPath = join(websiteRoot, ".cache", "og-manifest.json");
 
 // Bump to invalidate every cached image when the template design changes.
-const TEMPLATE_VERSION = 2;
+const TEMPLATE_VERSION = 3;
 const FALLBACK_DESCRIPTION = "Declarative vector search for Qdrant.";
 
 function escapeXml(unsafe) {
@@ -88,11 +88,31 @@ function getCategoryFromSlug(slug) {
 }
 
 const SPECIMEN_CODE = [
-	[["QUERY ", "ffab98"], ["'chest pain' ", "9fe3b8"], ["FROM ", "ffab98"], ["medical", null]],
-	[["USING ", "ffab98"], ["dense", null]],
-	[["WHERE ", "ffab98"], ["department ", null], ["= ", "8b8880"], ["'cardio'", "9fe3b8"]],
-	[["SHARD ", "ffab98"], ["'hospital-east'", "9fe3b8"]],
-	[["LIMIT ", "ffab98"], ["5", "f2c983"], [";", "8b8880"]],
+	[
+		["QUERY ", "ffab98"],
+		["'chest pain' ", "9fe3b8"],
+		["FROM ", "ffab98"],
+		["medical", null],
+	],
+	[
+		["USING ", "ffab98"],
+		["dense", null],
+	],
+	[
+		["WHERE ", "ffab98"],
+		["department ", null],
+		["= ", "8b8880"],
+		["'cardio'", "9fe3b8"],
+	],
+	[
+		["SHARD ", "ffab98"],
+		["'hospital-east'", "9fe3b8"],
+	],
+	[
+		["LIMIT ", "ffab98"],
+		["5", "f2c983"],
+		[";", "8b8880"],
+	],
 ];
 
 function specimenBody(description) {
@@ -132,10 +152,16 @@ function editorialBody(title, description) {
 	const descStartY = 244 + (titleLines.length - 1) * 62 + 126;
 
 	const titleTspans = titleLines
-		.map((line, i) => `<tspan x="80" y="${244 + i * 62}">${escapeXml(line)}</tspan>`)
+		.map(
+			(line, i) =>
+				`<tspan x="80" y="${244 + i * 62}">${escapeXml(line)}</tspan>`,
+		)
 		.join("\n");
 	const descTspans = descLines
-		.map((line, i) => `<tspan x="80" y="${descStartY + i * 30}">${escapeXml(line)}</tspan>`)
+		.map(
+			(line, i) =>
+				`<tspan x="80" y="${descStartY + i * 30}">${escapeXml(line)}</tspan>`,
+		)
 		.join("\n");
 
 	return `  <!-- Title & Description -->
@@ -318,9 +344,7 @@ async function mapPool(items, size, fn) {
 
 async function renderEntry(entry) {
 	const svg = generateSvg(entry);
-	const pngBuffer = await sharp(Buffer.from(svg))
-		.png({ quality: 90 })
-		.toBuffer();
+	const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
 	const outPath = join(outDir, `${entry.slug}.png`);
 	mkdirSync(dirname(outPath), { recursive: true });
 	writeFileSync(outPath, pngBuffer);

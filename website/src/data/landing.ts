@@ -65,6 +65,11 @@ export const pipeline = {
 	],
 } as const;
 
+export const cliInstall = {
+	cmd: "curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh",
+	display: "curl -fsSL https://…/install.sh | sh",
+} as const;
+
 export const language = {
 	heading: "One grammar. The whole surface.",
 	sub: "Hybrid retrieval, faceting, and formula scoring. Twelve query forms over one typed grammar.",
@@ -78,7 +83,8 @@ export const getStarted = {
 	installs: [
 		{
 			name: "CLI",
-			cmd: "curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh",
+			cmd: cliInstall.cmd,
+			display: cliInstall.display,
 			href: "/docs/getting-started/installation/",
 		},
 		{ name: "Python", cmd: "pip install pyqql", href: "/docs/sdks/python/" },
