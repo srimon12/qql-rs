@@ -1,88 +1,114 @@
 use super::{
     ComparisonOp, FilterExpr, PointId, PointIdPredicate, PointSelector, Prefetch, PrefetchSource,
-    QueryExpr, QueryStmt, Stmt, Value,
+    QueryExpr, QueryStmt, ShardKey, Stmt, Value,
 };
 use crate::error::QqlError;
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 
 impl Stmt {
     /// Custom shard routing key for this statement, if any.
     ///
-    /// Corresponds to QQL `SHARD '…'` on DML, lowered to request-level
+    /// Corresponds to QQL `SHARD` on DML, lowered to request-level
     /// `shard_key` (REST) / `ShardKeySelector` (gRPC) — never inside `Filter`.
-    pub fn shard_key(&self) -> Option<&str> {
+    /// Keyword and numeric forms are preserved (`ShardKey::Number(101)` reads
+    /// back as a number, never coerced to `"101"`).
+    pub fn shard_key(&self) -> Option<&ShardKey> {
         match self {
-            Self::Query(query) => query.shard_key.as_deref(),
-            Self::Scroll(scroll) => scroll.shard_key.as_deref(),
-            Self::Count(count) => count.shard_key.as_deref(),
-            Self::Facet(facet) => facet.shard_key.as_deref(),
-            Self::Upsert(upsert) => upsert.shard_key.as_deref(),
-            Self::Delete(delete) => delete.shard_key.as_deref(),
-            Self::ClearPayload(clear) => clear.shard_key.as_deref(),
-            Self::DeletePayload(delete) => delete.shard_key.as_deref(),
-            Self::DeleteVector(delete) => delete.shard_key.as_deref(),
-            Self::UpdateVector(update) => update.shard_key.as_deref(),
-            Self::UpdatePayload(update) => update.shard_key.as_deref(),
+            Self::Query(query) => query.shard_key.as_ref(),
+            Self::Scroll(scroll) => scroll.shard_key.as_ref(),
+            Self::Count(count) => count.shard_key.as_ref(),
+            Self::Facet(facet) => facet.shard_key.as_ref(),
+            Self::Upsert(upsert) => upsert.shard_key.as_ref(),
+            Self::Delete(delete) => delete.shard_key.as_ref(),
+            Self::ClearPayload(clear) => clear.shard_key.as_ref(),
+            Self::DeletePayload(delete) => delete.shard_key.as_ref(),
+            Self::DeleteVector(delete) => delete.shard_key.as_ref(),
+            Self::UpdateVector(update) => update.shard_key.as_ref(),
+            Self::UpdatePayload(update) => update.shard_key.as_ref(),
+            Self::Batch(batch) => {
+                // Members of one batch RPC normally share routing; report a
+                // key only when every member agrees so callers never act on
+                // a partial view.
+                let mut keys = batch.statements.iter().map(Stmt::shard_key);
+                match keys.next() {
+                    None => None,
+                    Some(first) => {
+                        if keys.all(|key| key == first) {
+                            first
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
             _ => None,
         }
     }
 
-    /// Set custom shard routing (same field as QQL `SHARD '…'`).
+    /// Set custom shard routing (same field as QQL `SHARD`).
     ///
-    /// Prefer writing `SHARD 'tenant'` in the query when the tenant is known at
-    /// authoring time. Use this setter only when the host resolves the key after
-    /// parse (e.g. from auth context) without re-stringifying QQL.
+    /// Prefer writing the `SHARD` clause in the query when the tenant is known
+    /// at authoring time. Use this setter only when the host resolves the key
+    /// after parse (e.g. from auth context) without re-stringifying QQL.
     ///
     /// On `QUERY`, recurses into CTEs and nested prefetch queries so routing
-    /// matches a top-level `SHARD` clause. Empty / `None` clears the key.
+    /// matches a top-level `SHARD` clause. `None` (or an empty keyword) clears
+    /// the key.
     /// Returns `false` for statement types that cannot carry routing (DDL, SHOW).
-    pub fn set_shard_key(&mut self, shard_key: Option<String>) -> bool {
-        let key = shard_key.filter(|k| !k.is_empty());
+    pub fn set_shard_key(&mut self, shard_key: Option<ShardKey>) -> bool {
+        let shard_key = shard_key.filter(|k| !matches!(k, ShardKey::Keyword(s) if s.is_empty()));
         match self {
             Self::Query(query) => {
-                apply_query_shard(query, key.as_deref());
+                apply_query_shard(query, shard_key.as_ref());
                 true
             }
             Self::Scroll(scroll) => {
-                scroll.shard_key = key;
+                scroll.shard_key = shard_key;
                 true
             }
             Self::Count(count) => {
-                count.shard_key = key;
+                count.shard_key = shard_key;
                 true
             }
             Self::Facet(facet) => {
-                facet.shard_key = key;
+                facet.shard_key = shard_key;
                 true
             }
             Self::Upsert(upsert) => {
-                upsert.shard_key = key;
+                upsert.shard_key = shard_key;
                 true
             }
             Self::Delete(delete) => {
-                delete.shard_key = key;
+                delete.shard_key = shard_key;
                 true
             }
             Self::ClearPayload(clear) => {
-                clear.shard_key = key;
+                clear.shard_key = shard_key;
                 true
             }
             Self::DeletePayload(delete) => {
-                delete.shard_key = key;
+                delete.shard_key = shard_key;
                 true
             }
             Self::DeleteVector(delete) => {
-                delete.shard_key = key;
+                delete.shard_key = shard_key;
                 true
             }
             Self::UpdateVector(update) => {
-                update.shard_key = key;
+                update.shard_key = shard_key;
                 true
             }
             Self::UpdatePayload(update) => {
-                update.shard_key = key;
+                update.shard_key = shard_key;
                 true
+            }
+            Self::Batch(batch) => {
+                let mut ok = true;
+                for member in &mut batch.statements {
+                    ok &= member.set_shard_key(shard_key.clone());
+                }
+                ok
             }
             _ => false,
         }
@@ -90,8 +116,8 @@ impl Stmt {
 }
 
 /// Apply shard routing to a query and nested CTE / prefetch queries.
-fn apply_query_shard(query: &mut QueryStmt, key: Option<&str>) {
-    query.shard_key = key.map(str::to_string);
+fn apply_query_shard(query: &mut QueryStmt, key: Option<&ShardKey>) {
+    query.shard_key = key.cloned();
     for cte in &mut query.ctes {
         apply_query_shard(&mut cte.query, key);
     }
@@ -114,6 +140,11 @@ pub fn inject_filter(
     let filter = build_filter(field, operator, value.clone())?;
     match statement {
         Stmt::Query(query) => inject_query(query, &filter),
+        Stmt::Batch(batch) => {
+            for member in &mut batch.statements {
+                inject_filter(member, field, operator, value.clone())?;
+            }
+        }
         Stmt::Scroll(scroll) => merge_filter(&mut scroll.filter, filter),
         Stmt::Delete(delete) => merge_selector(&mut delete.selector, filter),
         Stmt::Count(count) => merge_filter(&mut count.filter, filter),
@@ -122,18 +153,47 @@ pub fn inject_filter(
         Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
-        Stmt::Upsert(upsert)
-            if operator == ComparisonOp::Eq && !field.eq_ignore_ascii_case("id") =>
-        {
+        Stmt::Upsert(_) if operator != ComparisonOp::Eq || field.eq_ignore_ascii_case("id") => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                "inject_filter into UPSERT requires Eq on a non-id payload field",
+                None,
+            ));
+        }
+        Stmt::Upsert(upsert) => {
             for point in &mut upsert.points {
-                if let Some((_, current)) = point
+                // A whole-point placeholder has no payload yet — silently
+                // skipping it would drop a security filter. Bind first.
+                let inline = match point {
+                    crate::ast::PointEntry::Inline(inline) => inline,
+                    crate::ast::PointEntry::Param(name, _) => {
+                        return Err(QqlError::validation(
+                            "QQL-VALIDATION-FILTER-INJECT",
+                            alloc::format!(
+                                "cannot inject filter into unbound point parameter ':{name}'; bind point parameters before filter injection"
+                            ),
+                            None,
+                        ));
+                    }
+                    crate::ast::PointEntry::PositionalParam(idx, _) => {
+                        return Err(QqlError::validation(
+                            "QQL-VALIDATION-FILTER-INJECT",
+                            alloc::format!(
+                                "cannot inject filter into unbound point parameter '?{}'; bind point parameters before filter injection",
+                                *idx + 1
+                            ),
+                            None,
+                        ));
+                    }
+                };
+                if let Some((_, current)) = inline
                     .payload
                     .iter_mut()
                     .find(|(key, _)| key.eq_ignore_ascii_case(field))
                 {
                     *current = value.clone();
                 } else {
-                    point.payload.push((field.to_string(), value.clone()));
+                    inline.payload.push((field.to_string(), value.clone()));
                 }
             }
         }
@@ -142,41 +202,13 @@ pub fn inject_filter(
                 "QQL-VALIDATION-FILTER-INJECT",
                 format!(
                     "inject_filter does not apply to this statement type ({})",
-                    stmt_kind(other)
+                    other.stmt_kind()
                 ),
                 None,
             ));
         }
     }
     Ok(())
-}
-
-fn stmt_kind(statement: &Stmt) -> &'static str {
-    match statement {
-        Stmt::Query(_) => "QUERY",
-        Stmt::Scroll(_) => "SCROLL",
-        Stmt::Count(_) => "COUNT",
-        Stmt::Facet(_) => "FACET",
-        Stmt::Upsert(_) => "UPSERT",
-        Stmt::Delete(_) => "DELETE",
-        Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
-        Stmt::DeletePayload(_) => "DELETE PAYLOAD",
-        Stmt::DeleteVector(_) => "DELETE VECTOR",
-        Stmt::UpdateVector(_) => "UPDATE VECTOR",
-        Stmt::UpdatePayload(_) => "UPDATE PAYLOAD",
-        Stmt::CreateCollection(_) => "CREATE COLLECTION",
-        Stmt::AlterCollection(_) => "ALTER COLLECTION",
-        Stmt::DropCollection(_) => "DROP COLLECTION",
-        Stmt::CreateIndex(_) => "CREATE INDEX",
-        Stmt::DropIndex(_) => "DROP INDEX",
-        Stmt::CreateShardKey(_) => "CREATE SHARD KEY",
-        Stmt::DropShardKey(_) => "DROP SHARD KEY",
-        Stmt::ShowCollections => "SHOW COLLECTIONS",
-        Stmt::ShowCollection(_) => "SHOW COLLECTION",
-        Stmt::ShowShardKeys(_) => "SHOW SHARD KEYS",
-        Stmt::ShowQuotas => "SHOW QUOTAS",
-        Stmt::SetQuota(_) => "SET QUOTA",
-    }
 }
 
 fn build_filter(field: &str, operator: ComparisonOp, value: Value) -> Result<FilterExpr, QqlError> {
@@ -190,6 +222,7 @@ fn build_filter(field: &str, operator: ComparisonOp, value: Value) -> Result<Fil
         }
         let id = match value {
             Value::Int(value) if value >= 0 => PointId::Number(value as u64),
+            Value::UInt(value) => PointId::Number(value),
             Value::Str(value) => PointId::String(value),
             _ => {
                 return Err(QqlError::validation(

@@ -6,7 +6,8 @@
         "collection": "docs",
         "field": "status",
         "field_type": "keyword",
-        "options": []
+        "options": [],
+        "wait": null
       }
     },
     {
@@ -33,7 +34,8 @@
               "Bool": false
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -48,7 +50,8 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -56,7 +59,8 @@
         "collection": "docs",
         "field": "year",
         "field_type": "integer",
-        "options": []
+        "options": [],
+        "wait": null
       }
     },
     {
@@ -83,7 +87,8 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -98,7 +103,8 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -113,7 +119,8 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -162,7 +169,8 @@
               ]
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -177,7 +185,8 @@
               "Str": "multilingual"
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -192,7 +201,8 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -213,7 +223,8 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -234,7 +245,17 @@
               "Bool": true
             }
           ]
-        ]
+        ],
+        "wait": null
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "status",
+        "field_type": "keyword",
+        "options": [],
+        "wait": true
       }
     }
   ]

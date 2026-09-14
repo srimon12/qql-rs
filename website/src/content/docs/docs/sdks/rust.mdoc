@@ -1,6 +1,6 @@
 ---
 title: "Rust SDK"
-description: "Parse, rewrite, plan, and execute QQL from Rust with qql-core and qql."
+description: "Parse, rewrite, plan, and execute QQL from Rust with qql-core and qql: typed ASTs, policy injection, compilation, and backend dispatch."
 sidebar:
   order: 2
 ---
@@ -97,6 +97,81 @@ let bound = bind_named("QUERY :q FROM products LIMIT :lim", |k| match k {
 
 For text input, configure an embedder or provide a `QUERY VECTOR` / explicit
 vector value. The runtime also exposes `Executor::grpc` behind its gRPC feature.
+
+Bulk ingest takes point values — payload as data, never SQL text. One
+`:rows` template is prepared once (schema fetched once), then each chunk
+splices through the point-splice path with no re-parse:
+
+```rust
+let rows: Vec<qql_core::ast::Value> = vec![
+    // {id: 1, vector: {dense: [...]}, …payload} per entry
+];
+let report = executor.upsert_many("docs", rows, 100, OnError::Stop).await?;
+```
+
+Chunks move (never clone) through the point-splice path; the peak live-set
+is the caller's `rows` vector by construction — for million-row ingests,
+chunk the *calls*, since `upsert_many` chunks transport, not memory.
+
+## Scroll large collections manually
+
+Rust has no scroll helper type; loop `SCROLL ... AFTER` yourself with the same
+clause order the Python and Node helpers emit (`WHERE` then `AFTER` then
+`SHARD` then `WITH VECTOR` then `LIMIT`). Keep at most one page buffered and
+stop on the first empty page. Guard against a non-advancing cursor.
+
+```rust
+let mut cursor: Option<qql_plan::PlanPointId> = None;
+loop {
+    let page = match &cursor {
+        None => "SCROLL FROM products LIMIT 100".to_string(),
+        // Integer ids interpolate directly; quote string ids.
+        Some(id) => format!("SCROLL FROM products AFTER {id} LIMIT 100"),
+    };
+    let report = executor.execute(&page, OnError::Stop).await?;
+    let hits = report.first_hits().unwrap_or_default();
+    if hits.is_empty() {
+        break;
+    }
+    let next = hits.last().map(|h| h.id.clone());
+    if next == cursor {
+        break;
+    }
+    for hit in &hits {
+        println!("hit {}", hit.id);
+    }
+    cursor = next;
+}
+```
+
+For the managed equivalent, see Python `Client.scroll_cursor` and Node
+`scrollCursor` on their SDK pages.
+
+## Profile before you optimize
+
+`Executor::explain_analyze` (plus `_with_named_params` / `_with_params`
+twins) runs one statement and returns the static plan plus measured client
+phase timings and honest server telemetry. Every `ExecResponse` also carries
+`telemetry: Option<ServerTelemetry>` (`time_s` + hardware/inference `usage`,
+`None` where the route reports nothing), and typed result accessors
+(`hits()`, `points()`, `ids()`, `facet()`, `count()`, `groups()`,
+`collections()`, `collection()`, `shard_keys()`, `quotas()`) read
+from a cached typed representation — no JSON round-trip on the gRPC leg.
+The response model is closed (`ExecData` has no raw passthrough; the legacy
+`*_json` accessors are removed) and REST responses are parsed strictly per
+operation, failing closed with `QQL-BACKEND-ENVELOPE` on a missing or
+mistyped field. `SearchHit` carries `id`, `score`, `payload`, `collection`,
+and `vector` only — no `text`, `version`, or `shard_key`; derive text from
+`payload["text"]`:
+
+```rust
+let analysis = executor.explain_analyze(
+    "QUERY 'ultrabook' FROM products USING dense LIMIT 10",
+    OnError::Stop,
+).await?;
+println!("server: {:?}s", analysis.server_time_s);
+println!("dispatch: {}ms", analysis.phases.dispatch_ms);
+```
 
 ## Pin reads with route affinity
 

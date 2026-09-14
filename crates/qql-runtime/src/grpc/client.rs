@@ -9,6 +9,12 @@ use crate::qdrant_grpc::qdrant;
 /// gRPC metadata key for Qdrant 1.19 read affinity (same string as the HTTP header).
 pub const ROUTE_AFFINITY_METADATA: &str = "x-qdrant-route-affinity";
 
+/// gRPC metadata key for request correlation (`x-request-id`).
+pub const REQUEST_ID_METADATA: &str = crate::client::REQUEST_ID_HEADER;
+
+/// ColBERT / multi-vector scroll pages exceed tonic's 4 MiB default.
+const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+
 /// Qdrant gRPC backend handle: `tonic` channel plus API-key and route-affinity
 /// metadata, with typed points/collections client factories.
 pub struct GrpcQdrant {
@@ -16,6 +22,13 @@ pub struct GrpcQdrant {
     api_key: Option<String>,
     /// Stable value hashed by Qdrant to pin reads to one replica.
     route_affinity: Option<String>,
+    /// Most recently generated correlation id. Written by the interceptor on
+    /// every outgoing RPC; read by the error path so gRPC failures can be
+    /// matched against Qdrant's log lines (mirrors the REST `x-request-id`
+    /// echo). Best-effort under concurrent RPCs on one client (last write
+    /// wins); exact for sequential awaits, which is how the executor drives
+    /// this backend.
+    last_request_id: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 /// Interceptor that attaches API-key and optional route-affinity metadata.
@@ -23,6 +36,8 @@ pub struct GrpcQdrant {
 pub(crate) struct MetadataInterceptor {
     api_key: Option<String>,
     route_affinity: Option<String>,
+    /// Shared slot recording the id generated for each outgoing RPC.
+    last_request_id: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl tonic::service::Interceptor for MetadataInterceptor {
@@ -44,6 +59,16 @@ impl tonic::service::Interceptor for MetadataInterceptor {
                 .metadata_mut()
                 .insert(ROUTE_AFFINITY_METADATA, value);
         }
+        // Per-request correlation id — Qdrant echoes it into its log lines,
+        // matching the REST adapter's `x-request-id` header. The generated id
+        // is recorded on the shared slot so a failing RPC can report it.
+        let request_id = crate::client::next_request_id();
+        if let Ok(value) = tonic::metadata::MetadataValue::try_from(request_id.as_str()) {
+            request.metadata_mut().insert(REQUEST_ID_METADATA, value);
+        }
+        if let Ok(mut slot) = self.last_request_id.lock() {
+            *slot = request_id;
+        }
         Ok(request)
     }
 }
@@ -55,16 +80,35 @@ impl GrpcQdrant {
             channel,
             api_key: None,
             route_affinity: None,
+            last_request_id: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
         }
     }
 
     /// Connect lazily to a `grpc://` / `http(s)://` Qdrant endpoint with an
     /// optional API key.
+    ///
+    /// # Errors
+    /// Returns `QqlError::transport` if the provided endpoint URL cannot be parsed.
+    ///
+    /// # Panics
+    /// Panics if called when no Tokio runtime reactor is running or entered (due to
+    /// `tonic::transport::Endpoint::connect_lazy` requiring a Tokio timer handle).
+    /// Foreign thread callers (e.g. PyO3 / N-API constructors) must enter their
+    /// driving Tokio runtime before constructing a `GrpcQdrant` instance.
     pub fn from_url(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Self::from_url_with_timeout(url, api_key, None)
     }
 
     /// Like `from_url`, with an explicit overall request timeout on the endpoint.
+    ///
+    /// # Errors
+    /// Returns `QqlError::transport` if the provided endpoint URL cannot be parsed.
+    ///
+    /// # Panics
+    /// Panics if called when no Tokio runtime reactor is running or entered (due to
+    /// `tonic::transport::Endpoint::connect_lazy` requiring a Tokio timer handle).
+    /// Foreign thread callers (e.g. PyO3 / N-API constructors) must enter their
+    /// driving Tokio runtime before constructing a `GrpcQdrant` instance.
     pub fn from_url_with_timeout(
         url: &str,
         api_key: Option<String>,
@@ -93,6 +137,7 @@ impl GrpcQdrant {
             channel,
             api_key,
             route_affinity: None,
+            last_request_id: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
         })
     }
 
@@ -109,6 +154,16 @@ impl GrpcQdrant {
         self.route_affinity.as_deref()
     }
 
+    /// Most recently generated correlation id (best-effort under concurrent
+    /// RPCs — last write wins). Used by the error path so gRPC failures can
+    /// be matched to Qdrant's log lines.
+    pub(crate) fn current_request_id(&self) -> String {
+        self.last_request_id
+            .lock()
+            .map(|id| id.clone())
+            .unwrap_or_default()
+    }
+
     /// Clone the underlying `tonic` channel for custom clients.
     pub fn channel(&self) -> Channel {
         self.channel.clone()
@@ -118,6 +173,7 @@ impl GrpcQdrant {
         MetadataInterceptor {
             api_key: self.api_key.clone(),
             route_affinity: self.route_affinity.clone(),
+            last_request_id: self.last_request_id.clone(),
         }
     }
 
@@ -130,6 +186,8 @@ impl GrpcQdrant {
             self.channel.clone(),
             self.interceptor(),
         )
+        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_MESSAGE_SIZE)
     }
 
     pub(crate) fn collections_client(
@@ -141,5 +199,54 @@ impl GrpcQdrant {
             self.channel.clone(),
             self.interceptor(),
         )
+        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_MESSAGE_SIZE)
+    }
+}
+
+#[cfg(test)]
+mod repro_tests {
+    use super::*;
+    use crate::client::QdrantOps;
+    use qql_plan::{PlanPointId, PlannedOperation, PointsRequest};
+
+    fn get_points_op() -> PlannedOperation {
+        PlannedOperation::GetPoints {
+            collection: "docs".into(),
+            request: PointsRequest {
+                ids: vec![PlanPointId::Number(1)],
+                with_payload: None,
+                with_vector: None,
+                shard_key: None,
+            },
+        }
+    }
+
+    /// Contract pin: tonic's `connect_lazy` captures the tokio reactor at
+    /// construction (hyper-util timer handle), so `GrpcQdrant::from_url` MUST
+    /// run with a tokio runtime entered. Hosts that construct on a foreign
+    /// thread (PyO3 / N-API constructors) enter their driving runtime first —
+    /// see `crates/pyqql/src/embedder.rs` and `crates/nqql/src/lib.rs`.
+    #[test]
+    #[should_panic(expected = "no reactor running")]
+    fn construct_outside_runtime_is_a_programming_error() {
+        let _ = GrpcQdrant::from_url("http://127.0.0.1:1", None);
+    }
+
+    /// The fixed flow: the owning runtime is entered while the channel is
+    /// built (what pyqql must do), so connect_lazy's tasks bind to it.
+    #[test]
+    fn construct_inside_entered_runtime_then_call() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let client = {
+            let _enter = rt.enter();
+            GrpcQdrant::from_url("http://127.0.0.1:1", None)
+                .expect("construction must not panic with the runtime entered")
+        };
+        let result = rt.block_on(client.execute_planned(&get_points_op()));
+        assert!(
+            result.is_err(),
+            "unreachable endpoint must error, got {result:?}"
+        );
     }
 }

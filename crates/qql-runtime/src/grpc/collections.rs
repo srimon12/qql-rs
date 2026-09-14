@@ -17,7 +17,7 @@ impl GrpcQdrant {
         cl.create_shard_key(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("create_shard_key", e))
+            .map_err(|e| grpc_error("create_shard_key", e, &self.current_request_id()))
     }
 
     /// `DeleteShardKey` RPC: remove a custom shard key from a collection.
@@ -29,7 +29,7 @@ impl GrpcQdrant {
         cl.delete_shard_key(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("delete_shard_key", e))
+            .map_err(|e| grpc_error("delete_shard_key", e, &self.current_request_id()))
     }
 
     /// `ListShardKeys` RPC: enumerate a collection's custom shard keys.
@@ -41,7 +41,7 @@ impl GrpcQdrant {
         cl.list_shard_keys(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("list_shard_keys", e))
+            .map_err(|e| grpc_error("list_shard_keys", e, &self.current_request_id()))
     }
 
     /// `List` RPC returning the raw collections response.
@@ -50,7 +50,7 @@ impl GrpcQdrant {
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("list_collections", e))
+            .map_err(|e| grpc_error("list_collections", e, &self.current_request_id()))
     }
 
     /// `Get` RPC returning the raw collection-info response.
@@ -64,6 +64,6 @@ impl GrpcQdrant {
         }))
         .await
         .map(|r| r.into_inner())
-        .map_err(|e| grpc_error("collection_info", e))
+        .map_err(|e| grpc_error("collection_info", e, &self.current_request_id()))
     }
 }

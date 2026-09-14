@@ -1,6 +1,6 @@
 ---
 title: "Python SDK"
-description: "Use pyqql for native parsing, policy injection, planning, and Qdrant execution from Python."
+description: "Use pyqql for native QQL parsing, policy injection, compilation, and Qdrant execution from Python, with sync and async clients."
 sidebar:
   order: 3
 ---
@@ -41,7 +41,7 @@ print(report["succeeded"], report["failed"])
 Pass `params` as a dictionary for named placeholders (`:name`) or a list for positional placeholders (`?`):
 
 ```python
-from pyqql import Client, bind
+from pyqql import Client, bind, parse
 
 client = Client("http://localhost:6333")
 
@@ -57,8 +57,247 @@ report = client.execute(
     params=["cardiology", "medical", 10],
 )
 
-# Standalone query string binding
+# Standalone query string binding (accepts str or Stmt)
 bound_qql = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+```
+
+Parse once, then reuse the statement. `stmt.bind(params)` returns a new bound
+`Stmt`, and `stmt.compile_route(params=...)` lowers the bound statement to its
+Qdrant route without re-parsing:
+
+```python
+stmt = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
+
+bound = stmt.bind({"q": "cardiology", "cat": "medical", "lim": 10})
+route = stmt.compile_route(params={"q": "cardiology", "cat": "medical", "lim": 10})
+print(route["method"], route["path"])
+
+# str(stmt) renders canonical QQL; repr(stmt) truncates long vectors for logging
+print(str(bound))
+```
+
+Nested dictionaries expand to dotted keys (`{"loc": {"lat": 1.0, "lon": 2.0}}`
+binds `:loc.lat` / `:loc.lon`), and flat dotted keys work the same way. For a
+multi-statement batch, pass `params` as a list with one entry per statement —
+the length must match the statement count, and each entry is a dict (named) or
+a list of scalars (positional):
+
+```python
+report = client.execute(
+    [
+        "QUERY TEXT :q FROM docs LIMIT 5",
+        "QUERY TEXT :q FROM articles LIMIT 10",
+    ],
+    params=[{"q": "quantum"}, {"q": "relativity"}],
+)
+```
+
+Use `truncate_vectors=True` for readable logs: `bind(query, params,
+truncate_vectors=True)` renders long vector literals compactly, and binding a
+`Stmt` with truncation returns the readable string:
+
+```python
+print(bind("QUERY :vec FROM docs LIMIT 5", {"vec": [0.1] * 384}, truncate_vectors=True))
+# QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
+```
+
+Binding failures raise errors with stable `QQL-BIND-*` codes — mixed
+placeholder styles, missing parameters, extra positional values, or wrong
+types (see the [error code reference](/docs/reference/error-codes/)).
+
+Every error pyqql raises is a typed `QqlError` subclass carrying `.code`,
+`.kind`, and `.span`, so programs handle failures by code instead of
+string-matching messages:
+
+```python
+from pyqql import QqlSyntaxError, QqlValidationError, QqlTransportError
+
+try:
+    client.execute("QUERY :vec FROM docs USING dense", params={"vec": None})
+except QqlValidationError as e:
+    print(e.code)   # QQL-BIND-NULL-PARAM — a None parameter cannot bind
+except QqlSyntaxError as e:
+    print(e.code, e.span)  # parse errors carry the source span
+except QqlTransportError:
+    ...  # network / timeout failures
+```
+
+The subclasses also inherit the builtin category each one used to raise
+(`QqlSyntaxError` extends `SyntaxError`, `QqlValidationError` extends
+`ValueError`, `QqlExecutionError` / `QqlTransportError` /
+`QqlBackendError` extend `RuntimeError`), so existing `except` clauses
+keep working. Transport and backend errors additionally carry structured
+`.fields` (url, status, …) and a `.request_id` attribute matching the
+`x-request-id` header QQL sends on every request — correlate a failing
+response directly in Qdrant's logs. Re-binding an already-bound `Stmt`
+with new params raises `QQL-BIND-ALREADY-BOUND` instead of silently
+ignoring them, and executing an empty script raises
+`QQL-VALIDATION-EMPTY-SCRIPT` (parity with `";;"`).
+
+Prefer the **implicit** parameter spelling `QUERY :vec USING <model> FROM …`
+over the explicit `QUERY VECTOR :vec` form: both parse to the same
+statement and both accept matrix params (ColBERT multi-vectors) since 0.4.0,
+but the implicit form is the canonical, documented shape and reads the same
+across `QUERY`, `HYBRID`, and `RERANK` inputs.
+
+`compile_query(query, params=...)` and `Client.compile(query, params=...)`
+compile a template to its route in one step, and `is_valid` runs the full
+parse + plan gate:
+
+```python
+route = compile_query("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+print(client.compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}))
+```
+
+## Bulk ingest
+
+Pass point dicts — payload as data, never SQL text. One `:rows` template
+is prepared once, then each `batch_size` chunk splices through the
+point-splice path with no re-parse and no per-batch schema fetch.
+Prefer this over hand-rolled batch loops:
+
+```python
+rows = [
+    {"id": 1, "vector": {"dense": [0.1, 0.2, 0.3]}, "tag": "a"},
+    {"id": 2, "vector": {"dense": [0.4, 0.5, 0.6]}, "tag": "b"},
+]
+report = client.upsert_many("docs", rows, batch_size=100)
+print(report["succeeded"], report["failed"])
+```
+
+Row vectors accept plain lists, 1-D float buffers (numpy, `array.array`,
+memoryviews: one copy, no per-element walk), integer lists for sparse
+`indices`, and the flat
+`{"data": [...], "dim": N}` multivector form. A plain `list[float]` of 32+
+elements also binds as a packed `F32Array` with one copy instead of a
+per-element walk; shorter lists and nested shapes keep exact list semantics,
+and payload values are never repacked. Each dict has the same shape
+as an inline `VALUES {…}` row, so a misshapen row fails closed with
+`QQL-BIND-TYPE-MISMATCH` (missing `id` → `QQL-VALIDATION-UPSERT-ID`)
+instead of landing partial data. The full typed-array contract lives once in
+the [API surface reference](/docs/reference/api-surface/): same row shapes on
+Python, Node, and WASM, same `QQL-BIND-TYPE-MISMATCH` for a non-array `rows`,
+same `QQL-VALIDATION-UPSERT-BATCH` for `batch_size < 1`.
+
+## Typed results
+
+`Client.execute_hits` and `execute_async_hits` return native `ScoredPoint` objects
+directly, and the native `ExecutionReport` adds typed accessors
+(dict-style `[]` / `.get()`, plus `ok` / `results` / `succeeded` / `failed`):
+
+```python
+from pyqql import Client, ExecutionReport
+
+client = Client("http://localhost:6333")
+
+# 1. Hits as native ScoredPoint objects (id, score, payload, text, collection, vector)
+for hit in client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5"):
+    print(hit.id, hit.score, hit["title"])  # payload access via hit["key"]
+    print(hit.text)        # derived from payload["text"], None when absent/non-string
+    print(hit.collection)  # cross-collection source, else None
+    print(hit.vector)      # WITH VECTOR only, else None
+    print(hit.without_payload())  # copy with payload stripped
+
+# 2. Facet, count, point, and group accessors per statement index
+# Negative indexes count from the end (-1 is the last statement).
+# Out-of-range reads return [] (or 0 for count) instead of raising.
+report = client.execute("FACET category FROM docs LIMIT 10")
+print(report.facet())        # [{value: ..., count: ...}, ...]
+report = client.execute("COUNT FROM docs WHERE category = 'tech'")
+print(report.count())
+report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
+print(report.points())
+print(report.groups(-1))     # [{"id": <group key>, "hits": [ScoredPoint, ...]}, ...]
+print(report.ids())          # [hit.id, ...] for point operations
+print(report.collections())  # SHOW COLLECTIONS -> [name, ...]
+print(report.collection())   # SHOW COLLECTION -> CollectionInfo dict
+print(report.shard_keys())   # SHOW SHARD KEYS -> [str | int, ...]
+print(report.quotas())       # quota config dict or None
+
+# 3. Offline reports for tests/mocks: ExecutionReport.from_results([...])
+# with typed spec keys (hits / groups / count / facet / collections /
+# collection / shard_keys / quotas); dict hydration is removed.
+
+# 3. Per-result server telemetry (Qdrant time plus hardware and inference usage
+# when reported; None where the route reports nothing)
+print(report.telemetry)      # {"time_s": ..., "usage": {...}} or None
+```
+
+## Lazy scroll
+
+`Client.scroll_cursor` pages lazily through a collection with `SCROLL ... AFTER :cursor`.
+At most one page is buffered, so memory stays bounded. Use `scroll_cursor_async`
+with `async for` when your host flow is async. This is the Python equivalent of
+Node `scrollCursor` and the documented Rust manual loop.
+
+```python
+from pyqql import Client
+
+client = Client("http://localhost:6333")
+
+for point in client.scroll_cursor(
+    "docs",
+    batch_size=500,
+    where="status = :status",
+    params={"status": "active"},
+    shard_key="tenant-a",
+):
+    process_point(point)
+
+# Async variant
+async for point in client.scroll_cursor_async("docs", batch_size=500):
+    await process_point_async(point)
+```
+
+Options: `batch_size` (default 100, must be at least 1), `where` (QQL filter
+fragment), `params` (named bindings for the `where` fragment; `cursor` is
+reserved), `shard_key` (custom shard routing), `with_payload` (default True;
+False strips `payload` client-side before yielding, since `SCROLL` has no
+server-side payload exclusion), `with_vector` (default False; True appends
+`WITH VECTOR`). Collection names are quoted automatically when needed.
+
+## DB-API cursor
+
+`pyqql.connect()` returns a PEP 249-style connection for pipeline and
+analytics interop (`pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in
+cursor.description])` works). Qdrant is not relational: `commit()` is a
+no-op, `rollback()` raises `NotSupportedError`, and there is no `callproc`.
+
+```python
+import pyqql
+
+conn = pyqql.connect("http://localhost:6333")
+cursor = conn.cursor()
+cursor.execute("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "neural nets", "lim": 10})
+print(cursor.description)  # (("id", ...), ("score", ...), ("payload", ...))
+for row in cursor:         # (id, score, payload) tuples; fetchone() -> None when drained
+    print(row)
+cursor.executemany("UPSERT INTO docs VALUES :rows", [{"rows": batch} for batch in batches])
+
+# Multi-statement scripts isolate result sets; navigate via nextset():
+cursor.execute("SCROLL FROM docs LIMIT 5; COUNT FROM docs;")
+scroll_rows = cursor.fetchall()  # description: (id, score, payload)
+if cursor.nextset():
+    count_rows = cursor.fetchall()  # description: (count,)
+
+conn.close()
+```
+
+Native errors *are* the DB-API classes: `QqlSyntaxError` is a
+`ProgrammingError`, `QqlTransportError` an `OperationalError`, and
+`except QqlError` still catches everything.
+
+## Profile before you optimize
+
+`client.explain_analyze()` runs one statement and returns the static plan
+plus measured client phase timings and honest server telemetry (absent on a
+route means `None`, never an error):
+
+```python
+report = client.explain_analyze("QUERY TEXT 'q' FROM docs USING dense LIMIT 10")
+print(report["plan"])
+print(report["phases"])         # parse_ms / prepare_plan_ms / dispatch_ms / ...
+print(report["server_time_s"])  # seconds Qdrant spent, when reported
 ```
 
 ## Parse, isolate, and route
@@ -97,15 +336,48 @@ print(tokenize(query))
 |---|---|---|
 | `Client(url, api_key, use_grpc, embedder, route_affinity)` | client | Configure remote execution once |
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
-| `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it |
+| `Client.execute_hits` / `execute_async_hits` | `list[ScoredPoint]` | Skip the report when you only need typed hits |
+| `report.hits(stmt)` / `points` / `ids` / `facet` / `count` / `groups` / `collections` / `collection` / `shard_keys` / `quotas` | typed accessors | Read results per statement index without digging into `results` (negative index counts from the end; `groups` returns `[{id, hits: [ScoredPoint]}]`; see the API surface reference) |
+| `ExecutionReport.from_results([...])` | offline report | Build reports from typed `{operation, hits?, groups?, count?, facet?, collections?, collection?, shard_keys?, quotas?}` specs for tests/mocks |
+| `report.telemetry` | per-result server telemetry | Qdrant `time_s` plus hardware and inference `usage` when reported |
+| `Client.scroll_cursor` / `Client.scroll_cursor_async` | sync and async generators of `ScoredPoint` | Lazily page a collection with `SCROLL ... AFTER :cursor` (at most one page buffered) |
+| `Client.explain_analyze` | plan + measured timings | Static plan, client phases, and server telemetry for one statement |
+| `pyqql.connect` + cursor | PEP 249-style driver | `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/`nextset`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
+| `ScoredPoint.without_payload()` | payload-stripped copy | `scroll_cursor(with_payload=False)` path; `text` stays derived from the stripped payload |
+| `ScoredPoint` | native typed hit | `id`, `score` (f32 shortest round-trip), `payload`, `text` (derived from `payload["text"]`), `collection`, `vector`, and `hit["key"]` payload access |
+| `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
 | `parse_json(source)` | JSON string of the AST array | Forward a parse over HTTP/IPC without Python object overhead |
+| `Stmt.bind(params)` | bound `Stmt` | Substitute `:name` / `?` parameters into a prepared statement |
+| `Stmt.compile_route(params=...)` | route dictionary | Compile a prepared statement to its Qdrant route without re-parsing |
 | `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
 | `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
-| `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools |
-| `compile_query` | route dictionary | Obtain the Qdrant method, path, and payload |
+| `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools (`is_valid` runs parse + plan) |
+| `compile_query(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
+| `bind(query, params, *, truncate_vectors=False)` | bound string or `Stmt` | Substitute `:name` / `?` parameters; `Stmt` + `truncate_vectors=True` returns a readable string |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
-| `HttpEmbedder` | embedder object | Supply a remote embedding model |
+| `HttpEmbedder` | embedder object | Supply remote dense, multi, image, and rerank endpoints (sparse resolves to local BM25; see the embedder ladder in the API surface reference) |
+
+`HttpEmbedder` accepts dense plus optional multi, image, and rerank groups:
+
+```python
+from pyqql import Client, HttpEmbedder
+
+embedder = HttpEmbedder(
+    endpoint="http://localhost:11434/v1/embeddings",
+    model="dense-m",
+    dimension=8,
+    multi_endpoint="http://localhost:11434/v1/multi",
+    multi_model="colbert",
+    multi_dimension=4,
+    image_endpoint="http://localhost:11434/v1/image",
+    image_model="clip",
+    image_dimension=8,
+    rerank_endpoint="http://localhost:11434/rerank",
+    rerank_model="bge",
+)
+client = Client("http://localhost:6333", embedder=embedder)
+```
 
 ## Pin reads with route affinity
 

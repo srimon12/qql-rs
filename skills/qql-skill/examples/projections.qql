@@ -1,0 +1,40 @@
+-- 6. Selective payload and vector projections.
+QUERY TEXT 'acute bronchitis treatment protocols' FROM medical_records
+  USING dense
+  WHERE specialty = 'pulmonology' AND evidence_level IN ('A', 'B')
+  WITH PAYLOAD INCLUDE (title, summary, evidence_level, url)
+  WITH VECTOR (colbert)
+  LIMIT 15;
+
+-- 32. Compact vector literals and payload defaults.
+-- Payloads return by default. WITH PAYLOAD false strips for bandwidth.
+QUERY [0.0125, -0.0452, 0.8912]
+FROM documents
+USING dense
+LIMIT 10;
+
+QUERY [0.0125, -0.0452, 0.8912]
+FROM documents
+USING dense
+WITH PAYLOAD false
+LIMIT 10;
+
+-- 33. Parameterized templates.
+-- Named placeholders bind with object and dict params.
+QUERY TEXT :q
+FROM docs
+WHERE category = :cat
+LIMIT :lim;
+
+-- Positional placeholders bind with list params.
+QUERY TEXT ?
+FROM medical_records
+WHERE department = ?
+LIMIT ?;
+
+-- Placeholders work in clauses and point IDs.
+QUERY POINT :point_id
+FROM events
+SHARD :tenant
+LIMIT :lim
+OFFSET :offset;

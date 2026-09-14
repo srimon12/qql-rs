@@ -3,19 +3,23 @@
 //! `PlannedOperation` is the transport-neutral source of truth. REST routes
 //! are a projection (`to_rest_route`). gRPC converts the same typed operation.
 
-use crate::ddl::{lower_alter_collection, lower_create_collection, lower_create_index};
+use crate::ddl::{
+    lower_alter_collection, lower_create_collection, lower_create_index, lower_replica_state,
+    lower_set_quota,
+};
 use crate::mutation::{
     lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
     lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
     lower_update_vector_request, lower_upsert_request,
 };
 use crate::query::{lower_query_groups_request, lower_query_request};
-use crate::routing::Route;
+use crate::rerank::plan_cross_rerank;
 use crate::types::*;
-use qql_core::ast::{
-    QueryCollection, QueryExpr, QueryInput, Stmt, VectorKind, VectorTarget, VectorValue,
-};
+use crate::validate::validate_query_stmt;
+use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
 use qql_core::error::QqlError;
+
+pub use crate::routing::{RestProjectionError, to_rest_route, try_route};
 
 /// Full frontend validity gate: parse a script and plan-validate every
 /// statement.
@@ -71,11 +75,11 @@ pub enum PlannedOperation {
         /// Lowered `/points/count` request body.
         request: CountRequest,
     },
-    /// In-database facet aggregation (`POST /collections/{collection}/facet`).
+    /// In-database facet aggregation (REST `POST /collections/{collection}/facet` or gRPC `Points.Facet`).
     Facet {
         /// Target collection name.
         collection: String,
-        /// Lowered `/points/facet` request body.
+        /// Lowered facet request body.
         request: FacetRequest,
     },
     /// Point upsert: `PUT /collections/{c}/points`.
@@ -93,6 +97,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/delete` request body.
         request: DeleteRequest,
+        /// Wait for deletion.
+        wait: bool,
     },
     /// Merge payload keys: `POST /collections/{c}/points/payload`.
     UpdatePayload {
@@ -100,6 +106,21 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/payload` request body.
         request: UpdatePayloadRequest,
+        /// Wait for update.
+        wait: bool,
+    },
+    /// Replace full payload: batch-only (`{ "overwrite_payload": … }`).
+    ///
+    /// `POST /collections/{c}/points/payload` is merge-only, so this has no
+    /// single REST route: `to_rest_route` fails closed and batch planning
+    /// carries it as [`UpdateOperation::Overwrite`].
+    OverwritePayload {
+        /// Target collection name.
+        collection: String,
+        /// Lowered payload body (shared shape with `UpdatePayloadRequest`).
+        request: UpdatePayloadRequest,
+        /// Wait for update.
+        wait: bool,
     },
     /// Drop all payload: `POST /collections/{c}/points/payload/clear`.
     ClearPayload {
@@ -107,6 +128,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/payload/clear` request body.
         request: ClearPayloadRequest,
+        /// Wait for clear.
+        wait: bool,
     },
     /// Remove payload keys: `POST /collections/{c}/points/payload/delete`.
     DeletePayload {
@@ -114,6 +137,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/payload/delete` request body.
         request: DeletePayloadRequest,
+        /// Wait for delete.
+        wait: bool,
     },
     /// Replace point vectors: `PUT /collections/{c}/points/vectors`.
     UpdateVectors {
@@ -121,6 +146,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/vectors` request body.
         request: UpdateVectorRequest,
+        /// Wait for update.
+        wait: bool,
     },
     /// Remove named vectors: `POST /collections/{c}/points/vectors/delete`.
     DeleteVectors {
@@ -128,6 +155,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/vectors/delete` request body.
         request: DeleteVectorRequest,
+        /// Wait for delete.
+        wait: bool,
     },
     /// Create a collection: `PUT /collections/{c}`.
     CreateCollection {
@@ -154,6 +183,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered create-index request body.
         request: CreateIndexRequest,
+        /// Wait for index creation.
+        wait: bool,
     },
     /// Drop a payload index: `DELETE /collections/{c}/index/{field}`.
     DropIndex {
@@ -212,6 +243,19 @@ pub enum PlannedOperation {
         /// Replacement quota config; omitted keys become uncapped defaults.
         request: SetQuotaRequest,
     },
+    /// One Qdrant batch RPC for homogeneous same-collection members.
+    Batch {
+        /// Shared collection + family of every member.
+        key: BatchKey,
+        /// Member operations in execution order.
+        operations: Vec<PlannedOperation>,
+        /// Durability flag for mutation batches (`?wait=`).
+        wait: Option<bool>,
+        /// Shared read timeout in seconds (`?timeout=`).
+        timeout: Option<u64>,
+        /// Shared read consistency (`?consistency=`), query batches only.
+        consistency: Option<ReadConsistencyParam>,
+    },
 }
 
 impl PlannedOperation {
@@ -227,6 +271,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { .. } => "UPSERT",
             PlannedOperation::Delete { .. } => "DELETE",
             PlannedOperation::UpdatePayload { .. } => "UPDATE_PAYLOAD",
+            PlannedOperation::OverwritePayload { .. } => "OVERWRITE_PAYLOAD",
             PlannedOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
             PlannedOperation::DeletePayload { .. } => "DELETE_PAYLOAD",
             PlannedOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
@@ -244,6 +289,7 @@ impl PlannedOperation {
             PlannedOperation::CrossRerank { .. } => "CROSS_RERANK",
             PlannedOperation::GetQuotas => "SHOW_QUOTAS",
             PlannedOperation::SetQuotas { .. } => "SET_QUOTA",
+            PlannedOperation::Batch { .. } => "BATCH",
         }
     }
 
@@ -262,6 +308,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { .. } => "upsert",
             PlannedOperation::Delete { .. } => "delete",
             PlannedOperation::UpdatePayload { .. } => "update_payload",
+            PlannedOperation::OverwritePayload { .. } => "overwrite_payload",
             PlannedOperation::ClearPayload { .. } => "clear_payload",
             PlannedOperation::DeletePayload { .. } => "delete_payload",
             PlannedOperation::UpdateVectors { .. } => "update_vector",
@@ -279,6 +326,10 @@ impl PlannedOperation {
             PlannedOperation::CrossRerank { .. } => "cross_rerank",
             PlannedOperation::GetQuotas => "show_quotas",
             PlannedOperation::SetQuotas { .. } => "set_quota",
+            PlannedOperation::Batch { key, .. } => match key {
+                BatchKey::Query(_) => "query_batch",
+                BatchKey::Mutation(_) => "update_batch",
+            },
         }
     }
 
@@ -294,6 +345,7 @@ impl PlannedOperation {
             | PlannedOperation::Upsert { collection, .. }
             | PlannedOperation::Delete { collection, .. }
             | PlannedOperation::UpdatePayload { collection, .. }
+            | PlannedOperation::OverwritePayload { collection, .. }
             | PlannedOperation::ClearPayload { collection, .. }
             | PlannedOperation::DeletePayload { collection, .. }
             | PlannedOperation::UpdateVectors { collection, .. }
@@ -308,6 +360,9 @@ impl PlannedOperation {
             | PlannedOperation::ListShardKeys { collection }
             | PlannedOperation::GetCollection { collection }
             | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
+            PlannedOperation::Batch { key, .. } => Some(match key {
+                BatchKey::Query(collection) | BatchKey::Mutation(collection) => collection.as_str(),
+            }),
             PlannedOperation::ListCollections
             | PlannedOperation::GetQuotas
             | PlannedOperation::SetQuotas { .. } => None,
@@ -321,6 +376,7 @@ impl PlannedOperation {
             PlannedOperation::Upsert { .. }
             | PlannedOperation::Delete { .. }
             | PlannedOperation::UpdatePayload { .. }
+            | PlannedOperation::OverwritePayload { .. }
             | PlannedOperation::ClearPayload { .. }
             | PlannedOperation::DeletePayload { .. }
             | PlannedOperation::UpdateVectors { .. }
@@ -349,24 +405,26 @@ impl PlannedOperation {
         }
     }
 
-    /// Shard key carried on the plan, when present.
-    pub fn shard_key(&self) -> Option<&str> {
+    /// Shard key carried on the plan, when present, with its keyword /
+    /// numeric form preserved.
+    pub fn shard_key(&self) -> Option<&crate::semantic::PlanShardKey> {
         match self {
-            PlannedOperation::Query { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::QueryGroups { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::GetPoints { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Scroll { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Facet { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::CreateShardKey { request, .. } => Some(request.shard_key.as_str()),
-            PlannedOperation::DropShardKey { request, .. } => Some(request.shard_key.as_str()),
+            PlannedOperation::Query { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::QueryGroups { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::GetPoints { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Scroll { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Count { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Facet { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Upsert { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Delete { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::OverwritePayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::CreateShardKey { request, .. } => Some(&request.shard_key),
+            PlannedOperation::DropShardKey { request, .. } => Some(&request.shard_key),
             _ => None,
         }
     }
@@ -385,44 +443,41 @@ pub enum BatchFamily {
 }
 
 /// Grouping key for statement/operation batching (same collection + family).
-///
-/// Used by executors to collect adjacent operations into query/mutation
-/// batches before flushing to the backend.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BatchKey {
-    /// Query batch for the named collection.
-    Query(String),
-    /// Mutation batch for the named collection.
-    Mutation(String),
-}
+pub use crate::batch::{
+    BatchKey, batch_item_error, build_query_batch, build_update_batch, statement_batch_key,
+    verify_batch_cardinality,
+};
 
-/// Batch grouping key for a raw AST statement (before preparation/planning).
+/// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
+/// would ship a broken request — the string path with no `params` used to
+/// send the raw placeholder to Qdrant and get a 422 back. Probe with the
+/// binder's own traversal (no-op lookup): any surviving placeholder raises
+/// `QQL-BIND-MISSING-PARAM`, the same error `Stmt.bind` raises earlier on
+/// the prepared path.
 ///
-/// Returns `None` for statements that are never batchable (DDL, SHOW, group
-/// queries, point-ID lookups, etc.).
-pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
-    match stmt {
-        Stmt::Query(query)
-            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
-        {
-            match &query.collection {
-                QueryCollection::Explicit(collection) => Some(BatchKey::Query(collection.clone())),
-                QueryCollection::Inherited => None,
-            }
-        }
-        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeletePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        _ => None,
-    }
+/// Public so the executor can probe *before* schema resolution (network);
+/// [`plan`] probes again as the compile-path gate.
+pub fn ensure_no_unbound_params(statement: &Stmt) -> Result<(), QqlError> {
+    qql_core::params::validate_no_unbound_params(statement)
 }
 
 /// Fallible planner — the single source of truth for statement → operation.
 pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
+    ensure_no_unbound_params(statement)?;
+    lower_statement_to_planned(statement)
+}
+
+/// Fallible template planner for prepared statements.
+///
+/// Permits unbound vector parameters (`:name` or `?N`) so statements can be
+/// pre-planned into a [`PlannedOperation`], while rejecting unbound scalar parameters
+/// (e.g. filters, pagination, point IDs) which cannot be bound at the IR layer.
+pub fn plan_template(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
+    qql_core::params::validate_no_unbound_scalar_params(statement)?;
+    lower_statement_to_planned(statement)
+}
+
+pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     match statement {
         Stmt::Query(query) => {
             validate_query_stmt(query)?;
@@ -459,7 +514,10 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                         ids,
                         with_payload,
                         with_vector,
-                        shard_key: query.shard_key.clone(),
+                        shard_key: query
+                            .shard_key
+                            .as_ref()
+                            .map(crate::semantic::PlanShardKey::from),
                     },
                 });
             }
@@ -469,6 +527,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 model,
                 field,
                 prefetch,
+                ..
             } = &query.expression
             {
                 return plan_cross_rerank(query, &collection, qtext, model, field, prefetch);
@@ -493,53 +552,76 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 scroll.limit,
                 scroll.filter.as_deref(),
                 scroll.after.as_ref(),
+                scroll.order_by.as_ref(),
                 scroll.shard_key.clone(),
+                scroll.with_payload.as_ref(),
                 scroll.with_vector.as_ref(),
             ),
         }),
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
             request: lower_upsert_request(upsert),
-            wait: upsert.embedding.is_some() || !upsert.embed.is_empty(),
+            wait: upsert
+                .wait
+                .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty()),
         }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
             request: lower_delete_request(delete),
+            wait: delete.wait.unwrap_or(true),
         }),
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
             request: lower_clear_payload_request(clear),
+            wait: clear.wait.unwrap_or(true),
         }),
         Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
             collection: del.collection.clone(),
             request: lower_delete_payload_request(del),
+            wait: del.wait.unwrap_or(true),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
             request: lower_delete_vector_request(del_vec),
+            wait: del_vec.wait.unwrap_or(true),
         }),
         Stmt::UpdateVector(update) => Ok(PlannedOperation::UpdateVectors {
             collection: update.collection.clone(),
             request: lower_update_vector_request(update),
+            wait: update.wait.unwrap_or(true),
         }),
-        Stmt::UpdatePayload(update) => Ok(PlannedOperation::UpdatePayload {
-            collection: update.collection.clone(),
-            request: lower_update_payload_request(update),
-        }),
+        Stmt::UpdatePayload(update) => {
+            let request = lower_update_payload_request(update);
+            let wait = update.wait.unwrap_or(true);
+            if update.overwrite {
+                Ok(PlannedOperation::OverwritePayload {
+                    collection: update.collection.clone(),
+                    request,
+                    wait,
+                })
+            } else {
+                Ok(PlannedOperation::UpdatePayload {
+                    collection: update.collection.clone(),
+                    request,
+                    wait,
+                })
+            }
+        }
         Stmt::CreateCollection(create) => Ok(PlannedOperation::CreateCollection {
             collection: create.collection.clone(),
-            request: lower_create_collection(create),
+            request: lower_create_collection(create)?,
         }),
         Stmt::AlterCollection(alter) => Ok(PlannedOperation::UpdateCollection {
             collection: alter.collection.clone(),
-            request: lower_alter_collection(alter),
+            request: lower_alter_collection(alter)?,
         }),
         Stmt::DropCollection(drop) => Ok(PlannedOperation::DropCollection {
             collection: drop.collection.clone(),
         }),
         Stmt::CreateIndex(index) => Ok(PlannedOperation::CreateIndex {
             collection: index.collection.clone(),
-            request: lower_create_index(index),
+            request: lower_create_index(index)?,
+            wait: index.wait.unwrap_or(true),
         }),
         Stmt::DropIndex(index) => Ok(PlannedOperation::DropIndex {
             collection: index.collection.clone(),
@@ -573,7 +655,10 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 collection,
                 request: CountRequest {
                     filter,
-                    shard_key: count.shard_key.clone(),
+                    shard_key: count
+                        .shard_key
+                        .as_ref()
+                        .map(crate::semantic::PlanShardKey::from),
                     exact: count.exact,
                 },
             })
@@ -600,40 +685,34 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 .filter
                 .as_ref()
                 .map(|f| crate::filter::top_level_filter(f));
-            let limit = match facet.limit {
-                Some(n) if n > usize::MAX as u64 => {
-                    return Err(QqlError::validation(
-                        "QQL-VALIDATION-LIMIT-OVERFLOW",
-                        alloc::format!("facet limit {n} exceeds platform usize::MAX"),
-                        None,
-                    ));
-                }
-                Some(n) => Some(n as usize),
-                None => None,
-            };
             Ok(PlannedOperation::Facet {
                 collection,
                 request: FacetRequest {
                     key: facet.key.clone(),
-                    limit,
+                    limit: facet.limit,
                     filter,
                     exact: facet.exact,
-                    shard_key: facet.shard_key.clone(),
+                    shard_key: facet
+                        .shard_key
+                        .as_ref()
+                        .map(crate::semantic::PlanShardKey::from),
                 },
             })
         }
         Stmt::CreateShardKey(sk) => Ok(PlannedOperation::CreateShardKey {
             collection: sk.collection.clone(),
             request: CreateShardKeyRequest {
-                shard_key: sk.shard_key.clone(),
+                shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
                 shards_number: sk.shards_number,
                 replication_factor: sk.replication_factor,
+                placement: sk.placement.clone(),
+                initial_state: lower_replica_state(sk.initial_state.as_deref())?,
             },
         }),
         Stmt::DropShardKey(sk) => Ok(PlannedOperation::DropShardKey {
             collection: sk.collection.clone(),
             request: DropShardKeyRequest {
-                shard_key: sk.shard_key.clone(),
+                shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
             },
         }),
         Stmt::ShowCollections => Ok(PlannedOperation::ListCollections),
@@ -647,769 +726,185 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         Stmt::SetQuota(stmt) => Ok(PlannedOperation::SetQuotas {
             request: lower_set_quota(stmt)?,
         }),
+        Stmt::Batch(batch) => plan_batch(batch),
     }
 }
 
-/// Lower a `SET QUOTA (…)` statement to a typed quota request.
+/// Plan a `BATCH { … }` block into one batch operation.
 ///
-/// `PUT /quotas` **replaces** the entire cluster-wide config. Omitted keys
-/// (including `key = null`) are not set on the replacement body, so they
-/// become "uncapped / default" in the new config — not a patch of the old
-/// one. Callers that want to keep existing limits must restate them.
-fn lower_set_quota(stmt: &qql_core::ast::SetQuotaStmt) -> Result<SetQuotaRequest, QqlError> {
-    use qql_core::ast::Value;
-
-    let mut request = SetQuotaRequest {
-        enabled: None,
-        max_resident_memory_percent: None,
-        max_disk_usage_percent: None,
-        release_margin_percent: None,
-        wait: stmt.wait,
-    };
-    for (key, value) in &stmt.config {
-        let lower = key.to_ascii_lowercase();
-        match lower.as_str() {
-            "enabled" => match value {
-                Value::Bool(b) => request.enabled = Some(*b),
-                _ => {
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-QUOTA",
-                        "enabled must be true or false",
-                        None,
-                    ));
-                }
-            },
-            "max_resident_memory_percent" | "max_disk_usage_percent" => {
-                request = apply_quota_percent(request, &lower, value, 1, 100)?;
-            }
-            "release_margin_percent" => {
-                request = apply_quota_percent(request, &lower, value, 0, 100)?;
-            }
-            _ => {
-                return Err(QqlError::validation(
-                    "QQL-PLAN-QUOTA",
-                    format!(
-                        "unknown quota parameter '{key}'. Expected: enabled, max_resident_memory_percent, max_disk_usage_percent, release_margin_percent"
-                    ),
-                    None,
-                ));
-            }
-        }
+/// Members plan through the same lowering as standalone statements, then
+/// must share one batch key (one collection, one family). Shared wire opts
+/// live on the block: `WAIT` for mutation batches, `PARAMS`
+/// (timeout / consistency) for query batches. Members carrying those shared
+/// opts fail with a move-it-to-the-header error instead of silently dropping
+/// them (per-search `params` keys stay on the member).
+fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlError> {
+    let mut operations = Vec::with_capacity(batch.statements.len());
+    for member in &batch.statements {
+        operations.push(lower_statement_to_planned(member)?);
     }
-    Ok(request)
-}
-
-fn apply_quota_percent(
-    mut request: SetQuotaRequest,
-    key: &str,
-    value: &qql_core::ast::Value,
-    min: u64,
-    max: u64,
-) -> Result<SetQuotaRequest, QqlError> {
-    match value {
-        // Explicit null → leave field unset so the replacement config has no
-        // cap for this resource (full PUT replace semantics).
-        qql_core::ast::Value::Null => {}
-        qql_core::ast::Value::Int(n) if *n >= min as i64 && (*n as u64) <= max => {
-            let n = *n as u64;
-            match key {
-                "max_resident_memory_percent" => request.max_resident_memory_percent = Some(n),
-                "max_disk_usage_percent" => request.max_disk_usage_percent = Some(n),
-                _ => request.release_margin_percent = Some(n),
-            }
-        }
+    let mut keys = operations.iter().map(PlannedOperation::batch_key);
+    let key = match keys.next() {
+        Some(Some(key)) => key,
         _ => {
+            let label = batch
+                .statements
+                .first()
+                .map(Stmt::stmt_kind)
+                .unwrap_or("BATCH");
             return Err(QqlError::validation(
-                "QQL-PLAN-QUOTA",
-                format!("{key} must be an integer in [{min}, {max}] or null"),
+                "QQL-VALIDATION-BATCH-MEMBER",
+                alloc::format!("BATCH member cannot run in a batch RPC: {label}"),
                 None,
             ));
         }
-    }
-    Ok(request)
-}
-
-fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError> {
-    for cte in &query.ctes {
-        validate_query_stmt(&cte.query)?;
-    }
-    validate_query_expr(&query.expression)?;
-
-    let has_rrf_params = query
-        .params
-        .as_ref()
-        .is_some_and(|params| params.rrf_k.is_some() || params.rrf_weights.is_some());
-    let accepts_rrf_params = matches!(
-        &query.expression,
-        QueryExpr::Fusion {
-            method: qql_core::ast::FusionMethod::Rrf,
-            ..
-        } | QueryExpr::Hybrid {
-            fusion: qql_core::ast::FusionMethod::Rrf,
-            ..
-        }
-    );
-    if has_rrf_params && !accepts_rrf_params {
-        return Err(QqlError::validation(
-            "QQL-PLAN-RRF-PARAMS",
-            "rrf_k and rrf_weights are valid only with RRF fusion",
-            None,
-        ));
-    }
-    if let Some(weights) = query
-        .params
-        .as_ref()
-        .and_then(|params| params.rrf_weights.as_ref())
-    {
-        let prefetch_count = match &query.expression {
-            QueryExpr::Fusion { prefetch, .. }
-            | QueryExpr::Rerank { prefetch, .. }
-            | QueryExpr::CrossRerank { prefetch, .. } => prefetch.len(),
-            QueryExpr::Hybrid { .. } => 2,
-            _ => 0,
-        };
-        if prefetch_count > 0 && weights.len() != prefetch_count {
+    };
+    for (member, operation) in batch.statements.iter().zip(operations.iter()) {
+        if operation.batch_key().as_ref() != Some(&key) {
             return Err(QqlError::validation(
-                "QQL-PLAN-RRF-WEIGHTS",
-                format!(
-                    "rrf_weights contains {} values but fusion has {} prefetches",
-                    weights.len(),
-                    prefetch_count
+                "QQL-VALIDATION-BATCH-MIXED",
+                alloc::format!(
+                    "BATCH members must share one collection and one family, got {} next to {}",
+                    member.stmt_kind(),
+                    batch
+                        .statements
+                        .first()
+                        .map(Stmt::stmt_kind)
+                        .unwrap_or("BATCH"),
                 ),
                 None,
             ));
         }
     }
-    Ok(())
-}
-
-fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
-    validate_query_target_kinds(expression)?;
-    validate_recommend_average_dims(expression)?;
-    let prefetch = match expression {
-        QueryExpr::Nearest { prefetch, .. }
-        | QueryExpr::Recommend { prefetch, .. }
-        | QueryExpr::Context { prefetch, .. }
-        | QueryExpr::Discover { prefetch, .. }
-        | QueryExpr::Fusion { prefetch, .. }
-        | QueryExpr::Formula { prefetch, .. }
-        | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
-        QueryExpr::Points { .. }
-        | QueryExpr::OrderBy { .. }
-        | QueryExpr::SampleRandom
-        | QueryExpr::Hybrid { .. } => return Ok(()),
-    };
-
-    match expression {
-        QueryExpr::Fusion { .. } if prefetch.is_empty() => {
-            return Err(QqlError::validation(
-                "QQL-PLAN-FUSION-PREFETCH",
-                "FUSION requires at least one prefetch",
-                None,
-            ));
-        }
-        QueryExpr::Rerank { using: None, .. } => {
-            return Err(QqlError::validation(
-                "QQL-PLAN-RERANK-USING",
-                "RERANK requires a non-empty USING vector name",
-                None,
-            ));
-        }
-        QueryExpr::Rerank { .. } if prefetch.is_empty() => {
-            return Err(QqlError::validation(
-                "QQL-PLAN-RERANK-PREFETCH",
-                "RERANK requires at least one prefetch",
-                None,
-            ));
-        }
-        _ => {}
-    }
-
-    for item in prefetch {
-        if let qql_core::ast::PrefetchSource::Query(query) = &item.source {
-            validate_query_stmt(query)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
-    let (target, inputs): (Option<&VectorTarget>, Vec<&QueryInput>) = match expression {
-        QueryExpr::Nearest { input, using, .. } => (using.as_ref(), vec![input]),
-        QueryExpr::Recommend {
-            positive,
-            negative,
-            using,
-            ..
-        } => (
-            using.as_ref(),
-            positive.iter().chain(negative.iter()).collect(),
-        ),
-        QueryExpr::Context { pairs, using, .. } => (
-            using.as_ref(),
-            pairs
-                .iter()
-                .flat_map(|pair| [&pair.positive, &pair.negative])
-                .collect(),
-        ),
-        QueryExpr::Discover {
-            target,
-            context,
-            using,
-            ..
-        } => {
-            let mut inputs = vec![target];
-            inputs.extend(
-                context
-                    .iter()
-                    .flat_map(|pair| [&pair.positive, &pair.negative]),
-            );
-            (using.as_ref(), inputs)
-        }
-        QueryExpr::RelevanceFeedback {
-            target,
-            feedback,
-            using,
-            ..
-        } => {
-            let mut inputs = vec![target];
-            inputs.extend(feedback.iter().map(|item| &item.example));
-            (using.as_ref(), inputs)
-        }
-        QueryExpr::Rerank { input, using, .. } => {
-            if using
-                .as_ref()
-                .and_then(|target| target.kind)
-                .is_some_and(|kind| kind != VectorKind::Dense)
-            {
-                return Err(query_kind_error("RERANK requires a dense vector target"));
-            }
-            (using.as_ref(), vec![input])
-        }
-        _ => return Ok(()),
-    };
-
-    let Some(target_kind) = target.and_then(|target| target.kind) else {
-        return Ok(());
-    };
-    for input in inputs {
-        let input_kind = match input {
-            QueryInput::Vector(VectorValue::Dense(_) | VectorValue::MultiDense(_)) => {
-                Some(VectorKind::Dense)
-            }
-            QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
-            QueryInput::Text { .. } | QueryInput::Image { .. } | QueryInput::Point(_) => None,
-        };
-        if input_kind.is_some_and(|kind| kind != target_kind) {
-            return Err(query_kind_error(
-                "query input vector type does not match the USING vector kind",
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// The recommend `average_vector` strategy (also the server default) folds all
-/// positive/negative examples into a single query vector, so every inline
-/// example vector must share the same shape. Upstream Qdrant rejects
-/// mismatched dimensions (#10374); we fail fast at plan time. Point-ID / TEXT
-/// examples have no known shape here and are skipped (resolved later).
-fn validate_recommend_average_dims(expression: &QueryExpr) -> Result<(), QqlError> {
-    let QueryExpr::Recommend {
-        positive,
-        negative,
-        strategy,
-        ..
-    } = expression
-    else {
-        return Ok(());
-    };
-    // Only average_vector requires a shared shape; best_score / sum_scores
-    // score each example independently.
-    if matches!(
-        strategy,
-        Some(qql_core::ast::RecommendStrategy::BestScore)
-            | Some(qql_core::ast::RecommendStrategy::SumScores)
-    ) {
-        return Ok(());
-    }
-
-    // Dense → (1, dim); MultiDense → (rows, row dim). Ragged rows have no
-    // single dimension, so their shape is unknown here — skip them and let the
-    // backend validate. Sparse examples have no average semantics and are
-    // skipped as well.
-    let shape_of = |value: &VectorValue| -> Option<(usize, usize)> {
-        match value {
-            VectorValue::Dense(dims) => Some((1, dims.len())),
-            VectorValue::MultiDense(rows) => {
-                let dim = rows.first().map_or(0, Vec::len);
-                rows.iter()
-                    .all(|row| row.len() == dim)
-                    .then_some((rows.len(), dim))
-            }
-            VectorValue::Sparse { .. } => None,
-        }
-    };
-
-    let mut expected: Option<(usize, usize)> = None;
-    for input in positive.iter().chain(negative.iter()) {
-        let QueryInput::Vector(value) = input else {
-            continue;
-        };
-        let Some(shape) = shape_of(value) else {
-            continue;
-        };
-        match expected {
-            None => expected = Some(shape),
-            Some(prev) if prev == shape => {}
-            Some(prev) => {
+    match &key {
+        BatchKey::Query(_) => {
+            if batch.wait.is_some() {
                 return Err(QqlError::validation(
-                    "QQL-PLAN-RECOMMEND-AVERAGE",
-                    alloc::format!(
-                        "average_vector examples must share one dimension: found ({}, {}) and ({}, {}) rows x dims",
-                        prev.0, prev.1, shape.0, shape.1
-                    ),
+                    "QQL-VALIDATION-BATCH-WAIT",
+                    "WAIT has no representation on query batches",
                     None,
                 ));
             }
-        }
-    }
-    Ok(())
-}
-
-fn query_kind_error(message: &'static str) -> QqlError {
-    QqlError::validation("QQL-PLAN-VECTOR-KIND", message, None)
-}
-
-fn plan_cross_rerank(
-    outer: &qql_core::ast::QueryStmt,
-    collection: &str,
-    query_text: &str,
-    model: &str,
-    field: &Option<String>,
-    prefetch: &[qql_core::ast::Prefetch],
-) -> Result<PlannedOperation, QqlError> {
-    use qql_core::ast::{PrefetchSource, QueryCollection};
-
-    if prefetch.is_empty() {
-        return Err(QqlError::validation(
-            "QQL-PLAN-CROSS-RERANK-PREFETCH",
-            "CROSS RERANK requires at least one PREFETCH",
-            None,
-        ));
-    }
-    if query_text.is_empty() {
-        return Err(QqlError::validation(
-            "QQL-PLAN-CROSS-RERANK-QUERY",
-            "CROSS RERANK query text must not be empty",
-            None,
-        ));
-    }
-    if model.is_empty() {
-        return Err(QqlError::validation(
-            "QQL-PLAN-CROSS-RERANK-MODEL",
-            "CROSS RERANK MODEL must not be empty",
-            None,
-        ));
-    }
-    let field = field
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("text")
-        .to_string();
-
-    let mut candidates = Vec::with_capacity(prefetch.len());
-    for pref in prefetch {
-        let mut sub = match &pref.source {
-            PrefetchSource::Cte(name) => {
-                let cte = outer
-                    .ctes
-                    .iter()
-                    .find(|c| c.name.eq_ignore_ascii_case(name));
-                let Some(cte) = cte else {
+            let (timeout, consistency) = batch_shared_read_opts(batch.params.as_ref())?;
+            for member in &batch.statements {
+                if let Stmt::Query(query) = member
+                    && let Some(params) = query.params.as_ref()
+                    && (params.timeout.is_some() || params.consistency.is_some())
+                {
                     return Err(QqlError::validation(
-                        "QQL-PLAN-CROSS-RERANK-CTE",
-                        format!("PREFETCH references unknown CTE '{name}'"),
+                        "QQL-VALIDATION-BATCH-PARAMS",
+                        "move member PARAMS timeout / consistency to the BATCH header",
                         None,
                     ));
-                };
-                (*cte.query).clone()
+                }
             }
-            PrefetchSource::Query(q) => (**q).clone(),
-        };
-        if matches!(sub.collection, QueryCollection::Inherited) {
-            sub.collection = QueryCollection::Explicit(collection.to_string());
+            Ok(PlannedOperation::Batch {
+                key,
+                operations,
+                wait: None,
+                timeout,
+                consistency,
+            })
         }
-        // Candidate stage needs document text for pair scoring.
-        ensure_payload_field(&mut sub, &field);
-        if let Some(f) = &pref.filter {
-            sub.filter = Some(f.clone());
-        }
-        let planned = plan(&Stmt::Query(Box::new(sub)))?;
-        match planned {
-            PlannedOperation::Query {
-                collection: c,
-                request,
-            } => candidates.push((c, request)),
-            other => {
+        BatchKey::Mutation(_) => {
+            if let Some(params) = batch.params.as_ref()
+                && (params.timeout.is_some() || params.consistency.is_some())
+            {
                 return Err(QqlError::validation(
-                    "QQL-PLAN-CROSS-RERANK-CANDIDATE",
-                    format!(
-                        "CROSS RERANK prefetch must plan as a search query, got {}",
-                        other.operation_label()
-                    ),
+                    "QQL-VALIDATION-BATCH-PARAMS",
+                    "PARAMS timeout / consistency have no representation on mutation batches",
                     None,
                 ));
             }
-        }
-    }
-
-    Ok(PlannedOperation::CrossRerank {
-        collection: collection.to_string(),
-        query: query_text.to_string(),
-        model: model.to_string(),
-        field,
-        limit: outer.page.limit.unwrap_or(10),
-        offset: outer.page.offset.unwrap_or(0),
-        candidates,
-    })
-}
-
-fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
-    use qql_core::ast::{PayloadSelector, QueryOutput};
-    match &mut query.output {
-        QueryOutput {
-            payload: None | Some(PayloadSelector::None),
-            ..
-        } => {
-            query.output.payload = Some(PayloadSelector::Include(vec![field.to_string()]));
-        }
-        QueryOutput {
-            payload: Some(PayloadSelector::Include(fields)),
-            ..
-        } => {
-            if !fields.iter().any(|f| f.eq_ignore_ascii_case(field)) {
-                fields.push(field.to_string());
+            for member in &batch.statements {
+                if batch_member_wait(member).is_some() {
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-BATCH-WAIT",
+                        "move member WAIT to the BATCH header",
+                        None,
+                    ));
+                }
             }
+            Ok(PlannedOperation::Batch {
+                key,
+                operations,
+                wait: batch.wait,
+                timeout: None,
+                consistency: None,
+            })
         }
-        QueryOutput {
-            payload: Some(PayloadSelector::All | PayloadSelector::Exclude(_)),
-            ..
-        } => {}
     }
 }
 
-/// Why a planned operation cannot become a single Qdrant REST route.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RestProjectionError {
-    /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
-    ClientSideOnly {
-        /// Statement type name used in error messages.
-        stmt_type: &'static str,
-    },
-}
-
-/// Serialize a plan struct to JSON for the REST body.
-///
-/// Every plan IR request type is JSON-serializable by construction, so this is
-/// only reachable if a `Serialize` impl regresses. A failure must surface as a
-/// loud invariant violation — a JSON `null` body would be rejected by the
-/// backend with an opaque error. `pub(crate)` so the plan/query/ddl REST
-/// projections share the same no-swallow invariant; kept fallible so the
-/// property is unit-testable.
-pub(crate) fn serialize_body<T: serde::Serialize>(
-    req: &T,
-) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::to_value(req)
-}
-
-/// REST projection of a planned operation (HTTP method/path/query/body).
-///
-/// Client-side operations such as [`PlannedOperation::CrossRerank`] return
-/// [`RestProjectionError::ClientSideOnly`] — they must not invent a Qdrant path.
-/// Returns `RestProjectionError::ClientSideOnly` for operations that have no
-/// single Qdrant REST endpoint (e.g. CROSS RERANK).
-pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
-    /// Serialize a plan struct to JSON for the REST body, treating the
-    /// (provably unreachable) serialization failure as an invariant violation.
-    fn body<T: serde::Serialize>(req: &T) -> Option<serde_json::Value> {
-        Some(serialize_body(req).expect("plan IR REST request body serialization failed"))
-    }
-
-    /// Read-op query params: timeout, consistency.
-    fn read_query(
-        timeout: Option<u64>,
-        consistency: Option<&crate::types::ReadConsistencyParam>,
-    ) -> Vec<(String, String)> {
-        let mut q = Vec::new();
-        crate::query::push_read_opts(&mut q, timeout, consistency);
-        q
-    }
-
-    /// Mutation query params: wait + optional shard_key.
-    fn mut_query(shard_key: Option<&str>) -> Vec<(String, String)> {
-        let mut q = vec![("wait".into(), "true".into())];
-        if let Some(sk) = shard_key {
-            q.push(("shard_key".into(), sk.to_owned()));
-        }
-        q
-    }
-
-    Ok(match op {
-        PlannedOperation::Query {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/query"),
-            query: read_query(request.timeout, request.consistency.as_ref()),
-            body: body(request),
-        },
-        PlannedOperation::QueryGroups {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/query/groups"),
-            query: read_query(request.timeout, request.consistency.as_ref()),
-            body: body(request),
-        },
-        PlannedOperation::GetPoints {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points"),
-            query: Vec::new(),
-            body: body(request),
-        },
-        PlannedOperation::Scroll {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/scroll"),
-            query: Vec::new(),
-            body: body(request),
-        },
-        PlannedOperation::Count {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/count"),
-            query: Vec::new(),
-            body: body(request),
-        },
-        PlannedOperation::Facet {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/facet"),
-            query: Vec::new(),
-            body: body(request),
-        },
-        PlannedOperation::Upsert {
-            collection,
-            request,
-            wait,
-        } => {
-            let mut query = Vec::new();
-            if *wait {
-                query.push(("wait".into(), "true".into()));
-            }
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Put,
-                path: format!("/collections/{collection}/points"),
-                query,
-                body: body(request),
-            }
-        }
-        PlannedOperation::Delete {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/delete"),
-            query: mut_query(request.shard_key.as_deref()),
-            body: body(request),
-        },
-        PlannedOperation::ClearPayload {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/payload/clear"),
-            query: mut_query(request.shard_key.as_deref()),
-            body: body(request),
-        },
-        PlannedOperation::DeletePayload {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/payload/delete"),
-            query: mut_query(request.shard_key.as_deref()),
-            body: body(request),
-        },
-        PlannedOperation::DeleteVectors {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/vectors/delete"),
-            query: mut_query(request.shard_key.as_deref()),
-            body: body(request),
-        },
-        PlannedOperation::UpdateVectors {
-            collection,
-            request,
-        } => Route {
-            method: Method::Put,
-            path: format!("/collections/{collection}/points/vectors"),
-            query: mut_query(request.shard_key.as_deref()),
-            body: body(request),
-        },
-        PlannedOperation::UpdatePayload {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/payload"),
-            query: mut_query(request.shard_key.as_deref()),
-            body: body(request),
-        },
-        // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
-        PlannedOperation::CreateCollection {
-            collection,
-            request,
-        } => Route {
-            method: Method::Put,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: Some(crate::ddl::create_collection_rest_body(request)),
-        },
-        PlannedOperation::UpdateCollection {
-            collection,
-            request,
-        } => Route {
-            method: Method::Patch,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: Some(crate::ddl::update_collection_rest_body(request)),
-        },
-        PlannedOperation::CreateIndex {
-            collection,
-            request,
-        } => Route {
-            method: Method::Put,
-            path: format!("/collections/{collection}/index"),
-            query: Vec::new(),
-            body: Some(crate::ddl::create_index_rest_body(request)),
-        },
-        PlannedOperation::CreateShardKey {
-            collection,
-            request,
-        } => Route {
-            method: Method::Put,
-            path: format!("/collections/{collection}/shards"),
-            query: Vec::new(),
-            body: body(request),
-        },
-        PlannedOperation::DropShardKey {
-            collection,
-            request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/shards/delete"),
-            query: Vec::new(),
-            body: body(request),
-        },
-        // Bodyless
-        PlannedOperation::DropCollection { collection } => Route {
-            method: Method::Delete,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: None,
-        },
-        PlannedOperation::DropIndex { collection, field } => Route {
-            method: Method::Delete,
-            path: format!("/collections/{collection}/index/{field}"),
-            query: Vec::new(),
-            body: None,
-        },
-        PlannedOperation::ListCollections => Route {
-            method: Method::Get,
-            path: "/collections".into(),
-            query: Vec::new(),
-            body: None,
-        },
-        PlannedOperation::GetCollection { collection } => Route {
-            method: Method::Get,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: None,
-        },
-        PlannedOperation::ListShardKeys { collection } => Route {
-            method: Method::Get,
-            path: format!("/collections/{collection}/shards"),
-            query: Vec::new(),
-            body: None,
-        },
-        PlannedOperation::GetQuotas => Route {
-            method: Method::Get,
-            path: "/quotas".into(),
-            query: Vec::new(),
-            body: None,
-        },
-        PlannedOperation::SetQuotas { request } => {
-            let mut query = Vec::new();
-            if let Some(wait) = request.wait {
-                query.push(("wait".into(), wait.to_string()));
-            }
-            Route {
-                method: Method::Put,
-                path: "/quotas".into(),
-                query,
-                body: body(request),
-            }
-        }
-        PlannedOperation::CrossRerank { .. } => {
-            return Err(RestProjectionError::ClientSideOnly {
-                stmt_type: "cross_rerank",
-            });
-        }
-    })
-}
-/// Plan a statement and project it to a REST route in one call.
-///
-/// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
-/// RERANK) that have no single Qdrant REST endpoint.
-pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
-    let op = plan(statement)?;
-    to_rest_route(&op).map_err(|err| match err {
-        RestProjectionError::ClientSideOnly { stmt_type } => QqlError::validation(
-            "QQL-REST-CLIENT-SIDE",
-            format!(
-                "{stmt_type} is client-side and has no single Qdrant REST route; \
-                 execute via the runtime CROSS RERANK path"
+/// Split batch-header `PARAMS` into shared read opts, rejecting per-search keys.
+fn batch_shared_read_opts(
+    params: Option<&qql_core::ast::SearchParams>,
+) -> Result<(Option<u64>, Option<ReadConsistencyParam>), QqlError> {
+    let Some(params) = params else {
+        return Ok((None, None));
+    };
+    let present = [
+        ("hnsw_ef", params.hnsw_ef.is_some()),
+        ("exact", params.exact.is_some()),
+        ("acorn", params.acorn.is_some()),
+        ("max_selectivity", params.max_selectivity.is_some()),
+        ("indexed_only", params.indexed_only.is_some()),
+        ("quantization", params.quantization.is_some()),
+        ("rrf_k", params.rrf_k.is_some()),
+        ("rrf_weights", params.rrf_weights.is_some()),
+        ("idf", params.idf.is_some()),
+    ];
+    if let Some((name, _)) = present.iter().find(|(_, is_some)| *is_some) {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-BATCH-PARAMS",
+            alloc::format!(
+                "PARAMS {name} has no representation on a BATCH header; keep it on member queries"
             ),
             None,
-        ),
-    })
+        ));
+    }
+    Ok((
+        params.timeout,
+        params.consistency.as_ref().map(ReadConsistencyParam::from),
+    ))
+}
+
+/// Explicit `WAIT` on a batch member, if any (all mutation kinds carry one).
+fn batch_member_wait(member: &Stmt) -> Option<bool> {
+    match member {
+        Stmt::Upsert(stmt) => stmt.wait,
+        Stmt::Delete(stmt) => stmt.wait,
+        Stmt::ClearPayload(stmt) => stmt.wait,
+        Stmt::DeletePayload(stmt) => stmt.wait,
+        Stmt::DeleteVector(stmt) => stmt.wait,
+        Stmt::UpdateVector(stmt) => stmt.wait,
+        Stmt::UpdatePayload(stmt) => stmt.wait,
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt};
+    use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt, VectorValue};
     use qql_core::parser::Parser;
+
+    #[test]
+    fn unbound_params_fail_at_plan_time_with_the_binder_code() {
+        // N2: the string path with no params used to ship the raw placeholder
+        // to Qdrant and get a 422 back. Planning is the execution gate, so an
+        // unbound template must raise the binder's own missing-param error.
+        for source in [
+            "QUERY VECTOR :qvec FROM docs USING dense LIMIT 1;",
+            "QUERY :v FROM docs USING dense LIMIT :lim;",
+            "QUERY TEXT :q FROM docs LIMIT 5;",
+        ] {
+            let stmt = Parser::parse(source).expect("template must parse");
+            let err = plan(&stmt).expect_err("unbound template must not plan");
+            assert_eq!(err.code, "QQL-BIND-MISSING-PARAM", "{err:?}");
+            assert!(err.message.contains("missing value"), "{err:?}");
+        }
+    }
 
     /// Build a minimal recommend statement with inline example vectors.
     fn recommend_stmt(
@@ -1436,6 +931,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }))
@@ -1529,6 +1025,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));
@@ -1575,6 +1072,8 @@ mod tests {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
                     model: None,
+                    text_param: None,
+                    options: Vec::new(),
                 },
                 model: "colbert-v2".into(),
                 using: None,
@@ -1591,6 +1090,7 @@ mod tests {
                         page: PageSpec {
                             limit: Some(10),
                             offset: None,
+                            ..Default::default()
                         },
                         shard_key: None,
                     })),
@@ -1607,6 +1107,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));
@@ -1622,6 +1123,8 @@ mod tests {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
                     model: None,
+                    text_param: None,
+                    options: Vec::new(),
                 },
                 model: "colbert-v2".into(),
                 using: Some(VectorTarget {
@@ -1639,12 +1142,41 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));
         assert_eq!(
             plan(&stmt_empty_prefetch).unwrap_err().kind,
             qql_core::error::ErrorKind::Validation
+        );
+    }
+
+    #[test]
+    fn delete_payload_batches_with_mutations() {
+        // P1: DeletePayload is Mutation-batchable and has an UpdateOperation
+        // form, so contiguous same-collection runs build one update batch
+        // (REST DeletePayloadOperation / gRPC delete_payload = 5).
+        use crate::batch::statement_batch_key;
+        use crate::mutation::planned_to_update_operation;
+        let s1 =
+            qql_core::parser::Parser::parse("DELETE PAYLOAD a FROM docs WHERE id = 1;").unwrap();
+        let s2 =
+            qql_core::parser::Parser::parse("DELETE PAYLOAD b FROM docs WHERE id = 2;").unwrap();
+        assert!(statement_batch_key(&s1).is_some());
+        let op1 = plan(&s1).unwrap();
+        let op2 = plan(&s2).unwrap();
+        assert_eq!(op1.batch_key(), op2.batch_key());
+        assert!(planned_to_update_operation(&op1).is_some());
+        let (collection, labels, batch) = crate::batch::build_update_batch(&[op1, op2]).unwrap();
+        assert_eq!(collection, "docs");
+        assert_eq!(labels, vec!["DELETE_PAYLOAD", "DELETE_PAYLOAD"]);
+        assert_eq!(batch.operations.len(), 2);
+        let json = serde_json::to_value(&batch).unwrap();
+        assert!(json["operations"][0].get("delete_payload").is_some());
+        assert_eq!(
+            json["operations"][0]["delete_payload"]["keys"],
+            serde_json::json!(["a"])
         );
     }
 
@@ -1659,16 +1191,23 @@ mod tests {
         assert_eq!(op.operation_label(), "DELETE_PAYLOAD");
         assert_eq!(op.compile_stmt_type(), "delete_payload");
         assert_eq!(op.collection(), Some("docs"));
-        assert_eq!(op.shard_key(), Some("tenant_1"));
+        assert_eq!(
+            op.shard_key(),
+            Some(&crate::semantic::PlanShardKey::Keyword("tenant_1".into()))
+        );
 
         if let PlannedOperation::DeletePayload {
             collection,
             request,
+            ..
         } = &op
         {
             assert_eq!(collection, "docs");
             assert_eq!(request.keys, vec!["draft", "temp_token"]);
-            assert_eq!(request.shard_key.as_deref(), Some("tenant_1"));
+            assert_eq!(
+                request.shard_key,
+                Some(crate::semantic::PlanShardKey::Keyword("tenant_1".into()))
+            );
             assert!(request.filter.is_some());
         } else {
             panic!("expected DeletePayload operation");
@@ -1677,6 +1216,76 @@ mod tests {
         let route = crate::to_rest_route(&op).unwrap();
         assert_eq!(route.method, crate::Method::Post);
         assert_eq!(route.path, "/collections/docs/points/payload/delete");
+    }
+
+    #[test]
+    fn modelless_document_serializes_empty_model_placeholder() {
+        // P3: model-less plans keep "model": "" for the executor to fill;
+        // offline bodies require preparation before dispatch.
+        let stmt =
+            qql_core::parser::Parser::parse("QUERY TEXT 'hello' FROM docs LIMIT 5;").unwrap();
+        let op = plan(&stmt).unwrap();
+        let route = to_rest_route(&op).unwrap();
+        let body = route.body.unwrap();
+        assert_eq!(body["query"]["nearest"]["text"], "hello");
+        assert_eq!(body["query"]["nearest"]["model"], "");
+    }
+
+    #[test]
+    fn param_only_upsert_template_plans_empty_points_for_splice() {
+        // P5: whole-point placeholders splice at execution time; the template
+        // plan holds inline points only. An all-placeholder template is empty
+        // and must take the splice path, never dispatch directly.
+        let stmt = qql_core::parser::Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+        let op = plan_template(&stmt).unwrap();
+        let PlannedOperation::Upsert { request, .. } = &op else {
+            panic!("expected Upsert, got {op:?}");
+        };
+        assert!(
+            request.is_empty(),
+            "param-only template must plan no points"
+        );
+    }
+
+    #[test]
+    fn statement_and_planned_batch_keys_agree_on_queries() {
+        // P10: statement-level and planned keys must agree; CrossRerank is
+        // client-side Single on both levels, Points is never batched.
+        let cases = [
+            ("QUERY TEXT 'x' FROM docs LIMIT 1;", true),
+            ("QUERY POINTS (1) FROM docs;", false),
+            (
+                "QUERY CROSS RERANK TEXT 'q' MODEL 'm' ON FIELD body FROM docs PREFETCH (QUERY TEXT 'q' FROM docs USING dense LIMIT 5) LIMIT 10;",
+                false,
+            ),
+        ];
+        for (source, expect_batchable) in cases {
+            let stmt = qql_core::parser::Parser::parse(source).unwrap();
+            let ast_key = crate::batch::statement_batch_key(&stmt);
+            let planned = plan(&stmt).unwrap();
+            let plan_key = planned.batch_key();
+            assert_eq!(
+                ast_key.is_some(),
+                expect_batchable,
+                "statement key for {source}"
+            );
+            assert_eq!(
+                plan_key.is_some(),
+                expect_batchable,
+                "planned key for {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn group_query_without_group_is_an_error_not_a_panic() {
+        // P4: the groups lowerer is pub; a group-less call must error.
+        let stmt = qql_core::parser::Parser::parse("QUERY TEXT 'x' FROM docs LIMIT 1;").unwrap();
+        let qql_core::ast::Stmt::Query(query) = &stmt else {
+            panic!("expected query");
+        };
+        let err = crate::query::lower_query_groups_request(query).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-GROUP");
     }
 
     #[test]
@@ -1690,11 +1299,17 @@ mod tests {
 
         assert_eq!(op.operation_label(), "COUNT");
         assert_eq!(op.collection(), Some("docs"));
-        assert_eq!(op.shard_key(), Some("tenant_2"));
+        assert_eq!(
+            op.shard_key(),
+            Some(&crate::semantic::PlanShardKey::Keyword("tenant_2".into()))
+        );
 
         if let PlannedOperation::Count { request, .. } = op {
             assert_eq!(request.exact, Some(true));
-            assert_eq!(request.shard_key.as_deref(), Some("tenant_2"));
+            assert_eq!(
+                request.shard_key,
+                Some(crate::semantic::PlanShardKey::Keyword("tenant_2".into()))
+            );
             assert!(request.filter.is_some());
         } else {
             panic!("expected Count operation");
@@ -1753,7 +1368,7 @@ mod tests {
             }
         }
         assert!(
-            serialize_body(&FailingSerialize).is_err(),
+            crate::routing::serialize_body(&FailingSerialize).is_err(),
             "a serialization failure must surface as Err, never a JSON null body"
         );
 
@@ -1763,5 +1378,115 @@ mod tests {
         let route = to_rest_route(&op).expect("rest route");
         assert!(route.body.is_some());
         assert_ne!(route.body, Some(serde_json::Value::Null));
+    }
+
+    #[test]
+    fn cross_rerank_with_cte_prefetch_plans_candidates() {
+        let stmt = Parser::parse(
+            "WITH candidates AS (QUERY TEXT 'rust query' MODEL 'bge' FROM docs USING dense LIMIT 50) \
+             QUERY CROSS RERANK TEXT 'rust query' MODEL 'bge-reranker-large' ON FIELD body \
+             FROM docs PREFETCH (candidates) LIMIT 10;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        match op {
+            PlannedOperation::CrossRerank {
+                collection,
+                query,
+                model,
+                field,
+                limit,
+                offset,
+                candidates,
+            } => {
+                assert_eq!(collection, "docs");
+                assert_eq!(query, "rust query");
+                assert_eq!(model, "bge-reranker-large");
+                assert_eq!(field, "body");
+                assert_eq!(limit, 10);
+                assert_eq!(offset, 0);
+                assert_eq!(candidates.len(), 1);
+                assert_eq!(candidates[0].0, "docs");
+                assert_eq!(candidates[0].1.limit, Some(50));
+            }
+            other => panic!("expected CrossRerank, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    fn plan_source(source: &str) -> Result<PlannedOperation, qql_core::error::QqlError> {
+        let stmt = qql_core::parser::Parser::parse(source).expect("fixture must parse");
+        plan(&stmt)
+    }
+
+    #[test]
+    fn batch_homogeneity_is_enforced() {
+        // Mixed families fail.
+        let err =
+            plan_source("BATCH { QUERY [0.1] FROM docs LIMIT 1; DELETE FROM docs WHERE id = 1; }")
+                .expect_err("mixed batch must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-MIXED");
+        // Mixed collections fail.
+        let err =
+            plan_source("BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM other LIMIT 1; }")
+                .expect_err("mixed collections must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-MIXED");
+        // Non-batchable members fail (group query plans to QueryGroups).
+        let err = plan_source(
+            "BATCH { QUERY [0.1] FROM docs GROUP BY city LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }",
+        )
+        .expect_err("group member must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-MEMBER");
+    }
+
+    #[test]
+    fn batch_header_opts_are_exclusive() {
+        // WAIT belongs to mutation batches only.
+        let err = plan_source("BATCH { QUERY [0.1] FROM docs LIMIT 1; } WAIT true")
+            .expect_err("wait on query batch must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-WAIT");
+        // Member WAIT must move to the header.
+        let err = plan_source(
+            "BATCH { DELETE FROM docs WHERE id = 1 WAIT false; DELETE FROM docs WHERE id = 2; }",
+        )
+        .expect_err("member wait must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-WAIT");
+        // Member timeout must move to the header.
+        let err = plan_source(
+            "BATCH { QUERY [0.1] FROM docs PARAMS (timeout = 5) LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }",
+        )
+        .expect_err("member timeout must fail");
+        assert_eq!(err.code, "QQL-VALIDATION-BATCH-PARAMS");
+        // Per-search params keys stay on the member.
+        plan_source(
+            "BATCH { QUERY [0.1] FROM docs PARAMS (hnsw_ef = 32) LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }",
+        )
+        .expect("per-search params must stay");
+    }
+
+    #[test]
+    fn batch_header_opts_reach_the_wire() {
+        let op =
+            plan_source("BATCH { DELETE FROM docs WHERE id = 1; } WAIT false").expect("plan batch");
+        let route = to_rest_route(&op).expect("route batch");
+        assert_eq!(route.path, "/collections/docs/points/batch");
+        assert!(route.query.iter().any(|(k, v)| k == "wait" && v == "false"));
+        let op = plan_source(
+            "BATCH { QUERY [0.1] FROM docs LIMIT 1; } PARAMS (timeout = 30, consistency = majority)",
+        )
+        .expect("plan query batch");
+        let route = to_rest_route(&op).expect("route query batch");
+        assert_eq!(route.path, "/collections/docs/points/query/batch");
+        assert!(route.query.iter().any(|(k, v)| k == "timeout" && v == "30"));
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "majority")
+        );
     }
 }

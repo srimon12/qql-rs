@@ -1,6 +1,6 @@
 # Rust SDK (`qql-core`, `qql-plan`, `qql`) Reference & Examples
 
-Three crates, three responsibilities. Use only what you need.
+Three crates, three responsibilities. Use only what you need. Self-contained. Shared language rules live in `qql-query.md`, `qql-filters.md`, `qql-params.md`, `qql-embeddings.md`. This guide repeats the minimum needed to run alone.
 
 ## Dependencies
 
@@ -95,6 +95,9 @@ let exec = Executor::new(Box::new(client), None);
 ```
 
 `RestQdrant::with_timeout(url, api_key, timeout)` constructs with an explicit duration.
+`RestQdrant::with_read_timeout(url, api_key, read_timeout)` drops the total
+request cap and bounds each read operation instead — the streaming profile used
+for shard snapshots (`qql::snapshots`).
 
 **Request-level params (QQL 1.2+):** `PARAMS (timeout = 30, consistency = majority)`
 lower to REST query string / gRPC fields on the request (not body `SearchParams`).
@@ -276,6 +279,13 @@ Rust keeps typed twins (`bind_named` / `bind_positional`, `execute_with_params` 
 `execute_with_positional_params`). Python, Node, and WASM collapse those into
 one `bind(query, params)` plus `execute(..., params=...)`.
 
+Readable/preview variants truncate long vector literals in the bound output:
+`bind_named_readable(source, lookup, max_dims)` and
+`bind_positional_readable(source, params, max_dims)` (QQL 1.7,
+`qql_core::params`). To bind into a parsed AST instead of source text, use
+`bind_stmt(&mut Stmt, lookup, &positional)` — the same entry point the host
+SDKs call before planning.
+
 ```rust
 use std::collections::HashMap;
 use qql::executor::{Executor, OnError};
@@ -318,10 +328,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("{bound}");
 
-    // 4. Hierarchical ASCII Tree Explain (qql_core::explain)
+    // 3b. Readable binding with vector truncation (QQL 1.7, qql_core::params)
+    let readable = qql_core::params::bind_named_readable(
+        "QUERY :vec FROM docs LIMIT :lim",
+        |k| match k {
+            "vec" => Some(Value::List(vec![Value::Float(0.1); 384])),
+            "lim" => Some(Value::Int(5)),
+            _ => None,
+        },
+        2, // max dims shown before "... (N dims)"
+    )?;
+    println!("{readable}");
+
+    // 3c. Bind into a parsed AST (same entry point the host SDKs call)
+    let mut stmt = qql_core::parser::Parser::parse(
+        "QUERY TEXT :q FROM docs LIMIT :lim;",
+    )?;
+    qql_core::params::bind_stmt(
+        &mut stmt,
+        |k| match k {
+            "q" => Some(Value::Str("cardiology".into())),
+            "lim" => Some(Value::Int(5)),
+            _ => None,
+        },
+        &[],
+    )?;
+
+    // 4. Bulk ingest: point values in `batch_size` chunks. One `:rows`
+    // template is prepared once (schema fetched once) — prefer this over
+    // hand-rolled batch loops.
+    let rows: Vec<Value> = vec![
+        // {id, vector: {dense: [...]}, …payload} per entry
+    ];
+    let report = exec.upsert_many("docs", rows, 100, OnError::Stop).await?;
+
+    // 5. Hierarchical ASCII Tree Explain (qql_core::explain)
     let plan = qql_core::explain::explain(&bound)?;
     println!("{plan}");
 
     Ok(())
 }
 ```
+
+---
+
+## 7. Execution Profiling (`explain_analyze` + Telemetry)
+
+`Executor::explain_analyze` (plus `_with_named_params` / `_with_params` twins mirroring `execute`) runs one statement and returns an `AnalyzeReport`: the static plan summary plus measured client phase timings (`parse_ms`, `prepare_plan_ms`, `dispatch_ms`, `decode_ms`, `total_ms`) and honest server telemetry (`server_time_s` from Qdrant's `time` field, `usage` hardware/inference counters when the backend reports them). Instrumentation wraps the existing execute path — no forked logic, no grammar change, no trait change. Batches fail closed (`QQL-VALIDATION-MULTI-STMT`) — analyze entries separately.
+
+```rust
+use qql::executor::{Executor, OnError};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let exec = Executor::rest("http://localhost:6333", None)?;
+
+    let report = exec.explain_analyze(
+        "QUERY TEXT 'chest pain' FROM docs USING dense LIMIT 10",
+        OnError::Stop,
+    ).await?;
+    println!("server: {:?}s", report.server_time_s);
+    println!("dispatch: {}ms", report.phases.dispatch_ms);
+
+    Ok(())
+}
+```
+
+Every `ExecResponse` also carries `telemetry: Option<ServerTelemetry>` (`time_s` + `usage`, `None` where the route reports nothing — batch items genuinely lack envelopes on both transports, so per-item telemetry there is `None` rather than attributed totals), and `ExecutionReport.telemetry` aggregates the totals. Typed result accessors (`hits()`, `points()`, `ids()`, `facet()`, `count()`, `groups()`, `collections()`, `collection()`, `shard_keys()`, `quotas()`) read from a cached typed representation — no SearchHit→JSON round-trip on the gRPC leg. The response model is closed: every backend answer is one typed `ExecData` variant (`Hits | Groups | Count | Facet | Mutation | Collections | Collection | ShardKeys | Quotas`) with no raw-JSON passthrough (`ExecData::Raw` / `as_raw()` and the legacy `*_json` accessors are removed); REST parses each operation strictly against its OpenAPI shape and fails closed with `QQL-BACKEND-ENVELOPE` on a missing or mistyped field. `SearchHit` carries `id`, `score`, `payload`, `collection`, and `vector` only — no `text`, `version`, or `shard_key` fields. Derive display text from `payload["text"]`; scores serialize as the shortest f32 round-trip (`0.95`, not `0.949999988079071`).
+
+For bulk ingest, `upsert_many` moves (never clones) each chunk through the point-splice path; the peak live-set is the caller's `rows` vector by construction — for million-row ingests, chunk the *calls*, since `upsert_many` chunks transport, not memory.

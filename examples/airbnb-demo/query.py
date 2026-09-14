@@ -201,14 +201,12 @@ QUERIES: list[tuple[str, str]] = [
 def show_hits(label: str, data) -> None:
     print(f"\n═══ {label} ═══")
     if isinstance(data, dict):
-        if "result" in data and isinstance(data["result"], dict) and "count" in data["result"]:
-            print(f"  count = {data['result']['count']}")
+        if "count" in data:
+            print(f"  count = {data['count']}")
             return
-        points = data.get("result", data)
-        if isinstance(points, dict):
-            points = points.get("points") or points.get("hits") or []
-    else:
-        points = data
+        print(f"  {json.dumps(data)[:400]}")
+        return
+    points = data
     if not isinstance(points, list):
         print(f"  {json.dumps(data)[:400]}")
         return

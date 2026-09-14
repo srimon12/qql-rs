@@ -37,7 +37,7 @@ QQL_BIN = os.environ.get("QQL_BIN", "/data/codebases/qql-rs/target/debug/qql")
 
 
 def run_statement(statement: str) -> dict[str, object]:
-    raw = subprocess.check_output([QQL_BIN, "exec", "--quiet", "--json", statement], text=True)
+    raw = subprocess.check_output([QQL_BIN, "run", "--quiet", "--json", statement], text=True)
     payload = json.loads(raw)
     if not payload.get("ok"):
         raise SystemExit(raw)
@@ -91,10 +91,14 @@ def main() -> None:
 
     items = json.loads(path.read_text(encoding="utf-8"))
     mode_summaries = [score_mode(items, mode_name) for mode_name in MODES]
+    # Summary logs only the benchmark basename, collection name (non-secret
+    # demo config from env), aggregate counts, and opaque point IDs — never
+    # question/answer text (see module docstring).
+    # codeql[py/clear-text-logging-sensitive-data]: basename/count demo summary
     print(
         json.dumps(
             {
-                "benchmark_path": str(path),
+                "benchmark_path": path.name,
                 "collection": COLLECTION,
                 "dataset_size": len(items),
                 "modes": mode_summaries,

@@ -55,7 +55,32 @@ test("client options embedder forwards dense fields", () => {
     rerankEndpoint: undefined,
     rerankApiKey: undefined,
     rerankModel: undefined,
+    bm25K1: undefined,
+    bm25B: undefined,
+    bm25AvgLen: undefined,
   });
+});
+
+test("client options embedder forwards BM25 document params (camel + snake)", () => {
+  const camel = normalizeClientOptions({
+    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25K1: 2, bm25B: 0.5, bm25AvgLen: 8 },
+  });
+  assert.strictEqual(camel.embedder.bm25K1, 2);
+  assert.strictEqual(camel.embedder.bm25B, 0.5);
+  assert.strictEqual(camel.embedder.bm25AvgLen, 8);
+
+  const snake = normalizeClientOptions({
+    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25_k1: 1.5, bm25_b: 0.25, bm25_avg_len: 16 },
+  });
+  assert.strictEqual(snake.embedder.bm25K1, 1.5);
+  assert.strictEqual(snake.embedder.bm25B, 0.25);
+  assert.strictEqual(snake.embedder.bm25AvgLen, 16);
+
+  // Out-of-range values survive normalization; the native layer fails closed.
+  const bad = normalizeClientOptions({
+    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25K1: 0 },
+  });
+  assert.strictEqual(bad.embedder.bm25K1, 0);
 });
 
 test("client options embedder forwards multi/image/rerank fields (camelCase)", () => {

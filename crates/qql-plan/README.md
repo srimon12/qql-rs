@@ -33,30 +33,53 @@ let stmt = Parser::parse(
 )?;
 let op = plan(&stmt)?;
 let route = to_rest_route(&op)?;   // fallible REST projection
-// Prefer try_route(&stmt) for libraries; avoid panic-prone route()
+// Prefer try_route(&stmt) when you want plan + projection in one call.
 ```
 
 ## PlannedOperation (selected)
 
 | Family | Variants |
 |--------|----------|
-| Search | `Query`, `QueryGroups`, `GetPoints`, `Scroll`, `Count` |
-| Mutations | `Upsert`, `Delete`, `ClearPayload`, `UpdateVectors`, `DeleteVectors`, `UpdatePayload`, … |
+| Search | `Query`, `QueryGroups`, `GetPoints`, `Scroll`, `Count`, `Facet` |
+| Mutations | `Upsert`, `Delete`, `ClearPayload`, `DeletePayload`, `UpdateVectors`, `DeleteVectors`, `UpdatePayload` |
 | DDL | `CreateCollection`, `UpdateCollection`, indexes, **`CreateShardKey` / `DropShardKey` / `ListShardKeys`** |
 | Quotas | **`GetQuotas`** / **`SetQuotas`** → REST `GET|PUT /quotas` (Qdrant ≥ 1.19) |
 | Client-side | `CrossRerank` (no single Qdrant route) |
 
 ### Batch families
 
-- **Query** — contiguous same-collection queries → `/points/query/batch`
-- **Mutation** — contiguous mutations → `/points/batch`
-- **Single** — DDL, scroll, count, quotas, …
+- **Query** — contiguous same-collection searches → `/points/query/batch` (`CrossRerank` is Single)
+- **Mutation** — contiguous same-collection mutations, including `DELETE PAYLOAD` → `/points/batch`
+- **Single** — DDL, scroll, count, facet, quotas, `CrossRerank`, …
 
 ### Semantic primitives
 
 `PlanPointId`, `PlanVectorValue` (Dense / Sparse / MultiDense), `PlanQueryInput`,
 typed formula trees — stay typed until a transport boundary.
 `MemoryPlacement` / `VectorDatatype` re-exported from `qql-core`.
+
+### Typed formula (`PlanFormula` → proto / edge)
+
+`qql-plan/src/formula_types.rs` owns the formula tree. REST serializes the
+OpenAPI `Expression` straight from it; gRPC converts it directly via
+`plan_formula_to_grpc` (`PlanFormula` → `qdrant::Expression`) with no JSON
+round-trip (`CASE` conditions and datetime `TARGET` inference apply on gRPC
+too). Edge maps `$score` to the reserved score variable and fails closed on
+`MAX` / `MIN` / `ACOSH` (`QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`).
+
+### Typed DDL IR (no JSON-as-IR)
+
+Collection / index / quantization / optimizer configs are plan-owned typed
+structs (`DenseVectorParams`, `SparseVectorParams`, `CollectionParams`,
+`MaxOptimizationThreads`, `IndexOptions`, … in `ddl_types` / `index_types` /
+`quantization`). REST serializes them to exact OpenAPI bodies (`ddl_rest`);
+gRPC converts them directly to protobuf. Invalid tokenizer or field-type
+values fail at plan time (`QQL-PLAN-INDEX-TYPE`, `QQL-PLAN-INDEX-OPTION`);
+out-of-range DDL integers fail closed on gRPC (`QQL-GRPC-DDL-RANGE`).
+Per-vector `ALTER COLLECTION … WITH VECTOR <name>` / `WITH SPARSE <name>`
+diffs lower onto typed PATCH `vectors` / `sparse_vectors` maps
+(`QQL-PARSE-VECTOR-DIFF` / `QQL-PLAN-VECTOR-DIFF` for `datatype` and
+duplicates).
 
 ### Qdrant 1.19 lowering notes
 
@@ -76,16 +99,23 @@ let route = to_rest_route(&op)?; // PUT /quotas?wait=true
 
 ## Modules
 
+Public crate surface. REST projection lives in `routing`; `plan` re-exports
+`to_rest_route` / `try_route` so existing `qql_plan::plan::*` paths stay valid.
+
 | Module | Role |
 |--------|------|
-| `plan` | `plan`, `to_rest_route`, `try_route`, `compile_statement` |
+| `plan` | `plan` / `plan_template` → `PlannedOperation`. Re-exports `to_rest_route`, `try_route`. |
+| `routing` | `Route`, `to_rest_route`, `try_route`, `compile_statement` |
 | `query` / `mutation` / `ddl` | Lowering (including quotas / IDF / memory) |
 | `filter` | `FilterExpression` only (no routing fields) |
-| `types` | Request IR (`SetQuotaRequest`, `IdfSearchParams`, …) |
+| `formula_types` | `PlanFormula` OpenAPI `Expression` tree, `FormulaDefault` bindings |
+| `types` | Request IR façade (`SetQuotaRequest`, `IdfSearchParams`, …) |
+| `batch` | `BatchGrouper`, `BatchKey`, query/update batch builders |
+| `semantic` | `PlanPointId`, `PlanVectorValue`, `PlanQueryInput` |
 
 ## Docs
 
-- [AGENTS.md](../../AGENTS.md) pipeline · [Syntax](../../docs/syntax.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
+- [AGENTS.md](https://github.com/srimon12/qql-rs/blob/main/AGENTS.md) pipeline · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md)
 
 ## Test
 

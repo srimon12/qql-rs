@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { AnalysisService, DocumentAnalysis } from "../core/analysis";
+import { getActiveProfileName, getParamProfiles } from "../core/params";
 
 /**
  * Status bar item showing parse state for the active QQL document.
@@ -8,6 +9,9 @@ import type { AnalysisService, DocumentAnalysis } from "../core/analysis";
  * Does **not** trigger analysis on its own (except the click command).
  * Lifecycle in extension.ts owns analyze/schedule.
  */
+
+/** QQL language version this extension targets — bump with the grammar. */
+const QQL_VERSION = "1.7";
 export class QqlStatusBar implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
@@ -33,8 +37,8 @@ export class QqlStatusBar implements vscode.Disposable {
             this.render(a);
           } else {
             // Show idle state — extension lifecycle will analyze and notify
-            this.item.text = "$(file-code) QQL";
-            this.item.tooltip = "QQL — waiting for analysis";
+            this.item.text = `$(file-code) QQL ${QQL_VERSION}`;
+            this.item.tooltip = `QQL ${QQL_VERSION} — waiting for analysis`;
             this.item.backgroundColor = undefined;
             this.item.show();
           }
@@ -50,29 +54,37 @@ export class QqlStatusBar implements vscode.Disposable {
       const a = this.analysis.get(active.document.uri);
       if (a) this.render(a);
       else {
-        this.item.text = "$(file-code) QQL";
+        this.item.text = `$(file-code) QQL ${QQL_VERSION}`;
         this.item.show();
       }
     }
   }
 
   private render(a: DocumentAnalysis): void {
+    const profile = getActiveProfileName();
+    const suffix = profile != null ? ` · ${profile}` : "";
+    // With named profiles configured, the click opens the profile picker
+    // (which also offers re-analyze); otherwise it re-analyzes directly.
+    this.item.command = hasProfiles() ? "qql.selectParamsProfile" : "qql.analyze";
     if (a.result.valid) {
       const n = a.statements.length;
-      this.item.text = `$(check) QQL ${n}`;
-      this.item.tooltip = `QQL — valid · ${n} statement(s)\nClick to re-analyze`;
+      this.item.text = `$(check) QQL ${QQL_VERSION} · ${n}${suffix}`;
+      this.item.tooltip =
+        `QQL ${QQL_VERSION} — valid · ${n} statement(s)` +
+        (profile != null ? `\nParams profile: ${profile}` : "") +
+        `\nClick to ${hasProfiles() ? "pick profile / " : ""}re-analyze`;
       this.item.backgroundColor = undefined;
     } else if (a.result.error) {
-      this.item.text = `$(error) QQL`;
-      this.item.tooltip = `QQL — ${a.result.error.code}: ${a.result.error.message}\nClick to re-analyze`;
+      this.item.text = `$(error) QQL ${QQL_VERSION}${suffix}`;
+      this.item.tooltip = `QQL ${QQL_VERSION} — ${a.result.error.code}: ${a.result.error.message}\nClick to re-analyze`;
       this.item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
     } else if (!a.source.trim()) {
-      this.item.text = `$(file-code) QQL`;
-      this.item.tooltip = "Empty QQL document";
+      this.item.text = `$(file-code) QQL ${QQL_VERSION}${suffix}`;
+      this.item.tooltip = `QQL ${QQL_VERSION} — empty document`;
       this.item.backgroundColor = undefined;
     } else {
-      this.item.text = `$(warning) QQL`;
-      this.item.tooltip = "QQL — unknown state";
+      this.item.text = `$(warning) QQL ${QQL_VERSION}${suffix}`;
+      this.item.tooltip = `QQL ${QQL_VERSION} — unknown state`;
       this.item.backgroundColor = undefined;
     }
     this.item.show();
@@ -81,4 +93,8 @@ export class QqlStatusBar implements vscode.Disposable {
   dispose(): void {
     for (const d of this.disposables) d.dispose();
   }
+}
+
+function hasProfiles(): boolean {
+  return Object.keys(getParamProfiles()).length > 0;
 }

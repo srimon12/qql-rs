@@ -1,0 +1,14 @@
+-- batch.qql — Single-RPC batch blocks
+
+-- Query batch: one RPC for homogeneous same-collection queries
+BATCH {
+  QUERY [0.1] FROM docs LIMIT 1;
+  QUERY [0.2] FROM docs LIMIT 3;
+};
+
+-- Mutation batch: one RPC for homogeneous same-collection mutations
+BATCH {
+  UPSERT INTO docs VALUES {id: 1, vector: [0.1]};
+  DELETE FROM docs WHERE id = 2;
+  UPDATE docs SET PAYLOAD = {a: 1} WHERE id = 1;
+};

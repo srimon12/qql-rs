@@ -62,6 +62,11 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | `compileQuery` / `explain` / `explainStmt` | Offline |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
 | `execute` / `executeStmt` | Free-function execute (`options.params` same as `bind`) |
+| `executeHits` | Free-function execute returning `ScoredPoint[]` |
+| `ExecutionReport.hits/points/facet/count/groups` | Typed result accessors on every report |
+| `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration + pull-driven WHATWG stream (one page buffered max) |
+| `Client.explainAnalyze` | Static plan + measured client/server timings for one statement |
+| `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
 
 ### Isolation vs routing
 
@@ -127,5 +132,5 @@ console.log(client.routeAffinity); // "session-acme-42"
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [Filters](../../docs/filters.md) · [inject_filter](../../docs/inject_filter.md)
-- [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md) · [Node skill](../../skills/qql-skill/references/node-sdk.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Filters](https://github.com/srimon12/qql-rs/blob/main/docs/filters.md) · [inject_filter](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md)
+- [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md) · [Node skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/node-sdk.md)

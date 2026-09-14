@@ -62,7 +62,9 @@
         "filter": null,
         "key": "tag",
         "limit": 20,
-        "shard_key": "tenant_1"
+        "shard_key": {
+          "Keyword": "tenant_1"
+        }
       }
     },
     {

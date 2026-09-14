@@ -35,6 +35,7 @@ statement = _{
     | show_shard_keys
     | show_quotas
     | set_quota
+    | batch
 }
 
 // Query
@@ -55,14 +56,14 @@ query_tail = {
     (^"USING" ~ (hybrid_using | vector_target))?
     ~ (^"PREFETCH" ~ "(" ~ prefetch ~ ("," ~ prefetch)* ~ ")")?
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ shard_key)?
     ~ (^"PARAMS" ~ search_params)?
-    ~ (^"SCORE" ~ ^"THRESHOLD" ~ number)?
+    ~ (^"SCORE" ~ ^"THRESHOLD" ~ (param | number))?
     ~ group_clause?
     ~ (^"WITH" ~ ^"PAYLOAD" ~ payload_selector)?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
-    ~ (^"LIMIT" ~ positive_integer)?
-    ~ (^"OFFSET" ~ non_negative_integer)?
+    ~ (^"LIMIT" ~ (param | positive_integer))?
+    ~ (^"OFFSET" ~ (param | non_negative_integer))?
 }
 
 // Tail-form hybrid: QUERY TEXT '…' FROM c USING HYBRID [DENSE n] [SPARSE n] [FUSION …]
@@ -82,7 +83,9 @@ vector_kind = { ^"DENSE" | ^"SPARSE" | ^"MULTIVECTOR" | ^"MULTI" }
 group_clause = {
     ^"GROUP" ~ ^"BY" ~ field
     ~ (^"SIZE" ~ positive_integer)?
-    ~ (^"LOOKUP" ~ ^"FROM" ~ collection)?
+    ~ (^"LOOKUP" ~ ^"FROM" ~ collection
+        ~ (^"WITH" ~ ^"PAYLOAD" ~ payload_selector)?
+        ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?)?
 }
 
 query_expr = _{
@@ -107,21 +110,32 @@ points = { ^"POINTS" ~ point_id_list }
 nearest = { ^"NEAREST"? ~ query_input }
 
 query_input = _{
-      ^"TEXT" ~ string ~ (^"MODEL" ~ string)?
+      ^"TEXT" ~ (param | string) ~ (^"MODEL" ~ string)? ~ (^"OPTIONS" ~ object)?
     // IMAGE: local path or URL → dense embed via host image/CLIP vision model.
     // Same dense role as TEXT; modality is image, not multivector.
-    | ^"IMAGE" ~ string ~ (^"MODEL" ~ string)?
-    | ^"VECTOR" ~ vector_value
+    | ^"IMAGE" ~ (param | string) ~ (^"MODEL" ~ string)? ~ (^"OPTIONS" ~ object)?
+    // OBJECT: custom inference payload (OpenAPI InferenceObject), passed
+    // through to the backend inference service. Parentheses around the
+    // object are accepted but never emitted.
+    | ^"OBJECT" ~ (("(" ~ object ~ ")") | object) ~ (^"MODEL" ~ string)? ~ (^"OPTIONS" ~ object)?
+    | ^"VECTOR" ~ (param | vector_value)
+    // `VECTOR` is optional for array/object literals (`QUERY [0.1, 0.2] …`).
+    | vector_value
     | ^"POINT" ~ point_id
+    | param
     | string
 }
 
 recommend = {
     ^"RECOMMEND"
-    ~ ^"POSITIVE" ~ point_id_list
-    ~ (^"NEGATIVE" ~ point_id_list)?
+    ~ ^"POSITIVE" ~ recommend_example_list
+    ~ (^"NEGATIVE" ~ recommend_example_list)?
     ~ (^"STRATEGY" ~ recommend_strategy)?
 }
+// A recommend example: bare strings/integers stay point IDs; every other
+// spelling is a full `query_input` (mirrors `parse_recommend_examples`).
+recommend_example_list = { "(" ~ recommend_example ~ ("," ~ recommend_example)* ~ ")" }
+recommend_example = _{ point_id | query_input }
 recommend_strategy = { ^"average_vector" | ^"best_score" | ^"sum_scores" }
 
 context = { ^"CONTEXT" ~ context_pairs }
@@ -129,7 +143,10 @@ discover = { ^"DISCOVER" ~ ^"TARGET" ~ query_input ~ ^"CONTEXT" ~ context_pairs 
 context_pairs = { "(" ~ context_pair ~ ("," ~ context_pair)* ~ ")" }
 context_pair = { ^"POSITIVE" ~ query_input ~ ^"NEGATIVE" ~ query_input }
 
-order_query = { ^"ORDER" ~ ^"BY" ~ field ~ (^"ASC" | ^"DESC")? }
+order_query = {
+    ^"ORDER" ~ ^"BY" ~ field ~ (^"ASC" | ^"DESC")?
+    ~ (^"START" ~ ^"FROM" ~ (param | string | number))?
+}
 sample = { ^"SAMPLE" ~ ^"RANDOM" }
 fusion = { ^"FUSION" ~ fusion_method }
 fusion_method = { ^"RRF" | ^"DBSF" }
@@ -182,8 +199,10 @@ rerank_input = _{
 prefetch = {
     (cte_query | cte_name)
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SCORE" ~ ^"THRESHOLD" ~ number)?
-    ~ (^"LOOKUP" ~ ^"FROM" ~ collection ~ (^"VECTOR" ~ vector_name)?)?
+    ~ (^"SCORE" ~ ^"THRESHOLD" ~ (param | number))?
+    ~ (^"LOOKUP" ~ ^"FROM" ~ collection
+        ~ (^"VECTOR" ~ vector_name)?
+        ~ (^"SHARD" ~ shard_key)?)?
 }
 
 // Formula expressions
@@ -199,7 +218,8 @@ formula_product = {
 }
 formula_prefix = { "-"? ~ formula_primary }
 formula_primary = _{
-      number
+      param
+    | number
     | "(" ~ formula_expr ~ ")"
     | unary_function
     | nary_function
@@ -272,10 +292,14 @@ filter_primary = _{
     | nested_filter
     | has_vector_filter
     | slice_filter
+    | min_should_filter
     | predicate
 }
 
 slice_filter = { ^"SLICE" ~ "(" ~ non_negative_integer ~ "," ~ non_negative_integer ~ ")" }
+
+// At-least-N disjunction over a condition set (OpenAPI `MinShould`).
+min_should_filter = { ^"MIN" ~ ^"SHOULD" ~ non_negative_integer ~ "(" ~ filter ~ ("," ~ filter)* ~ ")" }
 
 nested_filter = { ^"NESTED" ~ "(" ~ string ~ "," ~ filter ~ ")" }
 has_vector_filter = { ^"HAS_VECTOR" ~ vector_name }
@@ -287,6 +311,8 @@ predicate_tail = _{
     | ^"NOT"? ~ ^"IN" ~ non_empty_literal_list
     | ^"IS" ~ ^"NOT"? ~ (^"NULL" | ^"EMPTY")
     | ^"MATCH" ~ ^"ANY" ~ non_empty_literal_list
+    | ^"MATCH" ~ ^"TOKENS" ~ string
+    | ^"MATCH" ~ ^"EXCEPT" ~ non_empty_literal_list
     | ^"MATCH" ~ ^"PHRASE" ~ string
     | ^"MATCH" ~ ^"PREFIX" ~ string
     | ^"MATCH" ~ string
@@ -304,15 +330,18 @@ scroll = {
     ^"SCROLL" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
     ~ (^"AFTER" ~ point_id)?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"ORDER" ~ ^"BY" ~ field ~ (^"ASC" | ^"DESC")?
+        ~ (^"START" ~ ^"FROM" ~ (param | string | number))?)?
+    ~ (^"SHARD" ~ shard_key)?
+    ~ (^"WITH" ~ ^"PAYLOAD" ~ payload_selector)?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
-    ~ ^"LIMIT" ~ positive_integer
+    ~ ^"LIMIT" ~ (param | positive_integer)
 }
 
 count = {
     ^"COUNT" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ shard_key)?
     ~ (^"WITH" ~ count_config)?
 }
 
@@ -332,9 +361,9 @@ facet = {
 }
 facet_clause = _{
       ^"WHERE" ~ filter
-    | ^"LIMIT" ~ integer
+    | ^"LIMIT" ~ (param | positive_integer)
     | ^"EXACT" ~ boolean?
-    | ^"SHARD" ~ string
+    | ^"SHARD" ~ shard_key
     | ^"WITH" ~ facet_config
 }
 facet_key = { name }
@@ -347,8 +376,21 @@ upsert = {
     ~ point_object ~ ("," ~ point_object)*
     ~ embedding_options?
     ~ embed_clause?
-    ~ (^"SHARD" ~ string)?
+    ~ upsert_guard*
+    ~ (^"SHARD" ~ shard_key)?
+    ~ (^"WAIT" ~ boolean)?
 }
+
+// Trailing upsert guards: conditional-write filter and write mode. Each may
+// appear at most once, in either order; duplicates are rejected by the
+// reference parser (QQL-PARSE-DUPLICATE-CLAUSE).
+upsert_guard = _{
+      ^"UPDATE" ~ ^"FILTER" ~ filter
+    | ^"UPDATE" ~ ^"MODE" ~ upsert_mode
+}
+
+// Upsert write mode: insert_only / update_only / explicit upsert (default).
+upsert_mode = { ^"UPSERT" | ^"INSERT_ONLY" | ^"UPDATE_ONLY" }
 
 embedding_options = {
     ^"USING" ~ single_embedding_spec ~ ("," ~ single_embedding_spec)*
@@ -392,37 +434,52 @@ delete_vectors = {
     ~ vector_name ~ ("," ~ vector_name)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ shard_key)?
+    ~ (^"WAIT" ~ boolean)?
 }
 delete = {
     ^"DELETE" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ shard_key)?
+    ~ (^"WAIT" ~ boolean)?
 }
 clear_payload = {
     ^"CLEAR" ~ ^"PAYLOAD" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ shard_key)?
+    ~ (^"WAIT" ~ boolean)?
 }
 delete_payload = {
     ^"DELETE" ~ ^"PAYLOAD"
     ~ field ~ ("," ~ field)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ shard_key)?
+    ~ (^"WAIT" ~ boolean)?
 }
 
 update = {
     ^"UPDATE" ~ collection ~ ^"SET"
     ~ (
-        ^"VECTOR" ~ vector_name? ~ "=" ~ vector_value
-        ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
-        ~ (^"SHARD" ~ string)?
-        | ^"PAYLOAD" ~ "=" ~ object
+        ^"VECTOR" ~ (
+            ^"VALUES" ~ point_object ~ ("," ~ point_object)*
+            | vector_name? ~ "=" ~ (param | vector_value | object)
+              ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
+        )
+        ~ (^"SHARD" ~ shard_key)?
+        | ^"PAYLOAD" ~ "=" ~ (param | object)
+        ~ payload_tail?
         ~ ^"WHERE" ~ filter
-        ~ (^"SHARD" ~ string)?
+        ~ (^"SHARD" ~ shard_key)?
     )
+    ~ (^"WAIT" ~ boolean)?
 }
+
+// Trailing payload-write modifiers: nested assignment path (`KEY`) and full
+// replace (`OVERWRITE`). Each may appear at most once, in either order;
+// duplicates are rejected by the reference parser.
+payload_tail = _{ (payload_key | ^"OVERWRITE")+ }
+payload_key = { ^"KEY" ~ string }
 
 // DDL
 
@@ -471,12 +528,33 @@ collection_config = {
         | ^"OPTIMIZERS" ~ config_block
         | ^"PARAMS" ~ config_block
         | ^"QUANTIZATION" ~ config_block
+        | ^"WAL" ~ config_block
+        | ^"STRICT_MODE" ~ config_block
+        | ^"METADATA" ~ config_block
     )
 }
 
 alter_collection = {
     ^"ALTER" ~ ^"COLLECTION" ~ collection
-    ~ collection_config+
+    ~ alter_collection_config+
+}
+
+// ALTER accepts the collection-wide blocks plus per-vector diffs. The named
+// dense form nests `HNSW` / `QUANTIZATION` / `VECTOR` diffs (the wire
+// `VectorParamsDiff` has no datatype field); the sparse form wraps one
+// `SPARSE` / `INDEX` block. The unnamed `WITH VECTOR (…)` default-vector form
+// is the plain `collection_config` alternative.
+alter_collection_config = {
+    collection_config
+    | ^"WITH" ~ ^"VECTOR" ~ vector_name
+      ~ "(" ~ vector_diff_block ~ ("," ~ vector_diff_block)* ~ ")"
+    | ^"WITH" ~ ^"SPARSE" ~ vector_name
+      ~ "(" ~ (^"SPARSE" | ^"INDEX") ~ config_block ~ ")"
+}
+vector_diff_block = {
+    ^"HNSW" ~ config_block
+    | ^"QUANTIZATION" ~ config_block
+    | ^"VECTOR" ~ config_block
 }
 drop_collection = { ^"DROP" ~ ^"COLLECTION" ~ collection }
 
@@ -485,6 +563,7 @@ create_index = {
     ~ ^"FOR" ~ field
     ~ (^"TYPE" ~ field_type)?
     ~ (^"WITH" ~ config_block)?
+    ~ (^"WAIT" ~ boolean)?
 }
 drop_index = {
     ^"DROP" ~ ^"INDEX" ~ ^"ON" ~ ^"COLLECTION" ~ collection
@@ -492,21 +571,31 @@ drop_index = {
 }
 
 create_shard_key = {
-    ^"CREATE" ~ ^"SHARD" ~ ^"KEY" ~ string
+    ^"CREATE" ~ ^"SHARD" ~ ^"KEY" ~ shard_key
     ~ ^"ON" ~ ^"COLLECTION" ~ collection
     ~ (^"WITH" ~ shard_key_config)?
 }
 
-// CREATE SHARD KEY config is exactly `shards_number` / `replication_factor`
-// as positive integers (strict reference-parser contract F-15: unknown keys,
+// CREATE SHARD KEY config is `shards_number` / `replication_factor` as
+// positive integers, `placement` as a peer-id list, and `initial_state` as a
+// replica-state string (strict reference-parser contract F-15: unknown keys,
 // zero, negative, and non-integer values are rejected with
 // QQL-PARSE-SHARD-KEY-CONFIG). Keys are matched case-insensitively via
 // per-character alternation instead of `^"…"` literals so no new keyword
 // tables are generated; quoted keys are accepted for reference-parser
 // alignment.
 shard_key_config = { "(" ~ shard_key_config_entry ~ ("," ~ shard_key_config_entry)* ~ ")" }
-shard_key_config_entry = { shard_key_name ~ "=" ~ shard_key_config_value }
-shard_key_name = { shards_number_key | replication_factor_key | string }
+// Value shapes are key-dependent, mirroring the reference parser: counts are
+// positive integers, `placement` is a peer-id list, `initial_state` is a
+// replica-state string. Quoted unknown keys keep the strict integer value so
+// the grammar never accepts a shape the reference parser rejects outright.
+shard_key_config_entry = {
+      (shards_number_key | replication_factor_key) ~ "=" ~ shard_key_config_value
+    | placement_key ~ "=" ~ placement_list
+    | initial_state_key ~ "=" ~ string
+    | string ~ "=" ~ shard_key_config_value
+}
+placement_list = { "[" ~ unsigned_integer ~ ("," ~ unsigned_integer)* ~ "]" }
 // Positive integer *value*: the literal `0` (and any literal whose numeric
 // value is 0, e.g. `00`) is rejected, while leading zeros on nonzero values
 // (`05`) remain accepted, mirroring the reference parser's value-level `> 0`
@@ -524,8 +613,16 @@ replication_factor_key = {
     ~ ("a" | "A") ~ ("t" | "T") ~ ("i" | "I") ~ ("o" | "O") ~ ("n" | "N")
     ~ "_" ~ ("f" | "F") ~ ("a" | "A") ~ ("c" | "C") ~ ("t" | "T") ~ ("o" | "O") ~ ("r" | "R")
 }
+placement_key = {
+    ("p" | "P") ~ ("l" | "L") ~ ("a" | "A") ~ ("c" | "C") ~ ("e" | "E")
+    ~ ("m" | "M") ~ ("e" | "E") ~ ("n" | "N") ~ ("t" | "T")
+}
+initial_state_key = {
+    ("i" | "I") ~ ("n" | "N") ~ ("i" | "I") ~ ("t" | "T") ~ ("i" | "I") ~ ("a" | "A") ~ ("l" | "L")
+    ~ "_" ~ ("s" | "S") ~ ("t" | "T") ~ ("a" | "A") ~ ("t" | "T") ~ ("e" | "E")
+}
 drop_shard_key = {
-    ^"DROP" ~ ^"SHARD" ~ ^"KEY" ~ string
+    ^"DROP" ~ ^"SHARD" ~ ^"KEY" ~ shard_key
     ~ ^"ON" ~ ^"COLLECTION" ~ collection
 }
 
@@ -539,6 +636,15 @@ show_quotas = { ^"SHOW" ~ ^"QUOTAS" }
 set_quota = {
     ^"SET" ~ ^"QUOTA" ~ config_block
     ~ (^"WAIT" ~ boolean)?
+}
+
+// Batch: one Qdrant batch RPC for homogeneous same-collection members.
+// Members are full statements; homogeneity is validated by the lowerer.
+// Trailing clauses carry the shared batch opts: WAIT for mutation batches,
+// PARAMS (timeout / consistency) for query batches.
+batch = {
+    ^"BATCH" ~ "{" ~ (statement ~ (";" ~ statement)*)? ~ ";"? ~ "}"
+    ~ (^"WAIT" ~ boolean)? ~ (^"PARAMS" ~ search_params)?
 }
 
 // Selectors and search parameters
@@ -599,8 +705,14 @@ sparse_vector = {
     ~ "}"
 }
 
+param = { ":" ~ identifier | "?" }
+
+// Routing / partition key: quoted keyword, non-negative integer, or placeholder.
+// One rule so the 11 SHARD clauses and both DDL key positions cannot drift.
+shard_key = { param | string | non_negative_integer }
+
 value = _{ scalar | object | list }
-scalar = _{ string | float | integer | boolean | null | identifier }
+scalar = _{ param | string | float | integer | boolean | null | identifier }
 object = { "{" ~ (object_entry ~ ("," ~ object_entry)*)? ~ "}" }
 object_entry = { object_key ~ ":" ~ value }
 object_key = { name }
@@ -641,7 +753,7 @@ collection = { name }
 vector_name = { name }
 cte_name = { name }
 field = { identifier | string }
-point_id = _{ unsigned_integer | string }
+point_id = _{ param | unsigned_integer | string }
 point_id_list = { "(" ~ point_id ~ ("," ~ point_id)* ~ ")" }
 
 identifier = @{

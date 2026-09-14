@@ -1,3 +1,7 @@
+> Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
+> Operations guides live in `website/src/content/docs/docs/operations/`.
+> This `docs/` file is the source text; edit here, then sync the website copy.
+
 # QQL Documentation
 
 **QQL** is a typed query language for [Qdrant](https://qdrant.tech): one grammar, one plan IR, three backends (REST, gRPC, edge). The language surface tracks **Qdrant ≥ 1.19.0** (OpenAPI / public protos pinned in `qql-runtime`).
@@ -13,12 +17,16 @@
 
 **Pipeline:** parse (`qql-core`) → prepare/embed (`qql-runtime` + `qql-embed`) → plan (`qql-plan` → `PlannedOperation`) → dispatch (REST / gRPC / edge).
 
+### Typed pipeline (0.4.0+)
+
+Every backend answer is one typed `ExecData` variant (`Hits | Groups | Count | Facet | Mutation | Collections | Collection | ShardKeys | Quotas`) — no raw-JSON passthrough (`ExecData::Raw` / `as_raw()` and the legacy `*_json` accessors are removed). gRPC and edge build typed data straight from protobuf / `qdrant_edge`; REST parses its HTTP JSON once per operation against the OpenAPI shape and fails closed with `QQL-BACKEND-ENVELOPE` on a missing or mistyped field instead of defaulting. Formula trees are plan-owned (`PlanFormula`) and collection/index configs are typed plan structs on every transport. Bindings consume the typed report natively (PyO3 `ScoredPoint` / `ExecutionReport`, `ExecutionReport.from_results([...])` for offline tests) — see the [backend compatibility](/docs/reference/backend-compatibility/) matrix, the [error codes](/docs/reference/error-codes/) reference, and the [Python](/docs/sdks/python/) / [Node](/docs/sdks/node/) / [WASM](/docs/sdks/wasm/) SDK pages.
+
 ### Qdrant 1.19 language highlights
 
 | Feature | Notes |
 |---------|--------|
 | `SHOW QUOTAS` / `SET QUOTA (…)` | Cluster REST `GET|PUT /quotas` only; gRPC → `QQL-GRPC-QUOTA`; edge → `QQL-EDGE-UNSUPPORTED-QUOTA` |
-| `FACET field FROM col` | In-database categorical value counts via REST `/collections/{col}/facet` |
+| `FACET field FROM col` | In-database categorical value counts via REST `/collections/{col}/facet` and gRPC `Points.Facet` |
 | `QUERY [...] FROM col` | Implicit vector array literals without requiring `VECTOR` keyword |
 | `WITH PAYLOAD` default | Queries default to returning all payload fields (`true`) when omitted |
 | `memory = 'cold'\|'cached'\|'pinned'` | HNSW / VECTOR / SPARSE / QUANTIZATION / indexes; `payload_memory` is cold\|cached only |

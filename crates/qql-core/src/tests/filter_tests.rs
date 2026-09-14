@@ -239,3 +239,150 @@ fn id_predicate_in() {
     let f = filter_of("QUERY TEXT 'x' FROM docs WHERE id IN (1, 'uuid', 3);").unwrap();
     assert!(matches!(*f, FilterExpr::PointId(PointIdPredicate::In(ref ids)) if ids.len() == 3));
 }
+
+#[test]
+fn min_should() {
+    let f =
+        filter_of("QUERY TEXT 'x' FROM docs WHERE MIN SHOULD 2 (a = 1, b = 2, c = 3);").unwrap();
+    match *f {
+        FilterExpr::MinShould {
+            min_count,
+            ref operands,
+        } => {
+            assert_eq!(min_count, 2);
+            assert_eq!(operands.len(), 3);
+        }
+        other => panic!("expected MinShould, got {other:?}"),
+    }
+}
+
+#[test]
+fn min_should_single_operand() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE MIN SHOULD 1 (a = 1);").unwrap();
+    assert!(matches!(*f, FilterExpr::MinShould { min_count: 1, .. }));
+}
+
+#[test]
+fn min_should_rejects_zero_count() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE MIN SHOULD 0 (a = 1);").unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-MIN-SHOULD");
+}
+
+#[test]
+fn min_does_not_require_should() {
+    // `MIN` stays a usable field name when `SHOULD` does not follow.
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE min = 5;").unwrap();
+    assert!(matches!(*f, FilterExpr::Compare { .. }));
+}
+
+#[test]
+fn min_should_roundtrip_fmt() {
+    let stmt =
+        Parser::parse("QUERY TEXT 'x' FROM docs WHERE MIN SHOULD 2 (a = 1, b MATCH 't');").unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("MIN SHOULD 2 (a = 1, b MATCH 't')"));
+    let reparsed = Parser::parse(&format!("{formatted};")).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn match_tokens() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE title MATCH TOKENS 'red shoes';").unwrap();
+    match *f {
+        FilterExpr::MatchTokens {
+            ref field,
+            ref text,
+        } => {
+            assert_eq!(field, "title");
+            assert_eq!(text, "red shoes");
+        }
+        other => panic!("expected MatchTokens, got {other:?}"),
+    }
+}
+
+#[test]
+fn match_tokens_roundtrip_fmt() {
+    let stmt =
+        Parser::parse("QUERY TEXT 'x' FROM docs WHERE title MATCH TOKENS 'red shoes';").unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("MATCH TOKENS 'red shoes'"));
+    let reparsed = Parser::parse(&format!("{formatted};")).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn match_except() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE tags MATCH EXCEPT ('a', 'b', 1);").unwrap();
+    match *f {
+        FilterExpr::MatchExcept {
+            ref field,
+            ref values,
+        } => {
+            assert_eq!(field, "tags");
+            assert_eq!(values.len(), 3);
+        }
+        other => panic!("expected MatchExcept, got {other:?}"),
+    }
+}
+
+#[test]
+fn match_except_rejects_empty_list() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE tags MATCH EXCEPT ();").unwrap_err();
+    assert_eq!(err.code, "QQL-PARSE-MATCH-EXCEPT");
+}
+
+#[test]
+fn match_except_roundtrip_fmt() {
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM docs WHERE tags MATCH EXCEPT ('a', 1);").unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("MATCH EXCEPT ('a', 1)"));
+    let reparsed = Parser::parse(&format!("{formatted};")).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn uint_literal_overflowing_i64() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE big = 18446744073709551615;").unwrap();
+    match *f {
+        FilterExpr::Compare {
+            ref value,
+            op: ComparisonOp::Eq,
+            ..
+        } => assert!(matches!(
+            value,
+            crate::ast::Value::UInt(18446744073709551615)
+        )),
+        other => panic!("expected Compare, got {other:?}"),
+    }
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM docs WHERE big = 18446744073709551615;").unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("big = 18446744073709551615"));
+    let reparsed = Parser::parse(&format!("{formatted};")).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn uint_point_id() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE id = 18446744073709551615;").unwrap();
+    assert!(matches!(
+        *f,
+        FilterExpr::PointId(PointIdPredicate::Eq(crate::ast::PointId::Number(
+            18446744073709551615
+        )))
+    ));
+}
+
+#[test]
+fn non_iso_string_range_bounds() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE name > 'm';").unwrap();
+    match *f {
+        FilterExpr::Compare {
+            op: ComparisonOp::Gt,
+            ref value,
+            ..
+        } => assert!(matches!(value, crate::ast::Value::Str(s) if s == "m")),
+        other => panic!("expected Compare, got {other:?}"),
+    }
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE name BETWEEN 'a' AND 'm';").unwrap();
+    assert!(matches!(*f, FilterExpr::Between { .. }));
+}

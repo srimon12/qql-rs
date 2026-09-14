@@ -1,17 +1,17 @@
 # QQL release procedure
 
-All public packages use one repository version. The current release is `0.3.0`;
-the corresponding Git tag is `v0.3.0`. The QQL language specification version
-(`1.5`) is independent from the package release version.
+All public packages use one repository version. The current release is `0.4.0`;
+the corresponding Git tag is `v0.4.0`. The QQL language specification version
+(`1.7`) is independent from the package release version.
 
 ## Published artifacts
 
 | Registry | Packages |
 |---|---|
-| crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
+| crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql-convert`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
-| VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.3.0`) |
+| VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.4.0`) |
 | GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
@@ -22,6 +22,7 @@ The native Node.js packages use platform packages. The first supported targets
 are:
 
 - Linux x86-64 with glibc;
+- Linux ARM64 with glibc;
 - macOS x86-64;
 - macOS Apple Silicon;
 - Windows x86-64.
@@ -58,11 +59,13 @@ Packages that must each have a Trusted Publisher:
 ```text
 @veristamp/nqql
 @veristamp/nqql-linux-x64-gnu
+@veristamp/nqql-linux-arm64-gnu
 @veristamp/nqql-darwin-x64
 @veristamp/nqql-darwin-arm64
 @veristamp/nqql-win32-x64-msvc
 @veristamp/nqql-edge
 @veristamp/nqql-edge-linux-x64-gnu
+@veristamp/nqql-edge-linux-arm64-gnu
 @veristamp/nqql-edge-darwin-arm64
 @veristamp/nqql-edge-win32-x64-msvc
 qql-wasm
@@ -129,17 +132,23 @@ server-side branch rules are therefore mandatory.
 ## Prepare a release
 
 1. Work on a topic branch created from `dev`.
-2. Update the single workspace version in `Cargo.toml`.
-3. Update the matching versions in:
-   - `crates/pyqql/pyproject.toml`;
-   - `crates/pyqql-edge/pyproject.toml`;
-   - `crates/nqql/package.json`;
-   - `crates/nqql-edge/package.json`;
-   - Node optional platform dependencies.
-4. Refresh the bundled editor WASM so it matches `crates/qql-wasm`:
+2. Synchronize every version site from the single source of truth (`VERSION`):
 
    ```bash
-   wasm-pack build crates/qql-wasm --target nodejs --out-dir ../../editors/vscode/wasm
+   python3 scripts/check_release.py set 0.4.0
+   ```
+
+   This rewrites the root `Cargo.toml` (`[workspace.package]` and the internal
+   `[workspace.dependencies]` pins), the crate manifests with literal internal
+   path dependencies, both Python `pyproject.toml` files, both npm
+   `package.json` files (including platform `optionalDependencies`), and every
+   release-version mention in this document, then refreshes `Cargo.lock` and
+   re-validates the metadata. `bump major|minor|patch` derives the target from
+   `VERSION`; add `--dry-run` to list the files first.
+3. Rebuild the bundled editor WASM so it ships the new parser:
+
+   ```bash
+   wasm-pack build crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm
    ```
 
    The extension loads the bundle with plain `require()` in a CommonJS
@@ -152,6 +161,9 @@ server-side branch rules are therefore mandatory.
    formatting reject syntax that the grammar, snippets, and completions
    advertise. Verify the exports (e.g. `formatQuery`) exist in
    `editors/vscode/wasm/qql_wasm.d.ts` before continuing.
+4. Move the `[Unreleased]` notes in `CHANGELOG.md` into a `[0.4.0]` section
+   dated today. The script never edits the changelog; check mode fails until
+   the section exists.
 5. If the Qdrant protocol pin moves, re-sync the vendored API surfaces:
 
    ```bash
@@ -166,15 +178,18 @@ server-side branch rules are therefore mandatory.
    (its version is independent of the workspace version), run
    `npm run check` and `npm test` inside `editors/vscode/`, and publish with
    `npx vsce publish` — VSIX binaries are never committed.
-6. Update release notes and user-facing installation documentation.
-7. Validate synchronized metadata:
+7. Update user-facing installation documentation and the remaining prose
+   version mentions: `editors/vscode/README.md` (extension packaging version),
+   `bench/README.md` (historical results only), and the website installation
+   snippets / landing copy.
+8. Validate synchronized metadata:
 
    ```bash
-   python3 scripts/check_release.py --version 0.3.0
+   python3 scripts/check_release.py --version 0.4.0
    ```
 
-8. Open a pull request into `dev` and let CI pass.
-9. Run the `Release` workflow manually from `dev`.
+9. Open a pull request into `dev` and let CI pass.
+10. Run the `Release` workflow manually from `dev`.
 
 A manual Release run builds and packages every artifact but has no publishing
 jobs. Download and inspect:
@@ -196,14 +211,14 @@ Install the artifacts in clean temporary projects before approving the release.
    ```bash
    git switch main
    git pull --ff-only origin main
-   python3 scripts/check_release.py --version 0.3.0
+   python3 scripts/check_release.py --version 0.4.0
    ```
 
 4. Create an annotated tag on that exact commit:
 
    ```bash
-   git tag -a v0.3.0 -m "QQL 0.3.0"
-   git push origin v0.3.0
+   git tag -a v0.4.0 -m "QQL 0.4.0"
+   git push origin v0.4.0
    ```
 
 Only the tag push can publish. The release gate verifies that:
@@ -219,6 +234,7 @@ crates.io publication follows dependency order:
 ```text
 qql-core
 ├── qql-plan
+├── qql-convert
 └── qql-embed
     └── qql
         └── qql-edge
@@ -234,17 +250,18 @@ are published before their root dispatcher packages.
 After the workflow succeeds:
 
 ```bash
-cargo info --registry crates-io qql-core@0.3.0
-cargo info --registry crates-io qql@0.3.0
-cargo info --registry crates-io qql-edge@0.3.0
-cargo install qql-cli@0.3.0 --locked --features edge
+cargo info --registry crates-io qql-core@0.4.0
+cargo info --registry crates-io qql-convert@0.4.0
+cargo info --registry crates-io qql@0.4.0
+cargo info --registry crates-io qql-edge@0.4.0
+cargo install qql-cli@0.4.0 --locked --features edge
 
-python -m pip install pyqql==0.3.0
-python -m pip install pyqql-edge==0.3.0
+python -m pip install pyqql==0.4.0
+python -m pip install pyqql-edge==0.4.0
 
-npm view @veristamp/nqql@0.3.0
-npm view @veristamp/nqql-edge@0.3.0
-npm view qql-wasm@0.3.0
+npm view @veristamp/nqql@0.4.0
+npm view @veristamp/nqql-edge@0.4.0
+npm view qql-wasm@0.4.0
 ```
 
 Install the CLI archive on at least one platform and verify

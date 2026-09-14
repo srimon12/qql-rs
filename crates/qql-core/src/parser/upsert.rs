@@ -1,6 +1,7 @@
-use super::helpers::point_id_from_value;
-use super::{ascii_equal, AstLowerer};
-use crate::ast::{EmbedDirective, EmbedKind, PointVectors, Stmt, UpsertPoint, UpsertStmt, Value};
+use super::helpers::{point_id_from_value, point_vectors_from_value};
+use super::{AstLowerer, ascii_equal};
+use crate::ast::UpsertUpdateMode;
+use crate::ast::{EmbedDirective, EmbedKind, PointEntry, Stmt, UpsertPoint, UpsertStmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
@@ -8,41 +9,56 @@ use alloc::vec::Vec;
 
 impl<'a> AstLowerer<'a> {
     pub fn parse_upsert(&mut self) -> Result<Stmt, QqlError> {
-        let span = self.expect(TokenKind::Upsert)?.span;
+        self.expect(TokenKind::Upsert)?;
         self.expect(TokenKind::Into)?;
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Values)?;
 
         let mut points = Vec::new();
         loop {
-            let mut row = self.parse_payload_dict()?;
-            let id_index = row
-                .iter()
-                .position(|(key, _)| key.eq_ignore_ascii_case("id"))
-                .ok_or_else(|| {
-                    QqlError::validation(
-                        "QQL-VALIDATION-UPSERT-ID",
-                        "each UPSERT row requires an id",
-                        Some(span),
-                    )
-                })?;
-            let (_, id) = row.remove(id_index);
-            let id = point_id_from_value(id, span)?;
-
-            let vectors = if let Some(index) = row
-                .iter()
-                .position(|(key, _)| key.eq_ignore_ascii_case("vector"))
-            {
-                let (_, value) = row.remove(index);
-                Some(point_vectors_from_value(value, span)?)
+            // Whole-point placeholders (`VALUES :p0, :p1` / `VALUES ?, ?`)
+            // bind later to point dicts (or lists of point dicts).
+            if self.peek()?.kind == TokenKind::Colon {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                let span = crate::error::Span::new(colon_tok.span.start, self.prev_span().end);
+                points.push(PointEntry::Param(name, Some(Box::new(span))));
+            } else if self.peek()?.kind == TokenKind::Question {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                points.push(PointEntry::PositionalParam(idx, Some(Box::new(q_tok.span))));
             } else {
-                None
-            };
-            points.push(UpsertPoint {
-                id,
-                vectors,
-                payload: row,
-            });
+                let row_start = self.peek()?.span.start;
+                let mut row = self.parse_payload_dict()?;
+                let row_span = crate::error::Span::new(row_start, self.prev_span().end);
+                let id_index = row
+                    .iter()
+                    .position(|(key, _)| key.eq_ignore_ascii_case("id"))
+                    .ok_or_else(|| {
+                        QqlError::validation(
+                            "QQL-VALIDATION-UPSERT-ID",
+                            "each UPSERT row requires an id",
+                            Some(row_span),
+                        )
+                    })?;
+                let (_, id) = row.remove(id_index);
+                let id = point_id_from_value(id, row_span)?;
+
+                let vectors = if let Some(index) = row
+                    .iter()
+                    .position(|(key, _)| key.eq_ignore_ascii_case("vector"))
+                {
+                    let (_, value) = row.remove(index);
+                    Some(point_vectors_from_value(value, Some(row_span))?)
+                } else {
+                    None
+                };
+                points.push(PointEntry::Inline(UpsertPoint {
+                    id,
+                    vectors,
+                    payload: row,
+                }));
+            }
             if self.peek()?.kind != TokenKind::Comma {
                 break;
             }
@@ -57,21 +73,84 @@ impl<'a> AstLowerer<'a> {
         } else {
             Vec::new()
         };
-
-        let shard_key = if self.peek()?.kind == TokenKind::Shard {
-            self.advance()?;
-            Some(self.parse_string()?)
-        } else {
-            None
-        };
-
+        let (update_filter, update_mode) = self.parse_upsert_guards()?;
+        let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
         Ok(Stmt::Upsert(Box::new(UpsertStmt {
             collection,
             points,
             embedding,
             embed,
+            update_filter,
+            update_mode,
             shard_key,
+            wait,
         })))
+    }
+
+    /// Trailing `UPDATE FILTER <filter>` / `UPDATE MODE <mode>` guards, each
+    /// at most once and in either order.
+    fn parse_upsert_guards(
+        &mut self,
+    ) -> Result<(Option<crate::ast::FilterExpr>, Option<UpsertUpdateMode>), QqlError> {
+        let mut update_filter = None;
+        let mut update_mode = None;
+        loop {
+            // Guards open with UPDATE; SHARD / WAIT / EOF end the scan.
+            if self.peek()?.kind != TokenKind::Update {
+                break;
+            }
+            let second = self.peek_nth(1).kind;
+            if second == TokenKind::Filter {
+                if update_filter.is_some() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate UPDATE FILTER clause",
+                        self.peek()?.span,
+                    ));
+                }
+                self.advance()?;
+                self.advance()?;
+                update_filter = Some(self.parse_filter_expr()?);
+            } else if second == TokenKind::Mode {
+                if update_mode.is_some() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate UPDATE MODE clause",
+                        self.peek()?.span,
+                    ));
+                }
+                self.advance()?;
+                self.advance()?;
+                update_mode = Some(self.parse_upsert_mode()?);
+            } else {
+                break;
+            }
+        }
+        Ok((update_filter, update_mode))
+    }
+
+    /// Parse an upsert write mode word (`INSERT_ONLY` / `UPDATE_ONLY` / `UPSERT`).
+    fn parse_upsert_mode(&mut self) -> Result<UpsertUpdateMode, QqlError> {
+        let tok = self.peek()?;
+        match tok.kind {
+            TokenKind::InsertOnly => {
+                self.advance()?;
+                Ok(UpsertUpdateMode::InsertOnly)
+            }
+            TokenKind::UpdateOnly => {
+                self.advance()?;
+                Ok(UpsertUpdateMode::UpdateOnly)
+            }
+            TokenKind::Upsert => {
+                self.advance()?;
+                Ok(UpsertUpdateMode::Upsert)
+            }
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-UPSERT-MODE",
+                "UPDATE MODE requires insert_only, update_only, or upsert",
+                tok.span,
+            )),
+        }
     }
 
     fn parse_embed_clause(&mut self) -> Result<Vec<EmbedDirective>, QqlError> {
@@ -130,25 +209,5 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
         }
         Ok(directives)
-    }
-}
-
-fn point_vectors_from_value(
-    value: Value,
-    span: crate::error::Span,
-) -> Result<PointVectors, QqlError> {
-    match value {
-        Value::Dict(items)
-            if !items.iter().any(|(key, _)| {
-                key.eq_ignore_ascii_case("indices") || key.eq_ignore_ascii_case("values")
-            }) =>
-        {
-            let mut vectors = Vec::new();
-            for (name, value) in items {
-                vectors.push((name, super::helpers::vector_from_value(value, span)?));
-            }
-            Ok(PointVectors::Named(vectors))
-        }
-        value => super::helpers::vector_from_value(value, span).map(PointVectors::Unnamed),
     }
 }

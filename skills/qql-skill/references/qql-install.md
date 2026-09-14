@@ -18,6 +18,17 @@ on `6333`/`6334`. Older servers will reject new config keys / filter conditions.
 
 ## Rust CLI (`qql`)
 
+Default binary is lean (`rest` + `grpc`); prebuilt archives ship default-only.
+Feature builds come from crates.io with one command (no clone):
+
+```bash
+cargo install qql-cli --locked --features edge
+cargo install qql-cli --locked --features record
+cargo install qql-cli --locked --features full
+```
+
+`qql version` reports the enabled `features` array.
+
 ### From source
 
 ```bash
@@ -41,15 +52,17 @@ Binary: `target/release/qql`.
 | `rest` | HTTP client → Qdrant REST |
 | `grpc` | tonic client → Qdrant gRPC |
 | `edge` | In-process qdrant-edge (no server) |
+| `record` | Transparent REST recorder (`qql record`) |
+| `full` | Alias for `edge,record` |
 
 ### CLI Commands
 
 ```bash
 # Execute a query
-qql exec "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
+qql run "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
 
 # Execute from file
-qql execute script.qql --stop-on-error
+qql run script.qql --stop-on-error
 
 # Explain (no Qdrant needed)
 qql explain "QUERY 'hello' FROM docs USING dense LIMIT 5"
@@ -77,7 +90,7 @@ qql doctor
 ### Verify Installation
 
 ```bash
-./target/release/qql version
+qql version
 ```
 
 ## Rust Library (`qql`)

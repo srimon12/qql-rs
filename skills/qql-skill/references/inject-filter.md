@@ -31,9 +31,10 @@ No `inject_shard_key`. Author `SHARD '…'` in QQL when the tenant is known; use
 ## Propagation
 
 - `QUERY`: top-level + every CTE + nested prefetch queries  
-- `SCROLL` / `COUNT`: statement filter  
-- Mutations: selector / filter merge  
-- `UPSERT` + `Eq`: stamp payload keys  
+- `SCROLL` / `COUNT` / `FACET`: statement filter  
+- Mutations (`DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`, `UPDATE … PAYLOAD`): selector / filter merge  
+- `UPSERT` + `Eq` on a non-`id` field: stamp payload keys  
+- Fail closed: DDL, `SHOW`, `UPDATE … VECTOR`, non-`Eq` / `id` Upsert (`QQL-VALIDATION-FILTER-INJECT`)  
 
 ## Full guide
 

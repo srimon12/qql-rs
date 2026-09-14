@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+{% grid style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%,18rem), 1fr)); gap:1rem;" %}
 
 {% glassCard title="QQL CLI" %}
 Execute scripts, inspect plans, convert REST requests, dump collections, and
@@ -18,6 +18,12 @@ diagnose runtime configuration.
 Explore Python, Node.js, WASM, edge, geo, medical, and SEC retrieval projects.
 
 [Browse the examples](/docs/tools/examples/)
+{% /glassCard %}
+
+{% glassCard title="Operations" %}
+Migrate collections between clusters and dump or restore datasets.
+
+[Open the operations guides](/docs/operations/)
 {% /glassCard %}
 
 {% /grid %}

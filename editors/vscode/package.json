@@ -1,8 +1,8 @@
 {
   "name": "qql-lang",
-  "displayName": "QQL — Qdrant Query Language",
-  "description": "Syntax highlighting, linting, and autocompletion for QQL 1.5 — Qdrant Query Language",
-  "version": "0.3.0",
+  "displayName": "QQL \u2014 Qdrant Query Language",
+  "description": "Syntax highlighting, linting, and autocompletion for QQL 1.7 \u2014 Qdrant Query Language",
+  "version": "0.4.0",
   "publisher": "srimon12",
   "license": "MIT",
   "icon": "icon.png",
@@ -22,8 +22,7 @@
   "categories": [
     "Programming Languages",
     "Linters",
-    "Snippets",
-    "Other"
+    "Snippets"
   ],
   "keywords": [
     "qql",
@@ -36,12 +35,25 @@
     "rag"
   ],
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.137.0"
   },
   "activationEvents": [
     "onLanguage:qql"
   ],
   "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "QQL linting, completions, and explain work on untrusted files without executing them; only qql.run performs network requests on explicit user invocation."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "The bundled WASM parser is loaded from the extension install directory on disk."
+    }
+  },
   "contributes": {
     "languages": [
       {
@@ -124,10 +136,45 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "qql.showTokens",
+        "title": "Show Tokens",
+        "category": "QQL",
+        "icon": "$(symbol-keyword)"
+      },
+      {
+        "command": "qql.run",
+        "title": "Run Statement",
+        "category": "QQL",
+        "icon": "$(play)"
+      },
+      {
+        "command": "qql.addFilter",
+        "title": "Add Tenant Filter",
+        "category": "QQL",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "qql.validateWorkspace",
+        "title": "Validate Workspace (.qql)",
+        "category": "QQL",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "qql.selectParamsProfile",
+        "title": "Select Params Profile",
+        "category": "QQL",
+        "icon": "$(database)"
+      },
+      {
         "command": "qql.analyze",
         "title": "Re-analyze Document",
         "category": "QQL",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "qql.noop",
+        "title": "No-op (label-only CodeLens anchor)",
+        "category": "QQL"
       }
     ],
     "menus": {
@@ -173,6 +220,26 @@
           "when": "resourceLangId == qql"
         },
         {
+          "command": "qql.showTokens",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.run",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.addFilter",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.validateWorkspace",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.selectParamsProfile",
+          "when": "resourceLangId == qql"
+        },
+        {
           "command": "qql.analyze",
           "when": "resourceLangId == qql"
         },
@@ -207,8 +274,28 @@
           "group": "qql@4"
         },
         {
-          "command": "qql.analyze",
+          "command": "qql.showTokens",
           "group": "qql@5"
+        },
+        {
+          "command": "qql.run",
+          "group": "qql@6"
+        },
+        {
+          "command": "qql.addFilter",
+          "group": "qql@7"
+        },
+        {
+          "command": "qql.validateWorkspace",
+          "group": "qql@8"
+        },
+        {
+          "command": "qql.selectParamsProfile",
+          "group": "qql@9"
+        },
+        {
+          "command": "qql.analyze",
+          "group": "qql@10"
         }
       ]
     },
@@ -257,6 +344,24 @@
           "type": "string",
           "default": "http://localhost:6333",
           "description": "Base URL used when generating curl commands for compiled REST routes."
+        },
+        "qql.params": {
+          "type": [
+            "object",
+            "array"
+          ],
+          "default": {},
+          "description": "Bind values for :name (object) or ? (array) placeholders. A `-- qql-params: {...}` header overrides this per file."
+        },
+        "qql.paramProfiles": {
+          "type": "object",
+          "default": {},
+          "description": "Named params sets for :name / ? placeholders. Activate one via qql.activeProfile or the status bar."
+        },
+        "qql.activeProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Active qql.paramProfiles entry (empty = default qql.params). The -- qql-params header still wins per file."
         }
       }
     },
@@ -275,28 +380,30 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run check && npm run compile",
+    "vscode:prepublish": "npm test && npm run check && npm run compile",
+    "precompile": "node -e \"require('node:fs').rmSync('out',{recursive:true,force:true})\"",
     "compile": "tsc -p tsconfig.json",
     "watch": "tsc --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "biome check src package.json tsconfig.json biome.json",
-    "lint:fix": "biome check --write src package.json tsconfig.json biome.json",
-    "format": "biome format --write src package.json tsconfig.json biome.json",
+    "lint": "biome check src test snippets package.json tsconfig.json biome.json language-configuration.json",
+    "lint:fix": "biome check --write src test snippets package.json tsconfig.json biome.json language-configuration.json",
+    "format": "biome format --write src test snippets package.json tsconfig.json biome.json language-configuration.json",
     "check": "npm run typecheck && npm run lint",
     "fix": "npm run lint:fix && npm run typecheck",
-    "test": "node --test",
+    "test": "node --test \"test/*.test.js\"",
+    "build:wasm": "wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ./wasm",
     "package": "npx @vscode/vsce package",
     "publish": "npx @vscode/vsce publish"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.6",
-    "@types/node": "^26.1.2",
-    "@types/vscode": "^1.85.0",
+    "@biomejs/biome": "^2.5.13",
+    "@types/node": "^26.5.1",
+    "@types/vscode": "^1.137.0",
     "@vscode/vsce": "^3.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^7.0.2"
   },
   "overrides": {
-    "js-yaml": "4.3.1",
+    "js-yaml": "4.3.2",
     "brace-expansion": "5.0.9",
     "qs": "6.16.0"
   }

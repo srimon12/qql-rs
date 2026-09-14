@@ -63,7 +63,7 @@ def build_statements():
 
     # Parameterized RRF
     stmts.append(("search-rrf-params",
-        f"QUERY HYBRID TEXT 'emergency critical neurological' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} WITH (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 3"))
+        f"QUERY HYBRID TEXT 'emergency critical neurological' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} PARAMS (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 3"))
 
     # MMR
     stmts.append(("search-mmr",

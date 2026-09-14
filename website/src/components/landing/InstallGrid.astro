@@ -1,8 +1,15 @@
 ---
+import CopyButton from "@qql/ui/CopyButton.astro";
+
 interface Props {
 	heading: string;
 	sub: string;
-	installs: readonly { name: string; cmd: string; href: string }[];
+	installs: readonly {
+		name: string;
+		cmd: string;
+		href: string;
+		note?: string;
+	}[];
 	footHref?: string;
 	footLabel?: string;
 }
@@ -10,29 +17,39 @@ interface Props {
 const { heading, sub, installs, footHref, footLabel } = Astro.props;
 ---
 
-<section class="landing-section" aria-labelledby="install-heading">
-  <div class="landing-shell landing-fade-up">
-    <header class="landing-section__head">
-      <h2 id="install-heading">{heading}</h2>
-      <p class="landing-section__sub">{sub}</p>
+<section class="border-t border-[var(--sl-color-gray-5)] py-[clamp(3rem,6vw,4.5rem)]" aria-labelledby="install-heading">
+  <div class="shell">
+    <header class="max-w-[44rem] reveal">
+      <h2 id="install-heading" class="h-section m-0">{heading}</h2>
+      <p class="m-0 mt-4 text-[1.0625rem] leading-[1.6] text-[var(--sl-color-gray-2)]">{sub}</p>
     </header>
 
-    <div class="landing-installs">
+    <ul class="mt-10 grid list-none grid-cols-1 gap-px overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-2 lg:grid-cols-3">
       {
         installs.map((item) => (
-          <a class="landing-install" href={item.href}>
-            <span class="landing-install__name">{item.name}</span>
-            <code class="landing-install__cmd">{item.cmd}</code>
-            <span class="landing-install__arrow" aria-hidden="true">→</span>
-          </a>
+          <li class="flex min-w-0 flex-col gap-3 p-5 bg-[var(--sl-color-bg)]">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="m-0 text-base font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">{item.name}</h3>
+              <a class="link font-mono text-[0.6875rem]" href={item.href}>Docs →</a>
+            </div>
+            <div class="flex items-center gap-3">
+              <code class="min-w-0 flex-1 break-all whitespace-normal leading-relaxed font-mono text-[0.72rem] text-[var(--sl-color-gray-2)]" title={item.cmd}>{item.cmd}</code>
+              <CopyButton
+                text={item.cmd}
+                class="shrink-0"
+                ariaLabel={`Copy the ${item.name} install command`}
+              />
+            </div>
+            {item.note && <p class="m-0 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)]">{item.note}</p>}
+          </li>
         ))
       }
-    </div>
+    </ul>
 
     {
       footHref && footLabel && (
-        <p class="landing-section__foot">
-          <a href={footHref}>{footLabel} →</a>
+        <p class="m-0 mt-8">
+          <a class="link font-mono text-[0.75rem]" href={footHref}>{footLabel} →</a>
         </p>
       )
     }

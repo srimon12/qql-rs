@@ -15,7 +15,7 @@ schema-as-code, REST or gRPC. Language surface tracks **Qdrant ≥ 1.19**
 pip install pyqql
 ```
 
-Python **3.8+** (stable ABI wheels). REST + gRPC included.
+Python **3.10+** (stable ABI wheels). REST + gRPC included.
 
 ## Quick start
 
@@ -56,6 +56,11 @@ client.execute(stmt)
 | `compile_query` / `explain` | Offline plan / REST projection |
 | `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
 | `execute` / `execute_async` | One-shot free functions (`params=` same as `bind`) |
+| `execute_hits` / `execute_async_hits` | One-shot free functions returning `List[ScoredPoint]` |
+| `ExecutionReport.hits/points/facet/count/groups` | Typed result accessors on every report |
+| `connect(url, ...)` + cursor | PEP 249 driver: `execute`/`executemany`/`fetchone`/`fetchmany`/`fetchall`/`nextset`/iteration, `description`, `rowcount`; `commit()` no-op, `rollback()` raises |
+| `Client.explain_analyze` | Static plan + measured client/server timings for one statement |
+| `report.telemetry` | Per-result server telemetry (`time_s`, hardware/inference `usage`) when reported |
 
 ### `inject_filter` operators
 
@@ -128,5 +133,5 @@ pyqql.execute("SHOW COLLECTIONS", url="http://localhost:6333", route_affinity="s
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [Filters](../../docs/filters.md) · [inject_filter](../../docs/inject_filter.md)
-- [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md) · [Python skill](../../skills/qql-skill/references/python-sdk.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Filters](https://github.com/srimon12/qql-rs/blob/main/docs/filters.md) · [inject_filter](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md)
+- [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md) · [Python skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/python-sdk.md)

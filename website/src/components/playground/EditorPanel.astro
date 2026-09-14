@@ -1,35 +1,43 @@
-<section class="flex min-h-0 min-w-0 flex-col border-b border-[var(--sl-color-gray-5)] lg:border-b-0" aria-labelledby="editor-title">
-  <div class="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-3">
-    <div>
-      <span class="block font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Source</span>
-      <h2 id="editor-title" class="!m-0 !mt-0.5 font-(family-name:--sl-font) !text-[0.95rem] !font-semibold text-[var(--sl-color-white)]">QQL editor</h2>
-    </div>
-    <div class="flex items-center gap-1.5 overflow-x-auto">
-      <button class="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-presets>
-        Examples
-        <kbd class="hidden rounded border border-current/20 px-1 font-mono text-[0.62rem] opacity-70 sm:inline" data-kbd>⌘K</kbd>
+<section class="flex min-h-0 min-w-0 flex-col" aria-labelledby="editor-title">
+  <div class="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-3">
+    <h2 id="editor-title" class="flex min-w-0 items-center gap-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
+      <span class="h-3 w-px shrink-0 bg-[var(--sl-color-accent)]" aria-hidden="true"></span>
+      <span class="truncate">Source</span>
+    </h2>
+
+    <div class="flex min-w-0 items-center gap-1">
+      <button class="app-action" type="button" data-open-presets aria-label="Example fixtures" title="Load a conformance fixture">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg>
+        <span class="hidden sm:inline">Examples</span>
       </button>
-      <button class="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-policy>
-        Policy
+      <button class="app-action" type="button" data-open-policy aria-label="Tenant policy" title="Inject a trusted tenant predicate after parse">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9v-6L12 3Z"/></svg>
+        <span class="hidden sm:inline">Policy</span>
         <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]" data-policy-dot></span>
       </button>
-      <button class="app-chip hidden max-w-56 sm:inline-flex" type="button" data-policy-chip hidden title="Edit tenant policy">
+      <button class="app-chip hidden max-w-56 sm:inline-flex" type="button" data-policy-chip hidden title="Edit the injected tenant policy">
         <span class="app-chip__label">Policy</span>
         <span class="app-chip__value" data-policy-chip-value></span>
       </button>
       <button
-        class="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
+        class="app-action"
         type="button"
         data-share
         popovertarget="share-menu"
         title="Share playground link"
+        aria-label="Share playground link"
         aria-haspopup="dialog"
         aria-expanded="false"
         aria-controls="share-menu"
       >
-        Share
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.9 7.6-4.4M8.2 13.1l7.6 4.4"/></svg>
+        <span class="hidden sm:inline">Share</span>
       </button>
-      <button class="ml-1 inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-[var(--sl-color-accent)] px-3.5 font-mono text-[0.78rem] font-semibold text-white transition hover:brightness-110 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-run disabled>
+      <button class="app-action" type="button" data-format aria-label="Format query" title="Format with the canonical formatter (same as qql fmt)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+        <span class="hidden sm:inline">Format</span>
+      </button>
+      <button class="app-action app-action--lg app-action--primary ml-1" type="button" data-run aria-label="Run query" disabled>
         <svg class="size-3 fill-current" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m8 5 11 7-11 7V5Z"></path>
         </svg>
@@ -41,15 +49,8 @@
 
   <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
     <div id="qql-editor" aria-label="QQL source editor" spellcheck="false"></div>
-    <div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[color-mix(in_srgb,var(--sl-color-bg)_90%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
-      <div class="w-72 max-w-[80%] space-y-2.5 px-6" aria-hidden="true">
-        <span class="block h-3 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)]"></span>
-        <span class="block h-3 w-11/12 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:120ms]"></span>
-        <span class="block h-3 w-4/5 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:240ms]"></span>
-        <span class="block h-3 w-9/12 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:360ms]"></span>
-        <span class="block h-3 w-1/2 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:480ms]"></span>
-      </div>
-      <span>Loading the current qql-rs WASM…</span>
+    <div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[color-mix(in_srgb,var(--sl-color-bg)_92%,transparent)] p-6 text-center font-mono text-[0.72rem] text-[var(--sl-color-gray-3)]" data-editor-loading role="status" aria-live="polite">
+      Loading the current qql-rs WASM…
     </div>
     <noscript>
       <p class="p-4">The playground requires JavaScript and WebAssembly.</p>
@@ -68,7 +69,7 @@
     <p class="app-share-pop__hint">Anyone with the link opens this QQL in the playground.</p>
     <label class="app-share-pop__field">
       <span class="sr-only">Playground link</span>
-      <input class="app-input app-share-pop__url" type="text" readonly data-share-url spellcheck="false" />
+      <input class="app-input app-share-pop__url" type="text" name="share-url" readonly data-share-url spellcheck="false" />
       <button class="app-share-pop__copy" type="button" data-share-copy aria-label="Copy link">
         <svg class="app-share-pop__icon" data-share-copy-icon viewBox="0 0 24 24" aria-hidden="true">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
@@ -120,7 +121,7 @@
     </div>
   </div>
 
-  <div class="flex min-h-11 items-center gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-2 font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
+  <div class="flex min-h-8 shrink-0 items-center gap-3 border-t border-[var(--sl-color-gray-5)] px-3 py-1.5 font-mono text-[0.72rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
     <span class="inline-flex shrink-0 items-center gap-1.5 text-[var(--sl-color-gray-2)]" data-validation-badge>
       <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]"></span>
       Loading qql-wasm

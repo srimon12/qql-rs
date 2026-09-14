@@ -3,7 +3,7 @@
 Transport-free QQL frontend: lexer, parser, typed AST, validation,
 `inject_filter`, and explain. **No I/O, no Qdrant JSON.**
 
-Canonical grammar: [`language/v1/grammar.pest`](../../language/v1/grammar.pest)
+Canonical grammar: [`language/v1/grammar.pest`](https://github.com/srimon12/qql-rs/blob/main/language/v1/grammar.pest)
 → `qql-grammar-gen` → checked-in `grammar/` (do not edit by hand).
 
 ## Proposition
@@ -15,8 +15,9 @@ policy here, then hand `Stmt` to `qql-plan` / runtime.
 
 | Kind | Examples |
 |------|----------|
-| Query | `QUERY`, CTEs, hybrid, formula, rerank, recommend, … |
-| DML | `UPSERT`, `DELETE`, `SCROLL`, `COUNT`, payload/vector updates |
+| Query | `QUERY` (nearest, hybrid, formula, recommend, `RERANK`, **`CROSS RERANK`**, …), CTEs |
+| Retrieval | `SCROLL`, `COUNT`, **`FACET`** |
+| DML | `UPSERT`, `DELETE`, payload/vector updates (`DELETE PAYLOAD`, …) |
 | DDL | `CREATE/ALTER/DROP COLLECTION`, indexes, **`CREATE/DROP/SHOW SHARD KEY`** |
 | Meta | `SHOW COLLECTIONS` / `SHOW COLLECTION` |
 | Quotas | **`SHOW QUOTAS`** / **`SET QUOTA (…)`** (Qdrant ≥ 1.19; REST at execute time) |
@@ -37,6 +38,7 @@ QUERY <expr> FROM <coll>
 |------|------|
 | `CREATE SHARD KEY 'acme' ON COLLECTION c` | DDL — define custom partition |
 | `… SHARD 'acme'` | DML — route this request |
+| `… SHARD 101` | DML — route to a numeric partition (never coerced to `"101"`) |
 
 Routing field after parse: `stmt.set_shard_key(Some("acme".into()))`  
 (same AST field; **no** `inject_shard_key`).
@@ -85,7 +87,9 @@ let mut stmt = Parser::parse(
     "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
 )?;
 
-// Isolation (recurses CTEs / prefetches)
+// Isolation (recurses CTEs / prefetches). Fail-closed on DDL / SHOW /
+// UPDATE VECTOR, and on UPSERT unless Eq on a non-id payload field.
+// ComparisonOp::parse_inject_op is ASCII-case-insensitive (`EQ`, ` Gt `).
 inject_filter(
     &mut stmt,
     "tenant_id",
@@ -106,7 +110,7 @@ stmt.set_shard_key(Some("org_99".into()));
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [inject_filter](../../docs/inject_filter.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [inject_filter](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md) · [Multitenancy](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-multitenancy.md)
 
 ## Test
 

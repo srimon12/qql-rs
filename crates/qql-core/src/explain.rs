@@ -6,7 +6,7 @@
 
 use crate::ast::*;
 use crate::error::QqlError;
-use crate::fmt::{render_filter, render_search_params};
+use crate::fmt::{render_filter, render_point_selector, render_search_params};
 use crate::parser::Parser;
 use alloc::format;
 use alloc::string::String;
@@ -46,6 +46,16 @@ pub fn explain_nodes(statements: &[Stmt]) -> String {
 pub fn explain_node(statement: &Stmt) -> String {
     let mut output = String::new();
     match statement {
+        Stmt::Batch(batch) => {
+            let _ = writeln!(
+                output,
+                "Statement: BATCH [{} members]",
+                batch.statements.len()
+            );
+            for (i, member) in batch.statements.iter().enumerate() {
+                let _ = writeln!(output, "├── Member {}: {}", i + 1, member.stmt_kind());
+            }
+        }
         Stmt::Query(query) => {
             let intent = query_intent(&query.expression);
             let _ = writeln!(output, "Statement: QUERY [{}]", intent);
@@ -61,7 +71,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             }
 
             if let Some(shard) = &query.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+                let _ = writeln!(output, "├── Shard Key: {shard}");
             }
 
             if !query.ctes.is_empty() {
@@ -83,18 +93,18 @@ pub fn explain_node(statement: &Stmt) -> String {
                 }
             }
 
-            if let Some(prefetches) = query_prefetches(&query.expression) {
-                if !prefetches.is_empty() {
-                    let _ = writeln!(output, "├── Prefetches ({}):", prefetches.len());
-                    for (i, pf) in prefetches.iter().enumerate() {
-                        let is_last = i + 1 == prefetches.len();
-                        let prefix = if is_last {
-                            "│   └──"
-                        } else {
-                            "│   ├──"
-                        };
-                        let _ = writeln!(output, "{} [{}] {}", prefix, i + 1, pf);
-                    }
+            if let Some(prefetches) = query_prefetches(&query.expression)
+                && !prefetches.is_empty()
+            {
+                let _ = writeln!(output, "├── Prefetches ({}):", prefetches.len());
+                for (i, pf) in prefetches.iter().enumerate() {
+                    let is_last = i + 1 == prefetches.len();
+                    let prefix = if is_last {
+                        "│   └──"
+                    } else {
+                        "│   ├──"
+                    };
+                    let _ = writeln!(output, "{} [{}] {}", prefix, i + 1, pf);
                 }
             }
 
@@ -153,12 +163,18 @@ pub fn explain_node(statement: &Stmt) -> String {
                 }
             }
 
-            let limit = query
-                .page
-                .limit
-                .map(|l| l.to_string())
-                .unwrap_or_else(|| "default".into());
-            let offset = query.page.offset.unwrap_or(0);
+            let limit = if let Some(param) = &query.page.limit_param {
+                param.clone()
+            } else if let Some(l) = query.page.limit {
+                l.to_string()
+            } else {
+                "default".into()
+            };
+            let offset = if let Some(param) = &query.page.offset_param {
+                param.clone()
+            } else {
+                query.page.offset.unwrap_or(0).to_string()
+            };
             let _ = writeln!(output, "└── Pagination: limit={}, offset={}", limit, offset);
         }
         Stmt::Scroll(statement) => {
@@ -167,22 +183,46 @@ pub fn explain_node(statement: &Stmt) -> String {
             if let Some(f) = &statement.filter {
                 let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
-            if let Some(shard) = &statement.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+            if let Some(order) = &statement.order_by {
+                let _ = writeln!(
+                    output,
+                    "├── Order By: {} {:?}",
+                    order.field, order.direction
+                );
             }
-            let _ = writeln!(output, "└── Limit: {}", statement.limit);
+            if let Some(shard) = &statement.shard_key {
+                let _ = writeln!(output, "├── Shard Key: {shard}");
+            }
+            if let Some(param) = &statement.limit_param {
+                let _ = writeln!(output, "└── Limit: {}", param);
+            } else {
+                let _ = writeln!(output, "└── Limit: {}", statement.limit);
+            }
         }
         Stmt::Upsert(statement) => {
             output.push_str("Statement: UPSERT\n");
             let _ = writeln!(output, "├── Collection: {}", statement.collection);
             let _ = writeln!(output, "├── Points: {}", statement.points.len());
+            if let Some(filter) = &statement.update_filter {
+                let _ = writeln!(
+                    output,
+                    "├── Update Filter: {}",
+                    crate::fmt::render_filter(filter)
+                );
+            }
+            if let Some(mode) = &statement.update_mode {
+                let _ = writeln!(output, "├── Update Mode: {mode:?}");
+            }
             if let Some(shard) = &statement.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+                let _ = writeln!(output, "├── Shard Key: {}", shard);
             }
             if !statement.embed.is_empty() {
-                let _ = writeln!(output, "└── Embed Directives: {}", statement.embed.len());
+                let _ = writeln!(output, "├── Embed Directives: {}", statement.embed.len());
             } else {
-                output.push_str("└── Status: direct payload\n");
+                output.push_str("├── Status: direct payload\n");
+            }
+            if let Some(wait) = statement.wait {
+                let _ = writeln!(output, "└── Wait: {wait}");
             }
         }
         Stmt::CreateCollection(statement) => {
@@ -256,7 +296,12 @@ pub fn explain_node(statement: &Stmt) -> String {
             if let Some(f) = &statement.filter {
                 let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
-            if let Some(l) = statement.limit {
+            if let Some(shard) = &statement.shard_key {
+                let _ = writeln!(output, "├── Shard Key: {shard}");
+            }
+            if let Some(param) = &statement.limit_param {
+                let _ = writeln!(output, "├── Limit: {}", param);
+            } else if let Some(l) = statement.limit {
                 let _ = writeln!(output, "├── Limit: {}", l);
             }
             let _ = writeln!(output, "└── Exact: {}", statement.exact.unwrap_or(false));
@@ -283,12 +328,24 @@ pub fn explain_node(statement: &Stmt) -> String {
         }
         Stmt::Delete(statement) => {
             let _ = writeln!(output, "Statement: DELETE FROM {}", statement.collection);
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_ref(),
+                statement.wait,
+            );
         }
         Stmt::ClearPayload(statement) => {
             let _ = writeln!(
                 output,
                 "Statement: CLEAR PAYLOAD ON {}",
                 statement.collection
+            );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_ref(),
+                statement.wait,
             );
         }
         Stmt::DeletePayload(statement) => {
@@ -297,12 +354,24 @@ pub fn explain_node(statement: &Stmt) -> String {
                 "Statement: DELETE PAYLOAD ({:?}) ON {}",
                 statement.keys, statement.collection
             );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_ref(),
+                statement.wait,
+            );
         }
         Stmt::DeleteVector(statement) => {
             let _ = writeln!(
                 output,
                 "Statement: DELETE VECTOR ({:?}) ON {}",
                 statement.vector_names, statement.collection
+            );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_ref(),
+                statement.wait,
             );
         }
         Stmt::UpdateVector(statement) => {
@@ -311,12 +380,31 @@ pub fn explain_node(statement: &Stmt) -> String {
                 "Statement: UPDATE VECTOR ON {}",
                 statement.collection
             );
+            let _ = writeln!(output, "├── Points: {}", statement.points.len());
+            if let Some(shard) = &statement.shard_key {
+                let _ = writeln!(output, "├── Shard Key: {shard}");
+            }
+            if let Some(wait) = statement.wait {
+                let _ = writeln!(output, "└── Wait: {wait}");
+            }
         }
         Stmt::UpdatePayload(statement) => {
             let _ = writeln!(
                 output,
                 "Statement: UPDATE PAYLOAD ON {}",
                 statement.collection
+            );
+            if let Some(key) = &statement.key {
+                let _ = writeln!(output, "├── Key: {key}");
+            }
+            if statement.overwrite {
+                output.push_str("├── Overwrite: true\n");
+            }
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_ref(),
+                statement.wait,
             );
         }
     }
@@ -357,8 +445,12 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Nearest { input, .. } => match input {
             QueryInput::Text { .. } => "nearest neighbors from text",
             QueryInput::Image { .. } => "nearest neighbors from an image",
+            QueryInput::Object { .. } => "nearest neighbors from an inference object",
             QueryInput::Vector(_) => "nearest neighbors from a vector",
             QueryInput::Point(_) => "nearest neighbors from a point",
+            QueryInput::Param(..) | QueryInput::PositionalParam(..) => {
+                "nearest neighbors from query parameter"
+            }
         },
         QueryExpr::Recommend { .. } => "recommend from positive and negative examples",
         QueryExpr::Context { .. } => "context search",
@@ -399,15 +491,33 @@ fn query_prefetches(expression: &QueryExpr) -> Option<Vec<String>> {
     }
 }
 
+fn explain_mutation_tail(
+    output: &mut String,
+    selector: &PointSelector,
+    shard_key: Option<&ShardKey>,
+    wait: Option<bool>,
+) {
+    let _ = writeln!(output, "├── Selector: {}", render_point_selector(selector));
+    if let Some(shard) = shard_key {
+        let _ = writeln!(output, "├── Shard Key: {shard}");
+    }
+    if let Some(wait) = wait {
+        let _ = writeln!(output, "└── Wait: {wait}");
+    }
+}
+
 fn render_quota_value(value: &Value) -> String {
     match value {
         Value::Str(s) => format!("'{}'", s),
         Value::Int(n) => n.to_string(),
+        Value::UInt(n) => n.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".into(),
         Value::Dict(_) => "<object>".into(),
-        Value::List(_) => "<list>".into(),
+        Value::List(_) | Value::F32Array(_) => "<list>".into(),
+        Value::Param(name, _) => format!(":{}", name),
+        Value::PositionalParam(..) => "?".into(),
     }
 }
 
@@ -425,5 +535,27 @@ mod tests {
         assert!(plan.contains("├── Shard Key: 'east'"));
         assert!(plan.contains("├── Filter: department = 'cardio'"));
         assert!(plan.contains("└── Pagination: limit=5, offset=0"));
+    }
+
+    #[test]
+    fn explain_dml_includes_selector_and_shard() {
+        let plan =
+            explain("DELETE FROM docs WHERE status = 'archived' SHARD 'east' WAIT true;").unwrap();
+        assert!(plan.contains("Statement: DELETE FROM docs"));
+        assert!(plan.contains("Selector:"));
+        assert!(plan.contains("status = 'archived'"));
+        assert!(plan.contains("Shard Key: 'east'"));
+        assert!(plan.contains("Wait: true"));
+    }
+
+    #[test]
+    fn explain_upsert_includes_shard_and_wait() {
+        let plan =
+            explain("UPSERT INTO docs VALUES {id: 1, text: 'a'} SHARD 101 WAIT true;").unwrap();
+        assert!(plan.contains("Statement: UPSERT"));
+        assert!(plan.contains("Shard Key: 101"));
+        assert!(plan.contains("Wait: true"));
+        let plain = explain("UPSERT INTO docs VALUES {id: 1, text: 'a'};").unwrap();
+        assert!(!plain.contains("Wait:"));
     }
 }

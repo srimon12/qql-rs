@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { getDocumentParams } from "./params";
 import { extractStatementSpans } from "./statements";
 import type { StatementSpan, WasmAnalyzeResult } from "./types";
 import { analyzeQql, isWasmReady } from "./wasm";
@@ -14,6 +15,13 @@ export interface DocumentAnalysis {
 
 type AnalysisListener = (analysis: DocumentAnalysis) => void;
 
+/** Error sink for analysis failures. Defaults to the extension host console. */
+export type AnalysisErrorLogger = (message: string, err: unknown) => void;
+
+const defaultLogger: AnalysisErrorLogger = (message, err) => {
+  console.error(message, err);
+};
+
 /**
  * Central analysis cache. One analyze() per document version; providers only
  * *read* the cache. Lifecycle events (open/edit/switch) own re-analysis and
@@ -23,13 +31,15 @@ export class AnalysisService implements vscode.Disposable {
   private readonly cache = new Map<string, DocumentAnalysis>();
   private readonly timers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
   private readonly listeners = new Set<AnalysisListener>();
+  private readonly logError: AnalysisErrorLogger;
   private debounceMs: number;
   /** Prevent re-entrant notify storms while a listener is running. */
   private notifying = false;
   private pendingNotifications = new Map<string, DocumentAnalysis>();
 
-  constructor(debounceMs = 300) {
+  constructor(debounceMs = 300, logError: AnalysisErrorLogger = defaultLogger) {
     this.debounceMs = debounceMs;
+    this.logError = logError;
   }
 
   setDebounceMs(ms: number): void {
@@ -80,7 +90,9 @@ export class AnalysisService implements vscode.Disposable {
     const source = document.getText();
 
     try {
-      const result = analyzeQql(source);
+      // Header (`-- qql-params:`) wins, else the `qql.params` setting.
+      // analyzeQql only re-analyzes bound text when raw fails with QQL-BIND-*.
+      const result = analyzeQql(source, getDocumentParams(document));
       const statements = extractStatementSpans(source, result);
       const analysis: DocumentAnalysis = {
         uri: key,
@@ -94,7 +106,7 @@ export class AnalysisService implements vscode.Disposable {
       this.notify(analysis);
       return analysis;
     } catch (err) {
-      console.error("[qql-lang] analyze error:", err);
+      this.logError("[qql-lang] analyze error:", err);
       return this.cache.get(key);
     }
   }
@@ -145,7 +157,7 @@ export class AnalysisService implements vscode.Disposable {
           try {
             listener(batch);
           } catch (err) {
-            console.error("[qql-lang] analysis listener error:", err);
+            this.logError("[qql-lang] analysis listener error:", err);
           }
         }
         // Flush any notifies that were queued during listener execution

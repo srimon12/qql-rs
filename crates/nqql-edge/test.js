@@ -278,8 +278,7 @@ console.log("  ✓ Client.compile");
   console.log(`  ✓ QUERY returned ${qResults.length} result(s) (top id: ${qResults[0]?.id})`);
 
   r = await exec.execute("COUNT FROM nqql_test");
-  const countVal = r.results[0].data?.result?.count ?? r.results[0].data;
-  assert.strictEqual(countVal, 2);
+  assert.strictEqual(r.results[0].data.count, 2);
   console.log("  ✓ COUNT = 2");
 
   r = await exec.execute([
@@ -295,8 +294,7 @@ console.log("  ✓ Client.compile");
   console.log("  ✓ DELETE doc-2");
 
   r = await exec.execute("COUNT FROM nqql_test");
-  const countAfterDel = r.results[0].data?.result?.count ?? r.results[0].data;
-  assert.strictEqual(countAfterDel, 1);
+  assert.strictEqual(r.results[0].data.count, 1);
   console.log("  ✓ COUNT after delete = 1");
 
   // Numeric point IDs must work (qdrant-edge NumId)
@@ -407,13 +405,24 @@ console.log("  ✓ Client.compile");
   assert.strictEqual(r.ok, false, "edge must reject clustered SHARD routing");
   console.log("  ✓ SHARD clause is rejected explicitly in edge mode");
 
-  // 5g. GROUP BY not supported in edge
-  r = await exec.execute(
-    `QUERY 'x' FROM nqql_test USING dense GROUP BY meta.cat LIMIT 5`,
-    { onError: "continue" },
+  // 5g. GROUP BY executes in edge (query_groups)
+  await exec.execute("CREATE COLLECTION nqql_group_test (dense VECTOR(3, DOT))");
+  await exec.execute(
+    "CREATE INDEX ON COLLECTION nqql_group_test FOR district TYPE keyword",
   );
-  assert.strictEqual(r.ok, false, "query_groups should fail in edge");
-  console.log("  ✓ GROUP BY rejected in edge mode");
+  await exec.execute(
+    "UPSERT INTO nqql_group_test VALUES " +
+      "{id: 1, vector: {dense: [3.0, 0.0, 0.0]}, district: 'NYC'}, " +
+      "{id: 2, vector: {dense: [2.0, 0.0, 0.0]}, district: 'SF'}",
+  );
+  r = await exec.execute(
+    "QUERY [3.0, 0.0, 0.0] FROM nqql_group_test USING dense GROUP BY district LIMIT 5",
+  );
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const edgeGroups = r.groups(0);
+  assert.deepStrictEqual(edgeGroups.map((g) => g.id), ["NYC", "SF"]);
+  await exec.execute("DROP COLLECTION nqql_group_test");
+  console.log("  ✓ GROUP BY executes in edge mode");
 
   // The original qdrant-edge API accepts vectors for recommendations, while
   // QQL's public RECOMMEND syntax supplies point references. Do not add a
@@ -433,10 +442,20 @@ console.log("  ✓ Client.compile");
   assert.strictEqual(r.ok, false, "wrong MODEL must fail");
   console.log("  ✓ USING MODEL mismatch rejected (embedder is locked at construction)");
 
-  // 5i. Empty / garbage scripts
-  r = await exec.execute("", { onError: "continue" });
-  // empty may parse to 0 stmts
-  console.log(`  ✓ empty script → ok=${r.ok} succeeded=${r.succeeded}`);
+  // 5i. Empty / garbage scripts — both fail closed (parity since the
+  // empty-script contract landed; "" raises QQL-VALIDATION-EMPTY-SCRIPT
+  // instead of returning a silently-empty ok report).
+  try {
+    await exec.execute("", { onError: "continue" });
+    assert.fail("empty script must raise");
+  } catch (e) {
+    assert.strictEqual(
+      e.code,
+      "QQL-VALIDATION-EMPTY-SCRIPT",
+      `expected EMPTY-SCRIPT code, got code=${e.code} msg=${e.message}`,
+    );
+  }
+  console.log("  ✓ empty script raises QQL-VALIDATION-EMPTY-SCRIPT (parity with ';;')");
 
   // 5j. CREATE COLLECTION with explicit wrong dimension vs model
   {

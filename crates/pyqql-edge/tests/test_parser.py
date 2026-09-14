@@ -183,7 +183,7 @@ class TestEdgeExecutor(unittest.TestCase):
 
             r = edge.exec.execute("COUNT FROM py_test")
             self.assertTrue(r["ok"], r)
-            count = r["results"][0]["data"]["result"]["count"]
+            count = r["results"][0]["data"]["count"]
             self.assertEqual(count, 2)
 
             # numeric ids work
@@ -196,7 +196,7 @@ class TestEdgeExecutor(unittest.TestCase):
             self.assertTrue(r["ok"], r)
 
             r = edge.exec.execute("COUNT FROM py_test")
-            count = r["results"][0]["data"]["result"]["count"]
+            count = r["results"][0]["data"]["count"]
             self.assertEqual(count, 2)  # id1 + numeric 7
 
     def test_native_query_variants(self):
@@ -268,14 +268,23 @@ class TestEdgeExecutor(unittest.TestCase):
             self.assertEqual(r["results"][0]["operation"], "PREPARE")
             self.assertIn("QQL-MISSING-USING", r["results"][0]["message"])
 
-    def test_group_by_unsupported(self):
+    def test_group_by_supported(self):
+        # GROUP BY executes offline via qdrant-edge query_groups; only
+        # LOOKUP FROM stays unsupported (the engine has no lookup collection).
         with _EdgeCase() as edge:
-            edge.exec.execute("CREATE COLLECTION t HYBRID")
-            r = edge.exec.execute(
-                "QUERY 'x' FROM t USING dense GROUP BY cat LIMIT 5",
-                on_error="continue",
+            edge.exec.execute("CREATE COLLECTION t (dense VECTOR(3, DOT))")
+            edge.exec.execute("CREATE INDEX ON COLLECTION t FOR district TYPE keyword")
+            edge.exec.execute(
+                "UPSERT INTO t VALUES "
+                "{id: 1, vector: {dense: [3.0, 0.0, 0.0]}, district: 'NYC'}, "
+                "{id: 2, vector: {dense: [2.0, 0.0, 0.0]}, district: 'SF'}"
             )
-            self.assertFalse(r["ok"])
+            r = edge.exec.execute(
+                "QUERY [3.0, 0.0, 0.0] FROM t USING dense GROUP BY district LIMIT 5"
+            )
+            self.assertTrue(r["ok"], r["results"][0]["message"])
+            groups = r.groups()
+            self.assertEqual([g["id"] for g in groups], ["NYC", "SF"])
 
     def test_point_reference_recommendation_rejected(self):
         with _EdgeCase() as edge:

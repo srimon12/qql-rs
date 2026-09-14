@@ -1,9 +1,12 @@
 ---
-title: "Rust"
-description: "Embed local QQL execution in a Rust service with the qql-edge crate."
+title: "Edge Rust"
+description: "Embed in-process QQL execution in a Rust service with the qql-edge crate: local HNSW storage plus optional on-device ONNX embeddings."
 sidebar:
   order: 3
+  label: "Rust (edge)"
 ---
+
+> Remote Qdrant version: [Rust SDK](/docs/sdks/rust/).
 
 The `qql-edge` crate combines the `qql` runtime executor with `qdrant-edge`
 (in-process HNSW) and, optionally, `fastembed-rs` (local ONNX embeddings).
@@ -92,6 +95,7 @@ let mut executor = local_executor_with_options(
     "./qdrant_data",
     LocalExecutorOptions {
         on_disk_payload: true,
+        wal_segment_capacity: Some(4 * 1024 * 1024), // shrink the 32 MiB WAL segments
         model: Some("bge-small-en-v1.5".into()),      // dense, 384-d
         sparse_model: Some("splade".into()),          // real ONNX sparse
         multi_model: Some("bge-m3".into()),           // ColBERT multivector
@@ -169,21 +173,42 @@ let backend = EdgeQdrant::new("./qdrant_data", true); // base_path, on_disk_payl
 ```
 
 `EdgeQdrant::new(base_path, on_disk_payload)` opens shards lazily per
-collection and persists them under `base_path`. Combined with an embedder and
-a `QqlConfig`, wrap it in a runtime `Executor` via `Executor::with_embedder`.
-The `close()` method (also on `Executor`) drains and flushes all open shards.
+collection and persists them under `base_path`. `with_wal_segment_capacity`
+shrinks the pre-allocated WAL segments (bytes): it seeds shards without a
+persisted capacity, then the persisted value wins. Combined with an embedder
+and a `QqlConfig`, wrap it in a runtime `Executor` via
+`Executor::with_embedder`. The `close()` method (also on `Executor`) drains and
+flushes all open shards.
+
+Snapshot seeding helpers live at the crate root: `qql_edge::unpack_snapshot`
+(unpack a downloaded snapshot archive into a directory) and
+`qql_edge::inspect_shard` (load it and return counts). These wrap the engine's
+snapshot API — never unpack or merge archives by hand.
 
 ## Response shapes
 
-Queries return hit arrays with `id`, `payload`, and `vector` keys inside
-`result.points`; mutations return the standard envelope:
+Response shaping matches the native SDKs' typed `ExecData` report: each
+operation reads exactly its Qdrant OpenAPI response field and emits the same
+shapes (`[{id, score, payload, vector?}]` with no separate `text`,
+`{"groups": [...]}`, `{"count": n}`, `{"collections": [...]}`, typed
+`CollectionInfo`, `{"shard_keys": [...]}` , quota config). Hits carry
+`id`, `score` (shortest f32 round-trip), `payload`, `collection` (cross-collection
+only), and `vector` (only with `WITH VECTOR`) — there is no separate `text`
+field; derive it from `payload["text"]`. A missing or mistyped backend field
+fails the statement with `QQL-BACKEND-ENVELOPE` instead of silently returning
+an empty or synthesized result. Server telemetry (`time`, `usage`) stays
+optional and lenient.
 
 | Operation | `data` shape |
 |---|---|
-| Query / scroll / points | `{"result": {"points": [{"id", "score", "payload", "vector"}]}}` |
-| Mutation | `{"result": {"status": "completed"}, "status": "ok", "time": 0.0}` |
-| Count | `{"result": {"count": N}}` |
-| `SHOW COLLECTIONS` | `{"result": {"collections": [{"name"}]}}` |
+| Query / scroll / points | `[{id, score, payload, collection?, vector?}]` (points carry no separate `text`) |
+| Grouped query | `{"groups": [{id, hits: [...]}]}` |
+| Facet | `[{value, count}]` |
+| Count / mutation count | `{"count": N}` (status-only mutations serialize `null`) |
+| `SHOW COLLECTIONS` | `{"collections": [<name>, ...]}` (list of names) |
+| `SHOW COLLECTION` | typed `CollectionInfo` (`status`, `points_count`, `indexed_vectors_count`, …) |
+| `SHOW SHARD KEYS` | `{"shard_keys": [...]}` |
+| Quotas | quota config object |
 
 ## Errors
 

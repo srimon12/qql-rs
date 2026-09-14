@@ -92,12 +92,37 @@ jobs:
         run: >
           cargo clippy --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-convert
+          --all-targets -- -D warnings
+
+      - name: Clippy (private binding helper crates)
+        run: >
+          cargo clippy --locked
+          -p pyqql-common -p nqql-common
           --all-targets -- -D warnings
 
       - name: Test (published Rust crates)
         run: >
           cargo test --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-convert
+
+      # One cargo unit so feature unification (e.g. serde_json/preserve_order
+      # pulled in by jsonschema/fastembed) is the same as a workspace build.
+      # Native FFI and wasm-bindgen crates have their own jobs.
+      - name: Test (workspace, host crates)
+        run: >
+          cargo test --locked --workspace --all-targets
+          --exclude qql-wasm --exclude pyqql --exclude pyqql-edge
+          --exclude nqql --exclude nqql-edge
+
+      - name: Test (private binding helper crates)
+        run: >
+          cargo test --locked
+          -p pyqql-common -p nqql-common
+
+      - name: Offline happy path (no Qdrant server)
+        run: cargo run --manifest-path examples/rust/quickstart/Cargo.toml
 
   features:
     name: Feature matrix
@@ -164,6 +189,7 @@ jobs:
         run: >
           cargo check --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-convert
 
   docs:
     name: Docs
@@ -184,11 +210,23 @@ jobs:
         run: >
           cargo doc --locked --no-deps --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+          -p qql-convert
 
       - name: cargo doc (CLI, deny warnings)
         run: >
           cargo doc --locked --no-deps --all-features -p qql-cli
           --target-dir target/doc-cli
+
+  error-codes:
+    name: Error codes sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # No toolchain needed: the check is rg/grep over sources versus the
+      # website error-code reference (tables + generated set block).
+      - name: Website error codes match emitted codes
+        run: bash scripts/check-error-codes.sh
 
   package:
     name: Package dry-run
@@ -210,7 +248,7 @@ jobs:
       - name: Package dependents (list + archive only)
         run: |
           set -euo pipefail
-          for crate in qql-plan qql-embed qql qql-edge qql-cli; do
+          for crate in qql-plan qql-embed qql qql-edge qql-cli qql-convert; do
             cargo package --locked --no-verify --exclude-lockfile -p "$crate"
           done
 
@@ -250,16 +288,45 @@ jobs:
         with:
           shared-key: pyqql-stable
           cache-on-failure: true
+      # fastembed downloads Xenova/bge-small-en-v1.5 from HuggingFace on
+      # first use; anonymous HF downloads from Actions runners are
+      # rate-limited intermittently (PR #73). Cached per-job (separate key:
+      # same-key saves race when both jobs miss), warm step retries cold path.
+      - name: Cache fastembed model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hf-home
+          key: fastembed-bge-small-en-v1.5-python
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build and test Python SDKs
+        # pyqql-edge is PyO3 over qql-edge → same Rust fastembed path →
+        # HF_HOME resolves as the cache ROOT (no /hub suffix) and overrides
+        # explicit cacheDir opts. Pin it so the workflow cache and tests share
+        # one deterministic directory. (Step-level env: the `runner` context
+        # is not available in job-level env.)
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install ./crates/pyqql ./crates/pyqql-edge
+          warm_ok=false
+          for attempt in 1 2 3 4 5; do
+            if python -c "import tempfile, pyqql_edge; pyqql_edge.local_executor(tempfile.mkdtemp())"; then
+              warm_ok=true
+              break
+            fi
+            echo "::warning::fastembed model download failed (attempt $attempt/5), retrying in 30s"
+            sleep 30
+          done
+          [ "$warm_ok" = true ]
           python -m unittest discover -s crates/pyqql/tests -v
           python -m unittest discover -s crates/pyqql-edge/tests -v
+          # Offline happy path (no Qdrant server): hybrid CTE → isolation →
+          # bind → compile route → `:rows` splice.
+          python examples/quickstart.py
 
   nqql-check:
     name: Node binding (${{ matrix.package }})
@@ -275,16 +342,73 @@ jobs:
         with:
           shared-key: nqql-${{ matrix.package }}-stable
           cache-on-failure: true
+      # fastembed downloads Xenova/bge-small-en-v1.5 from HuggingFace on first
+      # use; anonymous HF downloads from Actions runners are rate-limited
+      # intermittently (PR #73). Cache the pinned cache root so the download
+      # happens at most once; the warm step retries the cold path.
+      - name: Cache fastembed model
+        if: matrix.package == 'nqql-edge'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hf-home
+          key: fastembed-bge-small-en-v1.5-node
       - uses: actions/setup-node@v7
         with:
           node-version: "22.13.1"
-      - name: Build and test ${{ matrix.package }}
-        working-directory: crates/${{ matrix.package }}
+      - name: Shared DX helper files must stay byte-identical across SDKs
         run: |
           set -euo pipefail
-          npm install --no-package-lock --omit=optional --no-audit --no-fund
+          fail=0
+          for pair in \
+            "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
+            "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
+            "crates/pyqql/pyqql/_errors.py crates/pyqql-edge/pyqql_edge/_errors.py" \
+            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py"; do
+            set -- $pair
+            if ! diff -q "$1" "$2" >/dev/null; then
+              echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"
+              fail=1
+            fi
+          done
+          exit "$fail"
+      - name: Install JS dependencies
+        working-directory: crates/${{ matrix.package }}
+        run: npm install --no-package-lock --omit=optional --no-audit --no-fund
+      - name: Warm embedding model cache (guarded download)
+        if: matrix.package == 'nqql-edge'
+        working-directory: crates/nqql-edge
+        # fastembed-rs resolves HF_HOME as its cache ROOT (no /hub suffix) and
+        # it overrides even explicit cacheDir opts — pinning it gives the
+        # workflow cache and all tests one deterministic directory.
+        # (fastembed-6.0.2/src/common.rs: HF_HOME > FASTEMBED_CACHE_DIR > ./.fastembed_cache)
+        # Step-level env: the `runner` context is unavailable in job-level env.
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+        run: |
+          set -euo pipefail
+          # The build itself downloads ort-sys's onnxruntime static lib on a
+          # cold cache — retry it alongside the model download so a transient
+          # network failure cannot kill the whole warm step.
+          for attempt in 1 2 3 4 5; do
+            if npm run build:debug && node warm-cache.js; then
+              exit 0
+            fi
+            echo "::warning::fastembed warm-up failed (attempt $attempt/5), retrying in 30s"
+            sleep 30
+          done
+          exit 1
+      - name: Build and test ${{ matrix.package }}
+        working-directory: crates/${{ matrix.package }}
+        env:
+          # Same pinned cache root as the warm step — see the comment there.
+          HF_HOME: ${{ runner.temp }}/hf-home
+        run: |
+          set -euo pipefail
           npm test
           npm pack --dry-run --ignore-scripts
+          # Offline happy path (no Qdrant server): hybrid CTE → isolation →
+          # bind → compile route → `:rows` splice.
+          node ../../examples/quickstart.mjs crates/${{ matrix.package }}
 
   wasm-check:
     name: WASM bindings
@@ -390,22 +514,63 @@ jobs:
           fresh=/tmp/qql-wasm-editor-fresh/qql_wasm.d.ts
           bundled=editors/vscode/wasm/qql_wasm.d.ts
           # Every exported free function of the fresh build must exist in the
-          # committed bundle (byte-identical rebuilds are not required).
+          # committed bundle and vice-versa (bidirectional parity check).
           missing=0
+          exports() {
+            grep -oE '^export function [a-zA-Z0-9_]+' "$1" | awk '{print $3}' | sort -u
+          }
           while read -r name; do
             if ! grep -qE "^export function ${name}\b" "$bundled"; then
               echo "::error::bundled editor WASM is missing export '${name}'; rebuild editors/vscode/wasm from crates/qql-wasm"
               missing=1
             fi
-          done < <(grep -oE '^export function [a-zA-Z0-9_]+' "$fresh" | awk '{print $3}' | sort -u)
+          done < <(exports "$fresh")
+          while read -r name; do
+            if ! grep -qE "^export function ${name}\b" "$fresh"; then
+              echo "::error::bundled editor WASM has unexpected export '${name}' not in crates/qql-wasm; rebuild editors/vscode/wasm"
+              missing=1
+            fi
+          done < <(exports "$bundled")
+
+          # Class surfaces (Stmt / Client members, getters, properties) must match
+          # bidirectionally between fresh and bundled declarations.
+          members() {
+            sed -n \
+              -e 's/^[[:space:]]\+get[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+              -e 's/^[[:space:]]\+set[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+              -e 's/^[[:space:]]\+readonly[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+              -e 's/^[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\)[?(]\?.*(.*/\1/p' \
+              "$1" \
+              | grep -vE '^(get|set|readonly|if|for|while|switch|catch|function|return|export|constructor)$' \
+              | sort -u
+          }
+          while read -r name; do
+            if ! grep -qE "^[[:space:]]+(get[[:space:]]+|set[[:space:]]+|readonly[[:space:]]+)?${name}\b" "$bundled"; then
+              echo "::error::bundled editor WASM class API is missing member '${name}'; rebuild editors/vscode/wasm from crates/qql-wasm"
+              missing=1
+            fi
+          done < <(members "$fresh")
+          while read -r name; do
+            if ! grep -qE "^[[:space:]]+(get[[:space:]]+|set[[:space:]]+|readonly[[:space:]]+)?${name}\b" "$fresh"; then
+              echo "::error::bundled editor WASM class API has unexpected member '${name}' not in crates/qql-wasm; rebuild editors/vscode/wasm"
+              missing=1
+            fi
+          done < <(members "$bundled")
           exit "$missing"
       - name: Typecheck, lint, and test the extension
         working-directory: editors/vscode
         run: |
           set -euo pipefail
           npm ci
+          npm audit --audit-level=high
           npm run check
           npm test
+      - name: Package the extension (validates the VSIX manifest end to end)
+        working-directory: editors/vscode
+        run: |
+          set -euo pipefail
+          npx @vscode/vsce package -o /tmp/qql-lang.vsix
+          ls -la /tmp/qql-lang.vsix
 
   # ── Website documentation ────────────────────────────────────
   # Validate the docs corpus (raw fences, parse + plan of every example and

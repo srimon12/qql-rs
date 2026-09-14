@@ -204,12 +204,12 @@ fn first_unquoted(text: &str, needle: char) -> Option<usize> {
             c if c == needle && !in_string => return Some(idx),
             '^' => {
                 // `^"..."` — skip the whole literal.
-                if let Some((_, next)) = iter.next() {
-                    if next == '"' {
-                        for (_, c) in iter.by_ref() {
-                            if c == '"' {
-                                break;
-                            }
+                if let Some((_, next)) = iter.next()
+                    && next == '"'
+                {
+                    for (_, c) in iter.by_ref() {
+                        if c == '"' {
+                            break;
                         }
                     }
                 }
@@ -343,13 +343,29 @@ fn render_typescript(literals: &[String]) -> String {
         .join("\n");
     let constants = constants
         .iter()
-        .map(|literal| format!("  \"{literal}\","))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .map(|literal| format!("\"{literal}\""))
+        .collect::<Vec<_>>();
+    // Emit the Biome-canonical single line while it fits (lineWidth 100);
+    // fall back to one-per-line so regeneration never produces lint diffs.
+    let single = format!(
+        "export const QQL_CONSTANTS = new Set([{}]);",
+        constants.join(", ")
+    );
+    let constants_block = if single.len() <= 100 {
+        single
+    } else {
+        format!(
+            "export const QQL_CONSTANTS = new Set([\n{}\n]);",
+            constants
+                .iter()
+                .map(|literal| format!("  {literal},"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
 
     format!(
-        "{GENERATED_HEADER}export const QQL_KEYWORDS = [\n{keywords}\n] as const;\n\
-         export const QQL_CONSTANTS = new Set([\n{constants}\n]);\n"
+        "{GENERATED_HEADER}export const QQL_KEYWORDS = [\n{keywords}\n] as const;\n{constants_block}\n"
     )
 }
 

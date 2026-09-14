@@ -1,10 +1,12 @@
-use crate::filter::{lower_filter, top_level_filter};
+use crate::filter::{top_level_filter, value_to_json};
+use crate::prefetch::{build_query_with_prefetch, default_model_for_using, extract_lookup_from};
 use crate::semantic::PlanQueryInput;
 use crate::types::*;
-use qql_core::ast::{
-    FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
-};
+use qql_core::ast::{FusionMethod, OrderDirection, QueryExpr, QueryInput, QueryStmt, VectorValue};
 use qql_core::error::QqlError;
+
+pub use crate::params::{lower_request_opts, lower_search_params, push_read_opts};
+pub use crate::prefetch::{lower_prefetch, lower_prefetch_with_ctes};
 
 /// Convert an AST vector value into its transport-neutral plan representation.
 pub fn lower_vector_value(value: &VectorValue) -> PlanVectorValue {
@@ -16,178 +18,27 @@ pub fn lower_query_input(input: &QueryInput) -> PlanQueryInput {
     PlanQueryInput::from(input)
 }
 
-/// Lower a formula expression tree to the OpenAPI `Expression` JSON shape.
-pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Value {
-    match expr {
-        qql_core::ast::FormulaExpr::Constant { value } => serde_json::json!(value),
-        qql_core::ast::FormulaExpr::Variable { name } => {
-            if name == "score" {
-                serde_json::json!("$score")
-            } else {
-                serde_json::json!(name)
-            }
-        }
-        qql_core::ast::FormulaExpr::Sum { left, right } => serde_json::json!({
-            "sum": [lower_formula_expr(left), lower_formula_expr(right)]
-        }),
-        qql_core::ast::FormulaExpr::Sub { left, right } => serde_json::json!({
-            "sum": [lower_formula_expr(left), { "neg": lower_formula_expr(right) }]
-        }),
-        qql_core::ast::FormulaExpr::Mul { left, right } => serde_json::json!({
-            "mult": [lower_formula_expr(left), lower_formula_expr(right)]
-        }),
-        qql_core::ast::FormulaExpr::Div {
-            left,
-            right,
-            by_zero_default,
-        } => {
-            let mut div = serde_json::Map::new();
-            div.insert("left".into(), lower_formula_expr(left));
-            div.insert("right".into(), lower_formula_expr(right));
-            if let Some(default) = by_zero_default {
-                div.insert("by_zero_default".into(), serde_json::json!(default));
-            }
-            serde_json::json!({ "div": div })
-        }
-        qql_core::ast::FormulaExpr::Neg { operand } => serde_json::json!({
-            "neg": lower_formula_expr(operand)
-        }),
-        qql_core::ast::FormulaExpr::Abs { x } => serde_json::json!({
-            "abs": lower_formula_expr(x)
-        }),
-        qql_core::ast::FormulaExpr::Sqrt { x } => serde_json::json!({
-            "sqrt": lower_formula_expr(x)
-        }),
-        qql_core::ast::FormulaExpr::Log { x } => serde_json::json!({
-            "log10": lower_formula_expr(x)
-        }),
-        qql_core::ast::FormulaExpr::Ln { x } => serde_json::json!({
-            "ln": lower_formula_expr(x)
-        }),
-        qql_core::ast::FormulaExpr::Exp { x } => serde_json::json!({
-            "exp": lower_formula_expr(x)
-        }),
-        qql_core::ast::FormulaExpr::Acosh { x } => serde_json::json!({
-            "acosh": lower_formula_expr(x)
-        }),
-        qql_core::ast::FormulaExpr::Max { args } => {
-            let terms: Vec<_> = args.iter().map(lower_formula_expr).collect();
-            serde_json::json!({ "max": terms })
-        }
-        qql_core::ast::FormulaExpr::Min { args } => {
-            let terms: Vec<_> = args.iter().map(lower_formula_expr).collect();
-            serde_json::json!({ "min": terms })
-        }
-        qql_core::ast::FormulaExpr::Pow { base, exponent } => serde_json::json!({
-            "pow": {
-                "base": lower_formula_expr(base),
-                "exponent": lower_formula_expr(exponent)
-            }
-        }),
-        qql_core::ast::FormulaExpr::GeoDistance { lat, lon, field } => serde_json::json!({
-            "geo_distance": {
-                "origin": { "lat": lat, "lon": lon },
-                "to": field
-            }
-        }),
-        qql_core::ast::FormulaExpr::Decay {
-            kind,
-            x,
-            target,
-            scale,
-            midpoint,
-        } => {
-            let mut params = serde_json::Map::new();
-            let is_target_datetime = target
-                .as_ref()
-                .is_some_and(|t| matches!(&**t, qql_core::ast::FormulaExpr::Datetime { .. }));
-            let x_val = match (&**x, is_target_datetime) {
-                (qql_core::ast::FormulaExpr::Variable { name }, true) => {
-                    serde_json::json!({ "datetime_key": name })
-                }
-                _ => lower_formula_expr(x),
-            };
-            params.insert("x".into(), x_val);
-            if let Some(t) = target {
-                params.insert("target".into(), lower_formula_expr(t));
-            }
-            if let Some(s) = scale {
-                params.insert("scale".into(), serde_json::json!(s));
-            }
-            if let Some(m) = midpoint {
-                params.insert("midpoint".into(), serde_json::json!(m));
-            }
-            let key = match kind.to_ascii_lowercase().as_str() {
-                "lin" | "lin_decay" => "lin_decay",
-                "exp" | "exp_decay" => "exp_decay",
-                _ => "gauss_decay",
-            };
-            serde_json::json!({ key: params })
-        }
-        qql_core::ast::FormulaExpr::Case { cond, then_, else_ } => {
-            let cond_val = match lower_filter(cond) {
-                FilterExpression::Single(clause) => crate::plan::serialize_body(&*clause)
-                    .expect("formula CASE condition clause serialization failed"),
-                FilterExpression::Compound(comp) => crate::plan::serialize_body(&comp)
-                    .expect("formula CASE condition compound serialization failed"),
-            };
-            // OpenAPI Expression accepts a Condition as a boolean 0/1 term.
-            // Encode CASE as: condition * then + (1 - condition) * else.
-            serde_json::json!({
-                "sum": [
-                    {
-                        "mult": [cond_val.clone(), lower_formula_expr(then_)]
-                    },
-                    {
-                        "mult": [
-                            {
-                                "sum": [
-                                    1.0,
-                                    { "neg": cond_val }
-                                ]
-                            },
-                            lower_formula_expr(else_)
-                        ]
-                    }
-                ]
-            })
-        }
-        qql_core::ast::FormulaExpr::MatchCondition { field, values } => {
-            // Condition expressions evaluate to 1.0 / 0.0 on the formula wire format.
-            use crate::filter::value_to_json;
-            if values.len() == 1 {
-                let val = value_to_json(&values[0]);
-                serde_json::json!({
-                    "key": field,
-                    "match": { "value": val }
-                })
-            } else {
-                let any: Vec<_> = values.iter().map(value_to_json).collect();
-                serde_json::json!({
-                    "key": field,
-                    "match": { "any": any }
-                })
-            }
-        }
-        qql_core::ast::FormulaExpr::Datetime { value } => serde_json::json!({
-            "datetime": value
-        }),
-        qql_core::ast::FormulaExpr::DatetimeKey { key } => serde_json::json!({
-            "datetime_key": key
-        }),
-    }
-}
-
 /// Lower a `QueryExpr` to its wire `QueryVariant` representation.
 pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
     Ok(match expr {
-        QueryExpr::Nearest { input, mmr, .. } => QueryVariant::Nearest(NearestQuery {
-            nearest: lower_query_input(input),
-            mmr: mmr.as_ref().map(|m| MmrQueryParams {
-                diversity: m.diversity,
-                candidates_limit: m.candidates,
-            }),
-        }),
+        QueryExpr::Nearest {
+            input, using, mmr, ..
+        } => {
+            let mut nearest = lower_query_input(input);
+            if let PlanQueryInput::Document { model, .. } = &mut nearest
+                && model.as_deref().unwrap_or("").is_empty()
+            {
+                *model = default_model_for_using(using.as_ref().map(|t| t.name.as_str()))
+                    .or_else(|| model.clone());
+            }
+            QueryVariant::Nearest(NearestQuery {
+                nearest,
+                mmr: mmr.as_ref().map(|m| MmrQueryParams {
+                    diversity: m.diversity,
+                    candidates_limit: m.candidates,
+                }),
+            })
+        }
         QueryExpr::Recommend {
             positive,
             negative,
@@ -236,7 +87,11 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 },
             }
         }
-        QueryExpr::OrderBy { field, direction } => {
+        QueryExpr::OrderBy {
+            field,
+            direction,
+            start_from,
+        } => {
             let dir = match direction {
                 OrderDirection::Asc => Some("asc".into()),
                 OrderDirection::Desc => Some("desc".into()),
@@ -245,6 +100,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 order_by: OrderByQuery {
                     key: field.clone(),
                     direction: dir,
+                    start_from: start_from.as_ref().map(value_to_json),
                 },
             }
         }
@@ -263,18 +119,19 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
             defaults,
             ..
         } => {
-            let defaults_map = if defaults.is_empty() {
+            let defaults = if defaults.is_empty() {
                 None
             } else {
-                let mut m = serde_json::Map::new();
-                for (key, value) in defaults {
-                    m.insert(key.clone(), crate::filter::value_to_json(value));
-                }
-                Some(m)
+                Some(
+                    defaults
+                        .iter()
+                        .map(|(key, value)| (key.clone(), FormulaDefault::from(value)))
+                        .collect(),
+                )
             };
             QueryVariant::Formula(FormulaQuery {
-                formula: PlanFormula(expression.as_ref().clone()),
-                defaults: defaults_map,
+                formula: PlanFormula::from(expression.as_ref()),
+                defaults,
             })
         }
         QueryExpr::RelevanceFeedback {
@@ -324,84 +181,6 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
     })
 }
 
-/// Lower a `PREFETCH` clause with no CTE context (inline query sources only).
-pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> Result<PrefetchRequest, QqlError> {
-    lower_prefetch_with_ctes(prefetch, &[])
-}
-
-/// Lower a `PREFETCH` clause, resolving `CTE` sources against `ctes`.
-pub fn lower_prefetch_with_ctes(
-    prefetch: &qql_core::ast::Prefetch,
-    ctes: &[qql_core::ast::Cte],
-) -> Result<PrefetchRequest, QqlError> {
-    let source_query: &QueryStmt = match &prefetch.source {
-        PrefetchSource::Cte(name) => ctes
-            .iter()
-            .find(|c| c.name.eq_ignore_ascii_case(name))
-            .map(|c| c.query.as_ref())
-            .ok_or_else(|| {
-                QqlError::validation(
-                    "QQL-PLAN-PREFETCH-CTE",
-                    format!("PREFETCH references unknown CTE '{name}'"),
-                    None,
-                )
-            })?,
-        PrefetchSource::Query(query) => query.as_ref(),
-    };
-
-    // PrefetchRequest cannot represent grouping (no group_by / group_size
-    // fields). Reject explicitly instead of silently dropping the group.
-    if source_query.group.is_some() {
-        return Err(QqlError::validation(
-            "QQL-PLAN-PREFETCH-GROUP",
-            "GROUP BY is not supported inside PREFETCH",
-            None,
-        ));
-    }
-
-    let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) = {
-        let (variant, using, nested) = build_query_with_prefetch(source_query)?;
-        (
-            Some(variant),
-            using,
-            if nested.is_empty() {
-                None
-            } else {
-                Some(nested)
-            },
-            source_query.filter.as_ref().map(|f| top_level_filter(f)),
-            match source_query.params.as_ref() {
-                Some(p) => lower_search_params(p)?,
-                None => None,
-            },
-            source_query.page.limit,
-            source_query.score_threshold,
-        )
-    };
-
-    // Outer PREFETCH WHERE / SCORE THRESHOLD override source-query values when set.
-    let filter = prefetch
-        .filter
-        .as_ref()
-        .map(|f| top_level_filter(f))
-        .or(source_filter);
-    let score_threshold = prefetch.score_threshold.or(source_score);
-
-    Ok(PrefetchRequest {
-        query,
-        using,
-        filter,
-        params: source_params,
-        score_threshold,
-        limit: source_limit,
-        lookup_from: prefetch.lookup.as_ref().map(|l| LookupRequest {
-            collection: l.collection.clone(),
-            vector: l.vector.clone(),
-        }),
-        prefetch: nested_prefetch,
-    })
-}
-
 /// Lower a `QueryOutput` into payload/vector selection for wire bodies.
 pub fn lower_output_selector_public(
     output: &qql_core::ast::QueryOutput,
@@ -435,6 +214,32 @@ fn lower_output_selector(
     (with_payload, with_vector)
 }
 
+/// Lower a `GROUP BY … LOOKUP` clause to its wire form: a bare collection
+/// name when no selectors are present, otherwise the full lookup object.
+fn lower_group_lookup(lookup: &qql_core::ast::GroupLookup) -> WithLookupValue {
+    if lookup.payload.is_none() && lookup.vectors.is_none() {
+        return WithLookupValue::Collection(lookup.collection.clone());
+    }
+    WithLookupValue::Full(WithLookup {
+        collection: lookup.collection.clone(),
+        with_payload: lookup.payload.as_ref().map(|selector| match selector {
+            qql_core::ast::PayloadSelector::All => PayloadSelectorReq::All(true),
+            qql_core::ast::PayloadSelector::None => PayloadSelectorReq::All(false),
+            qql_core::ast::PayloadSelector::Include(fields) => PayloadSelectorReq::Include {
+                include: fields.clone(),
+            },
+            qql_core::ast::PayloadSelector::Exclude(fields) => PayloadSelectorReq::Exclude {
+                exclude: fields.clone(),
+            },
+        }),
+        with_vectors: lookup.vectors.as_ref().map(|selector| match selector {
+            qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
+            qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
+            qql_core::ast::VectorSelector::Names(names) => VectorSelectorReq::Names(names.clone()),
+        }),
+    })
+}
+
 /// Lower a full `QUERY` statement into the `/points/query` request body.
 pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
@@ -457,7 +262,10 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         offset: query.page.offset,
         lookup_from: extract_lookup_from(query),
         // Routing is request-level (REST shard_key / gRPC ShardKeySelector) — not in filter.
-        shard_key: query.shard_key.clone(),
+        shard_key: query
+            .shard_key
+            .as_ref()
+            .map(crate::semantic::PlanShardKey::from),
         timeout,
         consistency,
     })
@@ -467,10 +275,13 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
 ///
 /// User LIMIT and OFFSET fold into the wire `limit` + `group_offset` pair.
 pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
-    let group = query
-        .group
-        .as_ref()
-        .expect("group required for groups query");
+    let Some(group) = query.group.as_ref() else {
+        return Err(QqlError::validation(
+            "QQL-PLAN-GROUP",
+            "group required for groups query",
+            None,
+        ));
+    };
     let offset = query.page.offset.unwrap_or(0);
     let user_limit = query.page.limit.unwrap_or(10);
     let effective_limit = user_limit.checked_add(offset).ok_or_else(|| {
@@ -504,320 +315,16 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         group_by: group.field.clone(),
         group_size: group.size.unwrap_or(3),
         limit: effective_limit,
-        with_lookup: group
-            .lookup
-            .as_ref()
-            .map(|coll| WithLookupValue::Collection(coll.clone())),
+        with_lookup: group.lookup.as_ref().map(lower_group_lookup),
         lookup_from: extract_lookup_from(query),
-        shard_key: query.shard_key.clone(),
+        shard_key: query
+            .shard_key
+            .as_ref()
+            .map(crate::semantic::PlanShardKey::from),
         timeout,
         consistency,
         group_offset,
     })
-}
-
-fn build_query_with_prefetch(
-    query: &QueryStmt,
-) -> Result<(QueryVariant, Option<String>, Vec<PrefetchRequest>), QqlError> {
-    match &query.expression {
-        QueryExpr::Hybrid {
-            text,
-            model,
-            dense_vector,
-            sparse_vector,
-            fusion,
-        } => {
-            let fusion_name = match fusion {
-                FusionMethod::Rrf => "rrf",
-                FusionMethod::Dbsf => "dbsf",
-            };
-            let candidates = match query.page.limit {
-                Some(l) => l.checked_mul(10).ok_or_else(|| {
-                    QqlError::validation(
-                        "QQL-VALIDATION-LIMIT-OVERFLOW",
-                        format!(
-                            "hybrid query LIMIT {l} overflows the candidate limit \
-                             (LIMIT * 10); reduce LIMIT"
-                        ),
-                        None,
-                    )
-                })?,
-                None => 100,
-            };
-
-            let hybrid_params = match query.params.as_ref() {
-                Some(p) => lower_search_params(p)?,
-                None => None,
-            };
-            let dense_prefetch = PrefetchRequest {
-                query: Some(QueryVariant::Nearest(NearestQuery {
-                    nearest: build_text_input(text, model),
-                    mmr: None,
-                })),
-                using: dense_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
-                params: hybrid_params.clone(),
-                score_threshold: query.score_threshold,
-                limit: Some(candidates),
-                lookup_from: None,
-                prefetch: None,
-            };
-            let sparse_prefetch = PrefetchRequest {
-                query: Some(QueryVariant::Nearest(NearestQuery {
-                    nearest: build_text_input(text, model),
-                    mmr: None,
-                })),
-                using: sparse_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
-                params: hybrid_params,
-                score_threshold: query.score_threshold,
-                limit: Some(candidates),
-                lookup_from: None,
-                prefetch: None,
-            };
-            let variant = if let Some(params) = &query.params {
-                if params.rrf_k.is_some() || params.rrf_weights.is_some() {
-                    QueryVariant::Rrf(RrfQuery {
-                        rrf: RrfParams {
-                            k: params.rrf_k,
-                            weights: params.rrf_weights.clone(),
-                        },
-                    })
-                } else {
-                    QueryVariant::Fusion {
-                        fusion: fusion_name.into(),
-                    }
-                }
-            } else {
-                QueryVariant::Fusion {
-                    fusion: fusion_name.into(),
-                }
-            };
-            Ok((variant, None, vec![dense_prefetch, sparse_prefetch]))
-        }
-        QueryExpr::Rerank {
-            input,
-            model: rerank_model,
-            using,
-            prefetch,
-        } => {
-            let using = using.as_ref().ok_or_else(|| {
-                QqlError::validation(
-                    "QQL-PLAN-RERANK-USING",
-                    "RERANK requires USING vector name",
-                    None,
-                )
-            })?;
-            if using.name.is_empty() {
-                return Err(QqlError::validation(
-                    "QQL-PLAN-RERANK-USING",
-                    "RERANK requires non-empty USING vector name",
-                    None,
-                ));
-            }
-            if prefetch.is_empty() {
-                return Err(QqlError::validation(
-                    "QQL-PLAN-RERANK-PREFETCH",
-                    "RERANK requires at least one PREFETCH",
-                    None,
-                ));
-            }
-            let pf_requests: Vec<PrefetchRequest> = prefetch
-                .iter()
-                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
-                .collect::<Result<_, _>>()?;
-            let nearest_input = match input {
-                QueryInput::Text { text, .. } => PlanQueryInput::Document {
-                    text: text.clone(),
-                    model: Some(rerank_model.clone()),
-                },
-                _ => lower_query_input(input),
-            };
-            Ok((
-                QueryVariant::Nearest(NearestQuery {
-                    nearest: nearest_input,
-                    mmr: None,
-                }),
-                Some(using.name.clone()),
-                pf_requests,
-            ))
-        }
-        _ => {
-            let mut variant = lower_query_expr(&query.expression)?;
-            if let Some(params) = &query.params {
-                if params.rrf_k.is_some() || params.rrf_weights.is_some() {
-                    if let QueryVariant::Fusion { fusion } = &variant {
-                        if fusion == "rrf" {
-                            variant = QueryVariant::Rrf(RrfQuery {
-                                rrf: RrfParams {
-                                    k: params.rrf_k,
-                                    weights: params.rrf_weights.clone(),
-                                },
-                            });
-                        }
-                    }
-                }
-            }
-            let using = expression_using(&query.expression).map(str::to_owned);
-            let prefetches = expression_prefetch(&query.expression);
-            let pf_requests: Vec<PrefetchRequest> = prefetches
-                .iter()
-                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
-                .collect::<Result<_, _>>()?;
-            Ok((variant, using, pf_requests))
-        }
-    }
-}
-
-fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
-    PlanQueryInput::Document {
-        text: text.to_string(),
-        model: model.clone(),
-    }
-}
-
-/// True when a plan filter has no clauses (serde can produce this for objects
-/// with only unknown keys). Empty IDF corpora are rejected as plan errors.
-fn filter_expression_is_empty(filter: &FilterExpression) -> bool {
-    match filter {
-        FilterExpression::Compound(c) => {
-            c.must.is_empty()
-                && c.must_not.is_empty()
-                && c.should.is_empty()
-                && c.min_should.is_none()
-        }
-        FilterExpression::Single(clause) => match clause.as_ref() {
-            FilterClause::Filter(c) => {
-                c.must.is_empty()
-                    && c.must_not.is_empty()
-                    && c.should.is_empty()
-                    && c.min_should.is_none()
-            }
-            _ => false,
-        },
-    }
-}
-
-/// Lower body-only OpenAPI `SearchParams` (timeout/consistency are request-level).
-///
-/// IDF corpora are QQL filters (`idf = WHERE …`). An empty lowered filter is
-/// rejected with `QQL-PLAN-IDF`.
-pub fn lower_search_params(
-    params: &qql_core::ast::SearchParams,
-) -> Result<Option<SearchParamsRequest>, QqlError> {
-    let mut has = false;
-    let idf = match params.idf.as_ref() {
-        None => None,
-        Some(idf) => Some(match &idf.corpus {
-            None => IdfSearchParams::Global,
-            Some(filter) => {
-                let corpus = top_level_filter(filter);
-                if filter_expression_is_empty(&corpus) {
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-IDF",
-                        "idf corpus filter is empty or has no recognised conditions",
-                        None,
-                    ));
-                }
-                IdfSearchParams::Corpus { corpus }
-            }
-        }),
-    };
-    let r = SearchParamsRequest {
-        hnsw_ef: params.hnsw_ef,
-        exact: params.exact,
-        acorn: params.acorn.map(|enable| AcornSearchParams {
-            enable,
-            max_selectivity: params.max_selectivity,
-        }),
-        indexed_only: params.indexed_only,
-        quantization: params.quantization.as_ref().map(|q| {
-            has = true;
-            QuantizationSearchRequest {
-                ignore: q.ignore,
-                rescore: q.rescore,
-                oversampling: q.oversampling,
-            }
-        }),
-        idf,
-    };
-    if has
-        || r.hnsw_ef.is_some()
-        || r.exact.is_some()
-        || r.acorn.is_some()
-        || r.indexed_only.is_some()
-        || r.idf.is_some()
-    {
-        Ok(Some(r))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Extract request-level opts (OpenAPI query params / proto fields).
-pub fn lower_request_opts(
-    params: Option<&qql_core::ast::SearchParams>,
-) -> (Option<u64>, Option<ReadConsistencyParam>) {
-    match params {
-        Some(p) => (
-            p.timeout,
-            p.consistency.as_ref().map(ReadConsistencyParam::from),
-        ),
-        None => (None, None),
-    }
-}
-
-/// Append OpenAPI query params for timeout + consistency.
-pub fn push_read_opts(
-    query: &mut Vec<(String, String)>,
-    timeout: Option<u64>,
-    consistency: Option<&ReadConsistencyParam>,
-) {
-    if let Some(secs) = timeout {
-        query.push(("timeout".into(), secs.to_string()));
-    }
-    if let Some(c) = consistency {
-        query.push(("consistency".into(), c.to_query_value()));
-    }
-}
-
-fn expression_using(expr: &QueryExpr) -> Option<&str> {
-    match expr {
-        QueryExpr::Nearest { using, .. }
-        | QueryExpr::Recommend { using, .. }
-        | QueryExpr::Context { using, .. }
-        | QueryExpr::Discover { using, .. }
-        | QueryExpr::RelevanceFeedback { using, .. }
-        | QueryExpr::Rerank { using, .. } => using.as_ref().map(|target| target.name.as_str()),
-        _ => None,
-    }
-}
-
-fn expression_prefetch(expr: &QueryExpr) -> &[qql_core::ast::Prefetch] {
-    match expr {
-        QueryExpr::Nearest { prefetch, .. }
-        | QueryExpr::Recommend { prefetch, .. }
-        | QueryExpr::Context { prefetch, .. }
-        | QueryExpr::Discover { prefetch, .. }
-        | QueryExpr::Fusion { prefetch, .. }
-        | QueryExpr::Formula { prefetch, .. }
-        | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
-        _ => &[],
-    }
-}
-
-fn extract_lookup_from(query: &QueryStmt) -> Option<LookupRequest> {
-    for pf in expression_prefetch(&query.expression) {
-        if let Some(l) = &pf.lookup {
-            return Some(LookupRequest {
-                collection: l.collection.clone(),
-                vector: l.vector.clone(),
-            });
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -930,10 +437,12 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        assert!(route
-            .query
-            .iter()
-            .any(|(k, v)| k == "consistency" && v == "2"));
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "2")
+        );
     }
 
     #[test]
@@ -1398,6 +907,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(10),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));
@@ -1435,6 +945,59 @@ mod tests {
     }
 
     #[test]
+    fn plain_limit_and_offset_u64_max_plan_through() {
+        // REST bodies and the gRPC QueryPoints proto both carry u64, so the
+        // u64::MAX ceiling passes through unchanged; only LIMIT+OFFSET
+        // arithmetic and candidate scaling overflow (error tests above).
+        let op = crate::plan::plan(
+            &Parser::parse(
+                "QUERY VECTOR [0.1] FROM docs USING dense \
+                 LIMIT 18446744073709551615 OFFSET 18446744073709551615;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let crate::plan::PlannedOperation::Query { request, .. } = &op else {
+            panic!("expected Query, got {op:?}");
+        };
+        assert_eq!(request.limit, Some(u64::MAX));
+        assert_eq!(request.offset, Some(u64::MAX));
+    }
+
+    #[test]
+    fn grouped_limit_u64_max_without_offset_plans_through() {
+        // LIMIT alone (OFFSET defaults to 0) must not trip the overflow guard.
+        let op = crate::plan::plan(
+            &Parser::parse("QUERY TEXT 'x' FROM docs GROUP BY topic LIMIT 18446744073709551615;")
+                .unwrap(),
+        )
+        .unwrap();
+        let crate::plan::PlannedOperation::QueryGroups { request, .. } = &op else {
+            panic!("expected QueryGroups, got {op:?}");
+        };
+        assert_eq!(request.limit, u64::MAX);
+    }
+
+    #[test]
+    fn hybrid_limit_times_ten_boundary_plans_through() {
+        // u64::MAX / 10 scaled by 10 still fits u64 exactly; only LIMIT above
+        // that overflows the candidate limit (error test above).
+        let op = crate::plan::plan(
+            &Parser::parse(
+                "QUERY HYBRID TEXT 'q' DENSE d SPARSE s FROM docs \
+                 LIMIT 1844674407370955161;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let crate::plan::PlannedOperation::Query { request, .. } = &op else {
+            panic!("expected Query, got {op:?}");
+        };
+        let candidates = request.prefetch.first().and_then(|p| p.limit).unwrap();
+        assert_eq!(candidates, 1844674407370955161 * 10);
+    }
+
+    #[test]
     fn query_defaults_with_payload_to_true_when_omitted() {
         let json = parse_route("QUERY TEXT 'q' FROM docs;");
         assert_eq!(json["with_payload"], true);
@@ -1449,7 +1012,7 @@ mod tests {
     #[test]
     fn decay_datetime_target_and_variable_auto_inferred() {
         let json = parse_route(
-            "QUERY FORMULA EXP_DECAY(judgment_date, TARGET = '2026-09-04T00:00:00Z', SCALE = 630720000, MIDPOINT = 0.5) FROM docs;"
+            "QUERY FORMULA EXP_DECAY(judgment_date, TARGET = '2026-09-04T00:00:00Z', SCALE = 630720000, MIDPOINT = 0.5) FROM docs;",
         );
         let decay = &json["query"]["formula"]["exp_decay"];
         assert_eq!(decay["x"]["datetime_key"], "judgment_date");

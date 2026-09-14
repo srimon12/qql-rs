@@ -1,3 +1,7 @@
+> Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
+> Operations guides live in `website/src/content/docs/docs/operations/`.
+> This `docs/` file is the source text; edit here, then sync the website copy.
+
 # Parameter Binding & Prepared Statements
 
 QQL provides type-safe parameter binding and prepared query templates through `qql_core::params` and `qql::executor::Executor`.
@@ -39,7 +43,7 @@ If a colon immediately follows an identifier character (`a:b`) or closing quote 
 When substituting parameters into templates, the binder applies strict literal formatting:
 
 1. **Strings**: Escaped with QQL single-quote rules (`'` $\to$ `''`, `\` $\to$ `\\`, `\n`, `\t`).
-2. **Numbers & Floats**: Rendered canonically. Non-finite floats (`NaN`, `+Infinity`, `-Infinity`) are rejected with `QQL-BIND-INVALID-FLOAT`.
+2. **Numbers & Floats**: Rendered canonically. Non-finite floats (`NaN`, `+Infinity`, `-Infinity`) are rejected with `QQL-BIND-TYPE-MISMATCH`.
 3. **Dictionaries**: Keys with colons, quotes, spaces, or dots are escaped and quoted (`{'a: 1, b': 5}`).
 4. **Preserved Literals**: Source comments (`-- ...`), string literals (`'hello :name'`), and backtick strings (`` `C:\path\:dir` ``) in the template are preserved verbatim and never altered.
 5. **Mixed-Style Detection**: Passing `?` to a named binder or `:name` to a positional binder returns `QQL-BIND-MIXED-STYLE` with clear guidance.
@@ -105,4 +109,108 @@ await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
 bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "chest pain", lim: 5 });
 ```
 
-WASM `bind` takes a JS object or array (not a JSON string). The same object/array goes on `client.execute(query, { params })`.
+WASM `bind` takes a JS object or array (not a JSON string). The same object/array goes on `client.execute(query, { params })`; `params` is optional — without it the query is returned unchanged.
+
+---
+
+## 5. Prepared Statement Surface (QQL 1.7)
+
+Pre-parsed `Stmt` handles can carry parameters without re-lexing the source:
+
+| Host | Bind | Compile route | Direct hits |
+|---|---|---|---|
+| Python (`pyqql`, `pyqql-edge`) | `stmt.bind(params)` → new `Stmt` | `stmt.compile_route(params=None)` | `client.execute_hits(...)` / `execute_async_hits` |
+| Node (`nqql`, `nqql-edge`) | `stmt.bind(params?)` → new `Stmt` | `stmt.compileRoute(params?)` | `client.executeHits(...)` / module `executeHits` |
+| WASM (`qql-wasm`) | `stmt.bind(params?)` → new `Stmt` | `stmt.compileRoute(params?)` | — (no `executeHits`) |
+| Rust | `qql_core::params::bind_stmt(&mut Stmt, lookup, &positional)` | `compile_statement(&stmt)` after binding | — |
+
+`str(stmt)` (Python) / `stmt.toString()` (Node, WASM) render canonical
+re-parseable QQL; `repr(stmt)` / `stmt.toReadableString()` render a readable
+preview with long vectors truncated. The module-level `bind` accepts a string
+or a `Stmt`: a `Stmt` returns a bound `Stmt`, or the readable string when
+`truncate_vectors` / `truncateVectors` is set.
+
+Additional shapes:
+
+- **Nested expansion**: `{"loc": {"lat": 1.0, "lon": 2.0}}` binds `:loc.lat`
+  and `:loc.lon`; flat dotted keys (`{"loc.lat": 1.0}`) are equivalent.
+  Colliding flat and nested definitions (e.g. `{"loc.lat": 1.0, "loc": {"lat": 2.0}}`)
+  fail closed with `QQL-BIND-DUPLICATE-PARAM`.
+- **Statement-scoped batch params**: pass `params` as a list/array whose
+  entries are all dicts/objects or arrays — one container per statement
+  (object → named, array → positional for that statement). The length must
+  match the statement count exactly (`QQL-BIND-BATCH-LENGTH` otherwise);
+  partial binding is rejected rather than silently dropping placeholders.
+  Any other params shape (object, scalar list, scalar) applies identically to
+  every statement: a scalar list is a *shared* positional list, never
+  per-statement.
+  *Single-container disambiguation rule*: When executing a single statement with
+  a single array container like `params=[[1, 2]]`, the outer array is detected as
+  a 1-element container list whose only item is the array `[1, 2]`. This binds
+  the single statement positionally with parameters `[1, 2]`; it is never treated
+  as a positional matrix binding a nested array value into the statement.
+- **`is_valid`** runs the full parse + plan gate (`qql_plan::parse_and_plan`),
+  not just lexing, on `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge`.
+
+```python
+from pyqql import Client, parse
+
+client = Client("http://localhost:6333")
+stmt = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
+
+bound = stmt.bind({"q": "cardiology", "cat": "medical", "lim": 10})
+route = stmt.compile_route(params={"q": "cardiology", "cat": "medical", "lim": 10})
+hits = client.execute_hits(stmt, params={"q": "cardiology", "cat": "medical", "lim": 10})
+```
+
+---
+
+## 5b. Bulk ingest (`VALUES :rows` + `upsert_many`)
+
+Whole-point placeholders turn ingest into data: `UPSERT INTO c VALUES :rows`
+binds one point dict (`{id, vector, …payload}`) or a list of them, splicing
+N points with the same shape as inline `VALUES {…}` rows. Nested
+placeholders compose; misshapen rows fail closed (`QQL-BIND-TYPE-MISMATCH`,
+missing `id` → `QQL-VALIDATION-UPSERT-ID`).
+
+For application ingest, skip the hand-rolled batch loop. Every SDK prepares
+the `:rows` template once (schema fetched once) and chunks for you:
+
+| Host | Helper |
+|---|---|
+| Python | `client.upsert_many("docs", rows, batch_size=100)` |
+| Node | `await client.upsertMany("docs", rows, { batchSize: 100 })` |
+| Rust | `exec.upsert_many("docs", rows, 100, OnError::Stop).await` |
+
+```python
+rows = [{"id": 1, "vector": {"dense": [0.1, 0.2, 0.3]}, "tag": "a"}]
+report = client.upsert_many("docs", rows, batch_size=100)
+```
+
+Row vectors accept the same inputs as `bind` params (plain lists, 1-D float
+buffers, flat `{data, dim}` multivectors). On Node's async boundary the
+serde rule applies: plain arrays and `{data, dim}` ride `upsertMany`;
+`Float32Array`/`Float64Array` convert on the sync `Stmt.bind` surface —
+bind there, then `execute` the bound statement.
+
+---
+
+## 6. Error Codes
+
+All binding failures are validation errors with a stable `QQL-BIND-*` code:
+
+| Code | Meaning |
+|---|---|
+| `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
+| `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
+| `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
+| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. non-string bound to `TEXT`, non-integer to `LIMIT`/`OFFSET`, invalid point ID, non-string/non-integer bound to `SHARD`, non-finite float, or invalid formula parameter) |
+| `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
+| `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
+| `QQL-BIND-DUPLICATE-PARAM` | A key collision occurred when flattening nested dictionary parameters |
+| `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
+| `QQL-BIND-UNSUPPORTED-STATEMENT` | Parameter binding attempted on an unsupported statement type (e.g. DDL) |
+| `QQL-BIND-ALREADY-BOUND` | New params were passed to an already-bound `Stmt` |
+
+`QQL-BIND-INVALID-PARAMS` and `QQL-BIND-BATCH-LENGTH` are enforced by the shared JSON binding layer in
+`crates/qql-core/src/params_json.rs`, which every SDK binding routes through.

@@ -157,7 +157,13 @@ class TestErrorHandling(unittest.TestCase):
         self.assertEqual(stmt.shard_key, "tenant-a")
         self.assertEqual(
             stmt.to_dict()["DeletePayload"]["shard_key"],
-            "tenant-a",
+            {"Keyword": "tenant-a"},
+        )
+        stmt.shard_key = 101
+        self.assertEqual(stmt.shard_key, 101)
+        self.assertEqual(
+            stmt.to_dict()["DeletePayload"]["shard_key"],
+            {"Number": 101},
         )
 
     def test_c5_stmt_shard_key_property(self):

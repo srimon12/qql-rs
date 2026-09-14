@@ -1,0 +1,17 @@
+---
+import { faq } from "../data/landing";
+---
+
+<div class="not-content mt-8 grid gap-2.5">
+  {faq.items.map((item) => (
+    <details class="group rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)]">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3.5 text-[0.95rem] font-medium text-[var(--sl-color-gray-1)] [&::-webkit-details-marker]:hidden">
+        {item.question}
+        <span class="font-mono text-[var(--sl-color-gray-3)] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+      </summary>
+      <p class="m-0 border-t border-[var(--sl-color-gray-5)] px-4 py-3.5 text-sm leading-relaxed text-[var(--sl-color-gray-2)]">
+        {item.answer}
+      </p>
+    </details>
+  ))}
+</div>

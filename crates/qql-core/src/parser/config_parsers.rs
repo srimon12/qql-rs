@@ -3,27 +3,44 @@ use alloc::boxed::Box;
 use crate::ast::{
     CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MemoryPlacement,
     MultivectorComparator, MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig,
-    QuantizationType, QuantizationUpdate, SparseIndexConfig, Value, VectorDatatype, VectorsConfig,
+    QuantizationType, QuantizationUpdate, ShardKey, SparseIndexConfig, SparseVectorDiff, Value,
+    VectorDatatype, VectorDiff, VectorsConfig,
 };
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
+use super::config_validation::is_integer_val;
 use super::{
-    ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
+    AstLowerer, ascii_equal, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
     merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
-    validate_vectors_value, AstLowerer,
+    validate_vectors_value,
 };
 
-fn validation_err(
-    message: impl Into<alloc::borrow::Cow<'static, str>>,
-    position: usize,
-) -> QqlError {
-    QqlError::validation(
-        "QQL-VALIDATION-CONFIG",
-        message,
-        Some(Span::point(position)),
-    )
+fn validation_err(message: impl Into<alloc::borrow::Cow<'static, str>>, span: Span) -> QqlError {
+    QqlError::validation("QQL-VALIDATION-CONFIG", message, Some(span))
+}
+
+/// Malformed or unrepresentable `ALTER COLLECTION` per-vector diff.
+fn vector_diff_error(message: impl Into<alloc::borrow::Cow<'static, str>>, span: Span) -> QqlError {
+    QqlError::parse("QQL-PARSE-VECTOR-DIFF", message, span)
+}
+
+/// True when an HNSW block sets no field at all (`HNSW ()`).
+fn hnsw_is_empty(config: &HnswRuntimeConfig) -> bool {
+    config.m.is_none()
+        && config.ef_construct.is_none()
+        && config.full_scan_threshold.is_none()
+        && config.max_indexing_threads.is_none()
+        && config.on_disk.is_none()
+        && config.payload_m.is_none()
+        && config.inline_storage.is_none()
+        && config.memory.is_none()
+}
+
+/// True when a VECTOR block sets no field at all (`VECTOR ()`).
+fn vectors_config_is_empty(config: &VectorsConfig) -> bool {
+    config.on_disk.is_none() && config.memory.is_none() && config.datatype.is_none()
 }
 
 /// Parse a `memory = 'cold' | 'cached' | 'pinned'` placement value.
@@ -35,7 +52,7 @@ fn validation_err(
 fn config_memory(
     config: &[(alloc::string::String, Value)],
     key: &str,
-    pos: usize,
+    span: Span,
     allow_pinned: bool,
 ) -> Result<Option<MemoryPlacement>, QqlError> {
     match config_value(config, key) {
@@ -43,38 +60,35 @@ fn config_memory(
         Some(Value::Str(s)) => match MemoryPlacement::parse(s) {
             Some(MemoryPlacement::Pinned) if !allow_pinned => Err(validation_err(
                 alloc::format!("{key} does not support 'pinned'"),
-                pos,
+                span,
             )),
             Some(m) => Ok(Some(m)),
             None => Err(validation_err(
                 alloc::format!("{key} must be 'cold', 'cached', or 'pinned', got '{s}'"),
-                pos,
+                span,
             )),
         },
         Some(_) => Err(validation_err(
             alloc::format!("{key} must be a string ('cold', 'cached', or 'pinned')"),
-            pos,
+            span,
         )),
     }
 }
 
 fn config_dense_datatype(
     config: &[(alloc::string::String, Value)],
-    pos: usize,
+    span: Span,
 ) -> Result<Option<VectorDatatype>, QqlError> {
     match config_value(config, "datatype") {
         None => Ok(None),
         Some(Value::Str(s)) => match VectorDatatype::parse(s) {
             Some(dt) => Ok(Some(dt)),
-            None => Err(QqlError::syntax(
+            None => Err(validation_err(
                 "datatype must be float32, float16, uint8, or turbo4 for VECTOR",
-                pos,
+                span,
             )),
         },
-        Some(_) => Err(QqlError::syntax(
-            "datatype must be a string for VECTOR",
-            pos,
-        )),
+        Some(_) => Err(validation_err("datatype must be a string for VECTOR", span)),
     }
 }
 
@@ -91,7 +105,7 @@ impl<'a> AstLowerer<'a> {
             let block = self.parse_collection_config_clause(for_alter)?;
             match &mut config {
                 None => config = Some(block),
-                Some(ref mut c) => merge_collection_config(c, block, self.peek()?.pos)?,
+                Some(c) => merge_collection_config(c, block, self.peek()?.span)?,
             }
         }
         Ok(config.map(Box::new))
@@ -109,7 +123,14 @@ impl<'a> AstLowerer<'a> {
             }
             TokenKind::Vector => {
                 self.advance()?;
+                if for_alter && self.peek()?.kind != TokenKind::Lparen {
+                    return self.parse_vector_diff_clause();
+                }
                 self.parse_vectors_config_block()
+            }
+            TokenKind::Sparse if for_alter => {
+                self.advance()?;
+                self.parse_sparse_vector_diff_clause()
             }
             TokenKind::Optimizers => {
                 self.advance()?;
@@ -118,6 +139,18 @@ impl<'a> AstLowerer<'a> {
             TokenKind::Params => {
                 self.advance()?;
                 self.parse_collection_params_config_block(for_alter)
+            }
+            TokenKind::Wal => {
+                self.advance()?;
+                self.parse_wal_config_block(for_alter)
+            }
+            TokenKind::StrictMode => {
+                self.advance()?;
+                self.parse_strict_mode_config_block()
+            }
+            TokenKind::Metadata => {
+                self.advance()?;
+                self.parse_metadata_config_block()
             }
             TokenKind::Quantization => {
                 self.advance()?;
@@ -129,12 +162,208 @@ impl<'a> AstLowerer<'a> {
             }
             _ => Err(validation_err(
                 alloc::format!(
-                    "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
+                    "{}, got '{}'",
+                    if for_alter {
+                        "expected HNSW, VECTOR, SPARSE, OPTIMIZERS, PARAMS, QUANTIZATION, STRICT_MODE, or METADATA after WITH"
+                    } else {
+                        "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, QUANTIZATION, WAL, STRICT_MODE, or METADATA after WITH"
+                    },
                     tok.text
                 ),
-                tok.pos,
+                tok.span,
             )),
         }
+    }
+
+    /// `WITH VECTOR <name> (HNSW (…), QUANTIZATION (…), VECTOR (…))` — ALTER-only.
+    ///
+    /// Nested blocks mirror the per-vector clauses of `CREATE COLLECTION` and
+    /// lower onto the wire `VectorParamsDiff`; the unnamed `WITH VECTOR (…)`
+    /// form is the default-vector diff and is handled by
+    /// [`Self::parse_vectors_config_block`].
+    fn parse_vector_diff_clause(&mut self) -> Result<CollectionConfig, QqlError> {
+        let name = self.parse_identifier()?;
+        let mut hnsw = None;
+        let mut quantization = None;
+        let mut vectors = None;
+
+        self.expect(TokenKind::Lparen)?;
+        if self.peek()?.kind == TokenKind::Rparen {
+            return Err(vector_diff_error(
+                alloc::format!(
+                    "vector diff '{name}' requires at least one of HNSW (...), QUANTIZATION (...), or VECTOR (...)"
+                ),
+                self.peek()?.span,
+            ));
+        }
+        loop {
+            let tok = self.peek()?;
+            match tok.kind {
+                TokenKind::Hnsw => {
+                    self.advance()?;
+                    if hnsw.is_some() {
+                        return Err(vector_diff_error(
+                            alloc::format!("duplicate HNSW block in vector diff '{name}'"),
+                            tok.span,
+                        ));
+                    }
+                    hnsw = self.parse_hnsw_config_block()?.hnsw;
+                    if hnsw.as_deref().is_none_or(hnsw_is_empty) {
+                        return Err(vector_diff_error(
+                            alloc::format!(
+                                "HNSW (...) in vector diff '{name}' requires at least one setting"
+                            ),
+                            tok.span,
+                        ));
+                    }
+                }
+                TokenKind::Quantization => {
+                    self.advance()?;
+                    if quantization.is_some() {
+                        return Err(vector_diff_error(
+                            alloc::format!("duplicate QUANTIZATION block in vector diff '{name}'"),
+                            tok.span,
+                        ));
+                    }
+                    quantization = Some(self.parse_quantization_diff_block()?);
+                }
+                TokenKind::Vector => {
+                    self.advance()?;
+                    if vectors.is_some() {
+                        return Err(vector_diff_error(
+                            alloc::format!("duplicate VECTOR block in vector diff '{name}'"),
+                            tok.span,
+                        ));
+                    }
+                    let block = self.parse_vectors_config_block()?.vectors;
+                    // OpenAPI `VectorParamsDiff` / proto `VectorParamsDiff` have
+                    // no `datatype` field: the wire cannot express a per-vector
+                    // datatype change, so fail closed instead of dropping it.
+                    if block.as_deref().is_some_and(|cfg| cfg.datatype.is_some()) {
+                        return Err(vector_diff_error(
+                            "datatype cannot be changed per vector: the Qdrant VectorParamsDiff wire shape has no datatype field",
+                            tok.span,
+                        ));
+                    }
+                    if block.as_deref().is_none_or(vectors_config_is_empty) {
+                        return Err(vector_diff_error(
+                            alloc::format!(
+                                "VECTOR (...) in vector diff '{name}' requires on_disk or memory"
+                            ),
+                            tok.span,
+                        ));
+                    }
+                    vectors = block;
+                }
+                _ if tok.is_keyword_or_identifier() && ascii_equal(tok.text, "QUANTIZATION") => {
+                    // Defensive mirror of the main clause dispatch (some lexer
+                    // paths surface QUANTIZATION as an identifier).
+                    self.advance()?;
+                    if quantization.is_some() {
+                        return Err(vector_diff_error(
+                            alloc::format!("duplicate QUANTIZATION block in vector diff '{name}'"),
+                            tok.span,
+                        ));
+                    }
+                    quantization = Some(self.parse_quantization_diff_block()?);
+                }
+                _ => {
+                    return Err(vector_diff_error(
+                        alloc::format!(
+                            "expected HNSW (...), QUANTIZATION (...), or VECTOR (...) in vector diff '{}', got '{}'",
+                            name,
+                            tok.text
+                        ),
+                        tok.span,
+                    ));
+                }
+            }
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+            self.reject_trailing_comma(TokenKind::Rparen)?;
+        }
+        self.expect(TokenKind::Rparen)?;
+
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: alloc::vec![VectorDiff {
+                name,
+                hnsw,
+                quantization,
+                vectors,
+            }],
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// Parse one nested `QUANTIZATION (…)` block into the ALTER diff form:
+    /// `disabled = true` clears it, otherwise the config replaces it.
+    fn parse_quantization_diff_block(&mut self) -> Result<Box<QuantizationUpdate>, QqlError> {
+        let block = self.parse_quantization_config_block()?;
+        let disabled = block
+            .quantization_update
+            .as_ref()
+            .is_some_and(|update| update.disabled);
+        let config = block
+            .quantization_update
+            .and_then(|update| update.config)
+            .or(block.quantization);
+        Ok(Box::new(QuantizationUpdate { disabled, config }))
+    }
+
+    /// `WITH SPARSE <name> (SPARSE (…) | INDEX (…))` — ALTER-only.
+    fn parse_sparse_vector_diff_clause(&mut self) -> Result<CollectionConfig, QqlError> {
+        let name = self.parse_identifier()?;
+        self.expect(TokenKind::Lparen)?;
+        let tok = self.peek()?;
+        if !matches!(tok.kind, TokenKind::Sparse | TokenKind::Index) {
+            return Err(vector_diff_error(
+                alloc::format!(
+                    "expected SPARSE (...) or INDEX (...) in sparse vector diff '{name}', got '{}'",
+                    tok.text
+                ),
+                tok.span,
+            ));
+        }
+        self.advance()?;
+        let (index, modifier) = self.parse_sparse_config_block()?;
+        if index.is_none() && modifier.is_none() {
+            return Err(vector_diff_error(
+                alloc::format!(
+                    "SPARSE (...) in sparse vector diff '{name}' requires at least one setting"
+                ),
+                tok.span,
+            ));
+        }
+        self.expect(TokenKind::Rparen)?;
+
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: alloc::vec![SparseVectorDiff {
+                name,
+                index,
+                modifier,
+            }],
+        })
     }
 
     pub fn parse_hnsw_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
@@ -156,26 +385,34 @@ impl<'a> AstLowerer<'a> {
                             "unknown HNSW parameter '{}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage, memory",
                             key
                         ),
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
-            validate_hnsw_value(key, value, self.peek()?.pos)?;
+            validate_hnsw_value(key, value, self.peek()?.span)?;
         }
 
-        if let Some(Value::Int(n)) = config_value(&config, "m") {
-            if *n != 0 && *n < 4 {
-                return Err(validation_err("m must be 0 or >= 4", self.peek()?.pos));
+        if let Some(value) = config_value(&config, "m") {
+            let m = match value {
+                Value::Int(n) => Some(*n),
+                Value::Float(f) if is_integer_val(value) => Some(*f as i64),
+                _ => None,
+            };
+            if let Some(n) = m
+                && n != 0
+                && n < 4
+            {
+                return Err(validation_err("m must be 0 or >= 4", self.peek()?.span));
             }
         }
 
-        let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
-        let ef_construct = config_positive_u64(&config, "ef_construct", self.peek()?.pos)?;
+        let m_val = config_non_negative_u64(&config, "m", self.peek()?.span)?;
+        let ef_construct = config_positive_u64(&config, "ef_construct", self.peek()?.span)?;
         let full_scan_threshold =
-            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
+            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.span)?;
         let max_indexing_threads =
-            config_positive_u64(&config, "max_indexing_threads", self.peek()?.pos)?;
-        let payload_m = config_positive_u64(&config, "payload_m", self.peek()?.pos)?;
+            config_positive_u64(&config, "max_indexing_threads", self.peek()?.span)?;
+        let payload_m = config_positive_u64(&config, "payload_m", self.peek()?.span)?;
 
         Ok(CollectionConfig {
             vectors: None,
@@ -187,12 +424,17 @@ impl<'a> AstLowerer<'a> {
                 on_disk: config_bool(&config, "on_disk"),
                 payload_m,
                 inline_storage: config_bool(&config, "inline_storage"),
-                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+                memory: config_memory(&config, "memory", self.peek()?.span, true)?,
             })),
             optimizers: None,
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
         })
     }
 
@@ -203,27 +445,32 @@ impl<'a> AstLowerer<'a> {
                 key.to_ascii_lowercase().as_str(),
                 "on_disk" | "memory" | "datatype"
             ) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!(
                         "unknown VECTOR parameter '{}'. Expected: on_disk, memory, datatype",
                         key
                     ),
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
-            validate_vectors_value(key, value, self.peek()?.pos)?;
+            validate_vectors_value(key, value, self.peek()?.span)?;
         }
         Ok(CollectionConfig {
             vectors: Some(Box::new(VectorsConfig {
                 on_disk: config_bool(&config, "on_disk"),
-                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
-                datatype: config_dense_datatype(&config, self.peek()?.pos)?,
+                memory: config_memory(&config, "memory", self.peek()?.span, true)?,
+                datatype: config_dense_datatype(&config, self.peek()?.span)?,
             })),
             hnsw: None,
             optimizers: None,
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
         })
     }
 
@@ -242,32 +489,32 @@ impl<'a> AstLowerer<'a> {
                 | "max_optimization_threads"
                 | "prevent_unoptimized" => {}
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         alloc::format!(
                             "unknown OPTIMIZERS parameter '{}'. Expected: deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized",
                             key
                         ),
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
-            validate_optimizers_value(key, value, self.peek()?.pos)?;
+            validate_optimizers_value(key, value, self.peek()?.span)?;
 
             if lower.as_str() == "deleted_threshold" {
-                super::check_deleted_threshold(value, self.peek()?.pos)?;
+                super::check_deleted_threshold(value, self.peek()?.span)?;
             }
             if lower.as_str() == "max_optimization_threads" {
                 match value {
                     Value::Int(n) if *n <= 0 => {
-                        return Err(QqlError::syntax(
+                        return Err(validation_err(
                             "max_optimization_threads must be a positive integer or 'auto'",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
-                    Value::Str(s) if !ascii_equal_lower(s, "auto") => {
-                        return Err(QqlError::syntax(
+                    Value::Str(s) if !ascii_equal(s, "auto") => {
+                        return Err(validation_err(
                             "max_optimization_threads must be a positive integer or 'auto'",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                     _ => {}
@@ -283,32 +530,32 @@ impl<'a> AstLowerer<'a> {
                 vacuum_min_vector_number: config_positive_u64(
                     &config,
                     "vacuum_min_vector_number",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 default_segment_number: config_positive_u64(
                     &config,
                     "default_segment_number",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 max_segment_size: config_positive_u64(
                     &config,
                     "max_segment_size",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 memmap_threshold: config_non_negative_u64(
                     &config,
                     "memmap_threshold",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 indexing_threshold: config_non_negative_u64(
                     &config,
                     "indexing_threshold",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 flush_interval_sec: config_positive_u64(
                     &config,
                     "flush_interval_sec",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 max_optimization_threads: config_max_optimization_threads(
                     &config,
@@ -319,12 +566,17 @@ impl<'a> AstLowerer<'a> {
             params: None,
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
         })
     }
 
     pub fn parse_collection_params_config_block(
         &mut self,
-        for_alter: bool,
+        _for_alter: bool,
     ) -> Result<CollectionConfig, QqlError> {
         let config = self.parse_config_block()?;
         for (key, value) in &config {
@@ -345,22 +597,16 @@ impl<'a> AstLowerer<'a> {
                             "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, payload_memory, shard_number, sharding_method, shard_keys",
                             key
                         ),
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
-            validate_params_value(key, value, self.peek()?.pos)?;
+            validate_params_value(key, value, self.peek()?.span)?;
         }
 
-        if !for_alter
-            && (config_has_key(&config, "read_fan_out_factor")
-                || config_has_key(&config, "read_fan_out_delay_ms"))
-        {
-            return Err(validation_err(
-                    "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
-                    self.peek()?.pos,
-                ));
-        }
+        // `read_fan_out_*` only exist on the update wire shape
+        // (`CollectionParamsDiff`); create-time values are applied with a
+        // follow-up PATCH (see `create_collection_deferred_params_rest`).
 
         Ok(CollectionConfig {
             vectors: None,
@@ -370,32 +616,32 @@ impl<'a> AstLowerer<'a> {
                 replication_factor: config_positive_u64(
                     &config,
                     "replication_factor",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 write_consistency_factor: config_positive_u64(
                     &config,
                     "write_consistency_factor",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 read_fan_out_factor: config_positive_u64(
                     &config,
                     "read_fan_out_factor",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 read_fan_out_delay_ms: config_non_negative_u64(
                     &config,
                     "read_fan_out_delay_ms",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 on_disk_payload: config_bool(&config, "on_disk_payload"),
-                payload_memory: config_memory(&config, "payload_memory", self.peek()?.pos, false)?,
-                shard_number: config_positive_u64(&config, "shard_number", self.peek()?.pos)?,
+                payload_memory: config_memory(&config, "payload_memory", self.peek()?.span, false)?,
+                shard_number: config_positive_u64(&config, "shard_number", self.peek()?.span)?,
                 sharding_method: match config_value(&config, "sharding_method") {
                     Some(Value::Str(s)) => Some(s.clone()),
                     Some(_) => {
                         return Err(validation_err(
                             "sharding_method must be a string ('auto' or 'custom')",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                     None => None,
@@ -403,29 +649,45 @@ impl<'a> AstLowerer<'a> {
                 shard_keys: match config_value(&config, "shard_keys") {
                     Some(Value::List(items)) => {
                         let mut keys = Vec::with_capacity(items.len());
+                        let entry_span = self.peek()?.span;
                         for item in items {
                             match item {
-                                Value::Str(s) => keys.push(s.clone()),
+                                Value::Str(s) => keys.push(ShardKey::Keyword(s.clone())),
+                                Value::Int(n) if *n >= 0 => {
+                                    keys.push(ShardKey::Number(*n as u64));
+                                }
+                                Value::Param(name, span) => keys.push(ShardKey::Param(
+                                    name.clone(),
+                                    span.clone()
+                                        .or_else(|| Some(alloc::boxed::Box::new(entry_span))),
+                                )),
+                                Value::PositionalParam(idx, span) => {
+                                    keys.push(ShardKey::PositionalParam(
+                                        *idx,
+                                        span.clone()
+                                            .or_else(|| Some(alloc::boxed::Box::new(entry_span))),
+                                    ));
+                                }
                                 _ => {
                                     return Err(validation_err(
-                                        "shard_keys entries must all be strings",
-                                        self.peek()?.pos,
+                                        "shard_keys entries must all be strings or non-negative integers",
+                                        self.peek()?.span,
                                     ));
                                 }
                             }
                         }
                         if keys.is_empty() {
                             return Err(validation_err(
-                                "shard_keys must be a non-empty list of strings",
-                                self.peek()?.pos,
+                                "shard_keys must be a non-empty list of strings or non-negative integers",
+                                self.peek()?.span,
                             ));
                         }
                         Some(keys)
                     }
                     Some(_) => {
                         return Err(validation_err(
-                            "shard_keys must be a list of strings",
-                            self.peek()?.pos,
+                            "shard_keys must be a list of strings or non-negative integers",
+                            self.peek()?.span,
                         ));
                     }
                     None => None,
@@ -433,42 +695,147 @@ impl<'a> AstLowerer<'a> {
             })),
             quantization: None,
             quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// `WITH WAL (…)` — write-ahead log settings (CREATE-only; the update
+    /// wire shape has no WAL field).
+    pub fn parse_wal_config_block(
+        &mut self,
+        for_alter: bool,
+    ) -> Result<CollectionConfig, QqlError> {
+        if for_alter {
+            return Err(validation_err(
+                "WITH WAL is supported only for CREATE COLLECTION",
+                self.peek()?.span,
+            ));
+        }
+        let config = self.parse_config_block()?;
+        for (key, value) in &config {
+            let lower = key.to_ascii_lowercase();
+            match lower.as_str() {
+                "wal_capacity_mb" | "wal_segments_ahead" | "wal_retain_closed" => {}
+                _ => {
+                    return Err(validation_err(
+                        alloc::format!(
+                            "unknown WAL parameter '{}'. Expected: wal_capacity_mb, wal_segments_ahead, wal_retain_closed",
+                            key
+                        ),
+                        self.peek()?.span,
+                    ));
+                }
+            }
+            super::validate_wal_value(key, value, self.peek()?.span)?;
+        }
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: Some(config),
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// `WITH STRICT_MODE (…)` — strict-mode settings (CREATE and ALTER; the
+    /// plan layer validates value ranges and serializes the wire object).
+    pub fn parse_strict_mode_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
+        let config = self.parse_config_block()?;
+        for (key, value) in &config {
+            if !super::is_strict_mode_key(key) {
+                return Err(validation_err(
+                    alloc::format!(
+                        "unknown STRICT_MODE parameter '{}'. Expected: {}",
+                        key,
+                        super::STRICT_MODE_KEYS.join(", ")
+                    ),
+                    self.peek()?.span,
+                ));
+            }
+            super::validate_strict_mode_value(key, value, self.peek()?.span)?;
+        }
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: None,
+            strict_mode: Some(config),
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
+        })
+    }
+
+    /// `WITH METADATA (…)` — free-form collection metadata (CREATE and ALTER).
+    /// Keys are unrestricted; values are any JSON value.
+    pub fn parse_metadata_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
+        let config = self.parse_config_block()?;
+        Ok(CollectionConfig {
+            vectors: None,
+            hnsw: None,
+            optimizers: None,
+            params: None,
+            quantization: None,
+            quantization_update: None,
+            wal: None,
+            strict_mode: None,
+            metadata: Some(config),
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
         })
     }
 
     pub fn parse_quantization_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
         let config = self.parse_config_block()?;
 
-        if let Some(disabled_val) = config_bool(&config, "disabled") {
-            if disabled_val {
-                return Ok(CollectionConfig {
-                    vectors: None,
-                    hnsw: None,
-                    optimizers: None,
-                    params: None,
-                    quantization: None,
-                    quantization_update: Some(Box::new(QuantizationUpdate {
-                        disabled: true,
-                        config: None,
-                    })),
-                });
-            }
+        if let Some(disabled_val) = config_bool(&config, "disabled")
+            && disabled_val
+        {
+            return Ok(CollectionConfig {
+                vectors: None,
+                hnsw: None,
+                optimizers: None,
+                params: None,
+                quantization: None,
+                quantization_update: Some(Box::new(QuantizationUpdate {
+                    disabled: true,
+                    config: None,
+                })),
+                wal: None,
+                strict_mode: None,
+                metadata: None,
+                vector_diffs: Vec::new(),
+                sparse_vector_diffs: Vec::new(),
+            });
         }
 
-        let err_pos = self.peek()?.pos;
+        let err_span = self.peek()?.span;
         let type_raw = config_value(&config, "type").ok_or_else(|| {
-            QqlError::syntax(
+            validation_err(
                 "QUANTIZATION config requires a 'type' (scalar, binary, product, turbo)",
-                err_pos,
+                err_span,
             )
         })?;
 
         let type_str = match type_raw {
             Value::Str(s) => s,
             _ => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "QUANTIZATION 'type' must be a string",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         };
@@ -479,15 +846,49 @@ impl<'a> AstLowerer<'a> {
             "product" => QuantizationType::Product,
             "turbo" => QuantizationType::Turbo,
             _ => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!(
                         "unknown QUANTIZATION type '{}'. Expected scalar, binary, product, turbo",
                         type_str
                     ),
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         };
+
+        // Each family accepts only its own sub-fields: misplaced keys (e.g.
+        // `quantile` on binary, `bits` on scalar) fail closed instead of
+        // being silently dropped.
+        for (key, _) in &config {
+            let allowed = match qtype {
+                QuantizationType::Scalar => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "quantile" | "always_ram" | "memory" | "disabled"
+                ),
+                QuantizationType::Binary => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "encoding" | "query_encoding" | "always_ram" | "memory" | "disabled"
+                ),
+                QuantizationType::Product => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "compression" | "always_ram" | "memory" | "disabled"
+                ),
+                QuantizationType::Turbo => matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "type" | "bits" | "always_ram" | "memory" | "disabled"
+                ),
+            };
+            if !allowed {
+                return Err(validation_err(
+                    alloc::format!(
+                        "unknown QUANTIZATION parameter '{}' for type '{}'",
+                        key,
+                        type_str.to_ascii_lowercase()
+                    ),
+                    self.peek()?.span,
+                ));
+            }
+        }
 
         let always_ram = config_bool(&config, "always_ram").unwrap_or(false);
 
@@ -495,45 +896,45 @@ impl<'a> AstLowerer<'a> {
         if qtype == QuantizationType::Scalar && config_has_key(&config, "quantile") {
             quantile = config_float_range(&config, "quantile", 0.0, 1.0);
             if quantile.is_none() {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "quantile must be between 0.0 and 1.0",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
 
         let mut bits: Option<f64> = None;
-        if qtype == QuantizationType::Turbo {
-            if let Some(v) = config_value(&config, "bits") {
-                let bits_val = match v {
-                    Value::Int(n) => Some(*n as f64),
-                    Value::Float(f) => Some(*f),
-                    _ => None,
-                };
-                if let Some(b) = bits_val {
-                    if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
-                        return Err(QqlError::syntax(
-                            "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
-                            self.peek()?.pos,
-                        ));
-                    }
-                    bits = Some(b);
+        if qtype == QuantizationType::Turbo
+            && let Some(v) = config_value(&config, "bits")
+        {
+            let bits_val = match v {
+                Value::Int(n) => Some(*n as f64),
+                Value::Float(f) => Some(*f),
+                _ => None,
+            };
+            if let Some(b) = bits_val {
+                if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
+                    return Err(validation_err(
+                        "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
+                        self.peek()?.span,
+                    ));
                 }
+                bits = Some(b);
             }
         }
 
         let mut compression: Option<String> = None;
-        if qtype == QuantizationType::Product {
-            if let Some(Value::Str(c)) = config_value(&config, "compression") {
-                let c_lower = c.to_ascii_lowercase();
-                if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
-                    compression = Some(c_lower);
-                } else {
-                    return Err(QqlError::syntax(
-                        "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
-                        self.peek()?.pos,
-                    ));
-                }
+        if qtype == QuantizationType::Product
+            && let Some(Value::Str(c)) = config_value(&config, "compression")
+        {
+            let c_lower = c.to_ascii_lowercase();
+            if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
+                compression = Some(c_lower);
+            } else {
+                return Err(validation_err(
+                    "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
+                    self.peek()?.span,
+                ));
             }
         }
 
@@ -554,9 +955,9 @@ impl<'a> AstLowerer<'a> {
                         }
                     }
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(validation_err(
                             "encoding must be a string or number for BINARY quantization",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                 };
@@ -566,9 +967,9 @@ impl<'a> AstLowerer<'a> {
                     "two_bits" | "twobits" | "2" => "two_bits".into(),
                     "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits".into(),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(validation_err(
                             "encoding must be one_bit (1), two_bits (2), or one_and_half_bits (1.5) for BINARY quantization",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                 });
@@ -582,9 +983,9 @@ impl<'a> AstLowerer<'a> {
                 ) {
                     query_encoding = Some(qe_lower);
                 } else {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         "query_encoding must be default, binary, scalar4bits, or scalar8bits for BINARY quantization",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
@@ -598,7 +999,7 @@ impl<'a> AstLowerer<'a> {
             compression,
             encoding,
             query_encoding,
-            memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+            memory: config_memory(&config, "memory", self.peek()?.span, true)?,
         };
 
         Ok(CollectionConfig {
@@ -611,30 +1012,35 @@ impl<'a> AstLowerer<'a> {
                 disabled: false,
                 config: Some(Box::new(q_config)),
             })),
+            wal: None,
+            strict_mode: None,
+            metadata: None,
+            vector_diffs: Vec::new(),
+            sparse_vector_diffs: Vec::new(),
         })
     }
 
     pub fn parse_multivector_config_block(&mut self) -> Result<MultivectorConfig, QqlError> {
         let config = self.parse_config_block()?;
-        let err_pos = self.peek()?.pos;
+        let err_span = self.peek()?.span;
         let comp = config_value(&config, "comparator")
-            .ok_or_else(|| QqlError::syntax("MULTIVECTOR config requires 'comparator'", err_pos))?;
+            .ok_or_else(|| validation_err("MULTIVECTOR config requires 'comparator'", err_span))?;
         let comparator = match comp {
             Value::Str(s) => s.to_ascii_lowercase(),
             _ => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "MULTIVECTOR comparator must be a string",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         };
         if comparator != "max_sim" {
-            return Err(QqlError::syntax(
+            return Err(validation_err(
                 alloc::format!(
                     "MULTIVECTOR comparator must be 'max_sim', got '{}'",
                     comparator
                 ),
-                self.peek()?.pos,
+                self.peek()?.span,
             ));
         }
         Ok(MultivectorConfig {
@@ -652,12 +1058,12 @@ impl<'a> AstLowerer<'a> {
                 lower.as_str(),
                 "modifier" | "full_scan_threshold" | "on_disk" | "datatype" | "memory"
             ) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!(
                         "unknown SPARSE/INDEX parameter '{}'. Expected: modifier, full_scan_threshold, on_disk, datatype, memory",
                         key
                     ),
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
@@ -668,14 +1074,14 @@ impl<'a> AstLowerer<'a> {
             if matches!(m_lower.as_str(), "none" | "idf") {
                 modifier = Some(m_lower);
             } else {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "modifier must be none or idf for SPARSE vector",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
         let full_scan_threshold =
-            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
+            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.span)?;
         let on_disk = config_bool(&config, "on_disk");
         // `default` (and omitting the key) both mean "backend default" → None.
         let datatype = match config_value(&config, "datatype") {
@@ -683,16 +1089,16 @@ impl<'a> AstLowerer<'a> {
             Some(Value::Str(s)) => match VectorDatatype::parse_sparse(s) {
                 Some(dt) => Some(dt),
                 None => {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         "datatype must be float32, uint8, float16, or default for SPARSE index",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             },
             Some(_) => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "datatype must be a string for SPARSE index",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
             None => None,
@@ -707,7 +1113,7 @@ impl<'a> AstLowerer<'a> {
                 full_scan_threshold,
                 on_disk,
                 datatype,
-                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+                memory: config_memory(&config, "memory", self.peek()?.span, true)?,
             }))
         } else {
             None

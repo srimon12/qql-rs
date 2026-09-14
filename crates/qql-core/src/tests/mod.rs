@@ -3,6 +3,7 @@ mod filter_tests;
 mod lexer_tests;
 mod negative_tests;
 mod parser_tests;
+mod recovery_tests;
 mod transform_tests;
 
 pub(crate) use crate::parser::Parser;

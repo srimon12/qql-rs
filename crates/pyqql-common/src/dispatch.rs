@@ -1,0 +1,257 @@
+//! Shared client dispatch: input normalization, parameter planning, and the
+//! blocking/async run loops used by `pyqql` and `pyqql-edge` clients.
+
+use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::{PyAny, PyList};
+use qql_core::ast;
+use qql_core::error::QqlError;
+use qql_core::params_json::{
+    ValueParamPlan, bind_stmt_with_values, bind_str_with_values, param_value_for, plan_value_params,
+};
+use qql_core::parser::Parser;
+
+use crate::{PyStmt, already_bound_error, py_to_value, qql_py_syntax_error, qql_py_value_error};
+
+/// Executor error mode: stop the batch on the first failure, or continue.
+pub type OnError = qql::executor::OnError;
+
+/// Normalized execute input: one statement, a script string, or a batch.
+pub enum Input {
+    /// A single (possibly multi-statement) query string.
+    String(String),
+    /// A single pre-parsed statement.
+    Stmt(ast::Stmt),
+    /// A batch of query strings.
+    StrList(Vec<String>),
+    /// A batch of pre-parsed statements.
+    StmtList(Vec<ast::Stmt>),
+}
+
+/// Parse the `on_error` option (`"stop"` default, `"continue"`).
+pub fn parse_on_error(s: &str) -> PyResult<OnError> {
+    match s {
+        "stop" => Ok(OnError::Stop),
+        "continue" => Ok(OnError::Continue),
+        _ => Err(PyValueError::new_err(
+            "on_error must be 'stop' or 'continue'",
+        )),
+    }
+}
+
+/// Normalize `query` (str | Stmt | list) plus `params` into an [`Input`],
+/// applying the shared statement-scoped batch contract.
+pub fn prepare_input(
+    query: &Bound<'_, PyAny>,
+    params: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Input> {
+    let params_opt = params.filter(|p| !p.is_none());
+
+    if let Ok(list) = query.cast::<PyList>() {
+        if list.is_empty() {
+            return Ok(Input::StrList(Vec::new()));
+        }
+        // Convert params once; the shared planner enforces the scoped
+        // length contract (QQL-BIND-BATCH-LENGTH on mismatch).
+        let value_params = match params_opt {
+            Some(p) => Some(py_to_value(p)?),
+            None => None,
+        };
+        let plan = match &value_params {
+            Some(p) => Some(plan_value_params(p, list.len()).map_err(qql_py_value_error)?),
+            None => None,
+        };
+
+        let first = list.get_item(0)?;
+        if first.extract::<PyRef<'_, PyStmt>>().is_ok() {
+            let mut stmts = Vec::with_capacity(list.len());
+            for (i, item) in list.iter().enumerate() {
+                let py_stmt = item.extract::<PyRef<'_, PyStmt>>()?;
+                if plan.is_some() && py_stmt.bound {
+                    // The scoped/shared params would be silently ignored for
+                    // an already-bound statement.
+                    return Err(already_bound_error());
+                }
+                let mut s = py_stmt.inner.clone();
+                if let Some(plan) = &plan {
+                    bind_stmt_with_values(&mut s, param_value_for(plan, i))
+                        .map_err(qql_py_value_error)?;
+                }
+                stmts.push(s);
+            }
+            return Ok(Input::StmtList(stmts));
+        }
+
+        let mut strs = Vec::with_capacity(list.len());
+        for (i, item) in list.iter().enumerate() {
+            let s_str = item
+                .extract::<String>()
+                .map_err(|_| PyTypeError::new_err("list items must be strings or Stmt objects"))?;
+            let bound = match &plan {
+                Some(plan) => bind_str_with_values(&s_str, param_value_for(plan, i), false)
+                    .map_err(qql_py_value_error)?,
+                None => s_str,
+            };
+            strs.push(bound);
+        }
+        return Ok(Input::StrList(strs));
+    }
+
+    if let Ok(py_stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+        if py_stmt.bound && params_opt.is_some() {
+            return Err(already_bound_error());
+        }
+        let mut stmt = py_stmt.inner.clone();
+        if let Some(p) = params_opt {
+            let value_params = py_to_value(p)?;
+            let plan = plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
+            bind_stmt_with_values(&mut stmt, param_value_for(&plan, 0))
+                .map_err(qql_py_value_error)?;
+        }
+        return Ok(Input::Stmt(stmt));
+    }
+
+    if let Ok(s) = query.extract::<String>() {
+        if let Some(p) = params_opt {
+            let value_params = py_to_value(p)?;
+            // A params list of containers is a scoped candidate for scripts:
+            // parse once to count statements, then plan.
+            let scoped_candidate = matches!(&value_params, qql_core::ast::Value::List(arr)
+                if !arr.is_empty()
+                    && arr
+                        .iter()
+                        .all(|e| matches!(e, qql_core::ast::Value::Dict(_) | qql_core::ast::Value::List(_))));
+            if scoped_candidate {
+                let parsed = Parser::parse_all(&s).map_err(qql_py_syntax_error)?;
+                let plan =
+                    plan_value_params(&value_params, parsed.len()).map_err(qql_py_value_error)?;
+                if let ValueParamPlan::Scoped(list) = &plan {
+                    let mut bound_stmts = Vec::with_capacity(parsed.len());
+                    for (i, mut stmt) in parsed.into_iter().enumerate() {
+                        bind_stmt_with_values(&mut stmt, &list[i]).map_err(qql_py_value_error)?;
+                        bound_stmts.push(stmt);
+                    }
+                    return Ok(Input::StmtList(bound_stmts));
+                }
+                // Unreachable for container arrays (they scope or err); fall
+                // through to whole-string binding defensively.
+            }
+            let bound =
+                bind_str_with_values(&s, &value_params, false).map_err(qql_py_value_error)?;
+            return Ok(Input::String(bound));
+        }
+        return Ok(Input::String(s));
+    }
+
+    Err(PyTypeError::new_err(
+        "query must be a str, Stmt, list[str], or list[Stmt]",
+    ))
+}
+
+/// Run a normalized [`Input`] on the blocking Tokio runtime, returning the
+/// typed execution report (no JSON intermediate).
+pub fn run_input(
+    executor: &qql::executor::Executor,
+    runtime: &tokio::runtime::Runtime,
+    input: Input,
+    on_error: OnError,
+) -> PyResult<qql::executor::ExecutionReport> {
+    let stop = matches!(on_error, OnError::Stop);
+    let map_err = crate::qql_py_error;
+    match input {
+        Input::String(s) => runtime
+            .block_on(executor.execute(&s, on_error))
+            .map_err(map_err),
+        Input::Stmt(s) => {
+            let results = runtime
+                .block_on(executor.execute_batch_nodes(vec![s], stop))
+                .map_err(map_err)?;
+            Ok(qql::executor::ExecutionReport::from_results(results))
+        }
+        Input::StrList(strs) => {
+            let refs: Vec<&str> = strs.iter().map(String::as_str).collect();
+            runtime
+                .block_on(executor.execute_batch(&refs, on_error))
+                .map_err(map_err)
+        }
+        Input::StmtList(stmts) => {
+            let results = runtime
+                .block_on(executor.execute_batch_nodes(stmts, stop))
+                .map_err(map_err)?;
+            Ok(qql::executor::ExecutionReport::from_results(results))
+        }
+    }
+}
+
+/// Run a normalized [`Input`] on an existing async context, returning the
+/// typed execution report (no JSON intermediate).
+pub async fn run_async(
+    executor: &qql::executor::Executor,
+    input: Input,
+    on_error: OnError,
+) -> Result<qql::executor::ExecutionReport, QqlError> {
+    let stop = matches!(on_error, OnError::Stop);
+    match input {
+        Input::String(s) => executor.execute(&s, on_error).await,
+        Input::Stmt(s) => {
+            let results = executor.execute_batch_nodes(vec![s], stop).await?;
+            Ok(qql::executor::ExecutionReport::from_results(results))
+        }
+        Input::StrList(strs) => {
+            let refs: Vec<&str> = strs.iter().map(String::as_str).collect();
+            executor.execute_batch(&refs, on_error).await
+        }
+        Input::StmtList(stmts) => {
+            let results = executor.execute_batch_nodes(stmts, stop).await?;
+            Ok(qql::executor::ExecutionReport::from_results(results))
+        }
+    }
+}
+
+/// Run a normalized [`Input`] through `explain_analyze` on the blocking
+/// Tokio runtime. Single-statement only (like Postgres `EXPLAIN ANALYZE`):
+/// batch inputs fail closed instead of silently analyzing one entry.
+pub fn run_analyze_input(
+    executor: &qql::executor::Executor,
+    runtime: &tokio::runtime::Runtime,
+    input: Input,
+    on_error: OnError,
+) -> PyResult<serde_json::Value> {
+    let report = match input {
+        Input::String(s) => runtime
+            .block_on(executor.explain_analyze(&s, on_error))
+            .map_err(crate::qql_py_error)?,
+        Input::Stmt(s) => runtime
+            .block_on(executor.explain_analyze_node(s, on_error))
+            .map_err(crate::qql_py_error)?,
+        Input::StrList(_) | Input::StmtList(_) => {
+            return Err(crate::qql_py_value_error(QqlError::validation(
+                "QQL-VALIDATION-ANALYZE-BATCH",
+                "explain_analyze accepts a single statement (string or Stmt), not a batch; analyze each entry separately",
+                None,
+            )));
+        }
+    };
+    Ok(serde_json::to_value(&report).unwrap_or_default())
+}
+
+/// Run a normalized [`Input`] through `explain_analyze` on an existing async
+/// context. Same single-statement contract as [`run_analyze_input`].
+pub async fn run_analyze_async(
+    executor: &qql::executor::Executor,
+    input: Input,
+    on_error: OnError,
+) -> Result<serde_json::Value, QqlError> {
+    let report = match input {
+        Input::String(s) => executor.explain_analyze(&s, on_error).await?,
+        Input::Stmt(s) => executor.explain_analyze_node(s, on_error).await?,
+        Input::StrList(_) | Input::StmtList(_) => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-ANALYZE-BATCH",
+                "explain_analyze accepts a single statement (string or Stmt), not a batch; analyze each entry separately",
+                None,
+            ));
+        }
+    };
+    Ok(serde_json::to_value(&report).unwrap_or_default())
+}

@@ -43,6 +43,10 @@ pub mod lexer;
 /// Parameter binding for `:name` / `?` placeholders with type-checked
 /// substitution.
 pub mod params;
+#[cfg(feature = "json")]
+/// Host-language parameter binding over JSON-shaped `params` values: the
+/// single batch-dispatch contract shared by every SDK binding.
+pub mod params_json;
 /// Recursive-descent parser: token stream → validated typed AST.
 pub mod parser;
 /// Lexical token kinds, spans, and keyword lookup tables.

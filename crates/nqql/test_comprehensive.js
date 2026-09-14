@@ -100,10 +100,12 @@ test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, '
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
 test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, 'function'));
 test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
+test('exports: scrollCursor', () => assert.strictEqual(typeof nqql.scrollCursor, 'function'));
+test('exports: scrollStream', () => assert.strictEqual(typeof nqql.scrollStream, 'function'));
 
 // Unknown exports check
-const knownKeys = ['Client','HttpEmbedder','Stmt','bind','compileQuery','execute','executeStmt',
-  'explain','explainStmt','injectFilter','isValid','parse','parseJson','tokenize', 'version', '__version__'];
+const knownKeys = ['Client','ExecutionReport','HttpEmbedder','ScoredPoint','Stmt','bind','compileQuery','execute','executeHits','executeStmt',
+  'explain','explainStmt','injectFilter','isValid','parse','parseJson','scrollCursor','scrollStream','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
   const extras = actualKeys.filter(k => !knownKeys.includes(k));
@@ -525,6 +527,65 @@ test('HttpEmbedder accepts rerank fields (snake_case aliases)', () => {
   assert.strictEqual(e.rerankApiKey, 'rk-snake');
 });
 
+// Client-side BM25 document params (local sparse encoder; write-path only).
+// The wrapper must forward them to the native Client, which fails closed on
+// out-of-range values with QQL-VALIDATION-CONFIG.
+test('HttpEmbedder accepts BM25 fields (camelCase)', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25K1: 2.0,
+    bm25B: 0.5,
+    bm25AvgLen: 8,
+  });
+  assert.strictEqual(e.bm25K1, 2.0);
+  assert.strictEqual(e.bm25B, 0.5);
+  assert.strictEqual(e.bm25AvgLen, 8);
+});
+
+test('HttpEmbedder accepts BM25 fields (snake_case aliases)', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25_k1: 1.5,
+    bm25_b: 0.25,
+    bm25_avg_len: 16,
+  });
+  assert.strictEqual(e.bm25K1, 1.5);
+  assert.strictEqual(e.bm25B, 0.25);
+  assert.strictEqual(e.bm25AvgLen, 16);
+});
+
+test('HttpEmbedder rejects non-number BM25 values', () => {
+  assert.throws(
+    () =>
+      new nqql.HttpEmbedder({
+        endpoint: 'http://localhost:8080/v1/embeddings',
+        model: 'test-model',
+        dimension: 768,
+        bm25K1: 'nope',
+      }),
+    /must be a number/
+  );
+});
+
+test('Client with embedder (including BM25 fields) constructs w/o error', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25K1: 2.0,
+    bm25B: 0.5,
+    bm25AvgLen: 8,
+  });
+  const c = new nqql.Client({ url: QDRANT_URL, embedder: e, useGrpc: false });
+  assert.ok(c instanceof nqql.Client);
+  const plan = c.explain('QUERY TEXT "hello" FROM docs LIMIT 5');
+  assert.ok(plan.length > 0);
+});
+
 test('Client with embedder (including rerank fields) constructs w/o error', () => {
   const e = new nqql.HttpEmbedder({
     endpoint: 'http://localhost:8080/v1/embeddings',
@@ -603,7 +664,7 @@ async function runE2E() {
   {
     const r = await e2eClient.execute('SHOW COLLECTIONS');
     assert.strictEqual(r.ok, true);
-    const names = r.results[0].data.result.collections.map(c => c.name);
+    const names = r.results[0].data.collections;
     assert.ok(names.includes(TEST_COLLECTION));
     console.log('  ✓ E2E: SHOW COLLECTIONS via QQL');
     passed++;
@@ -640,7 +701,7 @@ async function runE2E() {
   {
     const r = await e2eClient.execute(`COUNT FROM ${TEST_COLLECTION}`);
     assert.strictEqual(r.ok, true);
-    assert.strictEqual(r.results[0].data.result.count, 2);
+    assert.strictEqual(r.results[0].data.count, 2);
     console.log('  ✓ E2E: COUNT = 2');
     passed++;
   }
@@ -668,7 +729,7 @@ async function runE2E() {
   {
     const r = await e2eClient.execute(`COUNT FROM ${TEST_COLLECTION}`);
     assert.strictEqual(r.ok, true);
-    assert.strictEqual(r.results[0].data.result.count, 1);
+    assert.strictEqual(r.results[0].data.count, 1);
     console.log('  ✓ E2E: COUNT = 1 after delete');
     passed++;
   }
@@ -756,7 +817,21 @@ async function runE2E() {
     const [stmt] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived'");
     stmt.shardKey = 'tenant-a';
     assert.strictEqual(stmt.shardKey, 'tenant-a');
-    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
+    assert.deepStrictEqual(stmt.toObject().DeletePayload.shard_key, { Keyword: 'tenant-a' });
+  });
+
+  test('Stmt.shardKey setter supports numeric keys without coercion', () => {
+    const [stmt] = nqql.parse("DELETE FROM docs WHERE id = 1");
+    stmt.shardKey = 101;
+    assert.strictEqual(stmt.shardKey, 101n);
+    assert.deepStrictEqual(stmt.toObject().Delete.shard_key, { Number: 101 });
+    // Booleans and floats are rejected, never silently coerced.
+    assert.throws(() => { stmt.shardKey = true; }, /shardKey/);
+    assert.throws(() => { stmt.shardKey = 1.5; }, /shardKey/);
+    assert.throws(() => { stmt.shardKey = -3; }, /shardKey/);
+    assert.throws(() => { stmt.shardKey = 2 ** 60; }, /BigInt/);
+    stmt.shardKey = 2n ** 60n;
+    assert.strictEqual(stmt.shardKey, 2n ** 60n);
   });
 
   test('SHARD clause on DELETE PAYLOAD', () => {
@@ -764,7 +839,7 @@ async function runE2E() {
       "DELETE PAYLOAD draft FROM docs WHERE status = 'archived' SHARD 'tenant-b'",
     );
     assert.strictEqual(stmt.shardKey, 'tenant-b');
-    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-b');
+    assert.deepStrictEqual(stmt.toObject().DeletePayload.shard_key, { Keyword: 'tenant-b' });
   });
 
   test('Stmt.shardKey on SHOW COLLECTIONS returns null', () => {

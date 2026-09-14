@@ -1,0 +1,110 @@
+-- 26. Cluster resource quotas. REST only.
+SHOW QUOTAS;
+
+SET QUOTA (
+  enabled = true,
+  max_resident_memory_percent = 80,
+  max_disk_usage_percent = 90,
+  release_margin_percent = 5
+) WAIT true;
+
+SET QUOTA (enabled = false);
+
+SET QUOTA (max_disk_usage_percent = null);
+
+-- 27. Memory placement tiers plus TurboQuant.
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+    WITH HNSW (memory = 'cold')
+) WITH PARAMS (payload_memory = 'cold')
+  WITH QUANTIZATION (type = 'scalar', memory = 'cached');
+
+CREATE COLLECTION docs_sparse (
+  sparse SPARSE WITH SPARSE (modifier = 'idf', memory = 'cached')
+);
+
+CREATE COLLECTION docs_q (
+  dense VECTOR(128, DOT) WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
+);
+
+-- 28. Keyword prefix index plus MATCH PREFIX.
+CREATE INDEX ON COLLECTION docs FOR title
+  TYPE keyword WITH (prefix = true, memory = 'cached');
+
+QUERY TEXT 'x' FROM docs
+  WHERE title MATCH PREFIX 'Comp'
+  LIMIT 10;
+
+-- 29. Deterministic SLICE sampling filter.
+QUERY TEXT 'x' FROM docs
+  WHERE SLICE (4, 1)
+  LIMIT 100;
+
+QUERY TEXT 'x' FROM docs
+  WHERE SLICE (4, 1) AND status = 'active'
+  LIMIT 100;
+
+-- 30. Per-query sparse IDF corpus.
+QUERY TEXT 'hello' FROM docs USING sparse
+  PARAMS (idf = 'global')
+  LIMIT 5;
+
+QUERY TEXT 'hello' FROM docs USING sparse
+  WHERE tenant_id = 'acme'
+  SHARD 'acme'
+  PARAMS (idf = WHERE tenant_id = 'acme')
+  LIMIT 5;
+
+-- 31. In-database categorical aggregations.
+FACET room_type FROM stays
+WHERE price < 150
+LIMIT 5
+EXACT true;
+
+FACET tag FROM products
+WHERE in_stock = true
+SHARD 'tenant_1'
+LIMIT 10;
+
+-- 38. Conditional upserts and nested payload writes.
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active';
+
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;
+
+UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE FILTER status = 'active' UPDATE MODE update_only;
+
+UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
+
+BATCH { UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1; UPDATE docs SET PAYLOAD = {b: 2} WHERE id = 2; };
+
+-- 39. Inference options, objects, and per-point vectors.
+QUERY TEXT 'hi' MODEL 'm' OPTIONS {temperature: 0.5} FROM docs USING dense LIMIT 1;
+
+QUERY IMAGE 'https://x/y.jpg' MODEL 'clip' OPTIONS {size: 512} FROM docs USING img LIMIT 1;
+
+QUERY OBJECT {a: 1} MODEL 'm' OPTIONS {k: true} FROM docs USING dense LIMIT 5;
+
+UPSERT INTO docs VALUES {id: 1, vector: {text: 'hello', model: 'm'}};
+
+UPSERT INTO docs VALUES {id: 1, vector: {dense: {text: 'hello', model: 'm'}, sparse: {indices: [1], values: [0.5]}}};
+
+UPDATE docs SET VECTOR dense = {text: 'hello', model: 'm'} WHERE id = 1;
+
+-- 40. Collection blocks, shard placement, and literal forms.
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH WAL (wal_capacity_mb = 32, wal_segments_ahead = 2, wal_retain_closed = 1);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH STRICT_MODE (enabled = true, max_query_limit = 100);
+
+CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH METADATA (owner = 'team', version = 3);
+
+ALTER COLLECTION docs WITH STRICT_MODE (enabled = false);
+
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2, placement = [1, 2], initial_state = 'Active');
+
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = 'english');
+
+CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = {languages: ['english'], custom: ['foo']});
+
+QUERY TEXT 'x' FROM docs WHERE big = 18446744073709551615 LIMIT 5;
+
+QUERY FORMULA DATETIME('2024-01-01T00:00:00Z') FROM docs LIMIT 1;

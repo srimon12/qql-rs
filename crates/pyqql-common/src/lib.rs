@@ -1,0 +1,789 @@
+//! Shared PyO3 logic for the `pyqql` and `pyqql-edge` bindings.
+//!
+//! The two Python SDKs expose different transports (REST/gRPC vs qdrant-edge)
+//! but ship an identical parser/parameter surface. Every piece of that logic
+//! lives here so the SDKs cannot drift: the crates register the shared classes
+//! and functions in their `#[pymodule]` and keep only transport-specific
+//! client construction.
+//!
+//! Parameter dispatch follows the shared batch contract in
+//! [`qql_core::params_json::plan_statement_params`]: a params list whose
+//! entries are all objects/arrays is statement-scoped (exact length match,
+//! `QQL-BIND-BATCH-LENGTH` otherwise); every other shape applies to every
+//! statement identically.
+
+use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use qql_core::ast::{self, Value};
+use qql_core::error::QqlError;
+use qql_core::lexer::Lexer;
+use qql_core::parser::Parser;
+
+pub mod dispatch;
+mod float_list;
+pub mod report;
+
+pub use dispatch::{
+    Input, OnError, parse_on_error, prepare_input, run_analyze_async, run_analyze_input, run_async,
+    run_input,
+};
+pub use report::{PyExecutionReport, PyScoredPoint, register_report_classes};
+
+// ═══════════════════════════════════════════════════════════════════
+//  Error mapping
+// ═══════════════════════════════════════════════════════════════════
+
+/// The host module that owns the shared exception classes (`pyqql` /
+/// `pyqql_edge`). Registered by each SDK's `#[pymodule]` init; the classes
+/// themselves live in the byte-identical `_errors.py` shared file and
+/// subclass both `QqlError` and the builtin category each mapper used to
+/// raise, so existing `except` clauses keep working.
+static ERROR_MODULE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Point pyqql-common at the host module exporting the shared exception
+/// classes. Call once from `#[pymodule]` init.
+pub fn register_error_module(module_name: &'static str) {
+    let _ = ERROR_MODULE.set(module_name.to_string());
+}
+
+/// Python class for a QQL error kind, per the shared `_errors.py`.
+fn exception_class_name(kind: qql_core::error::ErrorKind) -> &'static str {
+    use qql_core::error::ErrorKind;
+    match kind {
+        ErrorKind::Lex | ErrorKind::Parse => "QqlSyntaxError",
+        ErrorKind::Validation => "QqlValidationError",
+        ErrorKind::Execution => "QqlExecutionError",
+        ErrorKind::Transport => "QqlTransportError",
+        ErrorKind::Backend => "QqlBackendError",
+    }
+}
+
+/// Raise `error` as the shared typed exception `class_name`, carrying
+/// `.code` / `.kind` / `.span`. Falls back to the builtin category with
+/// attached attributes when the shared classes are unavailable (before
+/// module registration, or during interpreter teardown).
+fn raise_qql_error(error: QqlError, class_name: &str) -> PyErr {
+    let message = error.to_string();
+    let code = error.code.as_ref().to_string();
+    let kind_str = format!("{:?}", error.kind);
+    let span = error.span.map(|s| (s.start as i64, s.end as i64));
+    Python::attach(|py| {
+        let fields = PyDict::new(py);
+        for field in &error.fields {
+            let _ = fields.set_item(field.key.as_ref(), field.value.as_ref());
+        }
+        let fields_py = fields.unbind();
+        let cls = ERROR_MODULE
+            .get()
+            .and_then(|module| py.import(module.as_str()).ok())
+            .and_then(|module| module.getattr(class_name).ok());
+        if let Some(cls) = cls
+            && let Ok(ty) = cls.cast_into::<pyo3::types::PyType>()
+        {
+            return PyErr::from_type(ty, (message, code, kind_str, span, fields_py));
+        }
+        let base: PyErr = match class_name {
+            "QqlSyntaxError" => PySyntaxError::new_err(message),
+            "QqlValidationError" => PyValueError::new_err(message),
+            _ => PyRuntimeError::new_err(message),
+        };
+        attach_qql_error(base, error)
+    })
+}
+
+/// Map a [`QqlError`] to the typed shared exception for its
+/// [`ErrorKind`](qql_core::error::ErrorKind) (subclass of `QqlError` and of
+/// the builtin category this kind used to raise).
+pub fn qql_py_error(error: QqlError) -> PyErr {
+    let class_name = exception_class_name(error.kind);
+    raise_qql_error(error, class_name)
+}
+
+/// Map a [`QqlError`] to `QqlSyntaxError` (parse / validation surface).
+pub fn qql_py_syntax_error(error: QqlError) -> PyErr {
+    raise_qql_error(error, "QqlSyntaxError")
+}
+
+/// Map a [`QqlError`] to `QqlValidationError` (binding / value surface).
+pub fn qql_py_value_error(error: QqlError) -> PyErr {
+    raise_qql_error(error, "QqlValidationError")
+}
+
+/// The typed `QQL-CLIENT-CLOSED` error shared by both Python SDKs' client
+/// guards (message parity with the executor's own `ensure_open` gate).
+pub fn client_closed_error() -> PyErr {
+    qql_py_error(QqlError::execution(
+        "QQL-CLIENT-CLOSED",
+        "client is closed; create a new Client to run more statements",
+        None,
+    ))
+}
+
+fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
+    Python::attach(|py| {
+        let value = py_error.value(py);
+        let _ = value.setattr("code", error.code.as_ref());
+        let _ = value.setattr("kind", format!("{:?}", error.kind));
+        let span = error.span.map(|s| (s.start as i64, s.end as i64));
+        let _ = value.setattr("span", span);
+        // Structured fields (url, status, collection, request_id, …) as a
+        // dict, with a `request_id` convenience attribute so programmatic
+        // correlation never requires message parsing.
+        let fields = PyDict::new(py);
+        for field in &error.fields {
+            let _ = fields.set_item(field.key.as_ref(), field.value.as_ref());
+        }
+        let _ = value.setattr("fields", fields);
+        if let Some(field) = error.fields.iter().find(|f| f.key == "request_id") {
+            let _ = value.setattr("request_id", field.value.as_ref());
+        }
+    });
+    py_error
+}
+
+/// A statement that has already been bound rejects new params — silently
+/// ignoring them would look like success while the placeholders stay as
+/// they were.
+fn already_bound_error() -> PyErr {
+    qql_py_value_error(QqlError::validation(
+        "QQL-BIND-ALREADY-BOUND",
+        "statement is already bound; passing params again would be silently ignored — parse a fresh Stmt or bind a copy",
+        None,
+    ))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Python value conversion — the single Py → serde_json path
+// ═══════════════════════════════════════════════════════════════════
+
+/// Convert a Python value to a JSON-compatible `serde_json::Value`.
+///
+/// Bools are checked before ints (Python `bool` subclasses `int`), so
+/// `True` binds as a boolean, not `1`.
+pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    if value.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    if let Ok(v) = value.extract::<bool>() {
+        return Ok(serde_json::Value::Bool(v));
+    }
+    if let Ok(v) = value.extract::<i64>() {
+        return Ok(serde_json::Value::Number(v.into()));
+    }
+    if let Ok(v) = value.extract::<f64>() {
+        if !v.is_finite() {
+            // serde_json would silently serialize NaN/infinity as `null`;
+            // reject eagerly with ValueError to prevent silent corruption downstream.
+            return Err(PyValueError::new_err(format!(
+                "cannot bind non-finite float value '{v}'"
+            )));
+        }
+        return Ok(serde_json::json!(v));
+    }
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(serde_json::Value::String(s));
+    }
+    if let Ok(list) = value.cast::<PyList>() {
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_json(&item)?);
+        }
+        return Ok(serde_json::Value::Array(items));
+    }
+    if let Ok(dict) = value.cast::<pyo3::types::PyDict>() {
+        let mut map = serde_json::Map::with_capacity(dict.len());
+        for (key, item) in dict.iter() {
+            let key = key
+                .extract::<String>()
+                .map_err(|_| PyValueError::new_err("dict keys must be strings"))?;
+            map.insert(key, py_to_json(&item)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+    // Array-likes (numpy arrays, pandas Series) expose `tolist()` — accept
+    // them so query vectors can bind directly, matching qdrant-client's
+    // numpy support.
+    if let Ok(list) = value.call_method0("tolist") {
+        return py_to_json(&list);
+    }
+    Err(PyValueError::new_err(
+        "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
+    ))
+}
+
+/// Read a 1-D float buffer (numpy `float32`/`float64` arrays,
+/// `array.array('f'/'d')`, memoryviews) straight into an [`Value::F32Array`]
+/// without materializing a Python list first.
+///
+/// Implemented on top of the `memoryview` protocol (all safe, stable API —
+/// no version-gated `pyo3::buffer`, no `unsafe`): any object exporting a
+/// 1-D native-endian float buffer qualifies, regardless of where it comes
+/// from. Multi-dimensional, strided (copied in C order by `tobytes`), and
+/// non-float buffers fall through to the regular arms.
+///
+/// Returns `Ok(None)` for anything that is not such a buffer so the caller
+/// falls through (scalars, lists, dicts, `tolist()`-only array-likes).
+fn try_buffer_value(value: &Bound<'_, PyAny>) -> PyResult<Option<Value>> {
+    use pyo3::types::PyMemoryView;
+    let Ok(view) = PyMemoryView::from(value) else {
+        return Ok(None);
+    };
+    let Ok(format) = view.getattr("format")?.extract::<String>() else {
+        return Ok(None);
+    };
+    if format != "d" && format != "f" {
+        return Ok(None);
+    }
+    let Ok(shape) = view.getattr("shape")?.extract::<Vec<usize>>() else {
+        return Ok(None);
+    };
+    if shape.len() != 1 {
+        return Ok(None);
+    }
+    let n = shape[0];
+    let bytes: Vec<u8> = view.call_method0("tobytes")?.extract()?;
+    let itemsize = if format == "d" { 8 } else { 4 };
+    if bytes.len() != n * itemsize {
+        return Ok(None);
+    }
+    // `format` is native-endian by PEP 3118, so `from_ne_bytes` is correct
+    // on every platform.
+    if format == "d" {
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        debug_assert!(rest.is_empty(), "tobytes length pre-validated");
+        let mut out = Vec::with_capacity(n);
+        for chunk in chunks {
+            let x = f64::from_ne_bytes(*chunk);
+            if !x.is_finite() {
+                return Err(PyValueError::new_err(format!(
+                    "cannot bind non-finite float value '{x}'"
+                )));
+            }
+            out.push(x as f32);
+        }
+        return Ok(Some(Value::F32Array(out)));
+    }
+    let (chunks, rest) = bytes.as_chunks::<4>();
+    debug_assert!(rest.is_empty(), "tobytes length pre-validated");
+    let mut out = Vec::with_capacity(n);
+    for chunk in chunks {
+        out.push(f32::from_ne_bytes(*chunk));
+    }
+    Ok(Some(Value::F32Array(out)))
+}
+
+/// Convert a Python value straight to a typed [`Value`].
+///
+/// Same contract as [`py_to_json`], minus the JSON layer: plain values map to
+/// the same variants [`Value::from_json`] would produce from their JSON form,
+/// while 1-D C-contiguous float buffers bind as [`Value::F32Array`] with a
+/// single copy. Error behavior (non-finite floats, `tolist()` fallback,
+/// unsupported types) matches [`py_to_json`] arm-for-arm.
+///
+/// Flat `list[float]` values with at least 32 elements also bind as
+/// [`Value::F32Array`], with `f32` precision — the same representation the
+/// buffer fast path produces — because dense vectors are `f32` end to end and
+/// a 384-d vector otherwise builds 384 `Value::Float` nodes first. Nested
+/// lists, int/bool lists, and shorter float lists keep the exact
+/// [`Value::List`] / `f64` contract.
+pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if value.is_none() {
+        return Ok(Value::Null);
+    }
+    if let Ok(v) = value.extract::<bool>() {
+        return Ok(Value::Bool(v));
+    }
+    if let Ok(v) = value.extract::<i64>() {
+        return Ok(Value::Int(v));
+    }
+    if let Ok(v) = value.extract::<f64>() {
+        if !v.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "cannot bind non-finite float value '{v}'"
+            )));
+        }
+        return Ok(Value::Float(v));
+    }
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(Value::Str(s));
+    }
+    if let Ok(list) = value.cast::<PyList>() {
+        if let Some(packed) = flat_float_list_to_value(list)? {
+            return Ok(packed);
+        }
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_value(&item)?);
+        }
+        return Ok(Value::List(items));
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        let mut entries = Vec::with_capacity(dict.len());
+        for (key, item) in dict.iter() {
+            let key = key
+                .extract::<String>()
+                .map_err(|_| PyValueError::new_err("dict keys must be strings"))?;
+            entries.push((key, py_to_value(&item)?));
+        }
+        return Ok(Value::Dict(entries));
+    }
+    if let Some(fast) = try_buffer_value(value)? {
+        return Ok(fast);
+    }
+    if let Ok(list) = value.call_method0("tolist") {
+        return py_to_value(&list);
+    }
+    Err(PyValueError::new_err(
+        "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
+    ))
+}
+
+/// Pack a flat Python `float` list of at least
+/// [`float_list::FLOAT_LIST_F32_THRESHOLD`] elements as [`Value::F32Array`].
+///
+/// `Ok(None)` means the list is not a flat float list — it is nested, holds
+/// int/bool/opaque elements, or is shorter than the threshold — and the
+/// caller binds it element-wise as [`Value::List`]. The element walk stops at
+/// the first non-`float` element; a qualifying list is converted once with no
+/// per-element `Value` nodes.
+fn flat_float_list_to_value(list: &Bound<'_, PyList>) -> PyResult<Option<Value>> {
+    if list.len() < float_list::FLOAT_LIST_F32_THRESHOLD {
+        return Ok(None);
+    }
+    let mut values = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        // `bool` and `int` are not `float` instances in Python, so this
+        // rejects both (and any nested container or opaque element) in one
+        // check, preserving the exact `Value::List` contract for them.
+        if !item.is_instance_of::<PyFloat>() {
+            return Ok(None);
+        }
+        values.push(item.extract::<f64>()?);
+    }
+    match float_list::pack_f32(&values) {
+        Ok(value) => Ok(Some(value)),
+        Err(bad) => Err(PyValueError::new_err(format!(
+            "cannot bind non-finite float value '{bad}'"
+        ))),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Parameter binding over Python objects
+// ═══════════════════════════════════════════════════════════════════
+
+/// Bind parameters into a statement AST in place.
+///
+/// `params` is a dict (named `:name`) or a list (positional `?`); anything
+/// else raises `ValueError`, mirroring the shared
+/// [`QQL-BIND-INVALID-PARAMS`](qql_core::params_json) contract.
+pub fn bind_py_stmt(stmt: &mut ast::Stmt, params: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+    let Some(p) = params else {
+        return Ok(());
+    };
+    if p.is_none() {
+        return Ok(());
+    }
+    let value_params = py_to_value(p)?;
+    qql_core::params_json::bind_stmt_with_values(stmt, &value_params).map_err(qql_py_value_error)
+}
+
+/// Bind parameters into a query string; `truncate_vectors` renders compact
+/// `[0.1, 0.2, ... (N dims)]` previews of long vector literals.
+pub fn bind_py_params(
+    query: &str,
+    params: Option<&Bound<'_, PyAny>>,
+    truncate_vectors: bool,
+) -> PyResult<String> {
+    let Some(p) = params else {
+        return Ok(query.to_string());
+    };
+    if p.is_none() {
+        return Ok(query.to_string());
+    }
+    let value_params = py_to_value(p)?;
+    let plan =
+        qql_core::params_json::plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
+    qql_core::params_json::bind_str_with_values(
+        query,
+        qql_core::params_json::param_value_for(&plan, 0),
+        truncate_vectors,
+    )
+    .map_err(qql_py_value_error)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Stmt class — identical surface in pyqql and pyqql-edge
+// ═══════════════════════════════════════════════════════════════════
+
+/// Convert a Python `shard_key` value to its typed form.
+///
+/// `str` (non-empty) becomes a keyword key, integers become numeric keys, and
+/// `None`/empty clears. `bool` is rejected explicitly — it subclasses `int`
+/// but `True` as shard `1` would be silent mistargeting, the exact failure
+/// this typing exists to prevent.
+fn py_shard_key_from_value(value: &Bound<'_, PyAny>) -> PyResult<Option<qql_core::ast::ShardKey>> {
+    use qql_core::ast::ShardKey;
+    if value.is_instance_of::<PyString>() {
+        let s: String = value
+            .extract()
+            .map_err(|_| PyValueError::new_err("shard_key string is not valid Unicode"))?;
+        return Ok(if s.is_empty() {
+            None
+        } else {
+            Some(ShardKey::Keyword(s))
+        });
+    }
+    if value.is_instance_of::<PyBool>() {
+        return Err(PyValueError::new_err(
+            "shard_key must be str, int, or None (bool is not a shard key)",
+        ));
+    }
+    if value.is_instance_of::<PyInt>() {
+        let n: u64 = value
+            .extract()
+            .map_err(|_| PyValueError::new_err("shard_key integer must fit in u64"))?;
+        return Ok(Some(ShardKey::Number(n)));
+    }
+    Err(PyValueError::new_err("shard_key must be str, int, or None"))
+}
+
+/// A parsed QQL statement handle (mirrors `nqql`'s `Stmt` and `qql-wasm`'s).
+#[pyclass(name = "Stmt", from_py_object)]
+#[derive(Clone)]
+pub struct PyStmt {
+    /// The typed AST backing this handle.
+    pub inner: qql_core::ast::Stmt,
+    /// Whether parameters have already been bound into this statement.
+    /// Binding again — or passing params to `execute` / `compile_route` —
+    /// would be silently ignored, so both raise `QQL-BIND-ALREADY-BOUND`.
+    pub bound: bool,
+}
+
+#[pymethods]
+impl PyStmt {
+    fn __str__(&self) -> String {
+        format!("{}", self.inner)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Stmt: {}>",
+            qql_core::fmt::format_stmt_readable(&self.inner)
+        )
+    }
+
+    /// Bind parameters into this statement and return a new bound Stmt.
+    #[pyo3(signature = (params=None))]
+    fn bind(&self, params: Option<&Bound<'_, PyAny>>) -> PyResult<PyStmt> {
+        if let Some(p) = params
+            && !p.is_none()
+            && self.bound
+        {
+            return Err(already_bound_error());
+        }
+        let mut inner = self.inner.clone();
+        let binds_now = params.map(|p| !p.is_none()).unwrap_or(false);
+        bind_py_stmt(&mut inner, params)?;
+        Ok(PyStmt {
+            inner,
+            bound: self.bound || binds_now,
+        })
+    }
+
+    fn inject_filter(&mut self, field: &str, op: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let val =
+            py_to_json(value).and_then(|v| Value::from_json(v).map_err(qql_py_syntax_error))?;
+        let cmp = qql_core::ast::ComparisonOp::parse_inject_op(op).map_err(qql_py_syntax_error)?;
+        ast::inject_filter(&mut self.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
+        Ok(())
+    }
+
+    /// QQL `SHARD '…'` routing key on this statement (request-level; not a filter).
+    /// Prefer writing `SHARD 'tenant'` in QQL; use the setter only when the host
+    /// resolves the key after parse. Empty / None clears. Recurses into CTEs.
+    ///
+    /// Reads back `str` for keyword keys, `int` for numeric keys, `None` when
+    /// unset (placeholders also read as `None` — bind first).
+    #[getter]
+    fn shard_key<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        match self.inner.shard_key() {
+            None => Ok(None),
+            Some(qql_core::ast::ShardKey::Keyword(s)) => Ok(Some(PyString::new(py, s).into_any())),
+            Some(qql_core::ast::ShardKey::Number(n)) => Ok(Some(PyInt::new(py, *n).into_any())),
+            // Unbound placeholders have no host value yet; bind first.
+            Some(_) => Ok(None),
+        }
+    }
+
+    #[setter]
+    fn set_shard_key(&mut self, key: Option<Bound<'_, PyAny>>) -> PyResult<()> {
+        let key = match key {
+            None => None,
+            // Empty strings clear, matching the pre-typed core setter contract.
+            Some(value) => py_shard_key_from_value(&value)?,
+        };
+        if !self.inner.set_shard_key(key) {
+            return Err(PyValueError::new_err(
+                "cannot set shard_key on statement type that does not support sharding (e.g. DDL statements)",
+            ));
+        }
+        Ok(())
+    }
+
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
+
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        // Must go through serde_json::Value: pythonize maps Rust tuples to
+        // Python tuples, while JSON arrays become lists. AST dicts are
+        // `Vec<(String, Value)>` and host tests walk those as lists.
+        let val =
+            serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
+
+    /// Compile this Stmt directly to its transport route without re-parsing.
+    /// Optionally accepts `params` to bind before compiling.
+    #[pyo3(signature = (params=None))]
+    fn compile_route<'py>(
+        &self,
+        py: Python<'py>,
+        params: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        if let Some(p) = params
+            && !p.is_none()
+            && self.bound
+        {
+            return Err(already_bound_error());
+        }
+        let mut stmt = self.inner.clone();
+        bind_py_stmt(&mut stmt, params)?;
+        let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
+        let result = compiled_route_json(&compiled);
+        pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
+
+    fn explain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let plan = qql_core::explain::explain_node(&self.inner);
+        let dict = PyDict::new(py);
+        dict.set_item(pyo3::intern!(py, "ok"), true)?;
+        dict.set_item(pyo3::intern!(py, "query"), format!("{}", self.inner))?;
+        dict.set_item(pyo3::intern!(py, "plan"), plan)?;
+        Ok(dict.into_any())
+    }
+}
+
+/// Shared route JSON shape for `compile_route` / `compile_query`.
+pub fn compiled_route_json(compiled: &qql_plan::routing::CompiledStatement) -> serde_json::Value {
+    let (method, path, payload) = match &compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path.clone()),
+                payload,
+            )
+        }
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+    };
+    serde_json::json!({
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
+    })
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Free functions — registered by both SDK modules
+// ═══════════════════════════════════════════════════════════════════
+
+/// Parse a QQL source into a list of Stmt objects.
+/// Accepts single statements and semicolon-delimited scripts.
+#[pyfunction]
+pub fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
+    let stmts = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
+    Ok(stmts
+        .into_iter()
+        .map(|s| PyStmt {
+            inner: s,
+            bound: false,
+        })
+        .collect())
+}
+
+/// Parse a QQL source and return the canonical AST as a JSON string without
+/// creating Python objects for every node (parity with `nqql.parseJson`).
+#[pyfunction]
+pub fn parse_json(input: &str) -> PyResult<String> {
+    let statements = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
+    serde_json::to_string(&statements).map_err(|e| PySyntaxError::new_err(e.to_string()))
+}
+
+/// Full frontend validity gate: parse + plan — the same contract as execution
+/// and the language conformance suite.
+#[pyfunction]
+pub fn is_valid(input: &str) -> bool {
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // language conformance suite.
+    qql_plan::parse_and_plan(input).is_ok()
+}
+
+/// Inject a WHERE filter into a query string or Stmt; returns the new Stmt.
+#[pyfunction]
+pub fn inject_filter(
+    query: &Bound<'_, PyAny>,
+    field: &str,
+    op: &str,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<PyStmt> {
+    let val = py_to_json(value).and_then(|v| Value::from_json(v).map_err(qql_py_syntax_error))?;
+    let cmp = qql_core::ast::ComparisonOp::parse_inject_op(op).map_err(qql_py_syntax_error)?;
+    if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
+        ast::inject_filter(&mut py_stmt.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
+        Ok(py_stmt.clone())
+    } else if let Ok(query_str) = query.extract::<String>() {
+        let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
+        ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_py_syntax_error)?;
+        Ok(PyStmt {
+            inner: stmt,
+            bound: false,
+        })
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a string or a Stmt object",
+        ))
+    }
+}
+
+/// Tokenize a query into `{ kind, text, pos, end, len }` dicts.
+#[pyfunction]
+pub fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    let lexer = Lexer::new(input);
+    let mut result = Vec::with_capacity(input.len() / 4 + 1);
+    let kind_key = pyo3::intern!(py, "kind");
+    let text_key = pyo3::intern!(py, "text");
+    let pos_key = pyo3::intern!(py, "pos");
+    let end_key = pyo3::intern!(py, "end");
+    let len_key = pyo3::intern!(py, "len");
+    for token_result in lexer {
+        let token = token_result.map_err(qql_py_syntax_error)?;
+        let d = PyDict::new(py);
+        d.set_item(kind_key, token.kind.as_str())?;
+        d.set_item(text_key, token.text)?;
+        d.set_item(pos_key, token.span.start as i64)?;
+        d.set_item(end_key, token.span.end as i64)?;
+        d.set_item(
+            len_key,
+            token.span.end.saturating_sub(token.span.start) as i64,
+        )?;
+        result.push(d);
+    }
+    Ok(result)
+}
+
+/// Compile a QQL query to its transport route (non-executing), optionally
+/// binding `params` first (parity with `nqql.compileQuery`).
+#[pyfunction]
+#[pyo3(signature = (input, params=None))]
+pub fn compile_query<'py>(
+    py: Python<'py>,
+    input: &str,
+    params: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let mut stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+    bind_py_stmt(&mut stmt, params)?;
+    let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
+    let result = compiled_route_json(&compiled);
+    pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+}
+
+/// Tree-formatted plan explanation for a query string or Stmt.
+pub fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    let query_str: String;
+    let plan_result = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
+        query_str = String::from("<Stmt>");
+        Ok(qql_core::explain::explain_node(&py_stmt.inner))
+    } else if let Ok(s) = query.extract::<String>() {
+        query_str = s.clone();
+        qql_core::explain::explain(&s)
+    } else {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a string or a Stmt object",
+        ));
+    };
+
+    let dict = PyDict::new(py);
+    match plan_result {
+        Ok(plan) => {
+            dict.set_item(pyo3::intern!(py, "ok"), true)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "plan"), plan)?;
+        }
+        Err(e) => {
+            dict.set_item(pyo3::intern!(py, "ok"), false)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "error"), e.to_string())?;
+        }
+    }
+    Ok(dict.into_any().unbind())
+}
+
+/// Explain a query string or Stmt (returns `{ok, query, plan|error}`).
+#[pyfunction]
+pub fn explain(query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    let py = query.py();
+    do_explain(py, query)
+}
+
+/// Substitute `:name` (dict) or `?` (list) placeholders into a query string or Stmt.
+///
+/// When `truncate_vectors=True`, long vector literals (e.g. 384 dims) are rendered
+/// in a compact human-readable format `[0.12, 0.34, ... (384 dims)]` suitable for logging.
+#[pyfunction]
+#[pyo3(signature = (query, params=None, *, truncate_vectors=false))]
+pub fn bind<'py>(
+    py: Python<'py>,
+    query: &Bound<'py, PyAny>,
+    params: Option<&Bound<'py, PyAny>>,
+    truncate_vectors: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    if let Ok(stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+        if let Some(p) = params
+            && !p.is_none()
+            && stmt.bound
+        {
+            return Err(already_bound_error());
+        }
+        let mut inner = stmt.inner.clone();
+        let binds_now = params.map(|p| !p.is_none()).unwrap_or(false);
+        bind_py_stmt(&mut inner, params)?;
+        let py_stmt = PyStmt {
+            inner,
+            bound: stmt.bound || binds_now,
+        };
+        if truncate_vectors {
+            let readable = qql_core::fmt::format_stmt_readable(&py_stmt.inner);
+            Ok(readable.into_pyobject(py)?.into_any())
+        } else {
+            Ok(Bound::new(py, py_stmt)?.into_any())
+        }
+    } else if let Ok(q_str) = query.extract::<String>() {
+        let bound = match params {
+            Some(p) => bind_py_params(&q_str, Some(p), truncate_vectors)?,
+            None => q_str,
+        };
+        Ok(bound.into_pyobject(py)?.into_any())
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a str or Stmt",
+        ))
+    }
+}

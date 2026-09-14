@@ -33,16 +33,20 @@ dist-site/
 website/dist/
 website/.astro/
 website/node_modules/
-
+.firecrawl
 crates/nqql/index.*.node
-crates/nqql/package-lock.json
-qdrant_storage
 crates/nqql/index.node
 crates/nqql/native.d.ts
+crates/nqql/package-lock.json
+crates/nqql/npm/
+crates/nqql/artifacts/
 crates/nqql-edge/index.*.node
 crates/nqql-edge/index.node
 crates/nqql-edge/native.d.ts
 crates/nqql-edge/package-lock.json
+crates/nqql-edge/npm/
+crates/nqql-edge/artifacts/
+qdrant_storage
 qdrant-lib-edge
 .fastembed_cache
 examples/medical-retrieval-ops/generated/eval.json
@@ -51,3 +55,9 @@ docs/audits
 launch/
 .agents/
 feedback.md
+
+# Benchmarking harnesses and results (archived in bench/archive-head-to-head)
+/vs-qdrant/
+/vs-qdrant-edge/
+audit/
+

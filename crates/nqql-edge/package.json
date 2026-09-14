@@ -1,12 +1,13 @@
 {
   "name": "@veristamp/nqql-edge",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Local QQL execution for Node.js with qdrant-edge and FastEmbed.",
   "main": "index.js",
   "types": "index.d.ts",
   "files": [
     "index.js",
     "options.js",
+    "dx-common.js",
     "index.d.ts",
     "index.*.node",
     "README.md"
@@ -14,7 +15,7 @@
   "scripts": {
     "build": "napi build --platform --no-js --release --dts native.d.ts",
     "build:debug": "napi build --platform --no-js --dts native.d.ts",
-    "test": "node --test test_options.js && npm run build:debug && node test.js && node test_comprehensive.js",
+    "test": "node --test test_options.js && npm run build:debug && node test_dx.js nqql-edge && node --test test_scroll.js && node test.js && node test_comprehensive.js",
     "test:options": "node --test test_options.js",
     "prepublishOnly": "napi prepublish -t npm"
   },
@@ -52,14 +53,16 @@
     "binaryName": "index",
     "targets": [
       "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
       "aarch64-apple-darwin",
       "x86_64-pc-windows-msvc"
     ]
   },
   "optionalDependencies": {
-    "@veristamp/nqql-edge-linux-x64-gnu": "0.3.1",
-    "@veristamp/nqql-edge-darwin-arm64": "0.3.1",
-    "@veristamp/nqql-edge-win32-x64-msvc": "0.3.1"
+    "@veristamp/nqql-edge-linux-x64-gnu": "0.4.0",
+    "@veristamp/nqql-edge-linux-arm64-gnu": "0.4.0",
+    "@veristamp/nqql-edge-darwin-arm64": "0.4.0",
+    "@veristamp/nqql-edge-win32-x64-msvc": "0.4.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.7.4"

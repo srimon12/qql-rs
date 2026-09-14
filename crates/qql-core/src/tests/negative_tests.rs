@@ -183,7 +183,7 @@ fn invalid_shard_params_rejected() {
         "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (sharding_method = true);"
     );
     assert_validation_err!(
-        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_keys = [\"a\", 42]);"
+        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_keys = [\"a\", true]);"
     );
     assert_validation_err!(
         "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_number = true);"
@@ -237,17 +237,51 @@ fn non_finite_float_literals_rejected() {
         "UPSERT INTO docs VALUES {id: 1, v: 1e999};",
         "QUERY TEXT 'x' FROM docs SCORE THRESHOLD 1e999 LIMIT 5;",
         "QUERY FORMULA 1e999 FROM docs LIMIT 5;",
+        "QUERY FORMULA -1e999 FROM docs LIMIT 5;",
         "QUERY TEXT 'x' FROM docs WHERE score >= -1e999 LIMIT 5;",
+        "QUERY [1e999, 0.2] FROM docs;",
+        "QUERY VECTOR [-1e999] FROM docs;",
+        "UPSERT INTO docs VALUES {id: 1, vector: [1e999]};",
+        "UPSERT INTO docs VALUES {id: 1, vector: {indices: [1], values: [1e999]}};",
+        "QUERY 'x' FROM docs WITH (mmr = true, diversity = 1e999);",
+        "QUERY 'x' FROM docs PARAMS (oversampling = 1e999);",
     ];
     for source in cases {
         let err = Parser::parse(source).expect_err(&format!(
             "expected non-finite float rejection for: {source}"
         ));
-        assert_eq!(
+        assert!(
+            matches!(err.kind, ErrorKind::Parse | ErrorKind::Validation),
+            "unexpected error kind for: {source} (kind {:?}, code {})",
             err.kind,
-            ErrorKind::Parse,
-            "unexpected error kind for: {source} (code {})",
             err.code
+        );
+    }
+}
+
+#[test]
+fn limit_beyond_u64_and_zero_rejected_with_positive_integer_code() {
+    // Integer literals larger than u64::MAX must be rejected at parse time,
+    // not silently clamped or wrapped; LIMIT/OFFSET are `positive_integer`
+    // productions carried as u64.
+    //
+    // LIMIT 0 is rejected too — live-verified against Qdrant 1.19.1: its
+    // /points/query API answers 422 "internal.limit: value 0 invalid, must
+    // be 1 or larger", so a parse-time rejection beats a runtime 422. (The
+    // one-shot acceptance was reverted on that evidence.)
+    let cases = [
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;",
+        "SCROLL FROM docs LIMIT 18446744073709551616;",
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT -1;",
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 0;",
+        "SCROLL FROM docs LIMIT 0;",
+    ];
+    for source in cases {
+        let err =
+            Parser::parse(source).expect_err(&format!("expected limit rejection for: {source}"));
+        assert_eq!(
+            err.code, "QQL-PARSE-POSITIVE-INTEGER",
+            "unexpected code for: {source}"
         );
     }
 }
@@ -393,4 +427,132 @@ fn dollar_leading_dotted_segment_rejected() {
     let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE a.$b = 1 LIMIT 5;")
         .expect_err("dollar-leading dotted segment must be rejected");
     assert_eq!(err.code, "QQL-LEX-CHAR");
+}
+
+#[test]
+fn numeric_field_name_rejected() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE 42 = 1;")
+        .expect_err("numeric field names must be rejected");
+    assert_eq!(err.code, "QQL-PARSE-FIELD");
+}
+
+#[test]
+fn trailing_commas_rejected() {
+    for source in [
+        "UPSERT INTO docs VALUES {id: 1, title: 'a',};",
+        "QUERY TEXT 'x' FROM docs PARAMS (exact = true,);",
+        "QUERY [0.1, 0.2,] FROM docs;",
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (m = 16,);",
+    ] {
+        let err = Parser::parse(source).expect_err(&format!("trailing comma: {source}"));
+        assert_eq!(err.code, "QQL-PARSE-TRAILING-COMMA", "{source}");
+        assert!(err.span.is_some(), "{source}");
+    }
+}
+
+#[test]
+fn empty_params_and_alter_without_config_rejected() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs PARAMS ();")
+        .expect_err("empty PARAMS must be rejected");
+    assert_eq!(err.code, "QQL-PARSE-SEARCH-PARAMS");
+    assert!(err.span.is_some());
+
+    let err =
+        Parser::parse("ALTER COLLECTION docs;").expect_err("ALTER without WITH must be rejected");
+    assert_eq!(err.code, "QQL-PARSE-ALTER-CONFIG");
+}
+
+#[test]
+fn facet_unknown_and_duplicate_options_rejected() {
+    let err = Parser::parse("FACET category FROM docs WITH (foo = 1);")
+        .expect_err("unknown FACET WITH key");
+    assert_eq!(err.code, "QQL-PARSE-FACET-CONFIG");
+
+    let err = Parser::parse("FACET category FROM docs LIMIT 5 LIMIT 10;")
+        .expect_err("duplicate FACET LIMIT");
+    assert_eq!(err.code, "QQL-PARSE-DUPLICATE-CLAUSE");
+
+    let err = Parser::parse("FACET category FROM docs EXACT true EXACT false;")
+        .expect_err("duplicate FACET EXACT");
+    assert_eq!(err.code, "QQL-PARSE-DUPLICATE-CLAUSE");
+
+    let err = Parser::parse("FACET category FROM docs LIMIT 5 WITH (limit = 10);")
+        .expect_err("WITH limit after LIMIT");
+    assert_eq!(err.code, "QQL-PARSE-DUPLICATE-CLAUSE");
+}
+
+#[test]
+fn between_rejects_composite_bounds() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE n BETWEEN {a: 1} AND 2;")
+        .expect_err("BETWEEN dict bound");
+    assert_eq!(err.code, "QQL-PARSE-LITERAL");
+    assert!(err.span.is_some());
+    let span = err.span.unwrap();
+    assert!(
+        span.end > span.start,
+        "literal span must not point past the dict"
+    );
+}
+
+#[test]
+fn in_literal_span_points_at_the_composite() {
+    let source = "QUERY TEXT 'x' FROM docs WHERE n IN ({a: 1});";
+    let err = Parser::parse(source).expect_err("IN dict");
+    assert_eq!(err.code, "QQL-PARSE-LITERAL");
+    let span = err.span.expect("span");
+    let excerpt = &source[span.start..span.end];
+    assert!(excerpt.contains('{'), "span {span:?} excerpt {excerpt:?}");
+}
+
+#[test]
+fn unknown_vector_config_key_is_validation() {
+    let err = Parser::parse("CREATE COLLECTION docs (d VECTOR(4, COSINE) WITH VECTOR (foo = 1));")
+        .expect_err("unknown VECTOR key");
+    assert_eq!(err.kind, ErrorKind::Validation);
+    assert!(err.span.is_some());
+}
+
+#[test]
+fn hnsw_m_float_two_is_rejected() {
+    let int_err = Parser::parse("CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (m = 2);")
+        .expect_err("m = 2");
+    let float_err =
+        Parser::parse("CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (m = 2.0);")
+            .expect_err("m = 2.0");
+    assert_eq!(int_err.kind, ErrorKind::Validation);
+    assert_eq!(float_err.kind, ErrorKind::Validation);
+}
+
+#[test]
+fn search_param_errors_carry_spans() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs PARAMS (foo = 1);")
+        .expect_err("unknown search param");
+    assert_eq!(err.code, "QQL-VALIDATION-SEARCH-PARAM");
+    assert!(err.span.is_some());
+
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs PARAMS (max_selectivity = 0.5);")
+        .expect_err("max_selectivity without acorn");
+    assert_eq!(err.code, "QQL-VALIDATION-ACORN-SELECTIVITY");
+    assert!(err.span.is_some());
+}
+
+#[test]
+fn empty_script_and_separator_codes() {
+    assert!(Parser::parse_all("").unwrap().is_empty());
+    let err = Parser::parse("").expect_err("empty single statement");
+    assert_eq!(err.code, "QQL-PARSE-STATEMENT");
+
+    let err =
+        Parser::parse_all("SHOW COLLECTIONS SHOW COLLECTION docs").expect_err("missing semicolon");
+    assert_eq!(err.code, "QQL-PARSE-SEPARATOR");
+    assert!(err.span.is_some());
+
+    let err = Parser::parse_all("; SHOW COLLECTIONS").expect_err("leading semicolon");
+    assert_eq!(err.code, "QQL-PARSE-EMPTY-STATEMENT");
+}
+
+#[test]
+fn object_operator_keys_rejected() {
+    let err = Parser::parse("UPSERT INTO docs VALUES {id: 1, *: 2};").expect_err("star object key");
+    assert_eq!(err.code, "QQL-PARSE-OBJECT-KEY");
 }

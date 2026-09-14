@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import type { AnalysisService } from "../core/analysis";
 import { positionToByteOffset } from "../core/positions";
 import { statementAtOffset } from "../core/statements";
+import type { CompiledRoute } from "../core/types";
+import { compileQql } from "../core/wasm";
 import { formatKeywordHover, lookupKeywordDoc } from "../data/docs";
 
 export class QqlHoverProvider implements vscode.HoverProvider {
@@ -17,6 +19,15 @@ export class QqlHoverProvider implements vscode.HoverProvider {
     const word = wordRange ? document.getText(wordRange) : "";
 
     const parts: vscode.MarkdownString[] = [];
+
+    // First line: compiled route preview (cached; pure-wasm fallback, no I/O).
+    const preview = this.routePreview(document, position);
+    if (preview) {
+      const md = new vscode.MarkdownString(preview);
+      md.supportHtml = false;
+      md.isTrusted = false;
+      parts.push(md);
+    }
 
     if (word) {
       const doc = lookupKeywordDoc(word);
@@ -52,6 +63,35 @@ export class QqlHoverProvider implements vscode.HoverProvider {
 
     if (parts.length === 0) return undefined;
     return new vscode.Hover(parts, wordRange);
+  }
+
+  /**
+   * One-line compiled preview for the statement under the cursor:
+   * `` `POST /path · LIMIT n` ``. Prefers the cached route; falls back to a
+   * synchronous pure-wasm compile (no analysis, no navigation).
+   */
+  private routePreview(
+    document: vscode.TextDocument,
+    position: vscode.Position
+  ): string | undefined {
+    const cached = this.analysis.get(document.uri);
+    if (!cached || cached.statements.length === 0) return undefined;
+    const offset = positionToByteOffset(document, position);
+    const stmt = statementAtOffset(cached.statements, offset);
+    if (!stmt) return undefined;
+    const route = stmt.route ?? tryCompile(stmt.source);
+    if (route?.method == null || route.path == null) return undefined;
+    const limit = (route.payload as { limit?: unknown } | null)?.limit;
+    const suffix = typeof limit === "number" ? ` · LIMIT ${limit}` : "";
+    return `\`${route.method} ${route.path}${suffix}\``;
+  }
+}
+
+function tryCompile(source: string): CompiledRoute | undefined {
+  try {
+    return compileQql(source);
+  } catch {
+    return undefined;
   }
 }
 

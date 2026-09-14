@@ -15,7 +15,8 @@
             }
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -47,7 +48,26 @@
             }
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "ClearPayload": {
+        "collection": "docs",
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "archived"
+              }
+            }
+          }
+        },
+        "shard_key": null,
+        "wait": true
       }
     }
   ]

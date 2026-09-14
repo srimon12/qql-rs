@@ -1,6 +1,6 @@
 # WebAssembly SDK (`qql-wasm`) Reference & Examples
 
-WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
+WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun). Self-contained. Shared language rules live in `qql-query.md`, `qql-filters.md`, `qql-params.md`, `qql-embeddings.md`. This guide repeats the minimum needed to run alone.
 
 Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
@@ -86,6 +86,26 @@ client.setHttpEmbedder(
 
 Endpoint is required -- no default URL. Always sends the full text batch in one request.
 
+Single dense model per client: a `MODEL 'name'` clause other than empty or
+`'default'` is rejected with `QQL-EMBEDDING` — the client serves its one
+configured model (same rule on the sparse leg: non-default sparse models are
+rejected with `QQL-EMBEDDING-SPARSE`, otherwise local BM25 runs in-browser).
+
+### Local BM25 tuning
+
+Sparse `TEXT` inputs (and the sparse leg of `HYBRID`) are encoded locally with
+wire-compatible BM25. Tune the **document** side before upserting:
+
+```js
+client.setBm25Params(2.0, 0.5, 8.0); // k1, b, avg_len — throws on invalid values
+```
+
+Defaults are Qdrant's `1.2 / 0.75 / 256`. Client-side, write-path only: query
+weights stay unit, server-side inference is untouched, and vectors already
+written keep their weights — re-ingest to apply. Invalid values throw the
+`QQL-VALIDATION-CONFIG` error (`k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`, all
+finite).
+
 ### JS Function Embedder
 
 For Transformers.js, custom providers, or in-browser models:
@@ -118,8 +138,6 @@ strings. Pass `{ onError: "continue" }` to collect per-statement failures; the
 default is `"stop"`. Pass `{ params }` as an object for `:name` or an array for
 `?` — same shape as `bind(query, params)`, no `JSON.stringify`. Adjacent
 compatible operations use Qdrant batch endpoints.
-Every execution path returns an `ExecutionReport` object with `ok`, `results`,
-`succeeded`, and `failed` fields.
 
 ```js
 // Single query
@@ -131,6 +149,16 @@ const result = await client.execute(
 await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
     params: { q: "vector databases", lim: 10 },
 });
+
+// Statement-scoped params: array with one entry per statement —
+// the length must match the statement count exactly
+await client.execute(
+    [
+        "QUERY TEXT :q FROM docs LIMIT 5",
+        "QUERY TEXT :q FROM articles LIMIT 10",
+    ],
+    { params: [{ q: "quantum" }, { q: "relativity" }] }
+);
 
 // Multi-statement (semicolons auto-detected)
 const schemaResult = await client.execute(`
@@ -152,6 +180,53 @@ stmt.shardKey = "acme";
 const stmtResult = await client.executeStmt(stmt);
 ```
 
+Every execution path returns a plain `ExecutionReport` object with `ok`,
+`results`, `succeeded`, and `failed` fields. For typed accessors, wrap it
+with the [`dx.js` helpers](#10-typed-dx-layer-dxjs) (`hits()` / `facet()` /
+`count()` / `ScoredPoint`, plus the `executeHits(client, query, options)`
+one-shot).
+
+## 3a. Strict, canonical responses
+
+Response shaping matches the native SDKs' typed `ExecData` report: each
+operation reads exactly its Qdrant OpenAPI response field — `result.points`
+for `QUERY` / `SCROLL`, the bare `result` array for `QUERY POINTS`,
+`result.groups` for `GROUP BY`, `result.count`, facet `result.hits`,
+`result.collections`, `result.shard_keys`, `result.config`, and the
+`CollectionInfo` object — and emits the same JSON shapes
+(`[{id, score, payload, vector?}]` with no separate `text`, `{"groups": [...]}`,
+`{"count": n}`, `{"collections": [...]}`, `{"shard_keys": [...]}`, quota
+config). A missing or mistyped field fails the statement with
+`QQL-BACKEND-ENVELOPE` (JSON error string with `.code` / `.kind`, readable via
+`buildError`) instead of silently returning an empty result. There are no
+fallback shapes. Server telemetry (`time`, `usage`) remains optional and
+lenient: absent or misshapen telemetry never fails a successful response.
+
+---
+
+## 3b. Bulk ingest
+
+Pass point objects — payload as data, never SQL text. One `:rows` template
+is prepared once, then each `batchSize` chunk splices through the
+point-splice path with no re-parse. Prefer this over hand-rolled batch loops:
+
+```js
+const rows = [
+  { id: 1, vector: { dense: new Float32Array([0.1, 0.2, 0.3]) }, tag: "a" },
+  { id: 2, vector: { dense: [0.4, 0.5, 0.6] }, tag: "b" },
+];
+const report = await client.upsertMany("docs", rows, { batchSize: 100 });
+```
+
+Row vectors accept plain arrays, `Float32Array` / `Float64Array` (packed,
+one copy — unlike the Node async boundary, WASM converts `JsValue`
+directly), integer typed arrays (sparse `indices`), and the flat
+`{ data: [...], dim: N }` multivector form. A plain `number[]` of 32+
+elements also binds as a packed `F32Array` with one copy; shorter lists and
+nested shapes keep exact list semantics, and payload values are never
+repacked. Raw `ArrayBuffer` without a
+float view fails closed — wrap it first (`new Float64Array(buffer)`).
+
 ---
 
 ## 4. Stmt Class -- Parse Once, Reuse
@@ -171,10 +246,32 @@ stmt.injectFilter("tenant_id", "=", "acme");
 // Routing: prefer SHARD 'acme' in the QQL string; or set after parse:
 stmt.shardKey = "acme";  // same field as SHARD — no injectShardKey API
 console.log(stmt.shardKey);  // -> "acme"
+// Numeric partitions stay numeric (read back as BigInt):
+// stmt.shardKey = 101;
 
 // Serialise to JSON
 const json = stmt.toJSON();
 const obj = stmt.toObject();
+```
+
+Prepared-statement helpers (QQL 1.7):
+
+```js
+// Bind :name (object) or ? (array) params; params is optional.
+// Returns a NEW bound Stmt (the original is not mutated).
+const bound = stmt.bind({ q: "search", lim: 10 });
+
+// Compile to a route object; params binds first when provided.
+const route = stmt.compileRoute({ q: "search", lim: 10 });
+
+// Canonical, re-parseable QQL (mirrors Python str(stmt))
+console.log(stmt.toString());
+
+// Readable preview (mirrors Python repr(stmt); long vectors truncated)
+console.log(stmt.toReadableString());
+
+// Execution plan for this statement (mirrors the free explain)
+console.log(stmt.explain());
 ```
 
 Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
@@ -262,7 +359,8 @@ const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
 import init, { bind, formatQuery, explain } from 'qql-wasm';
 await init();
 
-// Substitute named parameters (:name)
+// Substitute named parameters (:name) — params is OPTIONAL; without it the
+// query is returned unchanged (mirrors pyqql bind)
 const boundNamed = bind(
     "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
     { q: "chest pain", cat: "medical", lim: 10 }
@@ -275,6 +373,14 @@ const boundPos = bind(
     ["chest pain", "medical", 10]
 );
 console.log(boundPos);
+
+// truncateVectors renders long vector literals as readable previews
+const preview = bind("QUERY :vec FROM docs LIMIT 5", { vec: Array(384).fill(0.1) }, { truncateVectors: true });
+console.log(preview); // QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
+
+// Typed arrays bind as packed f32 (one copy); integer arrays as int lists
+bind("QUERY VECTOR :v FROM docs USING dense", { v: new Float32Array([0.1, 0.2]) });
+bind("QUERY VECTOR :s FROM docs USING sparse", { s: { indices: new Uint32Array([1, 5]), values: [0.5, 0.8] } });
 
 // Canonical query formatting
 const formatted = formatQuery("query text 'hello' from docs limit 5");
@@ -290,11 +396,12 @@ console.log(planTree);
 ## 9. Free Functions
 
 ```js
-import init, { parse, isValid, inject_filter,
+import init, { parse, parseJson, isValid, inject_filter,
               tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
+parseJson("QUERY 'x' FROM docs LIMIT 5");              // Raw JSON string, no object allocation
 parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statement
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
@@ -304,3 +411,30 @@ explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII p
 bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter
 ```
+
+---
+
+## 10. Typed DX Layer (`dx.js`)
+
+For rich client responses and error handling matching `nqql` / `pyqql`, import from `qql-wasm/dx`:
+
+```js
+import init, { Client } from 'qql-wasm';
+import { ExecutionReport, ScoredPoint, buildError, executeHits } from 'qql-wasm/dx';
+await init();
+
+const client = new Client('http://localhost:6333');
+const raw = await client.execute("QUERY 'health' FROM docs LIMIT 5");
+const report = new ExecutionReport(raw);
+
+if (report.ok) {
+    const hits = report.hits(0); // ScoredPoint[] (id, score, payload, text derived from payload.text, collection, vector; shard_key is a legacy passthrough, always null on the typed path)
+    for (const hit of hits) {
+        console.log(hit.id, hit.score, hit.payload);
+    }
+}
+
+// One-shot reads without manual wrapping:
+const hits = await executeHits(client, "QUERY 'health' FROM docs LIMIT 5");
+```
+

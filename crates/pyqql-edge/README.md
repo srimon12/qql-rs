@@ -6,9 +6,10 @@ Local QQL for Python: **qdrant-edge + FastEmbed**, zero remote Qdrant.
 
 Same QQL language as `pyqql`, but storage and (optionally) embeddings run
 **in-process** (qdrant-edge **0.8**). Ideal for demos, CI, air-gapped tools.
-Cluster-only features (`GROUP BY`, custom `SHARD`, ACORN, **`SHOW QUOTAS` /
-`SET QUOTA`**, …) fail with stable `QQL-EDGE-UNSUPPORTED-*` codes. Sparse
-`PARAMS (idf = …)` is supported offline.
+Cluster-only features (custom `SHARD`, `GROUP BY … LOOKUP FROM`, **`SHOW
+QUOTAS` / `SET QUOTA`**, …) fail with stable `QQL-EDGE-UNSUPPORTED-*` codes.
+Sparse `PARAMS (idf = …)`, ACORN search params, `GROUP BY`, and
+HNSW/optimizer `ALTER COLLECTION` are supported offline.
 
 ## Install
 
@@ -16,7 +17,7 @@ Cluster-only features (`GROUP BY`, custom `SHARD`, ACORN, **`SHOW QUOTAS` /
 pip install pyqql-edge
 ```
 
-Python 3.8+. Wheels: Linux x64, macOS arm64, Windows x64 (not macOS Intel — ONNX).
+Python 3.10+. Wheels: Linux x64, macOS arm64, Windows x64 (not macOS Intel — ONNX).
 
 ## Quick start
 
@@ -43,6 +44,21 @@ pyqql_edge.inject_filter(stmt, "org_id", "=", "acme")
 client.close()
 ```
 
+### WAL footprint
+
+qdrant-edge pre-allocates each write-ahead-log segment (default 32 MiB), which
+dominates the on-disk footprint of small embedded shards. Pass whole MiB to
+`wal_segment_mb` to shrink it; the resolved capacity persists in the shard's
+`edge_config.json`:
+
+```python
+client = pyqql_edge.local_executor("./qdrant_data", wal_segment_mb=8)
+```
+
+`None` (the default) keeps the 32 MiB engine default. Zero, negative,
+fractional, or overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
+qdrant-edge 0.8's own Python binding does not expose this knob.
+
 ## API
 
 | Export | Role |
@@ -62,11 +78,11 @@ client.close()
 |-------|---------|
 | Point IDs | Integers or UUIDs only |
 | HYBRID queries | Specify `USING dense` / `USING sparse` / hybrid forms |
-| `GROUP BY`, `SHARD`, ACORN, quotas | Unsupported offline — use remote Qdrant (`QQL-EDGE-UNSUPPORTED-*`) |
+| `SHARD`, quotas | Unsupported offline — use remote Qdrant (`QQL-EDGE-UNSUPPORTED-*`) |
 | Sparse `idf` | Supported (qdrant-edge 0.8) |
 | Models | Locked at executor construction |
 | Lifetime | Call `close()` before deleting `data_dir` |
 
 ## Docs
 
-- [qql-edge](../qql-edge/README.md) · [Gaps](../../skills/qql-skill/references/qql-gaps.md) · [Syntax](../../docs/syntax.md)
+- [qql-edge](https://github.com/srimon12/qql-rs/blob/main/crates/qql-edge/README.md) · [Gaps](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-gaps.md) · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)

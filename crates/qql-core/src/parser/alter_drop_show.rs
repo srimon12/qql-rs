@@ -24,6 +24,13 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
         let config = self.parse_collection_config_blocks(true)?;
+        if config.is_none() {
+            return Err(QqlError::parse(
+                "QQL-PARSE-ALTER-CONFIG",
+                "ALTER COLLECTION requires at least one WITH clause",
+                self.peek()?.span,
+            ));
+        }
         Ok(Stmt::AlterCollection(Box::new(AlterCollectionStmt {
             collection,
             config,
@@ -49,7 +56,7 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::Shard {
             self.advance()?; // consume SHARD
             self.expect(TokenKind::Key)?;
-            let shard_key = self.parse_string()?;
+            let shard_key = self.parse_shard_key_atom()?;
             self.expect(TokenKind::On)?;
             self.expect(TokenKind::Collection)?;
             let collection = self.parse_identifier()?;
@@ -90,12 +97,14 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             return Ok(Stmt::ShowShardKeys(collection));
         }
-        Err(QqlError::syntax(
+        let peek = self.peek()?;
+        Err(QqlError::parse(
+            "QQL-PARSE-SYNTAX",
             alloc::format!(
                 "expected COLLECTION, COLLECTIONS, QUOTAS, or SHARD KEYS after SHOW, got '{}'",
-                self.peek()?.text
+                peek.text
             ),
-            self.peek()?.pos,
+            peek.span,
         ))
     }
 
@@ -163,16 +172,18 @@ impl<'a> AstLowerer<'a> {
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {
-            let pos = self.peek()?.pos;
+            let span = self.peek()?.span;
             self.advance()?;
             options = self.parse_config_block()?;
-            super::validate_index_options(&options, pos)?;
+            super::validate_index_options(&options, span)?;
         }
+        let wait = self.parse_optional_wait()?;
         Ok(Stmt::CreateIndex(Box::new(CreateIndexStmt {
             collection,
             field,
             field_type,
             options,
+            wait,
         })))
     }
 }

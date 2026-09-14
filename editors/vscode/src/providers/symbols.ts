@@ -22,6 +22,7 @@ const KIND_MAP: Record<string, vscode.SymbolKind> = {
   WITH: vscode.SymbolKind.Method,
   SCROLL: vscode.SymbolKind.Method,
   COUNT: vscode.SymbolKind.Number,
+  FACET: vscode.SymbolKind.Number,
   UPSERT: vscode.SymbolKind.Object,
   DELETE: vscode.SymbolKind.Object,
   "DELETE PAYLOAD": vscode.SymbolKind.Object,
@@ -39,6 +40,8 @@ const KIND_MAP: Record<string, vscode.SymbolKind> = {
   "SHOW COLLECTIONS": vscode.SymbolKind.Namespace,
   "SHOW COLLECTION": vscode.SymbolKind.Class,
   "SHOW SHARD KEYS": vscode.SymbolKind.Key,
+  "SHOW QUOTAS": vscode.SymbolKind.Namespace,
+  "SET QUOTA": vscode.SymbolKind.Class,
 };
 
 export class QqlDocumentSymbolProvider implements vscode.DocumentSymbolProvider {

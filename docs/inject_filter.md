@@ -1,3 +1,7 @@
+> Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
+> Operations guides live in `website/src/content/docs/docs/operations/`.
+> This `docs/` file is the source text; edit here, then sync the website copy.
+
 # Host Isolation: `inject_filter`
 
 **Purpose:** force a predicate onto untrusted or agent-written QQL **before** plan/execute — so tenants, soft-deletes, and policy flags cannot be omitted.
@@ -24,12 +28,13 @@ Given a parsed `Stmt`, merge `field op value` into every applicable branch:
 | Statement | Effect |
 |-----------|--------|
 | `QUERY` | AND into top-level filter; recurse CTEs + nested prefetches |
-| `SCROLL`, `COUNT` | Merge into statement filter |
+| `SCROLL`, `COUNT`, `FACET` | Merge into statement filter |
 | `DELETE`, `UPDATE … PAYLOAD`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR` | Wrap / merge into point selector |
 | `UPSERT` | Equality on non-`id` fields stamps payload on each point |
-| DDL / `SHOW` | **Error** (`QQL-VALIDATION-FILTER-INJECT`) — fail closed |
+| DDL / `SHOW` / `UPDATE … VECTOR` | **Error** (`QQL-VALIDATION-FILTER-INJECT`) — fail closed |
+| `UPSERT` with non-`Eq` or field `id` | **Error** (`QQL-VALIDATION-FILTER-INJECT`) — fail closed |
 
-**Operators (SDK string form):** `=`, `>`, `>=`, `<`, `<=` (and aliases `eq`/`gt`/…).  
+**Operators (SDK string form):** `=`, `>`, `>=`, `<`, `<=` (and aliases `eq`/`gt`/…; ASCII-case-insensitive, surrounding whitespace trimmed).  
 **Not supported:** `!=`, `IN`, `MATCH`, … — put those in authored QQL, or inject equality and compose with `NOT` in the source.
 
 ---

@@ -26,7 +26,7 @@
 			"!**/public",
 			"!**/src/scripts/qql-keywords.generated.ts",
 			"!**/src/styles/ec-theme.css",
-			"!**/packages/ui-docs/src/styles/*.css"
+			"!**/packages/ui/src/styles/*.css"
 		]
 	},
 	"javascript": {
@@ -34,7 +34,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["src/pages/index.astro"],
+			"includes": ["src/pages/index.astro", "src/pages/playground/index.astro"],
 			"linter": {
 				"rules": {
 					"complexity": {

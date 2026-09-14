@@ -6,12 +6,13 @@ import {
 	lintGutter,
 } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import initQql, {
 	analyze,
 	Client,
 	type CompiledRoute,
+	formatQuery,
 	Stmt,
 } from "qql-wasm-current";
 import { createBrowserEmbedder } from "./browser-embedder";
@@ -56,6 +57,19 @@ function formatError(error: unknown): string {
 	} catch {
 		return String(error);
 	}
+}
+
+function humanizeExecutionError(error: unknown, qdrantUrl: string): string {
+	const raw = formatError(error);
+	if (
+		error instanceof TypeError ||
+		/failed to fetch|networkerror|load failed|network request failed|connection refused/i.test(
+			raw,
+		)
+	) {
+		return `Qdrant unreachable at ${connectionHost(qdrantUrl)} — check connection`;
+	}
+	return raw;
 }
 
 function pretty(value: unknown): string {
@@ -194,6 +208,7 @@ curl -X ${route.method} ${JSON.stringify(`${settings.qdrantUrl}${route.path}`)} 
 const workspace = required<HTMLElement>("[data-default-query]");
 const editorHost = required<HTMLElement>("#qql-editor");
 const runButton = required<HTMLButtonElement>("[data-run]");
+const formatButton = required<HTMLButtonElement>("[data-format]");
 const exportButton = required<HTMLButtonElement>("[data-open-export]");
 const validationBadge = required<HTMLElement>("[data-validation-badge]");
 const analysisSummary = required<HTMLElement>("[data-analysis-summary]");
@@ -219,6 +234,12 @@ const embedStatus = required<HTMLElement>("[data-embed-status]");
 const editorLoading = required<HTMLElement>("[data-editor-loading]");
 const shareButton = required<HTMLButtonElement>("[data-share]");
 const docsBacklink = required<HTMLAnchorElement>("[data-docs-backlink]");
+const connectedLabel = required<HTMLElement>("[data-connected-label]");
+const connectedDot = required<HTMLElement>("[data-connected-dot]");
+const statusEndpoint = required<HTMLElement>("[data-status-endpoint]");
+const statusEmbed = required<HTMLElement>("[data-status-embed]");
+const statusWasm = required<HTMLElement>("[data-status-wasm]");
+const statusDetail = required<HTMLElement>("[data-status-detail]");
 
 const state: PlaygroundState = {
 	analysis: null,
@@ -321,6 +342,28 @@ function updateConnectionSummary(): void {
 		"title",
 		`Edit connection (${settings.qdrantUrl}, ${embedding})`,
 	);
+	statusEmbed.textContent = embedSummary();
+	statusEmbed.parentElement?.setAttribute("title", embedBreakage());
+}
+
+function embedSummary(): string {
+	if (settings.embedProvider === "browser") return "MiniLM (browser)";
+	if (settings.embedProvider === "http") {
+		return settings.embedModel
+			? `HTTP ${settings.embedModel}`
+			: "HTTP embedder";
+	}
+	return "None (vectors only)";
+}
+
+function embedBreakage(): string {
+	if (settings.embedProvider === "browser") {
+		return "Browser MiniLM downloads on the first TEXT query. TEXT queries fail until the download finishes. Explicit vectors always work.";
+	}
+	if (settings.embedProvider === "http") {
+		return `TEXT queries embed through ${settings.embedUrl || "the configured endpoint"}. Explicit vectors still work when the endpoint is down.`;
+	}
+	return "TEXT queries fail with no embedder. Use explicit vectors such as [0.1, 0.2, 0.3].";
 }
 
 function syncPolicyChip(): void {
@@ -434,23 +477,24 @@ function currentDiagnostic(): Diagnostic[] {
 			},
 		];
 	}
-	if (result.valid || !result.error) return [];
-	const from =
-		result.error.start == null
-			? 0
-			: byteOffsetToPosition(source, result.error.start);
-	const rawTo =
-		result.error.end == null
-			? from + 1
-			: byteOffsetToPosition(source, result.error.end);
-	return [
-		{
+	if (result.valid) return [];
+	const extra = (result as { errors?: NonNullable<typeof result.error>[] })
+		.errors;
+	const analysisErrors =
+		extra && extra.length > 0 ? extra : result.error ? [result.error] : [];
+	if (analysisErrors.length === 0) return [];
+	return analysisErrors.map((err) => {
+		const from =
+			err.start == null ? 0 : byteOffsetToPosition(source, err.start);
+		const rawTo =
+			err.end == null ? from + 1 : byteOffsetToPosition(source, err.end);
+		return {
 			from: Math.min(from, source.length),
 			to: Math.min(Math.max(from + 1, rawTo), source.length),
-			severity: "error",
-			message: `${result.error.code}: ${result.error.message}`,
-		},
-	];
+			severity: "error" as const,
+			message: `${err.code}: ${err.message}`,
+		};
+	});
 }
 
 function selectedRoute(): CompiledRoute | null {
@@ -549,7 +593,7 @@ function renderOutputs(): void {
 	const ast = analysis?.effectiveAst?.[state.selectedStatement] ?? null;
 	const responseOutput =
 		state.executionError != null
-			? { ok: false, error: state.executionError }
+			? `Run failed: ${state.executionError}`
 			: state.response;
 
 	const values: Record<Exclude<InspectorTab, "plan">, unknown> = {
@@ -602,8 +646,21 @@ function renderValidation(): void {
 		}, ${analysis.result.tokens.length} tokens, ${state.metrics?.parseMs.toFixed(2)} ms`;
 	} else {
 		setValidationBadge("Invalid QQL");
-		analysisSummary.textContent =
+		// analyze reports the first error only (a single `error` field), so
+		// render its stable code with a link to the error code reference.
+		const code = analysis.result.error?.code;
+		const message =
 			analysis.result.error?.message ?? "The parser rejected this input.";
+		if (code) {
+			analysisSummary.replaceChildren();
+			const link = document.createElement("a");
+			link.href = "/docs/reference/error-codes";
+			link.textContent = code;
+			link.title = "Open the error code reference";
+			analysisSummary.append(link, document.createTextNode(`: ${message}`));
+		} else {
+			analysisSummary.textContent = message;
+		}
 	}
 
 	runButton.disabled = !valid;
@@ -618,11 +675,37 @@ function renderInspector(): void {
 	renderValidation();
 }
 
+function formatEditor(): void {
+	const source = editor.state.doc.toString();
+	try {
+		const formatted = formatQuery(source);
+		if (formatted === source) {
+			toast("Already formatted.");
+			return;
+		}
+		editor.dispatch({
+			changes: { from: 0, to: editor.state.doc.length, insert: formatted },
+		});
+		editor.focus();
+		toast("Formatted with the canonical formatter.");
+	} catch (error) {
+		toast(formatError(error), "error");
+	}
+}
+
 function runAnalysis(source: string): void {
 	try {
 		state.analysis = analyzeWithPolicy(source);
 	} catch (error) {
 		const message = formatError(error);
+		// The synthetic fallback must satisfy the current AnalysisResult shape:
+		// `errors` is the primary diagnostic list; `error` is kept for older clients.
+		const diagnostic = {
+			code: "QQL-WASM",
+			message,
+			start: null,
+			end: null,
+		};
 		state.analysis = {
 			source,
 			result: {
@@ -633,12 +716,8 @@ function runAnalysis(source: string): void {
 				route: null,
 				routes: [],
 				explain: null,
-				error: {
-					code: "QQL-WASM",
-					message,
-					start: null,
-					end: null,
-				},
+				error: diagnostic,
+				errors: [diagnostic],
 			},
 			effectiveAst: null,
 			effectiveRoutes: [],
@@ -960,11 +1039,16 @@ function writeSettingsForm(): void {
 			localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 			required<HTMLDialogElement>("#settings-dialog").close();
 			runAnalysis(editor.state.doc.toString());
+			void checkEndpoint();
 			toast("Connection settings saved.");
 		} catch (error) {
 			toast(formatError(error), "error");
 		}
 	});
+	required<HTMLButtonElement>("[data-test-connection]").addEventListener(
+		"click",
+		() => void checkEndpoint(true),
+	);
 }
 
 function writePolicyForm(): void {
@@ -1151,7 +1235,7 @@ async function executeQuery(): Promise<void> {
 			state.response.ok ? "success" : "error",
 		);
 	} catch (error) {
-		state.executionError = formatError(error);
+		state.executionError = humanizeExecutionError(error, settings.qdrantUrl);
 		if (state.metrics) state.metrics.executeMs = performance.now() - started;
 		setRuntime("Execution failed.", "failed");
 		switchInspectorTab("response");
@@ -1164,6 +1248,69 @@ async function executeQuery(): Promise<void> {
 		runLabel.textContent = "Run";
 		renderValidation();
 		renderOutputs();
+	}
+}
+
+async function checkEndpoint(manual = false): Promise<void> {
+	const base = settings.qdrantUrl.replace(/\/+$/, "");
+	statusEndpoint.textContent = "Checking";
+	connectedLabel.textContent = "Connected: checking";
+	connectedDot.classList.remove("is-ready", "is-failed");
+	statusDetail.hidden = true;
+	statusDetail.textContent = "";
+
+	const withTimeout = async (init: RequestInit): Promise<Response> => {
+		const controller = new AbortController();
+		const timer = window.setTimeout(() => controller.abort(), 5000);
+		try {
+			return await fetch(`${base}/collections`, {
+				...init,
+				signal: controller.signal,
+			});
+		} finally {
+			window.clearTimeout(timer);
+		}
+	};
+
+	try {
+		const probe = await withTimeout({});
+		if (!probe.ok) {
+			statusEndpoint.textContent = `Reachable, HTTP ${probe.status}`;
+			statusDetail.textContent = `Qdrant answered but refused the request (HTTP ${probe.status}). Set the API key in Connection settings when the instance requires one. Offline analyze still works.`;
+			statusDetail.hidden = false;
+			connectedLabel.textContent = "Connected: Qdrant reachable";
+			connectedDot.classList.add("is-ready");
+			if (manual) toast(statusDetail.textContent, "error");
+			return;
+		}
+		statusEndpoint.textContent = `Reachable (${connectionHost(base)})`;
+		connectedLabel.textContent = "Connected: Qdrant reachable";
+		connectedDot.classList.add("is-ready");
+		if (manual) toast("Qdrant is reachable.");
+		return;
+	} catch {
+		// A normal fetch rejects for both a down server and a CORS block.
+		// An opaque no-cors probe resolves only when the server is up, so it
+		// tells the two cases apart without extra requests on success.
+		let corsBlocked = false;
+		try {
+			const opaque = await withTimeout({ mode: "no-cors" });
+			corsBlocked = opaque.type === "opaque";
+		} catch {
+			corsBlocked = false;
+		}
+		if (corsBlocked) {
+			statusEndpoint.textContent = "Blocked by browser CORS policy";
+			statusDetail.textContent = `Your Qdrant answered at ${base}, but the browser blocked the response. Allow this page origin in the Qdrant CORS settings, then reload. Offline analyze still works.`;
+			connectedLabel.textContent = "Connected: blocked by CORS";
+		} else {
+			statusEndpoint.textContent = `Not reachable (${connectionHost(base)})`;
+			statusDetail.textContent = `Qdrant is not reachable at ${base}. Start Qdrant locally with the default REST port 6333 and reload. Offline analyze still works without it.`;
+			connectedLabel.textContent = "Connected: Qdrant unreachable";
+		}
+		statusDetail.hidden = false;
+		connectedDot.classList.add("is-failed");
+		if (manual) toast(statusDetail.textContent, "error");
 	}
 }
 
@@ -1210,6 +1357,9 @@ const editor = new EditorView({
 				},
 			]),
 			EditorView.lineWrapping,
+			placeholder(
+				"QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;\n-- Nothing leaves this tab until you run.",
+			),
 			EditorView.updateListener.of((update) => {
 				if (!update.docChanged) return;
 				activeFixture.textContent = "Custom query";
@@ -1321,16 +1471,20 @@ async function start(): Promise<void> {
 		renderRoutes();
 	});
 	runButton.addEventListener("click", () => void executeQuery());
+	formatButton.addEventListener("click", formatEditor);
 
 	try {
 		await initQql();
 		configureClient();
 		setRuntime("Current qql-rs WASM ready", "ready");
+		statusWasm.textContent = "Ready";
 		runAnalysis(editor.state.doc.toString());
 		setEditorLoading(null);
+		void checkEndpoint();
 	} catch (error) {
 		const message = formatError(error);
 		setRuntime(`WASM failed: ${message}`, "failed");
+		statusWasm.textContent = "Failed to load";
 		validationBadge.classList.remove("is-loading");
 		validationBadge.classList.add("is-invalid");
 		validationBadge.textContent = "WASM unavailable";

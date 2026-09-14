@@ -1,0 +1,147 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Batch": {
+        "params": null,
+        "statements": [
+          {
+            "Query": {
+              "collection": {
+                "Explicit": "docs"
+              },
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Vector": {
+                      "Dense": [
+                        0.1
+                      ]
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": null
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 1,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "Query": {
+              "collection": {
+                "Explicit": "docs"
+              },
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Vector": {
+                      "Dense": [
+                        0.2
+                      ]
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": null
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 3,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "wait": null
+      }
+    },
+    {
+      "Batch": {
+        "params": null,
+        "statements": [
+          {
+            "Upsert": {
+              "collection": "docs",
+              "embed": [],
+              "embedding": null,
+              "points": [
+                {
+                  "id": {
+                    "Number": 1
+                  },
+                  "payload": [],
+                  "vectors": {
+                    "Unnamed": {
+                      "Dense": [
+                        0.1
+                      ]
+                    }
+                  }
+                }
+              ],
+              "shard_key": null,
+              "wait": null
+            }
+          },
+          {
+            "Delete": {
+              "collection": "docs",
+              "selector": {
+                "Id": {
+                  "Number": 2
+                }
+              },
+              "shard_key": null,
+              "wait": null
+            }
+          },
+          {
+            "UpdatePayload": {
+              "collection": "docs",
+              "payload": [
+                [
+                  "a",
+                  {
+                    "Int": 1
+                  }
+                ]
+              ],
+              "selector": {
+                "Id": {
+                  "Number": 1
+                }
+              },
+              "shard_key": null,
+              "wait": null
+            }
+          }
+        ],
+        "wait": null
+      }
+    }
+  ]
+}

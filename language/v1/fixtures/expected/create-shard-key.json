@@ -4,27 +4,57 @@
     {
       "CreateShardKey": {
         "collection": "docs",
+        "initial_state": null,
+        "placement": null,
         "replication_factor": null,
-        "shard_key": "acme",
+        "shard_key": {
+          "Keyword": "acme"
+        },
         "shards_number": 2
       }
     },
     {
       "CreateShardKey": {
         "collection": "docs",
+        "initial_state": null,
+        "placement": null,
         "replication_factor": null,
-        "shard_key": "default",
+        "shard_key": {
+          "Keyword": "default"
+        },
         "shards_number": null
       }
     },
     {
       "DropShardKey": {
         "collection": "docs",
-        "shard_key": "acme"
+        "shard_key": {
+          "Keyword": "acme"
+        }
       }
     },
     {
       "ShowShardKeys": "docs"
+    },
+    {
+      "CreateShardKey": {
+        "collection": "docs",
+        "initial_state": null,
+        "placement": null,
+        "replication_factor": null,
+        "shard_key": {
+          "Number": 101
+        },
+        "shards_number": 2
+      }
+    },
+    {
+      "DropShardKey": {
+        "collection": "docs",
+        "shard_key": {
+          "Number": 101
+        }
+      }
     }
   ]
 }

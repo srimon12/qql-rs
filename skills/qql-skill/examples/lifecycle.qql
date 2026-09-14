@@ -1,0 +1,27 @@
+-- 17. Full setup, indexing, ingestion, and cleanup script.
+CREATE COLLECTION medical (
+  dense VECTOR(384, COSINE),
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
+CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword;
+UPSERT INTO medical VALUES {id: 1, text: 'stroke protocol', specialty: 'neurology'}, {id: 2, text: 'cardiac arrest', specialty: 'cardiology'} USING DENSE MODEL 'all-minilm:l6-v2';
+COUNT FROM medical WHERE specialty = 'neurology';
+QUERY TEXT 'emergency' FROM medical USING dense LIMIT 5;
+CLEAR PAYLOAD FROM medical WHERE id = 1;
+DELETE VECTOR colbert FROM medical WHERE id = 2;
+DROP INDEX ON COLLECTION medical FOR specialty;
+DROP COLLECTION medical;
+
+-- 18. Shard key lifecycle.
+CREATE COLLECTION tenants HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+WITH PARAMS (shard_number = 8, sharding_method = 'custom');
+
+CREATE SHARD KEY 'acme' ON COLLECTION tenants WITH (shards_number = 2);
+CREATE SHARD KEY 'globex' ON COLLECTION tenants WITH (shards_number = 2);
+
+SHOW SHARD KEYS ON COLLECTION tenants;
+
+DROP SHARD KEY 'acme' ON COLLECTION tenants;
+
+SHOW SHARD KEYS ON COLLECTION tenants;
+DROP COLLECTION tenants;

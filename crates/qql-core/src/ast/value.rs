@@ -11,6 +11,9 @@ pub enum Value {
     Str(String),
     /// Integer literal.
     Int(i64),
+    /// Unsigned integer literal: bare digit literals that overflow `i64`
+    /// (up to `u64::MAX`) parse here instead of failing or becoming strings.
+    UInt(u64),
     /// Floating-point literal.
     Float(f64),
     /// Boolean literal (`true` / `false`).
@@ -21,6 +24,26 @@ pub enum Value {
     Dict(Vec<(String, Value)>),
     /// `[v1, v2, …]` list literal (also dense vector input).
     List(Vec<Value>),
+    /// Flat array of `f32` (dense vector). Bypasses per-element float boxing.
+    F32Array(Vec<f32>),
+    /// Named parameter placeholder (`:name`).
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+    /// Positional parameter placeholder (`?`).
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
 }
 
 impl core::fmt::Debug for Value {
@@ -28,11 +51,19 @@ impl core::fmt::Debug for Value {
         match self {
             Self::Str(value) => f.debug_tuple("Str").field(value).finish(),
             Self::Int(value) => f.debug_tuple("Int").field(value).finish(),
+            Self::UInt(value) => f.debug_tuple("UInt").field(value).finish(),
             Self::Float(value) => f.debug_tuple("Float").field(value).finish(),
             Self::Bool(value) => f.debug_tuple("Bool").field(value).finish(),
             Self::Null => f.write_str("Null"),
             Self::Dict(value) => f.debug_tuple("Dict").field(value).finish(),
             Self::List(value) => f.debug_tuple("List").field(value).finish(),
+            Self::F32Array(value) => f.debug_tuple("F32Array").field(value).finish(),
+            Self::Param(value, span) => f.debug_tuple("Param").field(value).field(span).finish(),
+            Self::PositionalParam(idx, span) => f
+                .debug_tuple("PositionalParam")
+                .field(idx)
+                .field(span)
+                .finish(),
         }
     }
 }
@@ -49,19 +80,23 @@ impl Value {
         }
     }
 
-    /// Set a key in a `Dict` (case-insensitive replace) or append it; no-op on
-    /// other variants.
-    pub fn dict_set(&mut self, key: String, value: Value) {
-        if let Self::Dict(items) = self {
-            if let Some((_, current)) = items
-                .iter_mut()
-                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
-            {
-                *current = value;
-            } else {
-                items.push((key, value));
-            }
+    /// Set a key in a `Dict` (case-insensitive replace) or append it.
+    ///
+    /// Returns `true` when this value is a dict and the key was written;
+    /// `false` when called on a non-dict (nothing is mutated).
+    pub fn dict_set(&mut self, key: String, value: Value) -> bool {
+        let Self::Dict(items) = self else {
+            return false;
+        };
+        if let Some((_, current)) = items
+            .iter_mut()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+        {
+            *current = value;
+        } else {
+            items.push((key, value));
         }
+        true
     }
 
     /// Borrow the string contents, if this value is a `Str`.
@@ -74,22 +109,25 @@ impl Value {
 
     /// Convert a JSON value into a QQL `Value`.
     ///
-    /// Integer numbers stay `Int`; any other number becomes `Float`.
+    /// Integer numbers stay `Int`, unsigned integers above `i64::MAX` become
+    /// `UInt`, and any other number becomes `Float`.
     #[cfg(feature = "json")]
     pub fn from_json(value: serde_json::Value) -> Result<Self, QqlError> {
         match value {
             serde_json::Value::String(value) => Ok(Self::Str(value)),
-            serde_json::Value::Number(value) => value
-                .as_i64()
-                .map(Self::Int)
-                .or_else(|| value.as_f64().map(Self::Float))
-                .ok_or_else(|| {
-                    QqlError::validation(
-                        "QQL-JSON-NUMBER",
-                        "JSON number cannot be represented by QQL",
-                        None,
-                    )
-                }),
+            serde_json::Value::Number(value) => match value.as_i64() {
+                Some(int) => Ok(Self::Int(int)),
+                None => match value.as_u64() {
+                    Some(uint) => Ok(Self::UInt(uint)),
+                    None => value.as_f64().map(Self::Float).ok_or_else(|| {
+                        QqlError::validation(
+                            "QQL-JSON-NUMBER",
+                            "JSON number cannot be represented by QQL",
+                            None,
+                        )
+                    }),
+                },
+            },
             serde_json::Value::Bool(value) => Ok(Self::Bool(value)),
             serde_json::Value::Null => Ok(Self::Null),
             serde_json::Value::Array(items) => items
@@ -106,11 +144,18 @@ impl Value {
     }
 
     /// Convert the value into JSON, failing on non-finite floats.
+    ///
+    /// Note: Parameter placeholders (`Value::Param` and `Value::PositionalParam`)
+    /// emit diagnostic sentinel objects (`{"$param": ...}`) with optional `$span`.
+    /// This manual JSON representation is emit-only; `Value::from_json` decodes
+    /// all JSON objects as standard `Value::Dict` to prevent payload sentinel
+    /// hijacking. For full two-way AST serialization, use serde.
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<serde_json::Value, QqlError> {
         match self {
             Self::Str(value) => Ok(serde_json::Value::String(value.clone())),
             Self::Int(value) => Ok(serde_json::Value::Number((*value).into())),
+            Self::UInt(value) => Ok(serde_json::Value::Number((*value).into())),
             Self::Float(value) => serde_json::Number::from_f64(*value)
                 .map(serde_json::Value::Number)
                 .ok_or_else(|| {
@@ -134,6 +179,79 @@ impl Value {
                 .map(Self::to_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(serde_json::Value::Array),
+            Self::F32Array(values) => {
+                let items = values
+                    .iter()
+                    .map(|&f| {
+                        serde_json::Number::from_f64(f as f64)
+                            .map(serde_json::Value::Number)
+                            .ok_or_else(|| {
+                                QqlError::validation(
+                                    "QQL-JSON-NONFINITE",
+                                    "non-finite floats cannot be converted to JSON",
+                                    None,
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(serde_json::Value::Array(items))
+            }
+            Self::Param(name, span) => {
+                if let Some(sp) = span {
+                    Ok(serde_json::json!({ "$param": name, "$span": [sp.start, sp.end] }))
+                } else {
+                    Ok(serde_json::json!({ "$param": name }))
+                }
+            }
+            Self::PositionalParam(idx, span) => {
+                if let Some(sp) = span {
+                    Ok(serde_json::json!({ "$param_idx": idx, "$span": [sp.start, sp.end] }))
+                } else {
+                    Ok(serde_json::json!({ "$param_idx": idx }))
+                }
+            }
         }
+    }
+
+    /// Construct an unlocated named parameter placeholder.
+    pub fn param(name: impl Into<String>) -> Self {
+        Self::Param(name.into(), None)
+    }
+
+    /// Construct a located named parameter placeholder.
+    pub fn param_with_span(name: impl Into<String>, span: crate::error::Span) -> Self {
+        Self::Param(name.into(), Some(alloc::boxed::Box::new(span)))
+    }
+
+    /// Construct an unlocated positional parameter placeholder.
+    pub fn positional_param(idx: usize) -> Self {
+        Self::PositionalParam(idx, None)
+    }
+
+    /// Construct a located positional parameter placeholder.
+    pub fn positional_param_with_span(idx: usize, span: crate::error::Span) -> Self {
+        Self::PositionalParam(idx, Some(alloc::boxed::Box::new(span)))
+    }
+
+    /// Extract the parameter name if this is a named parameter.
+    pub fn param_name(&self) -> Option<&str> {
+        match self {
+            Self::Param(name, _) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Extract the parameter source span if present.
+    pub fn param_span(&self) -> Option<crate::error::Span> {
+        match self {
+            Self::Param(_, span) | Self::PositionalParam(_, span) => span.as_deref().copied(),
+            _ => None,
+        }
+    }
+}
+
+impl From<Vec<f32>> for Value {
+    fn from(values: Vec<f32>) -> Self {
+        Self::F32Array(values)
     }
 }

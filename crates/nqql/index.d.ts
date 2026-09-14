@@ -5,9 +5,28 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
-  compileRoute(): CompiledRoute;
-  /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
-  shardKey?: string | null;
+  /** Canonical, re-parseable QQL (mirrors Python `str(stmt)`). */
+  toString(): string;
+  /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
+  toReadableString(): string;
+  /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt.
+   * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
+  bind(params?: Record<string, unknown> | unknown[]): Stmt;
+  compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
+  /** QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+   * Reads back `string` (keyword) or `bigint` (numeric); set with
+   * `string | number | bigint | null` (numbers must be exact integers). */
+  shardKey?: string | number | bigint | null;
+}
+
+export class ScoredPoint {
+  id: string | number;
+  score: number;
+  payload: Record<string, unknown> | null;
+  text: string | null;
+  collection: string | null;
+  get(key: string, defaultValue?: unknown): unknown;
+  [key: string]: unknown;
 }
 
 export interface ExecResponse {
@@ -15,13 +34,69 @@ export interface ExecResponse {
   operation: string;
   message: string;
   data: unknown | null;
+  /** Server telemetry when the backend reported it; absent otherwise. */
+  telemetry?: ServerTelemetry | null;
 }
 
-export interface ExecutionReport {
+export interface HardwareUsage {
+  cpu: number;
+  payload_io_read: number;
+  payload_io_write: number;
+  payload_index_io_read: number;
+  payload_index_io_write: number;
+  vector_io_read: number;
+  vector_io_write: number;
+}
+
+export interface ModelUsage {
+  tokens: number;
+}
+
+export interface InferenceUsage {
+  models: Record<string, ModelUsage>;
+}
+
+export interface ServerUsage {
+  hardware?: HardwareUsage | null;
+  inference?: InferenceUsage | null;
+}
+
+export interface ServerTelemetry {
+  time_s?: number | null;
+  usage?: ServerUsage | null;
+}
+
+export interface PhaseTimings {
+  parse_ms: number;
+  prepare_plan_ms: number;
+  dispatch_ms: number;
+  decode_ms: number;
+  total_ms: number;
+}
+
+/** Structured `EXPLAIN ANALYZE` report (see `Client.explainAnalyze`). */
+export interface AnalyzeReport {
+  ok: boolean;
+  plan: string;
+  phases: PhaseTimings;
+  server_time_s?: number | null;
+  usage?: ServerUsage | null;
+  results: ExecResponse[];
+}
+
+export class ExecutionReport {
   ok: boolean;
   results: ExecResponse[];
   succeeded: number;
   failed: number;
+  /** Aggregated server telemetry when the backend reported it; absent otherwise. */
+  telemetry?: ServerTelemetry | null;
+  hits(stmt?: number): ScoredPoint[];
+  points(stmt?: number): ScoredPoint[];
+  ids(stmt?: number): Array<string | number>;
+  facet(stmt?: number): Array<{ value: unknown; count: number }>;
+  count(stmt?: number): number;
+  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
 }
 
 export interface ExecuteOptions {
@@ -82,6 +157,16 @@ export interface HttpEmbedderOptions {
   rerank_api_key?: string;
   rerankModel?: string;
   rerank_model?: string;
+  /** Client-side BM25 `k1` for the local sparse document encoder (default 1.2;
+   * write-path only — does not change query weights or server-side inference) */
+  bm25K1?: number;
+  bm25_k1?: number;
+  /** Client-side BM25 `b` length normalization in [0, 1] (default 0.75) */
+  bm25B?: number;
+  bm25_b?: number;
+  /** Client-side BM25 expected average document length in tokens (default 256) */
+  bm25AvgLen?: number;
+  bm25_avg_len?: number;
 }
 
 export class HttpEmbedder {
@@ -94,9 +179,44 @@ export class Client {
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
   ): Promise<ExecutionReport>;
+  executeHits(
+    query: string | Stmt | string[] | Stmt[],
+    options?: ExecuteOptions,
+  ): Promise<ScoredPoint[]>;
+  /**
+   * Analyze a single query string or Stmt: static plan plus measured
+   * execution (per-phase client timings, server time, hardware/inference
+   * usage). Batches fail closed — analyze each entry separately.
+   */
+  explainAnalyze(
+    query: string | Stmt,
+    options?: ExecuteOptions,
+  ): Promise<AnalyzeReport>;
+  /**
+   * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
+   * chunks (default 100). One `:rows` template is prepared once — no
+   * re-parse, no per-batch schema fetch. Vectors take plain arrays, packed
+   * `Float32Array` / `Float64Array`, integer typed arrays for sparse
+   * `indices`, or the flat `{data, dim}` multivector form.
+   */
+  upsertMany(
+    collection: string,
+    rows: Record<string, unknown>[],
+    options?: ExecuteOptions & { batchSize?: number },
+  ): Promise<ExecutionReport>;
   explain(query: string): string;
   explainStmt(stmt: Stmt): string;
-  compile(query: string): CompiledRoute;
+  compile(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
+  /** Lazily page through a collection with SCROLL, yielding one ScoredPoint per point. */
+  scrollCursor(
+    collection: string,
+    options?: ScrollCursorOptions,
+  ): AsyncGenerator<ScoredPoint>;
+  /** WHATWG stream over `scrollCursor` (pull-driven; honors backpressure). */
+  scrollStream(
+    collection: string,
+    options?: ScrollCursorOptions,
+  ): ReadableStream<ScoredPoint>;
   /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
   readonly routeAffinity: string | null;
   close(): Promise<void>;
@@ -116,21 +236,61 @@ export function injectFilter(
 export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
-export function compileQuery(query: string): CompiledRoute;
+export function compileQuery(
+  query: string,
+  params?: Record<string, unknown> | unknown[],
+): CompiledRoute;
 export function explain(query: string): string;
 export function explainStmt(stmt: Stmt): string;
-/** Substitute `:name` (object) or `?` (array) placeholders into a query string. */
+/** Substitute `:name` (object) or `?` (array) placeholders into a query string
+ * or Stmt. Stmt inputs return a bound Stmt (a string when `truncateVectors`). */
 export function bind(
-  query: string,
-  params: Record<string, unknown> | unknown[],
-): string;
+  query: string | Stmt,
+  params?: Record<string, unknown> | unknown[],
+  options?: { truncateVectors?: boolean },
+): string | Stmt;
 export function execute(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & ClientOptions,
 ): Promise<ExecutionReport>;
+export function executeHits(
+  query: string | Stmt | string[] | Stmt[],
+  options?: ExecuteOptions & ClientOptions,
+): Promise<ScoredPoint[]>;
 export function executeStmt(
   stmt: Stmt,
-  options?: ClientOptions,
+  options?: ClientOptions & ExecuteOptions,
 ): Promise<ExecutionReport>;
+export interface ScrollCursorOptions {
+  /** Points per SCROLL page; a positive integer (default 100). */
+  batchSize?: number;
+  /** Raw QQL filter fragment appended as `WHERE …` (default none). */
+  where?: string;
+  /** Optional parameters to bind into the `where` filter fragment. */
+  params?: Record<string, unknown>;
+  /** Payloads are included by default; `false` strips `payload`
+   * client-side before yielding (SCROLL has no server-side payload
+   * exclusion in the grammar). */
+  withPayload?: boolean;
+  /** Append `WITH VECTOR` so yielded points carry vectors (default false;
+   * SCROLL omits vectors unless asked). */
+  withVector?: boolean;
+  /** Optional custom shard key partition routing (keyword or number). */
+  shardKey?: string | number | bigint;
+}
+/** Lazily page through a collection with SCROLL, yielding one ScoredPoint
+ * per point. At most one page is ever buffered. Works with any client
+ * exposing `execute(sql, { params })`. */
+export function scrollCursor(
+  client: Client,
+  collection: string,
+  options?: ScrollCursorOptions,
+): AsyncGenerator<ScoredPoint>;
+/** WHATWG stream over `scrollCursor` (pull-driven; honors backpressure). */
+export function scrollStream(
+  client: Client,
+  collection: string,
+  options?: ScrollCursorOptions,
+): ReadableStream<ScoredPoint>;
 export const version: string;
 export const __version__: string;

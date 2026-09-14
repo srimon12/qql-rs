@@ -1,5 +1,5 @@
 use super::AstLowerer;
-use crate::ast::{EmbeddingSpec, PointId, Value, VectorValue};
+use crate::ast::{EmbeddingSpec, PointId, PointVectors, Value, VectorValue};
 use crate::error::{QqlError, Span};
 use crate::token::{Token, TokenKind};
 use alloc::string::{String, ToString};
@@ -191,6 +191,20 @@ impl<'a> AstLowerer<'a> {
                     )
                 })
             }
+            TokenKind::Colon => {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                let span = Span::new(colon_tok.span.start, self.prev_span().end);
+                Ok(PointId::Param(name, Some(alloc::boxed::Box::new(span))))
+            }
+            TokenKind::Question => {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(PointId::PositionalParam(
+                    idx,
+                    Some(alloc::boxed::Box::new(q_tok.span)),
+                ))
+            }
             _ => Err(QqlError::parse(
                 "QQL-PARSE-POINT-ID",
                 alloc::format!(
@@ -224,12 +238,13 @@ impl<'a> AstLowerer<'a> {
     }
 
     pub fn parse_literal(&mut self) -> Result<Value, QqlError> {
+        let start = self.peek()?.span;
         let value = self.parse_value()?;
         if matches!(value, Value::Dict(_) | Value::List(_)) {
             return Err(QqlError::parse(
                 "QQL-PARSE-LITERAL",
                 "expected a scalar literal",
-                self.peek()?.span,
+                Span::new(start.start, self.prev_span().end),
             ));
         }
         Ok(value)
@@ -259,7 +274,7 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
             return self.decode_string(token);
         }
-        if token.kind != TokenKind::Identifier && !super::is_contextual_field_name(token.kind) {
+        if !token.is_keyword_or_identifier() {
             return Err(QqlError::parse(
                 "QQL-PARSE-FIELD",
                 alloc::format!("expected a field name, got '{}'", token.text),
@@ -300,9 +315,7 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rbrace {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rbrace)?;
         }
         self.expect(TokenKind::Rbrace)?;
         Ok(values)
@@ -334,9 +347,7 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rparen {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rparen)?;
         }
         self.expect(TokenKind::Rparen)?;
         Ok(values)
@@ -344,20 +355,12 @@ impl<'a> AstLowerer<'a> {
 
     pub(crate) fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
         let token = self.peek()?;
-        if matches!(
-            token.kind,
-            TokenKind::Lbrace
-                | TokenKind::Rbrace
-                | TokenKind::Lbracket
-                | TokenKind::Rbracket
-                | TokenKind::Lparen
-                | TokenKind::Rparen
-                | TokenKind::Colon
-                | TokenKind::Comma
-                | TokenKind::Equals
-                | TokenKind::Semicolon
-                | TokenKind::Eof
-        ) {
+        let ok = token.is_keyword_or_identifier()
+            || matches!(
+                token.kind,
+                TokenKind::String | TokenKind::Integer | TokenKind::Float
+            );
+        if !ok {
             return Err(QqlError::parse(
                 "QQL-PARSE-OBJECT-KEY",
                 alloc::format!("expected an object key, got '{}'", token.text),
@@ -365,6 +368,37 @@ impl<'a> AstLowerer<'a> {
             ));
         }
         self.advance()
+    }
+
+    /// Parse `:name` or `?` into the stored placeholder form (`":name"` / `"?{idx}"`).
+    pub(crate) fn parse_placeholder_param(&mut self) -> Result<Option<(String, Span)>, QqlError> {
+        match self.peek()?.kind {
+            TokenKind::Colon => {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                Ok(Some((
+                    alloc::format!(":{name}"),
+                    Span::new(colon_tok.span.start, self.prev_span().end),
+                )))
+            }
+            TokenKind::Question => {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(Some((alloc::format!("?{idx}"), q_tok.span)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn reject_trailing_comma(&mut self, closer: TokenKind) -> Result<(), QqlError> {
+        if self.peek()?.kind == closer {
+            return Err(QqlError::parse(
+                "QQL-PARSE-TRAILING-COMMA",
+                "trailing commas are not allowed",
+                self.peek()?.span,
+            ));
+        }
+        Ok(())
     }
 
     pub fn parse_list(&mut self) -> Result<Vec<Value>, QqlError> {
@@ -380,9 +414,7 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rbracket {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rbracket)?;
         }
         self.expect(TokenKind::Rbracket)?;
         Ok(values)
@@ -450,14 +482,99 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_vector_value(&mut self) -> Result<VectorValue, QqlError> {
         let span = self.peek()?.span;
         let value = self.parse_value()?;
-        vector_from_value(value, span)
+        vector_from_value(value, Some(span))
+    }
+
+    pub fn parse_bool(&mut self) -> Result<bool, QqlError> {
+        match self.peek()?.kind {
+            TokenKind::True => {
+                self.advance()?;
+                Ok(true)
+            }
+            TokenKind::False => {
+                self.advance()?;
+                Ok(false)
+            }
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-BOOL",
+                "expected true or false",
+                self.peek()?.span,
+            )),
+        }
+    }
+
+    pub fn parse_optional_wait(&mut self) -> Result<Option<bool>, QqlError> {
+        if self.peek()?.kind == TokenKind::Wait {
+            self.advance()?;
+            Ok(Some(self.parse_bool()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn parse_shard_key_atom(&mut self) -> Result<crate::ast::ShardKey, QqlError> {
+        match self.peek()?.kind {
+            TokenKind::Integer => {
+                let n = self.parse_non_negative_u64("shard key")?;
+                Ok(crate::ast::ShardKey::Number(n))
+            }
+            TokenKind::Colon => {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                let span = Span::new(colon_tok.span.start, self.prev_span().end);
+                Ok(crate::ast::ShardKey::param_with_span(name, span))
+            }
+            TokenKind::Question => {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(crate::ast::ShardKey::PositionalParam(
+                    idx,
+                    Some(alloc::boxed::Box::new(q_tok.span)),
+                ))
+            }
+            _ => Ok(crate::ast::ShardKey::Keyword(self.parse_string()?)),
+        }
+    }
+
+    pub fn parse_optional_typed_shard_and_wait(
+        &mut self,
+    ) -> Result<(Option<crate::ast::ShardKey>, Option<bool>), QqlError> {
+        let mut shard_key = None;
+        let mut wait = None;
+        loop {
+            if self.peek()?.kind == TokenKind::Shard && shard_key.is_none() {
+                self.advance()?;
+                shard_key = Some(self.parse_shard_key_atom()?);
+            } else if let Some(w) = self.parse_optional_wait()? {
+                if wait.is_some() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate WAIT clause",
+                        self.peek()?.span,
+                    ));
+                }
+                wait = Some(w);
+            } else {
+                break;
+            }
+        }
+        Ok((shard_key, wait))
     }
 }
 
 pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError> {
     match value {
         Value::Int(value) if value >= 0 => Ok(PointId::Number(value as u64)),
+        Value::UInt(value) => Ok(PointId::Number(value)),
         Value::Str(value) => Ok(PointId::String(value)),
+        Value::Param(name, param_span) => Ok(PointId::Param(
+            name,
+            param_span.or_else(|| Some(alloc::boxed::Box::new(span))),
+        )),
+        Value::PositionalParam(idx, param_span) => Ok(PointId::PositionalParam(
+            idx,
+            param_span.or_else(|| Some(alloc::boxed::Box::new(span))),
+        )),
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-POINT-ID",
             "point IDs must be unsigned integers or strings",
@@ -466,22 +583,59 @@ pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError
     }
 }
 
-pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue, QqlError> {
+pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<VectorValue, QqlError> {
     match value {
-        Value::List(values) if values.iter().all(|value| matches!(value, Value::List(_))) => values
-            .into_iter()
-            .map(|value| match value {
-                Value::List(row) => numeric_vector(row, span),
-                _ => unreachable!(),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|rows| {
-                if rows.is_empty() {
-                    Err(vector_error("multidense vector cannot be empty", span))
-                } else {
-                    Ok(VectorValue::MultiDense(rows))
+        Value::F32Array(values) => {
+            if values.is_empty() {
+                Err(vector_error("dense vector cannot be empty", span))
+            } else {
+                Ok(VectorValue::Dense(values))
+            }
+        }
+        Value::Param(name, param_span) => Ok(VectorValue::Param(
+            name,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::PositionalParam(idx, param_span) => Ok(VectorValue::PositionalParam(
+            idx,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::List(values)
+            if values
+                .iter()
+                .all(|value| matches!(value, Value::List(_) | Value::F32Array(_))) =>
+        {
+            if values.is_empty() {
+                return Err(vector_error("multidense vector cannot be empty", span));
+            }
+            let mut rows = Vec::with_capacity(values.len());
+            for value in values {
+                match value {
+                    Value::F32Array(row) => {
+                        if row.is_empty() {
+                            return Err(vector_error(
+                                "multidense vector rows cannot be empty",
+                                span,
+                            ));
+                        }
+                        rows.push(row);
+                    }
+                    Value::List(row) => {
+                        let row_vec = numeric_vector(row, span)?;
+                        if row_vec.is_empty() {
+                            return Err(vector_error(
+                                "multidense vector rows cannot be empty",
+                                span,
+                            ));
+                        }
+                        rows.push(row_vec);
+                    }
+                    // Guarded by the `all(List | F32Array)` match above.
+                    _ => unreachable!("multidense row is List or F32Array"),
                 }
-            }),
+            }
+            Ok(VectorValue::MultiDense(rows))
+        }
         Value::List(values) => numeric_vector(values, span).and_then(|values| {
             if values.is_empty() {
                 Err(vector_error("dense vector cannot be empty", span))
@@ -490,19 +644,81 @@ pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue,
             }
         }),
         Value::Dict(items) => {
+            // Per-point inference inputs (OpenAPI Document / Image /
+            // InferenceObject) share the dict spelling with sparse and named
+            // vectors; discriminate on their reserved keys first.
+            if let Some(inference) = try_inference_vector_value(&items, span)? {
+                return Ok(inference);
+            }
+            let mut data_v = None;
+            let mut dim_v = None;
             let mut indices_v = None;
             let mut values_v = None;
             for (key, value) in items {
-                if key.eq_ignore_ascii_case("indices") {
+                if key.eq_ignore_ascii_case("data") {
+                    data_v = Some(value);
+                } else if key.eq_ignore_ascii_case("dim") {
+                    dim_v = Some(value);
+                } else if key.eq_ignore_ascii_case("indices") {
                     indices_v = Some(value);
                 } else if key.eq_ignore_ascii_case("values") {
                     values_v = Some(value);
                 }
             }
-            let (Some(Value::List(indices)), Some(Value::List(values))) = (indices_v, values_v)
-            else {
+            if data_v.is_some() || dim_v.is_some() {
+                if indices_v.is_some() || values_v.is_some() {
+                    return Err(vector_error(
+                        "vector object must be either flat multivector {data, dim} or sparse {indices, values}, not both",
+                        span,
+                    ));
+                }
+                let (Some(data), Some(dim)) = (data_v, dim_v) else {
+                    return Err(vector_error(
+                        "flat multivector requires data and dim (e.g. {data: [...], dim: 128})",
+                        span,
+                    ));
+                };
+                let dim = match dim {
+                    Value::Int(n) if n > 0 => usize::try_from(n)
+                        .map_err(|_| vector_error("multivector dim is out of range", span))?,
+                    Value::UInt(n) if n > 0 => usize::try_from(n)
+                        .map_err(|_| vector_error("multivector dim is out of range", span))?,
+                    _ => {
+                        return Err(vector_error(
+                            "multivector dim must be a positive integer",
+                            span,
+                        ));
+                    }
+                };
+                let flat = match data {
+                    Value::F32Array(flat) => flat,
+                    Value::List(items) => numeric_vector(items, span)?,
+                    _ => {
+                        return Err(vector_error(
+                            "multivector data must be a flat list of numbers",
+                            span,
+                        ));
+                    }
+                };
+                if flat.is_empty() || flat.len() % dim != 0 {
+                    return Err(vector_error(
+                        "multivector data length must be a non-empty multiple of dim",
+                        span,
+                    ));
+                }
+                return Ok(VectorValue::MultiDense(
+                    flat.chunks_exact(dim).map(<[f32]>::to_vec).collect(),
+                ));
+            }
+            let (Some(indices), Some(values)) = (indices_v, values_v) else {
                 return Err(vector_error(
                     "sparse vectors require indices and values lists",
+                    span,
+                ));
+            };
+            let Value::List(indices) = indices else {
+                return Err(vector_error(
+                    "sparse vector indices must be non-negative integers",
                     span,
                 ));
             };
@@ -511,13 +727,24 @@ pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue,
                 .map(|value| match value {
                     Value::Int(value) if value >= 0 => u32::try_from(value)
                         .map_err(|_| vector_error("sparse vector index is out of range", span)),
+                    Value::UInt(value) => u32::try_from(value)
+                        .map_err(|_| vector_error("sparse vector index is out of range", span)),
                     _ => Err(vector_error(
                         "sparse vector indices must be non-negative integers",
                         span,
                     )),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let values = numeric_vector(values, span)?;
+            let values = match values {
+                Value::F32Array(flat) => flat,
+                Value::List(items) => numeric_vector(items, span)?,
+                _ => {
+                    return Err(vector_error(
+                        "sparse vector values must be a list of numbers",
+                        span,
+                    ));
+                }
+            };
             if indices.is_empty() || indices.len() != values.len() {
                 return Err(vector_error(
                     "sparse vector indices and values must be non-empty and have equal length",
@@ -533,18 +760,26 @@ pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue,
     }
 }
 
-fn numeric_vector(values: Vec<Value>, span: Span) -> Result<Vec<f32>, QqlError> {
+fn numeric_vector(values: Vec<Value>, span: Option<Span>) -> Result<Vec<f32>, QqlError> {
     values
         .into_iter()
         .map(|value| {
             let value = match value {
                 Value::Int(value) => value as f64,
+                Value::UInt(value) => value as f64,
                 Value::Float(value) => value,
-                _ => return Err(vector_error("vector elements must be numeric", span)),
+                _ => {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        "vector elements must be numeric",
+                        span,
+                    ));
+                }
             };
             let converted = value as f32;
             if !value.is_finite() || !converted.is_finite() {
-                return Err(vector_error(
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-VECTOR",
                     "vector elements must be finite f32 values",
                     span,
                 ));
@@ -554,6 +789,143 @@ fn numeric_vector(values: Vec<Value>, span: Span) -> Result<Vec<f32>, QqlError> 
         .collect()
 }
 
-fn vector_error(message: &'static str, span: Span) -> QqlError {
-    QqlError::validation("QQL-VALIDATION-VECTOR", message, Some(span))
+fn vector_error(message: &'static str, span: Option<Span>) -> QqlError {
+    QqlError::validation("QQL-VALIDATION-VECTOR", message, span)
+}
+
+pub fn point_vectors_from_value(
+    value: Value,
+    span: Option<Span>,
+) -> Result<PointVectors, QqlError> {
+    match value {
+        Value::Param(name, param_span) => Ok(PointVectors::Param(
+            name,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::PositionalParam(idx, param_span) => Ok(PointVectors::PositionalParam(
+            idx,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::Dict(items)
+            if !items.iter().any(|(key, _)| {
+                key.eq_ignore_ascii_case("indices") || key.eq_ignore_ascii_case("values")
+            }) =>
+        {
+            // Whole-vector inference (`vector: {text: '…', model: '…'}`)
+            // precedes the named-vector map: a dict carrying an inference
+            // key is a Document / Image / InferenceObject, never a map with
+            // a vector literally named `text` / `image` / `object`.
+            if let Some(inference) = try_inference_vector_value(&items, span)? {
+                return Ok(PointVectors::Unnamed(inference));
+            }
+            let mut vectors = Vec::new();
+            for (name, value) in items {
+                vectors.push((name, vector_from_value(value, span)?));
+            }
+            Ok(PointVectors::Named(vectors))
+        }
+        value => vector_from_value(value, span).map(PointVectors::Unnamed),
+    }
+}
+
+/// Discriminate an inference dict (`text` / `image` / `object` keys) into a
+/// [`VectorValue`], or `None` when the dict carries no inference key.
+///
+/// Exactly one of `text` / `image` / `object` must be present; the only other
+/// accepted keys are `model` and `options`. Anything else — including sparse
+/// (`indices` / `values`) or multivector (`data` / `dim`) keys — fails closed
+/// instead of silently picking a meaning.
+pub(crate) fn try_inference_vector_value(
+    items: &[(String, Value)],
+    span: Option<Span>,
+) -> Result<Option<VectorValue>, QqlError> {
+    let find = |key: &str| items.iter().find(|(k, _)| k.eq_ignore_ascii_case(key));
+    // A vector literally named `text` / `image` stays a named vector unless
+    // its value has the inference shape (strings for text/image); only then
+    // is the dict claimed as an inference input. This mirrors the wire, where
+    // `{"text": […]}` resolves as a named-vector map, not a Document.
+    let has_text = matches!(find("text"), Some((_, Value::Str(_))));
+    let has_image = matches!(find("image"), Some((_, Value::Str(_))));
+    let has_object = find("object").is_some();
+    if !has_text && !has_image && !has_object {
+        return Ok(None);
+    }
+    if [has_text, has_image, has_object]
+        .into_iter()
+        .filter(|has| *has)
+        .count()
+        != 1
+    {
+        return Err(vector_error(
+            "inference vector carries more than one of text, image, object",
+            span,
+        ));
+    }
+    for (key, _) in items {
+        if !(key.eq_ignore_ascii_case("text")
+            || key.eq_ignore_ascii_case("image")
+            || key.eq_ignore_ascii_case("object")
+            || key.eq_ignore_ascii_case("model")
+            || key.eq_ignore_ascii_case("options"))
+        {
+            return Err(vector_error(
+                "inference vector must only carry text/image/object, model, and options",
+                span,
+            ));
+        }
+    }
+    let model = match find("model") {
+        None => None,
+        Some((_, Value::Str(model))) => Some(model.clone()),
+        Some(_) => {
+            return Err(vector_error(
+                "inference vector model must be a string",
+                span,
+            ));
+        }
+    };
+    let options = match find("options") {
+        None => Vec::new(),
+        Some((_, Value::Dict(entries))) => entries.clone(),
+        Some(_) => {
+            return Err(vector_error(
+                "inference vector options must be an object",
+                span,
+            ));
+        }
+    };
+    if has_text {
+        let (_, text) = find("text").expect("text key checked");
+        match text {
+            Value::Str(text) => Ok(Some(VectorValue::Document {
+                text: text.clone(),
+                model,
+                options,
+            })),
+            _ => Err(vector_error(
+                "inference document text must be a string",
+                span,
+            )),
+        }
+    } else if has_image {
+        let (_, source) = find("image").expect("image key checked");
+        match source {
+            Value::Str(source) => Ok(Some(VectorValue::Image {
+                source: source.clone(),
+                model,
+                options,
+            })),
+            _ => Err(vector_error(
+                "inference image source must be a string",
+                span,
+            )),
+        }
+    } else {
+        let (_, object) = find("object").expect("object key checked");
+        Ok(Some(VectorValue::Object {
+            object: alloc::boxed::Box::new(object.clone()),
+            model,
+            options,
+        }))
+    }
 }

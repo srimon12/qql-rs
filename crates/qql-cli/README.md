@@ -1,45 +1,78 @@
 # qql-cli
 
-CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, doctor, optional edge.
+CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, migrate, doctor, optional edge.
 
 ## Install
 
+Default binary is lean (`rest` + `grpc` only) — edge (ONNX) and record
+(axum) stay opt-in. Prebuilt archives from GitHub releases are default-only;
+feature builds install from crates.io with one command (no clone needed):
+
 ```bash
-# Default: rest + grpc
+# Default: rest + grpc (matches the release archives)
+cargo install qql-cli --locked
+
+# REST only (smallest)
+cargo install qql-cli --locked --no-default-features --features rest
+
+# Local edge backend, no server (`--edge`, `qql edge`, `qql config edge`)
+cargo install qql-cli --locked --features edge
+
+# REST traffic recorder (`qql record`)
+cargo install qql-cli --locked --features record
+
+# Everything at once
+cargo install qql-cli --locked --features full
+
+# From a local checkout instead
 cargo build --release -p qql-cli
-
-# REST only (smaller)
 cargo build --release -p qql-cli --no-default-features --features rest
-
-# Edge + FastEmbed (opt-in; heavier)
 cargo build --release -p qql-cli --features edge
 ```
 
-Binary: `target/release/qql`.
+Check what's installed: `qql version` reports the enabled `features` array.
+Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 
 ## Commands
 
 | Command | Role |
 |---------|------|
-| `qql exec "…"` | One statement (`--json`, `--quiet`) |
-| `qql execute file.qql` | Script |
+| `qql lint [path]` | Offline syntax + plan check, `--fix` autofix, `--json` for CI |
+| `qql run "…"` | One statement (`--json`, `--quiet`, `--param`, `--params-file`) |
+| `qql run file.qql` | Script (`--stop-on-error`) |
 | `qql explain "…"` | Plan without Qdrant |
-| `qql connect` | REPL |
+| `qql repl` | REPL (alias: `connect`) |
+| `qql doctor ["…"]` | Health + embed host snapshot, or 5-stage query triage (alias: `check`) |
+| `qql setup` | Connection wizard → `~/.qql/config.json` (`0600`) |
+| `qql config …` | Persistent settings (`show`, `get`, `set`, `path`, `edge`) |
 | `qql convert [file.json]` | REST JSON → QQL |
-| `qql dump <coll> out.qql` | Export collection as QQL |
-| `qql doctor` | Health + embed host snapshot |
+| `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql run`) |
+| `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
+| `qql record` | Transparent REST recorder → JSONL + QQL (needs `--features record`) |
 | `qql --edge …` | Use configured local edge backend |
+| `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
+| `qql edge bootstrap <coll> --from <url>` | Seed a local edge collection from a remote shard snapshot |
 | `qql version` | Version |
 
 ```bash
-qql exec "SHOW COLLECTIONS"
-qql exec --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
+qql run "SHOW COLLECTIONS"
+qql run --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
+qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=ml -p lim=5
+qql run "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
 
+# Guide: /docs/operations/cluster-migration/ (migrate)
+# Guide: /docs/operations/backup-restore/ (dump)
+# Cross-version / cross-cluster migrate (schema + points, not snapshots)
+qql migrate docs --url http://old:6333 --target-url http://new:6334 --to docs
+qql migrate docs --to docs_q --quantize scalar --shard-number 12 --dry-run
+qql migrate docs --to docs --restart   # discard a checkpoint and start over
+qql migrate docs --to docs_v2 --cutover docs --shard-key-field tenant_id --on-missing-shard-key skip
+
 # Cluster quotas (Qdrant ≥ 1.19, REST only — use :6333, not gRPC :6334)
-qql exec "SHOW QUOTAS"
-qql exec "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true"
+qql run "SHOW QUOTAS"
+qql run "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true"
 ```
 
 ## Configuration
@@ -58,6 +91,12 @@ qql exec "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_
 | `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | — | Image/CLIP embedding endpoint |
 | `RERANK_URL` / `RERANK_KEY` / `RERANK_MODEL` | — | Cross-encoder reranking endpoint |
 
+Sparse document encoding is **always local** (`qdrant/bm25`-compatible), even on
+the remote path. Tune it in `~/.qql/config.json` via `bm25_k1` / `bm25_b` /
+`bm25_avg_len` (defaults `1.2` / `0.75` / `256`; write-path only; invalid values
+fail closed with `QQL-VALIDATION-CONFIG`). It applies only when an HTTP embedder
+is configured (`EMBED_URL`), since `TEXT` resolution requires an embedder.
+
 ### Local Edge Backend (`qql config edge`)
 
 Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, and
@@ -74,6 +113,10 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | — | Offline cross-encoder (also falls back to `RERANK_MODEL`) |
 | `QQL_EDGE_CACHE_DIR` | `--cache-dir` | — | Model download cache directory |
 | `QQL_EDGE_ON_DISK` | `--in-memory` | `true` | `true`/`false`/`1`/`0` — payloads on disk |
+| `QQL_EDGE_WAL_SEGMENT_MB` | `--wal-segment-mb` | qdrant-edge 32 MiB | WAL segment capacity in MiB (> 0; seeds shards without a persisted capacity, a persisted value wins; also exposed by the Python/Node edge SDKs) |
+| `QQL_EDGE_BM25_K1` | `--bm25-k1` | `1.2` | Client-side BM25 `k1` for the local sparse document encoder (write-path only; malformed values fail closed) |
+| `QQL_EDGE_BM25_B` | `--bm25-b` | `0.75` | Client-side BM25 `b` length normalization in `[0, 1]` |
+| `QQL_EDGE_BM25_AVG_LEN` | `--bm25-avg-len` | `256` | Client-side BM25 expected average document length in tokens |
 | `EMBED_URL` | `--embed-url` | — | HTTP embedding endpoint |
 | `EMBED_KEY` | `--embed-key` | — | HTTP Bearer token |
 | `EMBED_MODEL` | `--embed-model` | `nomic-embed-text` | HTTP embedding model ID |
@@ -81,7 +124,7 @@ Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, 
 | `MULTI_EMBED_URL` / `MULTI_EMBED_KEY` / `MULTI_EMBED_MODEL` / `MULTI_EMBED_DIM` | `--multi-embed-*` | — | Multi/ColBERT HTTP endpoint |
 | `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | `--image-embed-*` | — | Image/CLIP HTTP endpoint |
 
-Global: `qql --url http://host:6333 exec "…"`.
+Global: `qql --url http://host:6333 run "…"`.
 
 ### Edge
 
@@ -93,13 +136,21 @@ qql config edge \
   --embed-model all-minilm:l6-v2 \
   --embed-dim 384
 
-qql --edge exec "QUERY TEXT 'search' FROM docs USING dense LIMIT 5"
+qql --edge run "QUERY TEXT 'search' FROM docs USING dense LIMIT 5"
 qql --edge doctor
+qql edge optimize docs
+qql edge bootstrap docs --from http://localhost:6333
 ```
 
-Config: `~/.qql/edge.json`. Edge does **not** support custom `SHARD` / `CREATE SHARD KEY`,
-`GROUP BY`, or **`SHOW QUOTAS` / `SET QUOTA`** — use remote Qdrant (REST) for those.
-Sparse `PARAMS (idf = …)` is available offline (qdrant-edge 0.8+).
+Config: `~/.qql/edge.json`. Edge does **not** support custom `SHARD` / `CREATE SHARD KEY` or
+**`SHOW QUOTAS` / `SET QUOTA`** — use remote Qdrant (REST) for those. `GROUP BY` (without
+`LOOKUP FROM`), sparse `PARAMS (idf = …)`, and ACORN are available offline (qdrant-edge 0.8+).
+
+Edge → edge `migrate` is rejected before any executor starts; publish edge data to a remote
+target with `qql --edge migrate <coll> --target-url <url>` (or `--source-edge`), and seed other
+devices with `qql edge bootstrap`. Continuous sync is not provided (dual-write + partial
+snapshots per the edge sync guide). Run `qql edge optimize` after bulk writes — the engine has
+no background optimizer.
 
 ## Multitenancy examples
 
@@ -111,6 +162,36 @@ WHERE tenant_id = 'acme'
 SHARD 'acme'
 LIMIT 10;
 ```
+
+## Recorder (`qql record`, opt-in)
+
+Zero-code-change capture for migration: Qdrant keeps its address, point the
+app at the recorder instead, change nothing else. Every request is forwarded
+to `--target` (status, headers, body — auth included; repeated headers are
+preserved); collection and quota routes are appended as wrapped
+`{"method","path","query"?,"body"?}` JSONL for later `qql convert` use.
+Bodyless `SHOW` / `DROP` routes are recorded with no `body`.
+
+```bash
+cargo install qql-cli --locked --features record
+# ... or from a local checkout:
+# cargo build -p qql-cli --features record
+# Qdrant stays on :6333, the app now points at the recorder on :6334:
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
+  --out capture.jsonl --qql-out capture.qql
+# ... run the app ...
+qql convert --collection docs capture.jsonl   # replay/migrate later
+```
+
+Bare `qql record` uses those defaults. Notes: query strings are forwarded
+upstream and recorded as a `"query"` object (`wait`, `timeout`,
+`consistency`) so `qql convert` recovers `WAIT` and `PARAMS`; a trailing `/`
+is stripped from the recorded path only; non-JSON bodies are forwarded, not
+recorded; bodies are buffered in RAM (multi-hundred-MB single upserts sit in
+memory — fine for ColBERT-size batches); `--qql-out` converts at record time
+and failures become `-- ERROR <file:line> <error>` comments (valid QQL
+comments, so the capture replays without hand-editing). Ctrl-C stops
+the recorder; files are fsynced per line so nothing is lost.
 
 ## Script format
 
@@ -141,7 +222,9 @@ LIMIT 10;
 | `rest` | yes | REST |
 | `grpc` | yes | gRPC |
 | `edge` | no | In-process edge + FastEmbed |
+| `record` | no | Transparent REST recorder (`qql record`; axum + reqwest, versions already pinned) |
+| `full` | no | Convenience alias for `edge,record` |
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [Install skill](../../skills/qql-skill/references/qql-install.md) · [Gaps](../../skills/qql-skill/references/qql-gaps.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [Install skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-install.md) · [Gaps](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-gaps.md)

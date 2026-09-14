@@ -13,11 +13,22 @@ missing** features that already ship.
 | Multivector / ColBERT (`AS MULTI`, MaxSim `RERANK`) | **Opt-in** `multi_model` / multi HTTP |
 | CLIP `IMAGE` + CLIP text dense | **Opt-in** `image_model` (local **paths** only) |
 | Cross-encoder `CROSS RERANK` | **Opt-in** `reranker_model` / `rerank_endpoint` |
-| `GROUP BY` / query groups | **No** — `QQL-EDGE-UNSUPPORTED-GROUP-BY`; use remote Qdrant |
-| `SHARD`, `ALTER COLLECTION`, ACORN | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
+| `GROUP BY` / query groups | **Yes** on qdrant-edge **0.8+** (`SIZE`, `LIMIT`, `OFFSET`); `LOOKUP FROM` → `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` |
+| Create-time per-vector config (`WITH VECTOR` / `WITH HNSW` / `WITH QUANTIZATION` / `WITH SPARSE`) | **Yes** — lowered onto the engine config; `memory` tiers map to the engine's RAM/mmap switch (`pinned`→RAM, `cached`/`cold`→mmap) |
+| Background optimization | **No** — `qql edge optimize <collection>`; `qql --edge doctor` / `qql check --edge` report `indexed_vectors_count` lag with the same nudge |
+| Remote → edge seed | **Yes (CLI)** — `qql edge bootstrap <collection> --from <url> [--shard-id N] [--force]`; single-shard auto-discovery, multi-shard fails closed (`QQL-SNAPSHOT-SHARD`) |
+| Edge snapshot **creation** | **No** — qdrant-edge 0.8 exposes unpack/apply only; publish edge → remote with `qql --edge migrate … --target-url`, never by copying shard files |
+| Edge → edge migration | **No** — rejected before executors start; seed devices from a server snapshot instead |
+| WAL segment capacity | **All SDKs** — Rust `LocalExecutorOptions::wal_segment_capacity`, CLI `--wal-segment-mb` / `QQL_EDGE_WAL_SEGMENT_MB`, Python `local_executor(..., wal_segment_mb=N)`, Node `localExecutor(dir, { walSegmentMb: N })`; qdrant-edge 0.8's own Python binding cannot set it |
+| Local BM25 tuning (`k1`/`b`/`avg_len`) | **All SDKs, document side** — Rust `Bm25Params` / `LocalExecutorOptions::bm25_*` / `FastEmbedderOptions` / `HttpEmbedderOptions`, CLI `qql config edge --bm25-*` / `QQL_EDGE_BM25_*`, Python `local_executor(..., bm25_k1=, bm25_b=, bm25_avg_len=)` + `http_executor` + remote `pyqql.HttpEmbedder`, Node `{ bm25K1, bm25B, bm25AvgLen }` + remote `embedder`, WASM `setBm25Params(k1, b, avgLen)`. Client-side, write-path only: query weights stay unit, server-side inference untouched; defaults 1.2 / 0.75 / 256; invalid values → `QQL-VALIDATION-CONFIG`; **re-ingest to apply** (not a collection/ALTER setting) |
+| `ALTER COLLECTION … WITH VECTOR <name> (…)` | **Yes (REST/gRPC)** — per-vector `HNSW` / `QUANTIZATION` / storage diffs; unnamed `WITH VECTOR (…)` targets the default vector. Edge: per-vector `HNSW` only; other fields → `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF`, sparse → `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` |
+| `SHARD`, shard-key DDL | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
+| `ALTER COLLECTION` | **Partial** — remote: global + per-vector HNSW/quantization/storage; edge: global `HNSW` / `OPTIMIZERS` and per-vector `HNSW` persist, `WITH PARAMS` / `QUANTIZATION` / other per-vector fields reject per field |
+| Create-time `WITH PARAMS` | **Partial** — `on_disk_payload` only; other keys → `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
 | `SHOW QUOTAS` / `SET QUOTA` | **No** — `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST `/quotas` only) |
 | `PARAMS (idf = …)` | **Yes** on qdrant-edge **0.8+** (per-query sparse IDF corpus) |
-| Batch query/update | Fan-out only (not one native batch RPC) |
+| `PARAMS (acorn = …, max_selectivity = …)` | **Yes** on qdrant-edge **0.8+** |
+| Batch query/update | `BATCH { <stmt>; ... }` is one native batch RPC on remote Qdrant (queries share `PARAMS`, mutations share `WAIT`); edge fans out per member |
 | `PARAMS (timeout / consistency)` | Rejected fail-loud (`QQL-EDGE-UNSUPPORTED-TIMEOUT` / `…-CONSISTENCY`) |
 | Route affinity (`X-Qdrant-Route-Affinity`) | **N/A** — single-node process; no replica pin |
 
@@ -41,9 +52,11 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 | Area | Reality | Agent rule |
 |---|---|---|
-| Edge `GROUP BY` | Rejected offline (`QQL-EDGE-UNSUPPORTED-GROUP-BY`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
+| Edge `GROUP BY` | Supported offline (`QQL-EDGE-*` free) except `LOOKUP FROM`. | Same QQL works on remote Qdrant; offline `SIZE`/`LIMIT`/`OFFSET` are honored. |
 | Host SDK route affinity | Exposed: `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `client.setRouteAffinity(…)`. | Route affinity is **N/A on edge** (single node). Do not add it to `localExecutor`/`httpExecutor`. |
 | Edge quotas | Always unsupported. | Use remote Qdrant REST for quota admin. |
+| Edge → edge migrate | Refused with a precise error (local dir is not a server). | Publish edge → remote (`--target-url`) or seed devices with `qql edge bootstrap`; no continuous sync is provided (dual-write + partial snapshots is the documented pattern). |
+| Edge snapshots | qdrant-edge 0.8 can only unpack/apply snapshots, never create them. | Never tar/copy shard directories by hand; back up via a server snapshot seed flow or `qql dump`. |
 
 ---
 
@@ -51,17 +64,19 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 | Area | Use this |
 |---|---|
-| In-database faceting | `FACET <field> FROM <col> [WHERE ...] [LIMIT ...] [EXACT true]` → REST `/collections/{col}/facet` |
+| In-database faceting | `FACET <field> FROM <col> [WHERE ...] [LIMIT ...] [EXACT true]` → REST `/collections/{col}/facet` / gRPC `Points.Facet` |
 | Implicit vector literals | `QUERY [0.1, 0.2, ...] FROM <col>` (array literal without `VECTOR` keyword) |
 | Payload inclusion default | `WITH PAYLOAD` defaults to `true` when omitted; use `WITH PAYLOAD false` to explicitly omit |
 | Formula decay ISO strings | `EXP_DECAY(field, TARGET = "2024-01-01T00:00:00Z", ...)` — auto-infers `datetime_key` and parses ISO string |
 | Hybrid shorthand | `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
 | Request timeout | `PARAMS (timeout = 30)` → REST `?timeout=30` / gRPC `timeout` (seconds) |
 | Read consistency | `PARAMS (consistency = majority\|quorum\|all\|N)` → OpenAPI `ReadConsistency` |
-| ACORN params (remote) | `PARAMS (acorn = true, max_selectivity = 0.4)` — not on edge |
+| ACORN params | `PARAMS (acorn = true, max_selectivity = 0.4)` — remote Qdrant and edge 0.8+ |
 | Cluster quotas (REST) | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` — full replace; not gRPC/edge |
 | Memory placement | `memory = 'cold'\|'cached'\|'pinned'` on VECTOR / HNSW / SPARSE / QUANTIZATION / indexes; `payload_memory` in `PARAMS` (no `pinned`) |
+| Per-vector ALTER diffs | `ALTER COLLECTION c WITH VECTOR <name> (HNSW (…), QUANTIZATION (…), VECTOR (…))` / `WITH SPARSE <name> (SPARSE (…))` → typed PATCH `vectors` / `sparse_vectors` maps (gRPC `VectorsConfigDiff`) |
 | TurboQuant dense | `WITH VECTOR (…, datatype = 'turbo4')` |
+| Client-side BM25 tuning | `Bm25Params::new/1.2,0.75,256-defaults` · `HttpEmbedderOptions.bm25_*` · `qql_edge::{LocalExecutorOptions,FastEmbedderOptions}.bm25_*` · Python `bm25_k1`/`bm25_b`/`bm25_avg_len` · Node `bm25K1`/`bm25B`/`bm25AvgLen` · WASM `setBm25Params` — document-side only, write-path, re-ingest to apply |
 | Keyword prefix | Index `WITH (prefix = true)`; filter `field MATCH PREFIX '…'` |
 | Slice sampling | `WHERE SLICE (total, index)` |
 | Sparse IDF corpus | `PARAMS (idf = 'global' \| WHERE <filter>)` — remote + edge 0.8+ |
@@ -71,8 +86,19 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
 | Grouped pagination (OFFSET with GROUP BY) | `GROUP BY … OFFSET N` → maps to `group_offset` |
 | MMR with sparse vectors | `USING … AS SPARSE` with MMR is supported |
-| Filter `min_should` | Conjunction threshold on compound filters |
-| Request-level shard routing | QQL `SHARD '…'` or `stmt.shard_key` → REST `shard_key` / gRPC `ShardKeySelector` (never inside Filter) |
+| Filter `min_should` | `WHERE MIN SHOULD 2 (a = 1, b = 2)` — at least n operands hold (`min_count >= 1`) |
+| Filter token and except match | `field MATCH TOKENS 'text'` (any token) and `field MATCH EXCEPT ('a', 'b')` (none of the values) |
+| Scroll ordering and payload | `SCROLL ... ORDER BY <key> [ASC\|DESC] [START FROM <value>]` and `SCROLL ... WITH PAYLOAD false\|INCLUDE (...)\|EXCLUDE (...)` |
+| Order paging origin | `QUERY ORDER BY <field> [ASC\|DESC] START FROM <value>` and the same `START FROM` on `SCROLL ... ORDER BY` (integer, float, datetime string, or placeholder) |
+| Group lookup selectors | `GROUP BY ... LOOKUP FROM <coll> [WITH PAYLOAD ...] [WITH VECTOR ...]`; prefetch `LOOKUP FROM <coll> [VECTOR <name>] [SHARD <key>]` |
+| Conditional upsert | `UPSERT ... UPDATE FILTER <filter>` and `UPDATE MODE insert_only\|update_only\|upsert` (either order, each at most once) |
+| Nested payload write | `UPDATE ... SET PAYLOAD = {...} KEY '<path>'` merges at that path; `OVERWRITE` replaces the full payload and runs only inside `BATCH` (`QQL-REST-OVERWRITE-BATCH-ONLY` alone) |
+| Inference options and objects | `TEXT\|IMAGE ... OPTIONS {...}` and `OBJECT {...} [MODEL '...'] [OPTIONS {...}]`; per-point `vector: {text\|image\|object: ..., model: '...', options: {...}}` |
+| Collection blocks | `WITH WAL (...)` (create only), `WITH STRICT_MODE (...)`, `WITH METADATA (...)`; shard `WITH (placement = [1, 2], initial_state = 'Active')`; create-time `read_fan_out_factor` / `read_fan_out_delay_ms` (applied with a follow-up PATCH) |
+| Text index stopwords | `stopwords = 'english'`, `stopwords = ['the']`, or `stopwords = {languages: [...], custom: [...]}` (unknown languages fail at plan) |
+| Large integers and datetimes | Bare digits above `i64::MAX` parse as unsigned (up to `u64::MAX`); formula datetimes render canonical uppercase `DATETIME(...)` / `DATETIME_KEY(...)` while lowercase still parses |
+| Explicit wait | `WAIT false` sends `?wait=false` on mutation routes and batch blocks, never an omitted param |
+| Request-level shard routing | QQL `SHARD '…'` / `SHARD 101` or `stmt.shard_key` → REST `shard_key` / gRPC `ShardKeySelector` (never inside Filter) |
 | Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
 | Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |
 | CLIP | `QUERY IMAGE '…'` / `TEXT` into same dense space |
@@ -92,7 +118,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Multi-tenant shard | `SHARD 'tenant'` / `stmt.shard_key` + `inject_filter(…, tenant_id, …)` |
 | Tenant-local sparse IDF | `PARAMS (idf = WHERE tenant_id = 'acme')` + `WHERE tenant_id = 'acme'` |
 | Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |
-| Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
+| Edge group lookup | `GROUP BY district` works offline; `LOOKUP FROM` needs remote Qdrant |
 | Quota admin offline | Use remote Qdrant REST; never invent edge quota ops |
 
 ---

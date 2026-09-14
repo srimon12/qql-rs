@@ -6,11 +6,12 @@ use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::client::{CollectionInfo, QdrantOps};
+use crate::executor::response::BackendResponse;
 use crate::qdrant_grpc::qdrant;
 
 use super::client::GrpcQdrant;
 use super::error::grpc_error;
-use super::schema::schema_from_grpc_collection;
+use super::schema;
 
 #[async_trait]
 impl QdrantOps for GrpcQdrant {
@@ -29,7 +30,11 @@ impl QdrantOps for GrpcQdrant {
         {
             Ok(resp) => Ok(resp.into_inner().result.map(|r| r.exists).unwrap_or(false)),
             Err(status) if status.code() == tonic::Code::NotFound => Ok(false),
-            Err(e) => Err(grpc_error("collection_exists", e)),
+            Err(e) => Err(grpc_error(
+                "collection_exists",
+                e,
+                &self.current_request_id(),
+            )),
         }
     }
 
@@ -44,12 +49,7 @@ impl QdrantOps for GrpcQdrant {
             .with_collection(name.to_string())
         })?;
 
-        Ok(CollectionInfo {
-            status: info.status.to_string(),
-            points_count: info.points_count.unwrap_or(0),
-            segments_count: info.segments_count,
-            schema: schema_from_grpc_collection(&info),
-        })
+        Ok(schema::collection_info_from_grpc(&info))
     }
 
     async fn create_collection(
@@ -91,6 +91,7 @@ impl QdrantOps for GrpcQdrant {
         let op = qql_plan::PlannedOperation::CreateIndex {
             collection: collection_name.to_string(),
             request: req.clone(),
+            wait: true,
         };
         self.execute_planned(&op).await.map(|_| ())
     }
@@ -110,7 +111,9 @@ impl QdrantOps for GrpcQdrant {
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError> {
+    ) -> Result<BackendResponse, QqlError> {
+        // Every operation converts its protobuf response straight into typed
+        // `BackendResponse` data — no JSON envelope, no envelope parser.
         crate::grpc_route::execute_planned_grpc(self, op).await
     }
 
@@ -118,15 +121,49 @@ impl QdrantOps for GrpcQdrant {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
-        crate::grpc_route::execute_query_batch_grpc(self, collection, batch).await
+        timeout: Option<u64>,
+        consistency: Option<qql_plan::types::ReadConsistencyParam>,
+    ) -> Result<Vec<BackendResponse>, QqlError> {
+        crate::grpc_route::execute_query_batch_grpc(self, collection, batch, timeout, consistency)
+            .await
     }
 
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError> {
-        crate::grpc_route::execute_update_batch_grpc(self, collection, batch).await
+        wait: bool,
+    ) -> Result<Vec<BackendResponse>, QqlError> {
+        crate::grpc_route::execute_update_batch_grpc(self, collection, batch, wait).await
+    }
+
+    async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
+        use crate::client::AliasAction;
+        let grpc_actions = actions
+            .iter()
+            .map(|action| qdrant::AliasOperations {
+                action: Some(match action {
+                    AliasAction::Delete { alias } => {
+                        qdrant::alias_operations::Action::DeleteAlias(qdrant::DeleteAlias {
+                            alias_name: alias.clone(),
+                        })
+                    }
+                    AliasAction::Create { collection, alias } => {
+                        qdrant::alias_operations::Action::CreateAlias(qdrant::CreateAlias {
+                            collection_name: collection.clone(),
+                            alias_name: alias.clone(),
+                        })
+                    }
+                }),
+            })
+            .collect();
+        let mut cl = self.collections_client();
+        cl.update_aliases(qdrant::ChangeAliases {
+            actions: grpc_actions,
+            timeout: None,
+        })
+        .await
+        .map_err(|e| grpc_error("update_aliases", e, &self.current_request_id()))?;
+        Ok(())
     }
 }

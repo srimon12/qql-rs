@@ -79,9 +79,15 @@ client.free();
 | Method | Role |
 |--------|------|
 | `setHttpEmbedder` / `setEmbedder` | Dense embed hosts |
+| `setBm25Params(k1, b, avgLen)` | Local BM25 **document** encoder tuning (write-path only; defaults `1.2 / 0.75 / 256`; invalid → `QQL-VALIDATION-CONFIG`) |
 | `setRouteAffinity(key)` / `routeAffinity` | Qdrant 1.19 read affinity (get/set) |
 | `execute` / `executeStmt` | REST execute → `ExecutionReport` (`options.params` same as `bind`) |
 | `compile` / `explain` | Offline helpers |
+
+Response shaping is strict and canonical: read operations parse exactly their
+Qdrant OpenAPI response field and emit the same JSON shapes as the native SDKs'
+typed reports; a missing or mistyped field fails with `QQL-BACKEND-ENVELOPE`
+(no fallback shapes). Server telemetry stays optional and lenient.
 
 ## Features
 

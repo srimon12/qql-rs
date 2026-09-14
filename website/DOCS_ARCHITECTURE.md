@@ -18,7 +18,7 @@ inventing a documentation-only dialect.
 
 | Section | Reader question | Pages |
 |---|---|---|
-| Start | What is QQL and how do I run it? | overview, installation, quickstart, execution model |
+| Start | What is QQL and how do I run it? | overview, what-is-qql, installation, quickstart, execution-model, faq |
 | Language | What can I write? | queries, filters, data operations, collections/indexes, formulas, scripts/errors |
 | Guides | How do I solve production retrieval problems? | hybrid retrieval, embeddings/reranking, multitenancy, backends |
 | SDKs | How do I integrate QQL in my host? | Rust, Python, Node.js, WebAssembly |

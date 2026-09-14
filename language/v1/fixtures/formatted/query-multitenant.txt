@@ -18,3 +18,13 @@ DELETE FROM sec10k WHERE tenant_id = '3m' SHARD '3m';
 
 -- Shard-routed upsert
 UPSERT INTO sec10k VALUES {id: 1, text: 'test'} SHARD 'acme';
+
+-- Numerically routed query (numeric partition, not the "101" keyword)
+QUERY 'supply chain risks'
+FROM sec10k
+WHERE tenant_id = 'honeywell'
+SHARD 101
+LIMIT 10;
+
+-- Numerically routed delete
+DELETE FROM sec10k WHERE tenant_id = '3m' SHARD 7;

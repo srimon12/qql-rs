@@ -10,11 +10,11 @@ function isMusl() {
 
 function nativeTarget() {
   const { platform, arch } = process;
-  if (platform === 'linux' && arch === 'x64') {
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
     if (isMusl()) {
       throw new Error(`nqql-edge ${pkg.version} does not provide a Linux musl binary`);
     }
-    return 'linux-x64-gnu';
+    return arch === 'arm64' ? 'linux-arm64-gnu' : 'linux-x64-gnu';
   }
   if (platform === 'darwin' && arch === 'arm64') {
     return 'darwin-arm64';
@@ -48,61 +48,17 @@ try {
   }
 }
 
-if (nativeBinding.Stmt && !nativeBinding.Stmt.prototype.toJSON) {
-  nativeBinding.Stmt.prototype.toJSON = function () {
-    return this.toJson();
-  };
-}
+// Shared DX layer (error mapping, typed result classes, Stmt-aware bind) —
+// byte-identical with nqql-edge; a CI check diffs the two copies.
+const dx = require('./dx-common.js');
+dx.installStmtToJSON(nativeBinding.Stmt);
 
-function buildError(raw) {
-  const message = raw instanceof Error ? raw.message : String(raw);
-  try {
-    const parsed = JSON.parse(message);
-    if (parsed && parsed.code) {
-      const error = new Error(parsed.message || message);
-      error.code = parsed.code;
-      error.kind = parsed.kind;
-      error.span = parsed.span ?? null;
-      return error;
-    }
-  } catch (_) {
-    // Non-QQL errors retain their original JS error and stack.
-  }
-  return raw instanceof Error ? raw : new Error(message);
-}
+const { buildError, callNative, validateOptions, ScoredPoint, ExecutionReport, scrollCursor, scrollStream } = dx;
 
-function callNative(call) {
-  try {
-    return call();
-  } catch (error) {
-    throw buildError(error);
-  }
-}
+const normalizeQuery = (query) => dx.normalizeQuery(nativeBinding.Stmt, query);
 
-function normalizeQuery(query) {
-  if (query instanceof nativeBinding.Stmt) {
-    return query.toObject();
-  }
-  if (Array.isArray(query)) {
-    return query.map(normalizeQuery);
-  }
-  return query;
-}
 
-function validateOptions(options) {
-  if (
-    options !== undefined &&
-    options !== null &&
-    (typeof options !== 'object' || Array.isArray(options))
-  ) {
-    throw new TypeError('options must be an object');
-  }
-  const value = options?.onError;
-  if (value !== undefined && value !== 'stop' && value !== 'continue') {
-    throw new TypeError("options.onError must be 'stop' or 'continue'");
-  }
-  return options;
-}
+
 
 /**
  * Parse one statement or a semicolon-delimited script.
@@ -141,8 +97,8 @@ function explainStmt(stmt) {
   return callNative(() => nativeBinding.explainStmt(stmt));
 }
 
-function compileQuery(query) {
-  return callNative(() => nativeBinding.compileQuery(query));
+function compileQuery(query, params) {
+  return callNative(() => nativeBinding.compileQuery(query, params));
 }
 
 const {
@@ -165,6 +121,7 @@ const {
  *   rerankerModel?: string,
  *   cacheDir?: string,
  *   showDownloadProgress?: boolean,
+ *   walSegmentMb?: number,
  * }} [options] - boolean is legacy `onDiskPayload`; object is preferred.
  * @returns {Client}
  *
@@ -173,6 +130,7 @@ const {
  *   const exec = localExecutor('./data', false);
  *   const exec = localExecutor('./data', { model: 'AllMiniLML6V2', onDiskPayload: false });
  *   const exec = localExecutor('./data', { sparseModel: 'splade', rerankerModel: 'bge-reranker-base' });
+ *   const exec = localExecutor('./data', { walSegmentMb: 8 });  // 8 MiB WAL segments
  */
 function localExecutor(dataDir, options) {
   if (typeof dataDir !== 'string' || !dataDir) {
@@ -233,10 +191,15 @@ async function execute(query, options) {
       normalizeQuery(query),
       normalizeStandaloneOptions(options),
     );
-    return JSON.parse(raw);
+    return new ExecutionReport(JSON.parse(raw));
   } catch (error) {
     throw buildError(error);
   }
+}
+
+async function executeHits(query, options) {
+  const report = await execute(query, options);
+  return report.hits(0);
 }
 
 async function executeStmt(stmt, options) {
@@ -245,7 +208,7 @@ async function executeStmt(stmt, options) {
       stmt,
       normalizeStandaloneOptions(options),
     );
-    return JSON.parse(raw);
+    return new ExecutionReport(JSON.parse(raw));
   } catch (error) {
     throw buildError(error);
   }
@@ -272,7 +235,40 @@ class Client {
         normalizeQuery(query),
         validateOptions(options) || undefined,
       );
-      return JSON.parse(raw);
+      return new ExecutionReport(JSON.parse(raw));
+    } catch (error) {
+      throw buildError(error);
+    }
+  }
+
+  async executeHits(query, options) {
+    const report = await this.execute(query, options);
+    return report.hits(0);
+  }
+
+  /**
+   * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
+   * chunks (default 100). One `:rows` template is prepared once with no
+   * re-parse and no per-batch schema fetch. Vectors take plain arrays, packed
+   * `Float32Array` / `Float64Array`, integer typed arrays for sparse
+   * `indices`, or the flat `{data, dim}` multivector form (same contract as
+   * Python and WASM; see the API surface bulk ingest contract).
+   */
+  async upsertMany(collection, rows, options) {
+    try {
+      if (
+        options?.batchSize !== undefined &&
+        (!Number.isInteger(options.batchSize) || options.batchSize < 1)
+      ) {
+        throw new TypeError("options.batchSize must be an integer >= 1");
+      }
+      const normalized = dx.normalizeUpsertRows(rows);
+      const raw = await this._inner.upsertMany(
+        collection,
+        normalized,
+        validateOptions(options) || undefined,
+      );
+      return new ExecutionReport(JSON.parse(raw));
     } catch (error) {
       throw buildError(error);
     }
@@ -294,13 +290,43 @@ class Client {
     return callNative(() => this._inner.explainStmt(stmt));
   }
 
-  compile(query) {
-    return callNative(() => this._inner.compile(query));
+  /**
+   * Analyze a single query string or Stmt: static plan plus measured
+   * execution (per-phase client timings, server time, hardware/inference
+   * usage). Returns the AnalyzeReport as a plain object. Batches fail
+   * closed — analyze each entry separately.
+   */
+  async explainAnalyze(query, options) {
+    try {
+      const raw = await this._inner.explainAnalyze(
+        normalizeQuery(query),
+        validateOptions(options) || undefined,
+      );
+      return JSON.parse(raw);
+    } catch (error) {
+      throw buildError(error);
+    }
+  }
+
+  compile(query, params) {
+    return callNative(() => this._inner.compile(query, params));
+  }
+
+  scrollCursor(collection, options) {
+    return scrollCursor(this, collection, options);
+  }
+
+  scrollStream(collection, options) {
+    return scrollStream(this, collection, options);
   }
 }
 
-function bind(query, params) {
-  return callNative(() => nativeBinding.bind(query, params));
+/**
+ * Substitute `:name` (object) or `?` (array) placeholders into a query string
+ * or Stmt (shared implementation in dx-common.js, pyqql `bind` parity).
+ */
+function bind(query, params, options) {
+  return dx.bind(nativeBinding, query, params, options);
 }
 
 module.exports = {
@@ -314,12 +340,17 @@ module.exports = {
   explainStmt,
   bind,
   execute,
+  executeHits,
   executeStmt,
+  scrollCursor,
+  scrollStream,
   localExecutor,
   listEmbeddingModels,
   httpExecutor,
   Client,
   Stmt: nativeBinding.Stmt,
+  ScoredPoint,
+  ExecutionReport,
   version: pkg.version,
   __version__: pkg.version,
 };

@@ -1,0 +1,65 @@
+---
+/**
+ * The one copy button. Behavior lives in ../scripts/copy.ts — this component
+ * only renders the markup contract. Surfaces: code blocks, docs page action,
+ * landing commands, comparator panes.
+ */
+interface Props {
+	/** CSS selector of the element to copy from. */
+	target?: string;
+	/** Literal text to copy (wins over `target`). */
+	text?: string;
+	/** "article" copies the docs page as Markdown. */
+	source?: "article";
+	label?: string;
+	copiedLabel?: string;
+	variant?: "link" | "icon" | "page";
+	title?: string;
+	ariaLabel?: string;
+	id?: string;
+	class?: string;
+}
+
+const {
+	target,
+	text,
+	source,
+	label = "Copy",
+	copiedLabel = "Copied",
+	variant = "link",
+	title,
+	ariaLabel,
+	id,
+	class: className,
+} = Astro.props;
+---
+
+<button
+  type="button"
+  class:list={["copy-btn", `copy-btn--${variant}`, className]}
+  data-copy={text}
+  data-copy-target={target}
+  data-copy-source={source}
+  data-copy-label={label}
+  data-copied-label={copiedLabel}
+  id={id}
+  title={title}
+  aria-label={ariaLabel}
+>
+  <svg class="copy-btn__icon copy-btn__icon--copy" viewBox="0 0 24 24" aria-hidden="true">
+    <rect width="14" height="14" x="8" y="8" rx="2"></rect>
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+  </svg>
+  <svg class="copy-btn__icon copy-btn__icon--check" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M20 6 9 17l-5-5"></path>
+  </svg>
+  <span class="copy-btn__label" data-copy-label>{label}</span>
+  <span class="sr-only" data-copy-status aria-live="polite"></span>
+</button>
+
+<script>
+  import { mountCopyButtons } from "../scripts/copy";
+
+  mountCopyButtons();
+  document.addEventListener("astro:page-load", () => mountCopyButtons());
+</script>

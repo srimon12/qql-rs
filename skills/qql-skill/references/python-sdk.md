@@ -1,6 +1,6 @@
 # Python SDK (`pyqql`) Reference & Examples
 
-Native Python bindings via PyO3.
+Native Python bindings via PyO3. Self-contained. Shared language rules live in `qql-query.md`, `qql-filters.md`, `qql-params.md`, `qql-embeddings.md`. This guide repeats the minimum needed to run alone.
 
 Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
@@ -83,7 +83,7 @@ Client(
 - `url`: Qdrant REST (or gRPC) endpoint
 - `api_key`: Optional API key for authenticated Qdrant instances (sent as `api-key` header)
 - `use_grpc`: Set `True` to use gRPC transport (requires `--features grpc` build)
-- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys
+- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys. Sparse document encoding is always local (HTTP serves dense/multi/image/rerank only), so the dict/class also accepts `bm25_k1`, `bm25_b`, `bm25_avg_len` for the local BM25 encoder (write-path only; defaults 1.2 / 0.75 / 256; invalid values raise `QQL-VALIDATION-CONFIG`).
 - `route_affinity`: Optional Qdrant 1.19 read-affinity key, pinning reads to a
   stable replica. Sent as `X-Qdrant-Route-Affinity` (REST) / gRPC metadata
   `x-qdrant-route-affinity`. Empty string is treated as unset. Readable via
@@ -102,6 +102,17 @@ client = Client("http://localhost:6333", embedder={
     "api_key": "",
     "model": "all-minilm:l6-v2",
     "dimension": 384,
+})
+
+# Local sparse BM25 tuning (document side only; re-ingest to apply)
+client = Client("http://localhost:6333", embedder={
+    "endpoint": "http://localhost:11434/v1/embeddings",
+    "api_key": "",
+    "model": "all-minilm:l6-v2",
+    "dimension": 384,
+    "bm25_k1": 2.0,       # tf saturation (default 1.2)
+    "bm25_b": 0.5,        # length normalization, [0, 1] (default 0.75)
+    "bm25_avg_len": 8.0,  # expected avg doc length in tokens (default 256)
 })
 
 # With read affinity (Qdrant 1.19+)
@@ -171,6 +182,46 @@ failures; the default is `"stop"`.
 Every input form returns an `ExecutionReport` dict with `ok`, ordered
 `results`, `succeeded`, and `failed` fields.
 
+Typed exceptions: every error is a `pyqql.QqlError` subclass carrying
+`.code` / `.kind` / `.span` — catch `QqlSyntaxError`, `QqlValidationError`,
+`QqlExecutionError`, `QqlTransportError`, or `QqlBackendError` by code
+instead of string-matching (each also subclasses the builtin category it
+used to raise, so `except SyntaxError` / `ValueError` / `RuntimeError`
+keep working). Re-binding an already-bound `Stmt` with new params raises
+`QQL-BIND-ALREADY-BOUND`; an empty script raises
+`QQL-VALIDATION-EMPTY-SCRIPT`; a `close()`d client raises
+`QQL-CLIENT-CLOSED` on the next execute.
+
+Vector parameters: prefer the implicit `QUERY :vec USING <model> FROM …`
+spelling. `QUERY VECTOR :vec` now parses to the same statement (since
+0.4.0), but implicit+USING is the canonical documented form. Matrix params
+(list of number lists) bind as ColBERT multi-vectors on the `Stmt` path,
+and array-likes with `tolist()` (numpy arrays) bind directly.
+1-D C-contiguous float buffers (numpy `float32`/`float64`, `array.array`,
+memoryviews) bind as packed `f32` vectors with a single copy — prefer them
+over lists for bulk ingest; anything else keeps the `tolist()` path. A plain
+`list[float]` of 32+ elements also binds as a packed `F32Array` with one copy
+instead of a per-element walk; shorter lists and nested shapes keep exact list
+semantics, and payload values are never repacked.
+Whole-point upsert params: `UPSERT INTO c VALUES :rows` binds a point dict
+(`{id, vector, …payload}`) or a list of them (splicing N points) — the same
+shape as inline rows, so bulk ingest is data, not text. Pair with a prepared
+statement to skip re-parsing every batch. Better: skip the loop entirely
+with the helper, which prepares once and chunks for you:
+
+```python
+rows = [
+    {"id": 1, "vector": {"dense": [0.1, 0.2, 0.3]}, "tag": "a"},
+    {"id": 2, "vector": {"dense": [0.4, 0.5, 0.6]}, "tag": "b"},
+]
+report = client.upsert_many("docs", rows, batch_size=100)
+```
+`LIMIT 0` is rejected at parse time: Qdrant's query API requires
+`limit >= 1` (verified live — the server answers 422), so the failure
+surfaces at the parse gate instead of as a runtime 422. Unbound
+placeholders fail the same way on every path — `execute(str)` without
+params raises `QQL-BIND-MISSING-PARAM` before any request leaves.
+
 ```python
 from pyqql import parse, Client
 
@@ -217,6 +268,10 @@ stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10")[0]
 # Read / write the shard key
 stmt.shard_key = "acme"
 print(stmt.shard_key)  # -> "acme"
+
+# Numeric partitions: ints stay numeric end-to-end (never coerced to keywords)
+stmt.shard_key = 101
+print(stmt.shard_key)  # -> 101
 
 # Inject a tenant filter
 stmt.inject_filter("tenant_id", "=", "acme")
@@ -285,30 +340,131 @@ result = client.execute(query)
 Substitute named (`:name`) or positional (`?`) parameters safely into queries:
 
 ```python
-from pyqql import Client, bind
+from pyqql import Client, bind, parse
 
 client = Client("http://localhost:6333")
 
 # Direct execution with named parameters
-result = client.execute(
+report = client.execute(
     "QUERY TEXT :query FROM docs WHERE category = :cat AND rating >= :min_rating LIMIT :limit",
     params={"query": "machine learning", "cat": "tech", "min_rating": 4.5, "limit": 10},
 )
 
 # Direct execution with positional parameters
-result = client.execute(
+report = client.execute(
     "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
     params=["machine learning", "tech", 10],
 )
 
-# Standalone string binding
-bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search term", "lim": 5})
-print(bound)  # QUERY TEXT 'search term' FROM docs LIMIT 5
+# Prepared statements: parse once, execute repeatedly with different parameters
+stmt = parse("QUERY TEXT :query FROM docs WHERE category = :cat LIMIT :limit")[0]
+report = client.execute(stmt, params={"query": "neural nets", "cat": "ai", "limit": 5})
+
+# Direct compile route from prepared statement (no re-parsing required)
+route = stmt.compile_route(params={"query": "neural nets", "cat": "ai", "limit": 5})
+print(route["path"], route["payload"])
+
+# Standalone AST statement binding
+bound_stmt = stmt.bind({"query": "search term", "cat": "tech", "limit": 5})
+print(bound_stmt)  # Formatted QQL string
+
+# Nested dictionary parameters (automatically flattened to dotted keys like :loc.lat)
+geo_query = "QUERY 'coffee' FROM venues WHERE location GEO_RADIUS { center: {lat: :loc.lat, lon: :loc.lon}, radius: :rad } LIMIT 5"
+report = client.execute(geo_query, params={"loc": {"lat": 52.52, "lon": 13.40}, "rad": 1000})
+
+# Statement-scoped parameters for multi-statement batches
+# (length must match the statement count exactly — QQL-BIND-BATCH-LENGTH
+# otherwise; a scalar list like [1, 2] is a shared positional list, never
+# per-statement. Single-container rule: with 1 statement, params=[[1, 2]] unrolls
+# as a 1-element container list binding [1, 2] to statement 0 positionally,
+# never as a positional matrix)
+batch_stmts = [
+    "QUERY TEXT :q FROM docs LIMIT 5",
+    "QUERY TEXT :q FROM articles LIMIT 10",
+]
+report = client.execute(batch_stmts, params=[{"q": "quantum"}, {"q": "relativity"}])
+
+# Vector truncation for readable logging (avoids dumping hundreds of float literals)
+vec_query = "QUERY :vec FROM docs LIMIT 5"
+print(bind(vec_query, {"vec": [0.1] * 384}, truncate_vectors=True))
+# -> QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
 ```
 
 ---
 
-## 8. Async Execution
+## 8. Typed Result Accessors & `ExecutionReport`
+
+`client.execute()` returns a native typed `ExecutionReport` (PyO3 class with dict-style `[]` / `.get()` access and report-level `ok` / `results` / `succeeded` / `failed` / `telemetry`).
+
+```python
+from pyqql import Client, ScoredPoint
+
+client = Client("http://localhost:6333")
+
+# 1. Accessing hits with .hits() -> List[ScoredPoint]
+report = client.execute("QUERY TEXT 'neural search' FROM docs LIMIT 5")
+for hit in report.hits():
+    # hit is a native ScoredPoint (id, score, payload, text, collection, vector):
+    print(hit.id)         # int (e.g. 42) or str (UUID) -- numeric IDs are preserved as ints!
+    print(hit.score)      # float, e.g. 0.892 (shortest f32 round-trip)
+    print(hit.payload)    # dict with document payload
+    print(hit.text)       # derived from hit.payload.get("text"), None when absent/non-string
+    print(hit.collection) # source collection for cross-collection ops, else None
+    print(hit.vector)     # dense / sparse / multi-dense / named vectors when WITH VECTOR, else None
+    print(hit["title"])   # dict-like subscript access to hit.payload
+    print(hit.get("url")) # dict-like get() with optional default
+    print(hit.without_payload()) # copy with payload stripped
+
+# 2. Shortcut: execute_hits() returns List[ScoredPoint] directly
+hits = client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5")
+
+# 3. Facet queries -> .facet() returns normalized [{value: ..., count: ...}]
+report = client.execute("FACET category FROM docs LIMIT 10")
+for item in report.facet():
+    print(item["value"], item["count"])
+
+# 4. Count queries -> .count() returns integer count
+report = client.execute("COUNT FROM docs WHERE category = 'tech'")
+print("Total matches:", report.count())
+
+# 5. Point retrieval -> .points() returns retrieved points
+report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
+points = report.points()
+
+# 6. Grouped queries -> .groups() returns [{id, hits: [ScoredPoint, ...]}]
+report = client.execute("QUERY TEXT 'neural search' FROM docs GROUP BY category LIMIT 5")
+for group in report.groups():
+    print(group["id"], [h.id for h in group["hits"]])
+
+# 7. Collection / shard / quota metadata accessors (per statement index)
+print(report.ids())          # [hit.id, ...] for point operations
+print(report.collections())  # SHOW COLLECTIONS -> [name, ...]
+print(report.collection())   # SHOW COLLECTION -> CollectionInfo dict (status, points_count, ...)
+print(report.shard_keys())   # SHOW SHARD KEYS -> [str | int, ...]
+print(report.quotas())       # quota config dict or None
+
+# 8. Offline reports for tests/mocks (no dict hydration):
+# ExecutionReport({...}) is replaced by ExecutionReport.from_results([...]).
+offline = ExecutionReport.from_results([
+    {"operation": "QUERY", "hits": [{"id": 1, "score": 0.95}]},
+    {"operation": "COUNT", "count": 42},
+])
+```
+
+| `from_results` spec key | Meaning |
+|---|---|
+| `hits` | list of `{id, score?, payload?, collection?, vector?}` |
+| `groups` | list of `{id, hits}` |
+| `count` | int COUNT result (or a mutation's affected count) |
+| `facet` | list of `{value, count}` |
+| `collections` | list of collection names |
+| `collection` | collection-info dict (`status`, `points_count`, …) |
+| `shard_keys` | list of strings or non-negative ints |
+| `quotas` | quota-config dict (`enabled`, `max_disk_usage_percent`, …) |
+
+---
+
+## 9. Async Execution
 
 ```python
 import asyncio
@@ -326,7 +482,7 @@ asyncio.run(main())
 
 ---
 
-## 9. Free Functions & Explain
+## 10. Free Functions & Explain
 
 ```python
 import pyqql
@@ -348,4 +504,57 @@ print(plan_dict["plan"])
 
 # Standalone parameter binding
 bound = pyqql.bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "test", "lim": 10})
+```
+
+---
+
+## 11. PEP 249 Cursor (`pyqql.connect`)
+
+A pragmatic DB-API 2.0 subset for pipeline and analytics interop (`pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in cursor.description])` works out of the box). Pure-Python wrapper over `Client` — no new engine path. Qdrant is not relational: `commit()` is a documented no-op (operations auto-commit; use `WAIT true`), `rollback()` raises `NotSupportedError`, and there is no `callproc` / `setinputsizes` / `setoutputsize`.
+
+```python
+import pyqql
+
+conn = pyqql.connect("http://localhost:6333")
+cursor = conn.cursor()
+
+cursor.execute(
+    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+    {"q": "neural nets", "cat": "ai", "lim": 10},
+)
+print(cursor.description)  # (("id", ...), ("score", ...), ("payload", ...)) 7-tuples
+for row in cursor:         # lazy iteration; fetchone() returns None when drained
+    print(row)             # (id, score, payload) tuples aligned with description
+print(cursor.rowcount)     # hit count, or -1 when indeterminate
+
+# Bulk ingest delegates to upsert_many (prepared once, chunked transport)
+cursor.executemany("UPSERT INTO docs VALUES :rows", [{"rows": batch} for batch in batches])
+
+# Multi-statement scripts isolate result sets; navigate with nextset():
+cursor.execute("SCROLL FROM docs LIMIT 5; COUNT FROM docs;")
+scroll_rows = cursor.fetchall()  # description: (id, score, payload)
+if cursor.nextset():
+    count_rows = cursor.fetchall()  # description: (count,)
+
+conn.commit()    # no-op
+conn.close()
+```
+
+Exception mapping (single hierarchy — native errors *are* these classes, no translation): `QqlSyntaxError` → `ProgrammingError`, `QqlValidationError` → `ProgrammingError` + `DataError`, `QqlTransportError` → `OperationalError`, `QqlBackendError` → `OperationalError`, closed-handle misuse → `InterfaceError`. `except QqlError` still catches everything.
+
+---
+
+## 12. Execution Profiling (`explain_analyze` + Telemetry)
+
+`client.explain_analyze()` runs one statement and returns the static plan plus measured timings — client phases (`parse_ms`, `prepare_plan_ms`, `dispatch_ms`, `decode_ms`, `total_ms`) and honest server telemetry (`server_time_s` from Qdrant's `time` field, `usage` hardware/inference counters when the backend reports them; absent on a route means `None`, never an error). Every `ExecutionReport` result also carries a per-result `telemetry` object with the same shape. Batches fail closed — analyze entries separately.
+
+```python
+report = client.explain_analyze(
+    "QUERY TEXT :q FROM docs USING dense LIMIT :lim",
+    params={"q": "neural nets", "lim": 10},
+)
+print(report["plan"])            # static plan summary
+print(report["phases"])          # {"parse_ms": ..., "dispatch_ms": ..., ...}
+print(report["server_time_s"])   # seconds Qdrant spent, when reported
+print(report["results"][0]["telemetry"])  # {"time_s": ..., "usage": {...} | None}
 ```

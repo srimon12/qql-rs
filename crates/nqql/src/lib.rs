@@ -1,25 +1,30 @@
+//! nqql — native Node.js bindings for the QQL parser and runtime.
+//!
+//! The parser/parameter/execution logic lives in `nqql-common`, shared with
+//! `nqql-edge` so the two SDKs cannot drift; this crate keeps only the
+//! `#[napi]` wrappers and the REST/gRPC client construction.
+
+use napi::Unknown;
 use napi_derive::napi;
-use qql_core::ast::{self, ComparisonOp, Value};
-use qql_core::error::QqlError;
-use qql_core::lexer::Lexer;
-use qql_core::parser::Parser;
-use qql_plan::routing;
 
-/// Serialize a QqlError to JSON so the JS wrapper can extract structured fields.
-fn to_napi_err(e: QqlError) -> napi::Error {
-    let json = serde_json::to_string(&e).unwrap_or_else(|_| e.to_string());
-    napi::Error::from_reason(json)
-}
+use nqql_common as common;
 
-/// Convert a serde_json error to a napi error.
-fn serde_napi_err(e: serde_json::Error) -> napi::Error {
-    napi::Error::from_reason(e.to_string())
-}
+// SAFETY (CodeQL rust/access-invalid-pointer false positive): `#[napi]` on
+// these structs expands via napi-derive into unsafe Node-API glue that
+// dereferences raw `napi_env`/`napi_value` pointers. That generated code is
+// audited upstream (napi-rs) and upholds safety via the Node-API runtime
+// (valid env, main-thread calls, `catch_unwind` on every entry point). This
+// crate contains no manual `unsafe` blocks or raw-pointer dereferences.
+// codeql[rust/access-invalid-pointer]: napi-derive generated FFI, not manual unsafe.
+// (Inline suppression is forward-compat: Rust has no AlertSuppression.ql yet,
+// see github/codeql#21637; current alerts are dismissed as false positives.)
 
+/// Thin `#[napi]` handle over the parsed QQL AST (logic lives in nqql-common).
 #[napi]
 #[derive(Clone)]
 pub struct Stmt {
-    inner: qql_core::ast::Stmt,
+    pub(crate) inner: qql_core::ast::Stmt,
+    pub(crate) bound: bool,
 }
 
 #[napi]
@@ -28,8 +33,10 @@ impl Stmt {
     /// `new Stmt(query)` — see the filter-injection guide).
     #[napi(constructor, catch_unwind)]
     pub fn new(input: String) -> napi::Result<Self> {
-        let inner = Parser::parse(&input).map_err(to_napi_err)?;
-        Ok(Stmt { inner })
+        Ok(Stmt {
+            inner: common::stmt_parse(&input).map_err(common::to_napi_err)?,
+            bound: false,
+        })
     }
 
     #[napi(catch_unwind)]
@@ -39,47 +46,54 @@ impl Stmt {
         op: String,
         value: serde_json::Value,
     ) -> napi::Result<()> {
-        if op == "!=" || op == "neq" || op == "<>" {
-            return Err(napi::Error::from_reason(
-                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
-            ));
-        }
-        let cmp = match op.as_str() {
-            "=" | "==" | "eq" => ComparisonOp::Eq,
-            ">" | "gt" => ComparisonOp::Gt,
-            ">=" | "gte" => ComparisonOp::Gte,
-            "<" | "lt" => ComparisonOp::Lt,
-            "<=" | "lte" => ComparisonOp::Lte,
-            _ => {
-                return Err(napi::Error::from_reason(format!(
-                    "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
-                )));
-            }
-        };
-        let val = Value::from_json(value).map_err(to_napi_err)?;
-        ast::inject_filter(&mut self.inner, &field, cmp, val).map_err(to_napi_err)?;
-        Ok(())
+        common::stmt_inject_filter(&mut self.inner, &field, &op, value).map_err(common::to_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
-        serde_json::to_value(&self.inner).map_err(serde_napi_err)
+        serde_json::to_value(&self.inner).map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn to_json(&self) -> napi::Result<String> {
-        serde_json::to_string(&self.inner).map_err(serde_napi_err)
+        serde_json::to_string(&self.inner).map_err(common::serde_napi_err)
     }
 
-    /// QQL `SHARD '…'` routing key (request-level). Prefer `SHARD` in the query;
-    /// set after parse only when the host resolves the key dynamically.
+    /// QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+    ///
+    /// Reads back `string` for keyword keys, `bigint` for numeric keys, and
+    /// `null` when unset (placeholders also read as `null` — bind first).
+    /// The setter accepts `string | number | bigint | null`: numbers must be
+    /// exact non-negative integers (larger keys need `BigInt`).
     #[napi(getter, catch_unwind)]
-    pub fn shard_key(&self) -> Option<String> {
-        self.inner.shard_key().map(str::to_owned)
+    pub fn shard_key(
+        &self,
+    ) -> Option<napi::bindgen_prelude::Either<String, napi::bindgen_prelude::BigInt>> {
+        use napi::bindgen_prelude::{BigInt, Either};
+        match self.inner.shard_key() {
+            None => None,
+            Some(qql_core::ast::ShardKey::Keyword(s)) => Some(Either::A(s.clone())),
+            Some(qql_core::ast::ShardKey::Number(n)) => Some(Either::B(BigInt {
+                sign_bit: false,
+                words: vec![*n],
+            })),
+            // Unbound placeholders have no host value yet; bind first.
+            Some(_) => None,
+        }
     }
 
-    #[napi(setter, catch_unwind)]
-    pub fn set_shard_key(&mut self, key: Option<String>) -> napi::Result<()> {
+    #[napi(
+        setter,
+        catch_unwind,
+        ts_type = "string | number | bigint | null | undefined"
+    )]
+    pub fn set_shard_key(&mut self, key: Option<Unknown<'_>>) -> napi::Result<()> {
+        let key = match key {
+            None => None,
+            Some(value) => {
+                common::jsparams::unknown_opt_to_shard_key(value).map_err(common::to_napi_err)?
+            }
+        };
         if !self.inner.set_shard_key(key) {
             return Err(napi::Error::from_reason(
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
@@ -88,38 +102,67 @@ impl Stmt {
         Ok(())
     }
 
-    /// Compile this Stmt AST directly into its transport route without re-parsing.
+    /// Whether parameters have already been bound into this statement.
+    #[napi(getter, catch_unwind)]
+    pub fn bound(&self) -> bool {
+        self.bound
+    }
+
+    /// Bind parameters into this statement and return a new bound Stmt.
+    /// Vector params accept plain arrays as well as `Float32Array` /
+    /// `Float64Array` (one memcpy, no per-element walk).
     #[napi(catch_unwind)]
-    pub fn compile_route(&self) -> napi::Result<serde_json::Value> {
-        let compiled = routing::compile_statement(&self.inner).map_err(to_napi_err)?;
-        let (method, path, payload) = match compiled.route {
-            Some(route) => {
-                let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-                (
-                    serde_json::Value::String(route.method.as_str().into()),
-                    serde_json::Value::String(route.path),
-                    payload,
-                )
-            }
-            None => (
-                serde_json::Value::Null,
-                serde_json::Value::Null,
-                serde_json::Value::Null,
-            ),
-        };
-        Ok(serde_json::json!({
-            "stmt_type": compiled.stmt_type,
-            "method": method,
-            "path": path,
-            "payload": payload,
-        }))
+    pub fn bind(&self, params: Unknown<'_>) -> napi::Result<Self> {
+        let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+        let binds_now = params.is_some();
+        if binds_now && self.bound {
+            return Err(common::to_napi_err(common::already_bound_error()));
+        }
+        let inner =
+            common::stmt_bind_value(&self.inner, params.as_ref()).map_err(common::to_napi_err)?;
+        Ok(Stmt {
+            inner,
+            bound: self.bound || binds_now,
+        })
+    }
+
+    /// Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
+    #[allow(clippy::inherent_to_string)]
+    #[napi(catch_unwind, js_name = "toString")]
+    pub fn to_string(&self) -> String {
+        common::stmt_full(&self.inner)
+    }
+
+    /// Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
+    /// long vector literals are truncated, so the output may not re-parse.
+    #[napi(catch_unwind, js_name = "toReadableString")]
+    pub fn to_readable_string(&self) -> String {
+        common::stmt_readable(&self.inner)
+    }
+
+    /// Compile this Stmt AST directly into its transport route without re-parsing.
+    /// Optionally accepts `params` to bind before compiling.
+    #[napi(catch_unwind)]
+    pub fn compile_route(&self, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+        let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+        let binds_now = params.is_some();
+        if binds_now && self.bound {
+            return Err(common::to_napi_err(common::already_bound_error()));
+        }
+        common::stmt_compile_route_value(&self.inner, params.as_ref()).map_err(common::to_napi_err)
     }
 }
 
 #[napi(catch_unwind)]
 pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
-    let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
-    Ok(stmts.into_iter().map(|s| Stmt { inner: s }).collect())
+    Ok(common::parse_all(&input)
+        .map_err(common::to_napi_err)?
+        .into_iter()
+        .map(|inner| Stmt {
+            inner,
+            bound: false,
+        })
+        .collect())
 }
 
 /// Fast JSON-only parse — returns a JSON string of the AST array.
@@ -127,15 +170,12 @@ pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
 /// Ideal for HTTP/IPC forwarding.
 #[napi(js_name = parseAllJson, catch_unwind)]
 pub fn parse_all_json(input: String) -> napi::Result<String> {
-    let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
-    serde_json::to_string(&stmts).map_err(serde_napi_err)
+    common::parse_all_json(&input).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
-    // Full frontend gate: parse + plan — same contract as execution and the
-    // language conformance suite.
-    qql_plan::parse_and_plan(&input).is_ok()
+    common::is_valid(&input)
 }
 
 #[napi(catch_unwind)]
@@ -145,86 +185,65 @@ pub fn inject_filter(
     op: String,
     value: serde_json::Value,
 ) -> napi::Result<serde_json::Value> {
-    if op == "!=" || op == "neq" || op == "<>" {
-        return Err(napi::Error::from_reason(
-            "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
-        ));
-    }
-    let cmp = match op.as_str() {
-        "=" | "==" | "eq" => ComparisonOp::Eq,
-        ">" | "gt" => ComparisonOp::Gt,
-        ">=" | "gte" => ComparisonOp::Gte,
-        "<" | "lt" => ComparisonOp::Lt,
-        "<=" | "lte" => ComparisonOp::Lte,
-        _ => {
-            return Err(napi::Error::from_reason(format!(
-                "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
-            )));
-        }
-    };
-    let val = Value::from_json(value).map_err(to_napi_err)?;
-    let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
-    ast::inject_filter(&mut stmt, &field, cmp, val).map_err(to_napi_err)?;
-    serde_json::to_value(&stmt).map_err(serde_napi_err)
+    common::inject_filter(&query, &field, &op, value).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
 pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
-    #[derive(serde::Serialize)]
-    struct TokenView<'a> {
-        kind: &'a str,
-        text: &'a str,
-        pos: usize,
-        end: usize,
-        len: usize,
-    }
-
-    let lexer = Lexer::new(&input);
-    let mut tokens = Vec::with_capacity(input.len() / 4 + 1);
-    for token_result in lexer {
-        let token =
-            token_result.map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
-        tokens.push(TokenView {
-            kind: token.kind.as_str(),
-            text: token.text,
-            pos: token.span.start,
-            end: token.span.end,
-            len: token.span.end.saturating_sub(token.span.start),
-        });
-    }
-    serde_json::to_value(&tokens).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("failed to serialize tokens: {}", e),
-        )
-    })
+    common::tokenize(&input).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
-pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
-    let stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
-    let (method, path, payload) = match compiled.route {
-        Some(route) => {
-            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-            (
-                serde_json::Value::String(route.method.as_str().into()),
-                serde_json::Value::String(route.path),
-                payload,
+pub fn compile_query(input: String, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+    let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+    common::compile_query_value(&input, params.as_ref()).map_err(common::to_napi_err)
+}
+
+#[napi(catch_unwind)]
+pub fn explain(query: String) -> napi::Result<String> {
+    common::explain(&query).map_err(common::to_napi_err)
+}
+
+#[napi(catch_unwind)]
+pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
+    Ok(common::explain_stmt(&stmt.inner))
+}
+
+/// Substitute `:name` (object) or `?` (array) placeholders into a query string.
+/// Without `params`, the query is returned unchanged. With `truncateVectors`,
+/// long vector literals render as `[0.1, 0.2, ... (N dims)]` for previews.
+/// (Stmt inputs are handled by the JS wrapper, which routes to `Stmt.bind`.)
+#[napi(
+    catch_unwind,
+    ts_args_type = "query: string, params?: Record<string, any> | any[], options?: { truncateVectors?: boolean }"
+)]
+pub fn bind(
+    query: String,
+    params: Unknown<'_>,
+    options: Option<serde_json::Value>,
+) -> napi::Result<String> {
+    let truncate = options
+        .as_ref()
+        .and_then(|o| {
+            o.get("truncateVectors")
+                .or_else(|| o.get("truncate_vectors"))
+        })
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+    match params {
+        Some(p) => {
+            let plan =
+                qql_core::params_json::plan_value_params(&p, 1).map_err(common::to_napi_err)?;
+            qql_core::params_json::bind_str_with_values(
+                &query,
+                qql_core::params_json::param_value_for(&plan, 0),
+                truncate,
             )
+            .map_err(common::to_napi_err)
         }
-        None => (
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-        ),
-    };
-    Ok(serde_json::json!({
-        "stmt_type": compiled.stmt_type,
-        "method": method,
-        "path": path,
-        "payload": payload,
-    }))
+        None => Ok(query),
+    }
 }
 
 fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {
@@ -258,80 +277,104 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
         ..Default::default()
     };
 
-    if let Some(emb) = opts.get("embedder") {
-        if let Some(ep) = emb.get("endpoint").and_then(|v| v.as_str()) {
-            config.embedding_endpoint = Some(ep.to_string());
-            config.embedding_api_key = emb
-                .get("apiKey")
-                .or_else(|| emb.get("api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
-            config.embedding_dimension =
-                emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            config.multi_embedding_endpoint = emb
-                .get("multiEndpoint")
-                .or_else(|| emb.get("multi_endpoint"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.multi_embedding_api_key = emb
-                .get("multiApiKey")
-                .or_else(|| emb.get("multi_api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.multi_embedding_model = emb
-                .get("multiModel")
-                .or_else(|| emb.get("multi_model"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.multi_embedding_dimension = emb
-                .get("multiDimension")
-                .or_else(|| emb.get("multi_dimension"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            config.image_embedding_endpoint = emb
-                .get("imageEndpoint")
-                .or_else(|| emb.get("image_endpoint"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.image_embedding_api_key = emb
-                .get("imageApiKey")
-                .or_else(|| emb.get("image_api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.image_embedding_model = emb
-                .get("imageModel")
-                .or_else(|| emb.get("image_model"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.image_embedding_dimension = emb
-                .get("imageDimension")
-                .or_else(|| emb.get("image_dimension"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            config.rerank_endpoint = emb
-                .get("rerankEndpoint")
-                .or_else(|| emb.get("rerank_endpoint"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.rerank_api_key = emb
-                .get("rerankApiKey")
-                .or_else(|| emb.get("rerank_api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.rerank_model = emb
-                .get("rerankModel")
-                .or_else(|| emb.get("rerank_model"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-        }
+    if let Some(emb) = opts.get("embedder")
+        && let Some(ep) = emb.get("endpoint").and_then(|v| v.as_str())
+    {
+        config.embedding_endpoint = Some(ep.to_string());
+        config.embedding_api_key = emb
+            .get("apiKey")
+            .or_else(|| emb.get("api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
+        config.embedding_dimension =
+            emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        config.multi_embedding_endpoint = emb
+            .get("multiEndpoint")
+            .or_else(|| emb.get("multi_endpoint"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.multi_embedding_api_key = emb
+            .get("multiApiKey")
+            .or_else(|| emb.get("multi_api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.multi_embedding_model = emb
+            .get("multiModel")
+            .or_else(|| emb.get("multi_model"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.multi_embedding_dimension = emb
+            .get("multiDimension")
+            .or_else(|| emb.get("multi_dimension"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        config.image_embedding_endpoint = emb
+            .get("imageEndpoint")
+            .or_else(|| emb.get("image_endpoint"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.image_embedding_api_key = emb
+            .get("imageApiKey")
+            .or_else(|| emb.get("image_api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.image_embedding_model = emb
+            .get("imageModel")
+            .or_else(|| emb.get("image_model"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.image_embedding_dimension = emb
+            .get("imageDimension")
+            .or_else(|| emb.get("image_dimension"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        config.rerank_endpoint = emb
+            .get("rerankEndpoint")
+            .or_else(|| emb.get("rerank_endpoint"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.rerank_api_key = emb
+            .get("rerankApiKey")
+            .or_else(|| emb.get("rerank_api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.rerank_model = emb
+            .get("rerankModel")
+            .or_else(|| emb.get("rerank_model"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        // Client-side BM25 document parameters for the local sparse path.
+        // Raw `serde_json::Number` access: invalid types are left to the
+        // native HttpEmbedderOptions validator (`QQL-VALIDATION-CONFIG`).
+        config.bm25_k1 = emb
+            .get("bm25K1")
+            .or_else(|| emb.get("bm25_k1"))
+            .and_then(|v| v.as_f64());
+        config.bm25_b = emb
+            .get("bm25B")
+            .or_else(|| emb.get("bm25_b"))
+            .and_then(|v| v.as_f64());
+        config.bm25_avg_len = emb
+            .get("bm25AvgLen")
+            .or_else(|| emb.get("bm25_avg_len"))
+            .and_then(|v| v.as_f64());
     }
 
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
         #[cfg(feature = "grpc")]
         {
-            let mut grpc =
-                qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(to_napi_err)?;
+            // tonic's `connect_lazy` captures the tokio reactor at
+            // construction — build the channel inside napi's global tokio
+            // runtime (which drives every async #[napi] call), otherwise
+            // construction panics on the JS thread with "there is no reactor
+            // running".
+            let handle =
+                napi::bindgen_prelude::block_on(async { tokio::runtime::Handle::current() });
+            let mut grpc = {
+                let _enter = handle.enter();
+                qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(common::to_napi_err)?
+            };
             if let Some(affinity) = route_affinity.as_deref() {
                 grpc = grpc.with_route_affinity(affinity);
             }
@@ -370,8 +413,11 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     rerank_endpoint: config.rerank_endpoint.clone(),
                     rerank_api_key: config.rerank_api_key.clone(),
                     rerank_model: config.rerank_model.clone(),
+                    bm25_k1: config.bm25_k1,
+                    bm25_b: config.bm25_b,
+                    bm25_avg_len: config.bm25_avg_len,
                 })
-                .map_err(to_napi_err)?;
+                .map_err(common::to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None
@@ -385,6 +431,8 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
     Ok(exec)
 }
 
+/// Node-API client handle (REST/gRPC executor + route affinity).
+/// See SAFETY note at the top of this file for the `#[napi]` false positive.
 #[napi(js_name = "Client")]
 pub struct JsClient {
     inner: qql::executor::Executor,
@@ -433,162 +481,113 @@ impl JsClient {
         query: serde_json::Value,
         options: Option<serde_json::Value>,
     ) -> napi::Result<String> {
-        let on_error = options
-            .as_ref()
-            .and_then(|o| o.get("onError"))
-            .and_then(|v| v.as_str())
-            .map(|s| match s {
-                "continue" => qql::executor::OnError::Continue,
-                _ => qql::executor::OnError::Stop,
-            })
-            .unwrap_or(qql::executor::OnError::Stop);
-
-        let params = options.as_ref().and_then(|o| o.get("params"));
-
-        let report = match &query {
-            serde_json::Value::String(s) => {
-                let effective_query = if let Some(p) = params {
-                    bind_json_params(s, p)?
-                } else {
-                    s.clone()
-                };
-                self.inner
-                    .execute(&effective_query, on_error)
-                    .await
-                    .map_err(to_napi_err)?
-            }
-            serde_json::Value::Array(arr) => {
-                if arr.is_empty() {
-                    qql::executor::ExecutionReport::empty()
-                } else if arr[0].is_string() {
-                    let strs: Vec<String> = arr
-                        .iter()
-                        .map(|v| {
-                            let s = v.as_str().ok_or_else(|| {
-                                napi::Error::from_reason("batch items must be strings")
-                            })?;
-                            if let Some(p) = params {
-                                bind_json_params(s, p)
-                            } else {
-                                Ok(s.to_string())
-                            }
-                        })
-                        .collect::<napi::Result<_>>()?;
-                    let str_refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
-                    self.inner
-                        .execute_batch(&str_refs, on_error)
-                        .await
-                        .map_err(to_napi_err)?
-                } else {
-                    let stmts: Vec<ast::Stmt> = arr
-                        .iter()
-                        .map(|v| {
-                            serde_json::from_value(v.clone())
-                                .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))
-                        })
-                        .collect::<napi::Result<_>>()?;
-                    let results = self
-                        .inner
-                        .execute_batch_nodes(
-                            stmts,
-                            matches!(on_error, qql::executor::OnError::Stop),
-                        )
-                        .await
-                        .map_err(to_napi_err)?;
-                    qql::executor::ExecutionReport::from_results(results)
-                }
-            }
-            _ => {
-                let s: ast::Stmt = serde_json::from_value(query)
-                    .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))?;
-                let results = self
-                    .inner
-                    .execute_batch_nodes(vec![s], matches!(on_error, qql::executor::OnError::Stop))
-                    .await
-                    .map_err(to_napi_err)?;
-                qql::executor::ExecutionReport::from_results(results)
-            }
-        };
-        serde_json::to_string(&report).map_err(serde_napi_err)
+        let report = common::execute::execute_dispatch(&self.inner, query, options.as_ref())
+            .await
+            .map_err(common::to_napi_err)?;
+        serde_json::to_string(&report).map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn explain(&self, query: String) -> napi::Result<String> {
-        qql::executor::Executor::explain(&query).map_err(to_napi_err)
+        qql::executor::Executor::explain(&query).map_err(common::to_napi_err)
+    }
+
+    /// Analyze a single query string or Stmt: static plan plus measured
+    /// execution (phase timings, server time, hardware/inference usage).
+    /// Returns a stable AnalyzeReport JSON string for the JavaScript wrapper
+    /// to deserialize into an object. Batches fail closed.
+    #[napi(
+        catch_unwind,
+        ts_args_type = "query: string | Stmt, options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
+    )]
+    pub async fn explain_analyze(
+        &self,
+        query: serde_json::Value,
+        options: Option<serde_json::Value>,
+    ) -> napi::Result<String> {
+        let report =
+            common::execute::explain_analyze_dispatch(&self.inner, query, options.as_ref())
+                .await
+                .map_err(common::to_napi_err)?;
+        serde_json::to_string(&report).map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
-        qql::executor::Executor::explain_node(&stmt.inner).map_err(to_napi_err)
+        qql::executor::Executor::explain_node(&stmt.inner).map_err(common::to_napi_err)
     }
 
     /// Compile a QQL query to its transport route (non-executing).
     #[napi(catch_unwind)]
-    pub fn compile(&self, query: String) -> napi::Result<serde_json::Value> {
-        crate::compile_query(query)
+    pub fn compile(&self, query: String, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+        let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+        common::compile_query_value(&query, params.as_ref()).map_err(common::to_napi_err)
+    }
+
+    /// Bulk ingest: `rows` is an array of point objects
+    /// (`{id, vector, …payload}`) spliced through the `:rows` point-splice
+    /// path in `batchSize` chunks (default 100). Vectors accept plain arrays
+    /// and the flat `{data, dim}` multivector form. The JS wrapper normalizes
+    /// `Float32Array`/`Float64Array` and integer typed arrays to plain arrays
+    /// before this serde boundary, so direct native callers should pass plain
+    /// arrays (or bind typed arrays on the sync `Stmt.bind` surface instead,
+    /// then execute the bound statement). Returns a stable ExecutionReport JSON string.
+    #[napi(
+        catch_unwind,
+        ts_args_type = "collection: string, rows: Record<string, any>[], options?: { onError?: 'stop' | 'continue', batchSize?: number }"
+    )]
+    pub async fn upsert_many(
+        &self,
+        collection: String,
+        rows: serde_json::Value,
+        options: Option<serde_json::Value>,
+    ) -> napi::Result<String> {
+        let rows = common::value_from_json(rows).map_err(common::to_napi_err)?;
+        let batch_size =
+            common::execute::batch_size_from(options.as_ref()).map_err(common::to_napi_err)?;
+        let on_error = common::execute::on_error_from(options.as_ref());
+        let report = common::execute::upsert_many_dispatch(
+            &self.inner,
+            collection,
+            rows,
+            batch_size,
+            on_error,
+        )
+        .await
+        .map_err(common::to_napi_err)?;
+        serde_json::to_string(&report).map_err(common::serde_napi_err)
     }
 
     /// Close the client and release underlying connections.
     #[napi(catch_unwind)]
     pub async fn close(&self) -> napi::Result<()> {
-        self.inner.close().await.map_err(to_napi_err)
+        self.inner.close().await.map_err(common::to_napi_err)
     }
-}
-
-fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<String> {
-    match params {
-        serde_json::Value::Object(obj) => {
-            let mut map = std::collections::HashMap::new();
-            for (k, v) in obj {
-                let val = ast::Value::from_json(v.clone()).map_err(to_napi_err)?;
-                map.insert(k.clone(), val);
-            }
-            qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(to_napi_err)
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<ast::Value> = arr
-                .iter()
-                .map(|v| ast::Value::from_json(v.clone()))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(to_napi_err)?;
-            qql_core::params::bind_positional(query, &items).map_err(to_napi_err)
-        }
-        _ => Err(napi::Error::from_reason(
-            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
-        )),
-    }
-}
-
-/// Substitute `:name` (object) or `?` (array) placeholders into a query string.
-#[napi(
-    catch_unwind,
-    ts_args_type = "query: string, params: Record<string, any> | any[]"
-)]
-pub fn bind(query: String, params: serde_json::Value) -> napi::Result<String> {
-    bind_json_params(&query, &params)
-}
-
-#[napi(catch_unwind)]
-pub fn explain(query: String) -> napi::Result<String> {
-    qql_core::explain::explain(&query).map_err(to_napi_err)
-}
-
-#[napi(catch_unwind)]
-pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
-    Ok(qql_core::explain::explain_node(&stmt.inner))
 }
 
 /// Execute a pre-parsed Stmt directly via a new temporary client.
 #[napi(catch_unwind, ts_args_type = "stmt: Stmt, options?: object")]
 pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
-    let client = JsClient::new(options)?;
-    let resp = client
-        .inner
-        .execute_node(stmt.inner.clone())
-        .await
-        .map_err(to_napi_err)?;
+    let client = JsClient::new(options.clone())?;
+    let resp = common::execute::run_then_close(&client.inner, async {
+        let mut inner = stmt.inner.clone();
+        if let Some(p) = options
+            .as_ref()
+            .and_then(|o| o.get("params"))
+            .filter(|p| !p.is_null())
+        {
+            let plan = qql_core::params_json::plan_statement_params(p, 1)?;
+            qql_core::params_json::bind_stmt_with_params(
+                &mut inner,
+                qql_core::params_json::param_for(&plan, 0),
+            )?;
+        }
+        client.inner.execute_node(inner).await
+    })
+    .await
+    .map_err(common::to_napi_err)?;
     let report = qql::executor::ExecutionReport::single(resp);
-    serde_json::to_string(&report).map_err(serde_napi_err)
+    serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
 #[napi(
@@ -600,5 +599,11 @@ pub async fn execute(
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let client = JsClient::new(options.clone())?;
-    client.execute(query, options).await
+    let report = common::execute::run_then_close(
+        &client.inner,
+        common::execute::execute_dispatch(&client.inner, query, options.as_ref()),
+    )
+    .await
+    .map_err(common::to_napi_err)?;
+    serde_json::to_string(&report).map_err(common::serde_napi_err)
 }

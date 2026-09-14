@@ -3,12 +3,13 @@ use std::future::Future;
 use std::pin::Pin;
 
 use qql_core::ast::{
-    EmbedKind, EmbeddingSpec, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryInput,
-    QueryStmt, Stmt, UpsertPoint, UpsertStmt, VectorKind, VectorTarget, VectorValue,
+    EmbedKind, EmbeddingSpec, PointEntry, PointVectors, Prefetch, PrefetchSource, QueryExpr,
+    QueryInput, QueryStmt, Stmt, UpsertStmt, VectorKind, VectorTarget, VectorValue,
 };
 use qql_core::error::QqlError;
 
 use crate::embedder::Embedder;
+use crate::sparse::SparseVector;
 
 /// Default named dense vector for auto-embedding.
 pub const DENSE_VECTOR_NAME: &str = "dense";
@@ -69,18 +70,19 @@ async fn resolve_upsert_embeddings(
     if upsert.embedding.is_none() && upsert.embed.is_empty() {
         let mut targets = Vec::new();
         for (idx, point) in upsert.points.iter().enumerate() {
-            if point.vectors.is_none() {
-                if let Some((_, qql_core::ast::Value::Str(text))) =
-                    point.payload.iter().find(|(k, _)| {
+            let PointEntry::Inline(inline) = point else {
+                continue;
+            };
+            if inline.vectors.is_none()
+                && let Some((_, qql_core::ast::Value::Str(text))) =
+                    inline.payload.iter().find(|(k, _)| {
                         k.eq_ignore_ascii_case("text")
                             || k.eq_ignore_ascii_case("body")
                             || k.eq_ignore_ascii_case("content")
                     })
-                {
-                    if !text.is_empty() {
-                        targets.push((idx, text.clone()));
-                    }
-                }
+                && !text.is_empty()
+            {
+                targets.push((idx, text.clone()));
             }
         }
         if !targets.is_empty() {
@@ -108,14 +110,16 @@ async fn resolve_upsert_embeddings(
         let target_vec_name = &directive.target_vector;
         let mut targets = Vec::new();
         for (idx, point) in upsert.points.iter().enumerate() {
-            if let Some((_, qql_core::ast::Value::Str(text))) = point
+            let PointEntry::Inline(inline) = point else {
+                continue;
+            };
+            if let Some((_, qql_core::ast::Value::Str(text))) = inline
                 .payload
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(field_name))
+                && !text.is_empty()
             {
-                if !text.is_empty() {
-                    targets.push((idx, text.clone()));
-                }
+                targets.push((idx, text.clone()));
             }
         }
 
@@ -314,7 +318,7 @@ fn collect_expr_dense_jobs(
             ..
         } => {
             // RERANK uses the MODEL string for dense/multi, not "default".
-            let mut emb = require_embed_target(using)?;
+            let emb = require_embed_target(using)?;
             // RERANK is always dense-family; multi comes from USING / schema.
             if emb.kind == VectorKind::Sparse {
                 return Err(QqlError::execution(
@@ -323,7 +327,6 @@ fn collect_expr_dense_jobs(
                     None,
                 ));
             }
-            emb.kind = VectorKind::Dense;
             collect_input_dense_job(input, emb, model.as_str(), jobs);
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
@@ -340,11 +343,12 @@ fn collect_input_dense_job(
     default_model: &str,
     jobs: &mut Vec<(String, String)>,
 ) {
-    if let QueryInput::Text { text, model } = input {
-        if target.kind == VectorKind::Dense && !target.multi {
-            let m = model.as_deref().unwrap_or(default_model).to_string();
-            jobs.push((m, text.clone()));
-        }
+    if let QueryInput::Text { text, model, .. } = input
+        && target.kind == VectorKind::Dense
+        && !target.multi
+    {
+        let m = model.as_deref().unwrap_or(default_model).to_string();
+        jobs.push((m, text.clone()));
     }
 }
 
@@ -510,6 +514,7 @@ fn apply_expr_embeddings<'a>(
             }
             QueryExpr::Hybrid {
                 text,
+                model,
                 dense_vector,
                 sparse_vector,
                 fusion,
@@ -522,7 +527,10 @@ fn apply_expr_embeddings<'a>(
                         None,
                     )
                 })?;
-                let s_vec = embedder.embed_sparse_query(text, "default").await?;
+                // The sparse leg shares `Hybrid.model` with the batched dense
+                // leg above (there is no dedicated sparse-model field).
+                let s_model = model.as_deref().unwrap_or("default");
+                let s_vec = embed_sparse_query_one(embedder, text, s_model).await?;
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -597,8 +605,7 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let mut emb = require_embed_target(using)?;
-                emb.kind = VectorKind::Dense;
+                let emb = require_embed_target(using)?;
                 apply_input(input, emb, model.as_str(), embedder, dense).await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -611,6 +618,31 @@ fn apply_expr_embeddings<'a>(
     })
 }
 
+/// Single query-side sparse embedding via the batch entry point, so backends
+/// that override only [`Embedder::embed_sparse_query_batch`] still serve the
+/// one-text Hybrid and sparse-apply paths.
+async fn embed_sparse_query_one(
+    embedder: &dyn Embedder,
+    text: &str,
+    model: &str,
+) -> Result<SparseVector, QqlError> {
+    let mut vecs = embedder
+        .embed_sparse_query_batch(&[text.to_string()], model)
+        .await?;
+    if vecs.len() != 1 {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-SPARSE",
+            format!(
+                "embed_sparse_query_batch returned {} vectors for 1 text (model={model})",
+                vecs.len()
+            ),
+            None,
+        ));
+    }
+    // `len == 1` checked above.
+    Ok(vecs.swap_remove(0))
+}
+
 async fn apply_input(
     input: &mut QueryInput,
     target: EmbedTarget,
@@ -619,7 +651,7 @@ async fn apply_input(
     dense: DenseIter<'_>,
 ) -> Result<(), QqlError> {
     match input {
-        QueryInput::Image { source, model } => {
+        QueryInput::Image { source, model, .. } => {
             // Images always produce single-vector dense (CLIP vision, etc.).
             if target.kind == VectorKind::Sparse {
                 return Err(QqlError::execution(
@@ -647,10 +679,10 @@ async fn apply_input(
             *input = QueryInput::Vector(VectorValue::Dense(vec));
             Ok(())
         }
-        QueryInput::Text { text, model } => {
+        QueryInput::Text { text, model, .. } => {
             let model_name = model.as_deref().unwrap_or(default_model);
             if target.kind == VectorKind::Sparse {
-                let s_vec = embedder.embed_sparse_query(text, model_name).await?;
+                let s_vec = embed_sparse_query_one(embedder, text, model_name).await?;
                 *input = QueryInput::Vector(VectorValue::Sparse {
                     indices: s_vec.indices,
                     values: s_vec.values,
@@ -676,10 +708,23 @@ async fn apply_input(
                     None,
                 )
             })?;
+            if vec.is_empty() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    "embed_dense_batch returned an empty vector",
+                    None,
+                ));
+            }
             *input = QueryInput::Vector(VectorValue::Dense(vec));
             Ok(())
         }
-        QueryInput::Vector(_) | QueryInput::Point(_) => Ok(()),
+        QueryInput::Vector(_)
+        | QueryInput::Point(_)
+        | QueryInput::Param(..)
+        | QueryInput::PositionalParam(..) => Ok(()),
+        // Custom inference objects have no client-side embedder method; the
+        // backend inference service resolves them (options ride along).
+        QueryInput::Object { .. } => Ok(()),
     }
 }
 
@@ -924,6 +969,10 @@ fn validate_non_empty_targets(
         let actual_fields = upsert
             .points
             .first()
+            .and_then(|p| match p {
+                PointEntry::Inline(inline) => Some(inline),
+                PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
+            })
             .map(|p| {
                 p.payload
                     .iter()
@@ -987,7 +1036,7 @@ const DEFAULT_IMAGE_FIELDS_ORDERED: &[&str] = &[
 
 /// Collect image path/URL payload fields for IMAGE embedding specs.
 fn collect_image_targets(
-    points: &[UpsertPoint],
+    points: &[PointEntry],
     field_override: Option<&str>,
 ) -> Vec<(usize, String)> {
     if let Some(target_field) = field_override {
@@ -995,13 +1044,15 @@ fn collect_image_targets(
             .iter()
             .enumerate()
             .filter_map(|(idx, point)| {
-                point.payload.iter().find_map(|(key, value)| {
-                    if key.eq_ignore_ascii_case(target_field) {
-                        if let qql_core::ast::Value::Str(source) = value {
-                            if !source.is_empty() {
-                                return Some((idx, source.clone()));
-                            }
-                        }
+                let PointEntry::Inline(inline) = point else {
+                    return None;
+                };
+                inline.payload.iter().find_map(|(key, value)| {
+                    if key.eq_ignore_ascii_case(target_field)
+                        && let qql_core::ast::Value::Str(source) = value
+                        && !source.is_empty()
+                    {
+                        return Some((idx, source.clone()));
                     }
                     None
                 })
@@ -1012,15 +1063,17 @@ fn collect_image_targets(
             .iter()
             .enumerate()
             .filter_map(|(idx, point)| {
+                let PointEntry::Inline(inline) = point else {
+                    return None;
+                };
                 for &candidate in DEFAULT_IMAGE_FIELDS_ORDERED {
-                    if let Some((_, qql_core::ast::Value::Str(source))) = point
+                    if let Some((_, qql_core::ast::Value::Str(source))) = inline
                         .payload
                         .iter()
                         .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                        && !source.is_empty()
                     {
-                        if !source.is_empty() {
-                            return Some((idx, source.clone()));
-                        }
+                        return Some((idx, source.clone()));
                     }
                 }
                 None
@@ -1030,7 +1083,7 @@ fn collect_image_targets(
 }
 
 fn collect_text_targets(
-    points: &[UpsertPoint],
+    points: &[PointEntry],
     field_override: Option<&str>,
 ) -> Vec<(usize, String)> {
     if let Some(target_field) = field_override {
@@ -1038,13 +1091,15 @@ fn collect_text_targets(
             .iter()
             .enumerate()
             .filter_map(|(idx, point)| {
-                point.payload.iter().find_map(|(key, value)| {
-                    if key.eq_ignore_ascii_case(target_field) {
-                        if let qql_core::ast::Value::Str(text) = value {
-                            if !text.is_empty() {
-                                return Some((idx, text.clone()));
-                            }
-                        }
+                let PointEntry::Inline(inline) = point else {
+                    return None;
+                };
+                inline.payload.iter().find_map(|(key, value)| {
+                    if key.eq_ignore_ascii_case(target_field)
+                        && let qql_core::ast::Value::Str(text) = value
+                        && !text.is_empty()
+                    {
+                        return Some((idx, text.clone()));
                     }
                     None
                 })
@@ -1055,20 +1110,22 @@ fn collect_text_targets(
     }
 }
 
-fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> {
+fn collect_default_text_targets(points: &[PointEntry]) -> Vec<(usize, String)> {
     points
         .iter()
         .enumerate()
         .filter_map(|(idx, point)| {
+            let PointEntry::Inline(inline) = point else {
+                return None;
+            };
             for &candidate in DEFAULT_TEXT_FIELDS_ORDERED {
-                if let Some((_, qql_core::ast::Value::Str(text))) = point
+                if let Some((_, qql_core::ast::Value::Str(text))) = inline
                     .payload
                     .iter()
                     .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                    && !text.is_empty()
                 {
-                    if !text.is_empty() {
-                        return Some((idx, text.clone()));
-                    }
+                    return Some((idx, text.clone()));
                 }
             }
             None
@@ -1077,10 +1134,29 @@ fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> 
 }
 
 fn add_point_vector(
-    point: &mut UpsertPoint,
+    point: &mut PointEntry,
     name: &str,
     vector: VectorValue,
 ) -> Result<(), QqlError> {
+    let point = match point {
+        PointEntry::Inline(inline) => inline,
+        // Unreachable via collect_*_targets (they skip placeholders), but
+        // embedding into unknown payload must never silently drop vectors.
+        PointEntry::Param(name, span) => {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("cannot embed into unbound point parameter ':{name}'"),
+                span.as_deref().copied(),
+            ));
+        }
+        PointEntry::PositionalParam(idx, span) => {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("cannot embed into unbound point parameter '?{}'", *idx + 1),
+                span.as_deref().copied(),
+            ));
+        }
+    };
     if name.is_empty() {
         return match &mut point.vectors {
             Some(PointVectors::Unnamed(existing)) => {
@@ -1093,6 +1169,10 @@ fn add_point_vector(
                 } else {
                     list.push((String::new(), vector));
                 }
+                Ok(())
+            }
+            Some(PointVectors::Param(..)) | Some(PointVectors::PositionalParam(..)) => {
+                point.vectors = Some(PointVectors::Unnamed(vector));
                 Ok(())
             }
             None => {
@@ -1110,7 +1190,9 @@ fn add_point_vector(
             }
             Ok(())
         }
-        Some(PointVectors::Unnamed(_)) => Err(QqlError::execution(
+        Some(PointVectors::Unnamed(_))
+        | Some(PointVectors::Param(..))
+        | Some(PointVectors::PositionalParam(..)) => Err(QqlError::execution(
             "QQL-EMBEDDING",
             format!(
                 "cannot add named vector '{name}' to a point that already has an unnamed vector; \

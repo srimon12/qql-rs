@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use qql_core::error::QqlError;
 
-use crate::sparse::{self, SparseVector};
+use crate::sparse::{self, Bm25Params, SparseVector};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Send/Sync bound helper for `Embedder` implementations on native targets.
@@ -47,8 +47,9 @@ pub trait Embedder: EmbedderBound {
     /// embedding.
     ///
     /// Default implementation uses local wire-compatible BM25 when `model` is
-    /// empty or `"default"`. Non-default sparse models are rejected — override
-    /// this method to provide model-aware sparse inference.
+    /// empty or `"default"`, honoring [`Self::bm25_params`]. Non-default sparse
+    /// models are rejected — override this method to provide model-aware sparse
+    /// inference.
     async fn embed_sparse_document(
         &self,
         text: &str,
@@ -57,7 +58,10 @@ pub trait Embedder: EmbedderBound {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(sparse_model_unsupported_error(model));
         }
-        Ok(sparse::embed_document(text))
+        Ok(sparse::embed_document_with_params(
+            text,
+            &self.bm25_params(),
+        ))
     }
 
     /// Batch document-side sparse embedding. Default loops
@@ -70,6 +74,21 @@ pub trait Embedder: EmbedderBound {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
             results.push(self.embed_sparse_document(text, model).await?);
+        }
+        Ok(results)
+    }
+
+    /// Batch query-side sparse embedding. Default loops
+    /// [`Self::embed_sparse_query`]; override for real batching
+    /// (model-backed SPLADE / BGE-M3 sparse inference).
+    async fn embed_sparse_query_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>, QqlError> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed_sparse_query(text, model).await?);
         }
         Ok(results)
     }
@@ -107,6 +126,20 @@ pub trait Embedder: EmbedderBound {
     /// Custom and remote embedders may return `None`.
     fn dimension(&self) -> Option<usize> {
         None
+    }
+
+    /// Local BM25 hyperparameters used by the default
+    /// [`Self::embed_sparse_document`] / [`Self::embed_sparse_document_batch`]
+    /// implementations.
+    ///
+    /// Document-side only: it does not affect [`Self::embed_sparse_query`]
+    /// (always unit term weights) or model-backed sparse inference (SPLADE /
+    /// BGE-M3), and it is not a collection/wire setting. Defaults to
+    /// [`Bm25Params::default`], so hosts that never override it keep Qdrant's
+    /// `qdrant/bm25` defaults. Changing it affects documents embedded *after*
+    /// the change — re-ingest to apply.
+    fn bm25_params(&self) -> Bm25Params {
+        Bm25Params::default()
     }
 
     /// Multivector (ColBERT) per-token dimension when known without inference.
@@ -264,6 +297,24 @@ pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
     )
 }
 
+/// Error when a dense model is requested that this embedder cannot satisfy.
+///
+/// Mirrors [`sparse_model_unsupported_error`]: single-model hosts (WASM client
+/// embedder, fixed local models) reject non-default `MODEL` clauses instead
+/// of silently returning vectors from the wrong model.
+pub fn dense_model_unsupported_error(model: &str) -> QqlError {
+    QqlError::execution(
+        "QQL-EMBEDDING",
+        format!(
+            "dense model '{model}' is not available on this embedder. \
+             Omit the MODEL clause (or use MODEL 'default') to use the \
+             configured dense model. To serve multiple dense models, \
+             configure a model-routing dense embedding backend."
+        ),
+        None,
+    )
+}
+
 /// Output container for single-pass joint multi-modal / BGE-M3 embedding.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct JointEmbeddingOutput {
@@ -284,8 +335,14 @@ impl SparseEmbedder {
         sparse::embed_query(text)
     }
 
-    /// Embed document text with local wire-compatible BM25 (tf saturation).
+    /// Embed document text with local wire-compatible BM25 (tf saturation)
+    /// using Qdrant's `qdrant/bm25` defaults.
     pub fn embed_document(text: &str) -> SparseVector {
         sparse::embed_document(text)
+    }
+
+    /// Embed document text with explicit validated [`Bm25Params`].
+    pub fn embed_document_with(text: &str, params: &Bm25Params) -> SparseVector {
+        sparse::embed_document_with_params(text, params)
     }
 }

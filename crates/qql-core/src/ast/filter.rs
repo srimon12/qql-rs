@@ -19,6 +19,35 @@ pub enum ComparisonOp {
     Lte,
 }
 
+impl ComparisonOp {
+    /// Parse a host-language comparison operator string for
+    /// [`inject_filter`](crate::ast::inject_filter) (`=`, `==`, `eq`, `>`,
+    /// `gt`, …). Matching is ASCII-case-insensitive and trims surrounding
+    /// whitespace (`"EQ"`, `" Gt "`). `!=` / `neq` / `<>` are rejected with
+    /// guidance to inject equality and wrap with `NOT`; the single source of
+    /// this contract lives here so every binding surfaces the same message
+    /// and code.
+    pub fn parse_inject_op(op: &str) -> Result<Self, crate::error::QqlError> {
+        match op.trim().to_ascii_lowercase().as_str() {
+            "=" | "==" | "eq" => Ok(Self::Eq),
+            ">" | "gt" => Ok(Self::Gt),
+            ">=" | "gte" => Ok(Self::Gte),
+            "<" | "lt" => Ok(Self::Lt),
+            "<=" | "lte" => Ok(Self::Lte),
+            "!=" | "neq" | "<>" => Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+                None,
+            )),
+            other => Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                alloc::format!("unsupported comparison operator '{other}' (use =, >, >=, <, <=)"),
+                None,
+            )),
+        }
+    }
+}
+
 /// Point-ID predicate of a `PointId` filter clause.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -107,6 +136,30 @@ pub enum FilterExpr {
         field: String,
         /// Required value prefix.
         prefix: String,
+    },
+    /// `field MATCH TOKENS 'text'` — full-text match of at least one token
+    /// (Qdrant `MatchTextAny { text_any }`).
+    MatchTokens {
+        /// Payload field path.
+        field: String,
+        /// Text whose tokens are matched disjunctively.
+        text: String,
+    },
+    /// `field MATCH EXCEPT (…)` — at least one value must not match the
+    /// listed values (Qdrant `MatchExcept { except }`).
+    MatchExcept {
+        /// Payload field path.
+        field: String,
+        /// Rejected literal values.
+        values: Vec<Value>,
+    },
+    /// `MIN SHOULD n (…)` — at least `n` of the operands must hold
+    /// (Qdrant `MinShould { conditions, min_count }`, `min_count >= 1`).
+    MinShould {
+        /// Minimum number of operands required to match; must be `>= 1`.
+        min_count: u64,
+        /// Candidate sub-filters.
+        operands: Vec<FilterExpr>,
     },
     /// `… AND …` — all operands must hold.
     And {

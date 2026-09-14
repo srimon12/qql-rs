@@ -2,10 +2,12 @@
 
 export const hero = {
 	headline: "SQL for Qdrant.",
-	lede: "QQL is to Qdrant what SQL is to Postgres. One query for hybrid search, filters, and schema.",
-	eyebrow: "Open source · MIT · v0.3.1",
+	lede: "One declarative statement for hybrid search, filters, mutations and schema. Runs everywhere Qdrant does.",
+	eyebrow: "Open source · MIT · v0.4.0",
 	specimenTitle: "search.qql",
 	specimenMeta: "QQL · MIT",
+	specimenRoute: "POST /collections/medical/points/query",
+	specimenStatus: "1.2ms",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
 	secondaryCta: {
 		label: "Quickstart",
@@ -17,8 +19,13 @@ export const stats = [
 	{ value: "12", label: "Query forms" },
 	{ value: "276", label: "Conformance statements" },
 	{ value: "6", label: "Runtimes & tools" },
-	{ value: "1.4 MB", label: "WASM parser, in-browser" },
+	{ value: "2.5 MB", label: "WASM parser, in-browser" },
 ] as const;
+
+// WASM size = shipped bytes in website/.wasm/qql-wasm/qql_wasm_bg.wasm
+// (plain wasm-pack release, no wasm-opt step in build-playground-wasm.mjs).
+// Re-measure and re-verify when the wasm crate changes.
+export const wasmNote = "2.5 MB parser, in-browser" as const;
 
 export const problem = {
 	heading: "Same query. No boilerplate.",
@@ -60,14 +67,14 @@ export const pipeline = {
 
 export const language = {
 	heading: "One grammar. The whole surface.",
-	sub: "Hybrid retrieval, faceting, formula scoring, recommendations — twelve query forms over one typed grammar.",
+	sub: "Hybrid retrieval, faceting, and formula scoring. Twelve query forms over one typed grammar.",
 	footHref: "/docs/language/",
 	footLabel: "Language reference",
 } as const;
 
 export const getStarted = {
-	heading: "Install",
-	sub: "CLI, Python, Node, Rust, WASM, and VS Code.",
+	heading: "One statement. Every runtime.",
+	sub: "Same plan, six surfaces: CLI, Python, Node, Rust, WASM, and VS Code.",
 	installs: [
 		{
 			name: "CLI",
@@ -77,7 +84,12 @@ export const getStarted = {
 		{ name: "Python", cmd: "pip install pyqql", href: "/docs/sdks/python/" },
 		{ name: "Node.js", cmd: "npm i @veristamp/nqql", href: "/docs/sdks/node/" },
 		{ name: "Rust", cmd: "cargo add qql qql-core", href: "/docs/sdks/rust/" },
-		{ name: "WASM", cmd: "npm i qql-wasm", href: "/docs/sdks/wasm/" },
+		{
+			name: "WASM",
+			cmd: "npm i qql-wasm",
+			href: "/docs/sdks/wasm/",
+			note: wasmNote,
+		},
 		{ name: "VS Code", cmd: "srimon12.qql-lang", href: "/docs/tools/editors/" },
 	],
 	footHref: "/docs/getting-started/quickstart/",
@@ -85,8 +97,9 @@ export const getStarted = {
 } as const;
 
 export const cta = {
-	heading: "One query. Every runtime.",
-	body: "The playground runs the real WASM parser in your browser — no cluster, no signup.",
+	heading: "Parse a query in the browser.",
+	eyebrow: "WASM parser · MIT",
+	body: "The playground runs the real WASM parser locally: tokens, AST, plan and wire JSON. Point it at Docker or your Qdrant URL to execute.",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
 	secondaryCta: { label: "Read the docs", href: "/docs/" },
 } as const;
@@ -101,8 +114,10 @@ export const faq = {
 		},
 		{
 			question: "Which runtimes ship today?",
+			// ~2.5 MB = shipped website/.wasm/qql-wasm/qql_wasm_bg.wasm
+			// (plain wasm-pack release); re-verify on wasm crate changes.
 			answer:
-				"Rust crates, native Python and Node.js bindings, a ~1.4 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
+				"Rust crates, native Python and Node.js bindings, a ~2.5 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
 		},
 		{
 			question: "How does multitenancy work?",
@@ -117,12 +132,12 @@ export const faq = {
 		{
 			question: "Is it production-ready?",
 			answer:
-				"It is young: v0.3.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+				"It is young: v0.4.0. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
 		},
 		{
 			question: "Can I try it without a cluster?",
 			answer:
-				"Yes. The playground runs the real WASM parser in the browser. qql-edge runs the pipeline with local HNSW storage and ONNX embeddings.",
+				"The WASM parser runs fully offline in the browser. To execute, point the playground at Docker or your Qdrant URL, or run qql-edge for local HNSW storage.",
 		},
 	],
 } as const;

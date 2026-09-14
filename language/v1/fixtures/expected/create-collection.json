@@ -107,11 +107,16 @@
             "on_disk": null,
             "payload_m": null
           },
+          "metadata": null,
           "optimizers": null,
           "params": null,
           "quantization": null,
           "quantization_update": null,
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {
@@ -137,6 +142,7 @@
         "collection": "docs",
         "config": {
           "hnsw": null,
+          "metadata": null,
           "optimizers": null,
           "params": null,
           "quantization": {
@@ -162,7 +168,11 @@
             },
             "disabled": false
           },
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {
@@ -188,6 +198,7 @@
         "collection": "docs",
         "config": {
           "hnsw": null,
+          "metadata": null,
           "optimizers": null,
           "params": null,
           "quantization": {
@@ -213,7 +224,11 @@
             },
             "disabled": false
           },
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {
@@ -239,6 +254,7 @@
         "collection": "docs",
         "config": {
           "hnsw": null,
+          "metadata": null,
           "optimizers": null,
           "params": null,
           "quantization": {
@@ -264,7 +280,11 @@
             },
             "disabled": false
           },
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {
@@ -290,6 +310,7 @@
         "collection": "docs",
         "config": {
           "hnsw": null,
+          "metadata": null,
           "optimizers": null,
           "params": null,
           "quantization": {
@@ -315,7 +336,11 @@
             },
             "disabled": false
           },
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {
@@ -431,6 +456,7 @@
             "on_disk": null,
             "payload_m": null
           },
+          "metadata": null,
           "optimizers": null,
           "params": {
             "on_disk_payload": null,
@@ -439,10 +465,18 @@
             "read_fan_out_factor": null,
             "replication_factor": 2,
             "shard_keys": [
-              "honeywell",
-              "ge",
-              "3m",
-              "rtx"
+              {
+                "Keyword": "honeywell"
+              },
+              {
+                "Keyword": "ge"
+              },
+              {
+                "Keyword": "3m"
+              },
+              {
+                "Keyword": "rtx"
+              }
             ],
             "shard_number": 8,
             "sharding_method": "custom",
@@ -450,7 +484,11 @@
           },
           "quantization": null,
           "quantization_update": null,
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {
@@ -482,6 +520,7 @@
         "collection": "docs",
         "config": {
           "hnsw": null,
+          "metadata": null,
           "optimizers": {
             "default_segment_number": null,
             "deleted_threshold": null,
@@ -496,7 +535,11 @@
           "params": null,
           "quantization": null,
           "quantization_update": null,
-          "vectors": null
+          "sparse_vector_diffs": [],
+          "strict_mode": null,
+          "vector_diffs": [],
+          "vectors": null,
+          "wal": null
         },
         "mode": {
           "Dense": {

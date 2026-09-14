@@ -3,11 +3,11 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::ast::{FormulaExpr, Value};
-use crate::error::QqlError;
+use crate::ast::{FormulaExpr, Value, looks_like_iso_datetime};
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal, syntax_err};
 
 // ── Precedence constants ────────────────────────────────────────
 
@@ -42,6 +42,8 @@ fn formula_prefix_parse_fn(tok: &crate::token::Token<'_>) -> Option<PrefixParseF
             TokenKind::String => Some(parse_formula_string),
             TokenKind::Minus => Some(parse_formula_prefix_expression),
             TokenKind::Lparen => Some(parse_formula_grouped_expression),
+            TokenKind::Colon => Some(parse_formula_param),
+            TokenKind::Question => Some(parse_formula_positional_param),
             _ => None,
         }
     }
@@ -60,9 +62,9 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_formula_expr(&mut self, precedence: u8) -> Result<FormulaExpr, QqlError> {
         let tok = self.peek()?;
         let prefix = formula_prefix_parse_fn(&tok).ok_or_else(|| {
-            QqlError::syntax(
+            syntax_err(
                 alloc::format!("unexpected token in formula: {}", tok.text),
-                tok.pos,
+                tok.span,
             )
         })?;
 
@@ -93,7 +95,7 @@ fn parse_formula_identifier_or_func(p: &mut AstLowerer<'_>) -> Result<FormulaExp
 
     if p.peek()?.kind == TokenKind::Lparen {
         p.advance()?;
-        return parse_formula_function_call(p, &lower, tok.pos);
+        return parse_formula_function_call(p, &lower, tok.span);
     }
 
     Ok(FormulaExpr::Variable { name: val })
@@ -104,28 +106,18 @@ fn parse_formula_constant(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlErro
     let v: f64 = tok
         .text
         .parse()
-        .map_err(|_| QqlError::syntax("invalid number format in formula", tok.pos))?;
+        .map_err(|_| syntax_err("invalid number format in formula", tok.span))?;
     if !v.is_finite() {
-        return Err(QqlError::syntax(
-            alloc::format!("formula number '{}' is not finite", tok.text),
-            tok.pos,
+        // Same failure class as `parse_numeric_literal` (score thresholds,
+        // decay targets): a non-finite numeric literal, so it carries the
+        // same stable code instead of the generic syntax code.
+        return Err(QqlError::parse(
+            "QQL-PARSE-NUMBER",
+            alloc::format!("number '{}' is not finite", tok.text),
+            tok.span,
         ));
     }
     Ok(FormulaExpr::Constant { value: v })
-}
-
-fn looks_like_iso_datetime(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    if bytes.len() >= 10
-        && bytes[0..4].iter().all(|b| b.is_ascii_digit())
-        && bytes[4] == b'-'
-        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
-        && bytes[7] == b'-'
-        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
-    {
-        return true;
-    }
-    false
 }
 
 fn parse_formula_string(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
@@ -135,6 +127,27 @@ fn parse_formula_string(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError>
     } else {
         Ok(FormulaExpr::Variable { name: s })
     }
+}
+
+fn parse_formula_param(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
+    p.advance()?; // consume ':'
+    let name = p.parse_param_name()?;
+    // Keep the ':' prefix: bare identifiers are DEFAULTS-bound keys, so the
+    // prefix is what distinguishes a parameter placeholder on the AST path.
+    // bind_formula strips it, and `?idx` placeholders already store their
+    // prefix the same way. Without it `TARGET = :now` bound a bare variable
+    // and shipped an unresolved reference to the server.
+    Ok(FormulaExpr::Variable {
+        name: alloc::format!(":{name}"),
+    })
+}
+
+fn parse_formula_positional_param(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
+    p.advance()?; // consume '?'
+    let idx = p.next_positional_param();
+    Ok(FormulaExpr::Variable {
+        name: alloc::format!("?{}", idx),
+    })
 }
 
 fn parse_formula_prefix_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
@@ -190,9 +203,9 @@ fn parse_formula_infix_expression(
                 by_zero_default,
             })
         }
-        _ => Err(QqlError::syntax(
+        _ => Err(syntax_err(
             alloc::format!("unknown formula operator: {}", tok.text),
-            tok.pos,
+            tok.span,
         )),
     }
 }
@@ -225,7 +238,7 @@ fn parse_formula_case_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, 
 fn parse_formula_function_call(
     p: &mut AstLowerer<'_>,
     func_name: &str,
-    pos: usize,
+    span: Span,
 ) -> Result<FormulaExpr, QqlError> {
     match func_name {
         "match" | "match_any" => {
@@ -281,9 +294,9 @@ fn parse_formula_function_call(
                 }
             }
             let lat =
-                lat.ok_or_else(|| QqlError::syntax("geo_distance dict must have 'lat' key", pos))?;
+                lat.ok_or_else(|| syntax_err("geo_distance dict must have 'lat' key", span))?;
             let lon =
-                lon.ok_or_else(|| QqlError::syntax("geo_distance dict must have 'lon' key", pos))?;
+                lon.ok_or_else(|| syntax_err("geo_distance dict must have 'lon' key", span))?;
             return Ok(FormulaExpr::GeoDistance { lat, lon, field });
         }
         _ => {}
@@ -294,42 +307,42 @@ fn parse_formula_function_call(
     match func_name {
         "abs" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| QqlError::syntax("ABS() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("ABS() expects 1 argument", span))?;
             Ok(FormulaExpr::Abs { x: Box::new(x) })
         }
         "sqrt" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| QqlError::syntax("SQRT() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("SQRT() expects 1 argument", span))?;
             Ok(FormulaExpr::Sqrt { x: Box::new(x) })
         }
         "log" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| QqlError::syntax("LOG() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("LOG() expects 1 argument", span))?;
             Ok(FormulaExpr::Log { x: Box::new(x) })
         }
         "ln" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| QqlError::syntax("LN() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("LN() expects 1 argument", span))?;
             Ok(FormulaExpr::Ln { x: Box::new(x) })
         }
         "exp" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| QqlError::syntax("EXP() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("EXP() expects 1 argument", span))?;
             Ok(FormulaExpr::Exp { x: Box::new(x) })
         }
         "acosh" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| QqlError::syntax("ACOSH() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("ACOSH() expects 1 argument", span))?;
             Ok(FormulaExpr::Acosh { x: Box::new(x) })
         }
         "max" | "min" => {
             if args.is_empty() {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     alloc::format!(
                         "{}() requires at least one argument",
                         func_name.to_uppercase()
                     ),
-                    pos,
+                    span,
                 ));
             }
             if func_name == "max" {
@@ -340,7 +353,7 @@ fn parse_formula_function_call(
         }
         "pow" => {
             let [base, exponent] = <[FormulaExpr; 2]>::try_from(args)
-                .map_err(|_| QqlError::syntax("POW() expects 2 arguments", pos))?;
+                .map_err(|_| syntax_err("POW() expects 2 arguments", span))?;
             Ok(FormulaExpr::Pow {
                 base: Box::new(base),
                 exponent: Box::new(exponent),
@@ -348,35 +361,35 @@ fn parse_formula_function_call(
         }
         "geo_distance" => {
             let [lat_e, lon_e, field_e] = <[FormulaExpr; 3]>::try_from(args).map_err(|_| {
-                QqlError::syntax(
+                syntax_err(
                     "GEO_DISTANCE() expects 3 arguments (lat, lon, field_name)",
-                    pos,
+                    span,
                 )
             })?;
             let lat = match lat_e {
                 FormulaExpr::Constant { value } => value,
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         "GEO_DISTANCE() first argument must be a float constant",
-                        pos,
+                        span,
                     ));
                 }
             };
             let lon = match lon_e {
                 FormulaExpr::Constant { value } => value,
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         "GEO_DISTANCE() second argument must be a float constant",
-                        pos,
+                        span,
                     ));
                 }
             };
             let field = match field_e {
                 FormulaExpr::Variable { name } => name,
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         "GEO_DISTANCE() third argument must be a field name",
-                        pos,
+                        span,
                     ));
                 }
             };
@@ -392,9 +405,9 @@ fn parse_formula_function_call(
             {
                 val.clone()
             } else {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     alloc::format!("{}() requires 'x' argument", func_name.to_uppercase()),
-                    pos,
+                    span,
                 ));
             };
 
@@ -412,9 +425,9 @@ fn parse_formula_function_call(
                 match &args[2] {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "scale argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -426,9 +439,9 @@ fn parse_formula_function_call(
                 match val {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "scale argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -440,9 +453,9 @@ fn parse_formula_function_call(
                 match &args[3] {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "midpoint/decay argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -454,9 +467,9 @@ fn parse_formula_function_call(
                 match val {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "midpoint argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -468,9 +481,9 @@ fn parse_formula_function_call(
                 match val {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "decay argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -483,10 +496,10 @@ fn parse_formula_function_call(
                 "gauss_decay" => "gauss_decay",
                 "lin_decay" => "lin_decay",
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         alloc::format!("unknown decay function: {}", func_name),
-                        pos,
-                    ))
+                        span,
+                    ));
                 }
             };
             Ok(FormulaExpr::Decay {
@@ -497,9 +510,9 @@ fn parse_formula_function_call(
                 midpoint,
             })
         }
-        _ => Err(QqlError::syntax(
+        _ => Err(syntax_err(
             alloc::format!("unknown formula function: {}", func_name),
-            pos,
+            span,
         )),
     }
 }
@@ -544,9 +557,9 @@ fn parse_formula_call_arguments_and_kwargs(
             kwargs.push((key_tok.text.to_string(), arg));
         } else {
             if !kwargs.is_empty() {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "positional argument cannot follow keyword argument",
-                    p.peek()?.pos,
+                    p.peek()?.span,
                 ));
             }
             let arg = p.parse_formula_expr(PRECEDENCE_LOWEST)?;

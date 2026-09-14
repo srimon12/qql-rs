@@ -1,8 +1,36 @@
+#[cfg(any(feature = "rest", feature = "grpc"))]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(any(feature = "rest", feature = "grpc"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use async_trait::async_trait;
 use qql_core::error::QqlError;
+use qql_plan::types::ReadConsistencyParam;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
-pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
+use crate::executor::response::BackendResponse;
+
+pub use crate::backend::CollectionInfo;
+
+/// HTTP header / gRPC metadata key Qdrant echoes into its logs for request
+/// correlation (`x-request-id`). QQL generates one per request so a
+/// misbehaving server response can be traced in Qdrant's own log lines.
+pub const REQUEST_ID_HEADER: &str = "x-request-id";
+
+#[cfg(any(feature = "rest", feature = "grpc"))]
+static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Generate a process-unique request id: `qql-<nanos><seq>` — no external
+/// uuid dependency, globally unique and monotonic for log correlation.
+#[cfg(any(feature = "rest", feature = "grpc"))]
+pub(crate) fn next_request_id() -> String {
+    let seq = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    format!("qql-{nanos:016x}{seq:04x}")
+}
 
 /// Named vectors a collection exposes for dense, sparse, and rerank usage.
 #[derive(Debug, Clone)]
@@ -13,15 +41,6 @@ pub struct VectorTopology {
     pub sparse_vector: Option<String>,
     /// Multivector (ColBERT) vector name used for rerank, when present.
     pub rerank_vector: Option<String>,
-}
-
-/// Grouped query result: one group key and its ordered hits.
-#[derive(Debug, Clone)]
-pub struct PointGroup {
-    /// Group key value as returned by Qdrant (JSON-typed).
-    pub id: serde_json::Value,
-    /// Scored points in this group, in backend order.
-    pub hits: Vec<ScoredPoint>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -80,29 +99,81 @@ pub trait QdrantOps: QdrantOpsBound {
         field_name: &str,
     ) -> Result<(), QqlError>;
 
-    /// Execute a pre-planned operation.
+    /// Execute a pre-planned operation and return its typed payload.
     ///
-    /// REST backends: `PlannedOperation` → `to_rest_route` → HTTP.
-    /// gRPC backends: `PlannedOperation` → protobuf directly.
+    /// REST backends project `PlannedOperation` → `to_rest_route` → HTTP and
+    /// strictly parse the per-operation OpenAPI shape at the transport
+    /// boundary. gRPC/edge convert proto / `qdrant-edge` values straight into
+    /// [`BackendResponse`].
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,
-    ) -> Result<serde_json::Value, QqlError>;
+    ) -> Result<BackendResponse, QqlError>;
 
     /// Send multiple `QueryRequest`s to the same collection in one network call
     /// via Qdrant's `/points/query/batch` (REST) or `QueryBatch` (gRPC) endpoint.
+    /// Returns one typed response per search, in order.
+    ///
+    /// `timeout` / `consistency` are the batch-level query params. Explicit
+    /// `BATCH` blocks pass their header opts; ambient statement groups pass
+    /// `None` (per-search read opts stay on the member requests for gRPC and
+    /// are dropped on REST, as before).
     async fn execute_query_batch(
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError>;
+        timeout: Option<u64>,
+        consistency: Option<ReadConsistencyParam>,
+    ) -> Result<Vec<BackendResponse>, QqlError>;
 
     /// Apply a series of point mutations in one network call via Qdrant's
     /// `POST /points/batch` (REST) or `UpdateBatch` (gRPC) endpoint.
-    /// Returns one result per operation, in order.
+    /// Returns one typed response per operation, in order.
+    ///
+    /// Explicit `BATCH` blocks pass their header `WAIT` (default `true`);
+    /// ambient statement groups pass `true`, preserving prior behavior.
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-    ) -> Result<Vec<serde_json::Value>, QqlError>;
+        wait: bool,
+    ) -> Result<Vec<BackendResponse>, QqlError>;
+
+    /// Atomically update collection aliases (`POST /collections/aliases`).
+    ///
+    /// Default rejects: edge and custom backends have no alias table.
+    async fn change_aliases(&self, _actions: &[AliasAction]) -> Result<(), QqlError> {
+        Err(QqlError::validation(
+            "QQL-VALIDATION-ALIASES",
+            "collection aliases are not supported on this backend",
+            None,
+        ))
+    }
+
+    /// Run backend storage optimizers (segment merge / index build). Default:
+    /// unsupported — only an in-process backend has an optimizer to run.
+    async fn optimize_collection(&self, _collection: &str) -> Result<bool, QqlError> {
+        Err(QqlError::validation(
+            "QQL-BACKEND-OPTIMIZE",
+            "optimize is not supported by this backend",
+            None,
+        ))
+    }
+}
+
+/// One action in a Qdrant alias batch (`ChangeAliasesOperation`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasAction {
+    /// Remove an alias name.
+    Delete {
+        /// Alias to delete.
+        alias: String,
+    },
+    /// Point an alias at a collection.
+    Create {
+        /// Collection the alias should resolve to.
+        collection: String,
+        /// Alias name.
+        alias: String,
+    },
 }

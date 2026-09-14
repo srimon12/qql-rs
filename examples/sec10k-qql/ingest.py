@@ -169,7 +169,7 @@ def main() -> None:
             f"COUNT FROM {config.COLLECTION} WHERE tenant_id = '{t}' "
             f"SHARD '{t}' WITH (exact = true)"
         )
-        count = r["results"][0]["data"]["result"]["count"]
+        count = r["results"][0]["data"]["count"]
         print(f"  {t}: {count} points")
 
 

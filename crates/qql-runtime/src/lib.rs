@@ -14,7 +14,8 @@
 //! Backends implement the [`client::QdrantOps`] contract (11 methods); the
 //! [`executor::Executor`] drives it. DDL flows through the same planner as
 //! DML. The gRPC path converts typed plan structs directly to protobuf —
-//! query vectors and point IDs never take a JSON detour.
+//! query vectors, point IDs, DDL request configs, and formula expressions
+//! never take a JSON detour.
 //!
 //! # Features
 //!
@@ -65,6 +66,14 @@ pub mod qdrant_grpc;
 /// `QdrantOps` over JSON HTTP.
 #[cfg(feature = "rest")]
 pub mod rest;
+/// Strict per-operation REST response parsing (OpenAPI shapes only, no
+/// fallbacks). Used exclusively by the REST transport.
+#[cfg(feature = "rest")]
+mod rest_response;
+/// Remote shard-snapshot client for edge bootstrap (REST only, not part of
+/// the `QdrantOps` contract).
+#[cfg(feature = "rest")]
+pub mod snapshots;
 /// Sparse vector helpers re-exported from `qql-embed` (wire-compatible BM25).
 pub mod sparse;
 
@@ -72,17 +81,21 @@ pub mod sparse;
 // this crate's public signatures, plus the parse → inject policy flow, is
 // reachable through `qql` alone — backend and policy authors need no direct
 // `qql-core` / `qql-plan` dependency.
-pub use qql_core::ast::{inject_filter, ComparisonOp, Stmt, Value};
+pub use executor::PreparedStatement;
+pub use qql_core::ast::{ComparisonOp, Stmt, Value, VectorValue, inject_filter};
 pub use qql_core::error::{ErrorKind, QqlError, Span};
 pub use qql_core::parser::Parser;
 pub use qql_plan::{
-    CreateCollectionRequest, CreateIndexRequest, PlannedOperation, QueryBatchRequest,
-    UpdateBatchRequest, UpdateCollectionRequest,
+    CreateCollectionRequest, CreateIndexRequest, PlanFacetValue, PlanGroupId, PlanPointId,
+    PlanShardKey, PlanVectorStruct, PlanVectorValue, PlannedOperation, QueryBatchRequest,
+    QuotaConfig, UpdateBatchRequest, UpdateCollectionRequest,
 };
 
 // Sparse unit tests live in `qql-embed` (shared implementation).
 
-#[cfg(test)]
+// Contract tests exercise the typed gRPC route converters alongside the
+// OpenAPI REST schemas; gRPC is required for the parity half.
+#[cfg(all(test, feature = "grpc"))]
 mod contract_test;
 #[cfg(test)]
 mod executor_test;

@@ -1,5 +1,5 @@
 ---
-import BrandMark from "@qql/ui-docs/BrandMark.astro";
+import BrandMark from "@qql/ui/BrandMark.astro";
 import { APPS, SITE, SOCIAL } from "../config/site";
 
 const columns = [
@@ -39,24 +39,26 @@ const columns = [
 
 <footer class="site-footer">
   <div class="site-footer__grid">
-    <div class="site-footer__brand">
+    <div class="flex flex-col items-start gap-4">
       <a class="brand" href="/" aria-label="QQL home">
         <span class="brand__mark" aria-hidden="true">
           <BrandMark />
         </span>
         <span class="brand__name">QQL</span>
       </a>
-      <p class="site-footer__blurb">
+      <p class="m-0 max-w-96 text-sm leading-relaxed text-[var(--sl-color-gray-2)]">
         A typed, declarative query language for Qdrant. One surface for
         search, hybrid retrieval, mutations, and schema across every runtime.
       </p>
-      <span class="site-footer__pill">MIT licensed</span>
+      <p class="m-0 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
+        MIT licensed
+      </p>
     </div>
 
     {columns.map((col) => (
       <nav class="site-footer__col" aria-label={`${col.title} links`}>
         <p class="site-footer__col-title">{col.title}</p>
-        <ul>
+        <ul class="m-0 flex list-none flex-col gap-2.5 p-0">
           {col.links.map((link) => (
             <li>
               <a
@@ -75,8 +77,6 @@ const columns = [
 
   <div class="site-footer__bottom">
     <span>© {new Date().getFullYear()} {SITE.org}. QQL is MIT licensed.</span>
-    <span class="site-footer__tag">Same parser, every runtime.</span>
+    <span class="font-mono text-[0.6875rem]">Same parser, every runtime.</span>
   </div>
 </footer>
-
-/* watcher-probe */

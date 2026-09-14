@@ -1,5 +1,5 @@
 use super::AstLowerer;
-use crate::ast::{CountStmt, FacetStmt, ScrollStmt, Stmt};
+use crate::ast::{CountStmt, FacetStmt, OrderDirection, ScrollOrderBy, ScrollStmt, Stmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
@@ -21,9 +21,45 @@ impl<'a> AstLowerer<'a> {
         } else {
             None
         };
+        // Optional: ORDER BY <key> [ASC|DESC] [START FROM <value>].
+        let order_by = if self.peek()?.kind == TokenKind::Order {
+            self.advance()?;
+            self.expect(TokenKind::By)?;
+            let field = self.parse_field_path()?;
+            let direction = match self.peek()?.kind {
+                TokenKind::Desc => {
+                    self.advance()?;
+                    OrderDirection::Desc
+                }
+                TokenKind::Asc => {
+                    self.advance()?;
+                    OrderDirection::Asc
+                }
+                _ => OrderDirection::Asc,
+            };
+            let start_from = self.parse_optional_order_start()?;
+            Some(ScrollOrderBy {
+                field,
+                direction,
+                start_from,
+            })
+        } else {
+            None
+        };
         let shard_key = if self.peek()?.kind == TokenKind::Shard {
             self.advance()?;
-            Some(self.parse_string()?)
+            Some(self.parse_shard_key_atom()?)
+        } else {
+            None
+        };
+        // Optional: WITH PAYLOAD [true|false|INCLUDE (...)|EXCLUDE (...)].
+        // Bare `WITH PAYLOAD` without a selector means all payload.
+        let with_payload = if self.peek()?.kind == TokenKind::With
+            && self.peek_nth(1).kind == TokenKind::Payload
+        {
+            self.advance()?;
+            self.advance()?;
+            Some(self.parse_payload_selector()?)
         } else {
             None
         };
@@ -37,14 +73,23 @@ impl<'a> AstLowerer<'a> {
                 None
             };
         self.expect(TokenKind::Limit)?;
-        let limit = self.parse_positive_u64("SCROLL LIMIT")?;
+        let (limit, limit_param, limit_span) =
+            if let Some((param, span)) = self.parse_placeholder_param()? {
+                (10, Some(param), Some(span))
+            } else {
+                (self.parse_positive_u64("SCROLL LIMIT")?, None, None)
+            };
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
             limit,
             filter,
             after,
+            order_by,
             shard_key,
+            with_payload,
             with_vector,
+            limit_param,
+            limit_span,
         })))
     }
 
@@ -62,11 +107,12 @@ impl<'a> AstLowerer<'a> {
         };
         let shard_key = if self.peek()?.kind == TokenKind::Shard {
             self.advance()?;
-            Some(self.parse_string()?)
+            Some(self.parse_shard_key_atom()?)
         } else {
             None
         };
         let exact = if self.peek()?.kind == TokenKind::With {
+            let with_span = self.peek()?.span;
             self.advance()?;
             let opts = self.parse_config_block()?;
             let mut exact = None;
@@ -74,8 +120,8 @@ impl<'a> AstLowerer<'a> {
                 if !key.eq_ignore_ascii_case("exact") {
                     return Err(QqlError::parse(
                         "QQL-PARSE-COUNT-CONFIG",
-                        alloc::format!("unknown COUNT parameter '{}'. Expected: exact", key),
-                        self.peek()?.span,
+                        alloc::format!("unknown COUNT parameter '{key}'. Expected: exact"),
+                        with_span,
                     ));
                 }
                 match value {
@@ -84,7 +130,7 @@ impl<'a> AstLowerer<'a> {
                         return Err(QqlError::parse(
                             "QQL-PARSE-COUNT-CONFIG",
                             "COUNT 'exact' must be true or false",
-                            self.peek()?.span,
+                            with_span,
                         ));
                     }
                 }
@@ -130,6 +176,8 @@ impl<'a> AstLowerer<'a> {
 
         let mut filter = None;
         let mut limit = None;
+        let mut limit_param = None;
+        let mut limit_span = None;
         let mut exact = None;
         let mut shard_key = None;
 
@@ -139,9 +187,21 @@ impl<'a> AstLowerer<'a> {
                     self.advance()?;
                     filter = Some(Box::new(self.parse_filter_expr()?));
                 }
-                TokenKind::Limit if limit.is_none() => {
+                TokenKind::Limit if limit.is_none() && limit_param.is_none() => {
                     self.advance()?;
-                    limit = Some(self.parse_positive_u64("FACET LIMIT")?);
+                    if let Some((param, span)) = self.parse_placeholder_param()? {
+                        limit_param = Some(param);
+                        limit_span = Some(span);
+                    } else {
+                        limit = Some(self.parse_positive_u64("FACET LIMIT")?);
+                    }
+                }
+                TokenKind::Limit => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate FACET LIMIT clause",
+                        self.peek()?.span,
+                    ));
                 }
                 TokenKind::Exact if exact.is_none() => {
                     self.advance()?;
@@ -157,39 +217,69 @@ impl<'a> AstLowerer<'a> {
                         _ => exact = Some(true),
                     }
                 }
+                TokenKind::Exact => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate FACET EXACT clause",
+                        self.peek()?.span,
+                    ));
+                }
                 TokenKind::Shard if shard_key.is_none() => {
                     self.advance()?;
-                    shard_key = Some(self.parse_string()?);
+                    shard_key = Some(self.parse_shard_key_atom()?);
                 }
                 TokenKind::With => {
+                    let with_span = self.peek()?.span;
                     self.advance()?;
                     let opts = self.parse_config_block()?;
                     for (k, v) in &opts {
                         if k.eq_ignore_ascii_case("exact") {
-                            if let crate::ast::Value::Bool(b) = v {
-                                exact = Some(*b);
+                            if exact.is_some() {
+                                return Err(QqlError::parse(
+                                    "QQL-PARSE-DUPLICATE-CLAUSE",
+                                    "duplicate FACET EXACT clause",
+                                    with_span,
+                                ));
                             }
-                        } else if k.eq_ignore_ascii_case("limit") {
-                            if let crate::ast::Value::Int(i) = v {
-                                if *i > 0 {
-                                    limit = Some(*i as u64);
+                            match v {
+                                crate::ast::Value::Bool(b) => exact = Some(*b),
+                                _ => {
+                                    return Err(QqlError::parse(
+                                        "QQL-PARSE-FACET-CONFIG",
+                                        "FACET 'exact' must be true or false",
+                                        with_span,
+                                    ));
                                 }
                             }
+                        } else if k.eq_ignore_ascii_case("limit") {
+                            if limit.is_some() || limit_param.is_some() {
+                                return Err(QqlError::parse(
+                                    "QQL-PARSE-DUPLICATE-CLAUSE",
+                                    "duplicate FACET LIMIT clause",
+                                    with_span,
+                                ));
+                            }
+                            match v {
+                                crate::ast::Value::Int(i) if *i > 0 => {
+                                    limit = Some(*i as u64);
+                                }
+                                _ => {
+                                    return Err(QqlError::parse(
+                                        "QQL-PARSE-FACET-CONFIG",
+                                        "FACET limit must be a positive integer",
+                                        with_span,
+                                    ));
+                                }
+                            }
+                        } else {
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-FACET-CONFIG",
+                                alloc::format!(
+                                    "unknown FACET parameter '{k}'. Expected: exact, limit"
+                                ),
+                                with_span,
+                            ));
                         }
-                    }
-                }
-                _ if (self.peek_word("EXACT")? && exact.is_none()) => {
-                    self.advance()?;
-                    match self.peek()?.kind {
-                        TokenKind::True => {
-                            self.advance()?;
-                            exact = Some(true);
-                        }
-                        TokenKind::False => {
-                            self.advance()?;
-                            exact = Some(false);
-                        }
-                        _ => exact = Some(true),
                     }
                 }
                 _ => break,
@@ -203,6 +293,8 @@ impl<'a> AstLowerer<'a> {
             limit,
             exact,
             shard_key,
+            limit_param,
+            limit_span,
         })))
     }
 }

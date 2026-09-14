@@ -38,6 +38,15 @@ function normalizeLocalOptions(options) {
       typeof options.showDownloadProgress === "boolean"
         ? options.showDownloadProgress
         : undefined,
+    // Forwarded raw so invalid values (0, negative, fractional, non-numeric)
+    // reach the native validation and fail closed with QQL-VALIDATION-CONFIG
+    // instead of being silently dropped.
+    walSegmentMb: options.walSegmentMb,
+    // Client-side BM25 document parameters (local sparse encoder; write-path
+    // only). Raw for the same fail-closed reason.
+    bm25K1: options.bm25K1,
+    bm25B: options.bm25B,
+    bm25AvgLen: options.bm25AvgLen,
   };
 }
 
@@ -54,6 +63,16 @@ function normalizeStandaloneOptions(options) {
     options.onError !== "continue"
   ) {
     throw new TypeError("options.onError must be 'stop' or 'continue'");
+  }
+  if (
+    options.params !== undefined &&
+    options.params !== null &&
+    !Array.isArray(options.params) &&
+    typeof options.params !== "object"
+  ) {
+    throw new TypeError(
+      "options.params must be an object for named parameters (:name) or an array for positional parameters (?)",
+    );
   }
   return {
     dataDir: typeof options.dataDir === "string" ? options.dataDir : "./qdrant_data",
@@ -73,6 +92,16 @@ function normalizeStandaloneOptions(options) {
     embedKey: typeof options.embedKey === "string" ? options.embedKey : undefined,
     embedModel: typeof options.embedModel === "string" ? options.embedModel : undefined,
     embedDim: Number.isSafeInteger(options.embedDim) ? options.embedDim : undefined,
+    // Client-side BM25 document parameters (local sparse encoder; write-path
+    // only). Forwarded raw so invalid values fail closed in the native
+    // validator instead of silently falling back to defaults.
+    bm25K1: options.bm25K1,
+    bm25B: options.bm25B,
+    bm25AvgLen: options.bm25AvgLen,
+    // Query parameters for prepared statements: object (:name) or array (?).
+    // Must survive normalization or one-shot execute()/executeStmt() silently
+    // drop bindings. Type validity is asserted above.
+    params: options.params ?? undefined,
     onError: options.onError,
   };
 }

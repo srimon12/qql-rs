@@ -166,7 +166,7 @@ its `USING` and `PREFETCH` pipeline in the canonical AST.
 |---|---|
 | nearest | A bare string is equivalent to `TEXT string`; `POINT id` means similarity by point. |
 | points | Direct retrieval; only `SHARD`, payload/vector selectors, and no paging/filter/scoring clauses are allowed. |
-| recommend | `POSITIVE` is non-empty; `NEGATIVE` is optional; strategy is one of the three grammar values. |
+| recommend | `POSITIVE` is non-empty; `NEGATIVE` is optional; each example is a full `query-input` where bare strings and integers stay point IDs; strategy is one of the three grammar values. |
 | context/discover | Every positive/negative/target item is a full `query-input`; point IDs require `POINT`. |
 | order/sample | Do not accept `USING` or `PREFETCH`. |
 | fusion | Requires at least one `PREFETCH`. |
@@ -289,8 +289,18 @@ condition.
 ## 6. Point operations and DDL
 
 `SCROLL` requires a positive `LIMIT`. `DELETE`, `CLEAR PAYLOAD`, and
-`DELETE VECTOR` require `WHERE`. `UPDATE ... SET VECTOR` targets exactly one
-point ID; payload updates accept any filter.
+`DELETE VECTOR` require `WHERE`. `UPDATE ... SET VECTOR` replaces vectors on
+one or more points: compact `SET VECTOR [name] = … WHERE id = …` is a single
+point (a name map `{dense: …, sparse: …}` is allowed on the right-hand side);
+`SET VECTOR VALUES {id, vector}, …` is the batch form that matches REST
+`PUT /points/vectors` and gRPC `UpdatePointVectors`. Payload updates accept
+any filter.
+
+`UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`,
+`UPDATE … VECTOR`, `UPDATE … PAYLOAD`, and `CREATE INDEX` accept an optional
+trailing durability clause `WAIT true` / `WAIT false` after `SHARD`, lowering
+to REST `?wait=` / the gRPC `wait` field. A repeated `WAIT` is rejected with
+`QQL-PARSE-DUPLICATE-CLAUSE`.
 
 Collection modes:
 
@@ -319,7 +329,23 @@ Collection config keys are case-insensitive and unique:
 `read_fan_out_factor` and `read_fan_out_delay_ms` are ALTER-only. Quantization
 type is `scalar`, `binary`, `product`, or `turbo`; `disabled = true` is an
 ALTER form. `sharding_method` accepts the string `'auto'` or `'custom'`;
-`shard_keys` is a list of strings.
+`shard_keys` is a list of string or non-negative integer keys (integers route to numeric partitions, never coerced to keywords).
+
+`ALTER COLLECTION` additionally accepts per-vector diffs. The named dense form
+`WITH VECTOR <name> (HNSW (…), QUANTIZATION (…), VECTOR (…))` targets one
+vector; the unnamed `WITH VECTOR (…)` form targets the default unnamed vector
+(`""` on the PATCH `vectors` map). Sparse vectors use
+`WITH SPARSE <name> (SPARSE (…) | INDEX (…))` (Qdrant has no unnamed sparse
+vector). Nested blocks are comma-separated, each at most once, and must set at
+least one key; a vector name may appear in at most one clause. Diffs are
+field-wise: unset keys keep their current value. `datatype` is not part of
+`VectorParamsDiff` and is rejected (`QQL-PARSE-VECTOR-DIFF` at parse time for
+the named form, `QQL-PLAN-VECTOR-DIFF` for a programmatically built AST). Diff
+names are validated against the collection schema when available
+(`QQL-UNKNOWN-VECTOR`); the backend remains the final authority. The edge
+backend applies per-vector `HNSW` only and rejects other per-vector fields and
+all sparse diffs (`QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` /
+`QQL-EDGE-UNSUPPORTED-SPARSE-DIFF`).
 
 ### 6.1 Memory placement
 
@@ -459,12 +485,12 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-CLAUSE-ORDER` | Duplicate or out-of-order query clause |
 | `QQL-PARSE-VECTOR-KIND` | `AS` is not `DENSE`, `SPARSE`, `MULTI`, or `MULTIVECTOR` |
 | `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
+| `QQL-PARSE-DUPLICATE-CLAUSE` | Duplicate `WAIT` clause |
 | `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
 | `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `CANDIDATES`, vector size) |
 | `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
 | `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
 | `QQL-PARSE-COMPARISON` | Expected a comparison operator |
-| `QQL-PARSE-CONTEXT` | `CONTEXT` requires at least one positive/negative pair |
 | `QQL-PARSE-COUNT-CONFIG` | `COUNT … WITH (…)` accepts only `exact = true` / `exact = false` |
 | `QQL-PARSE-CROSS-RERANK` | `CROSS RERANK` requires `TEXT '…'` or a string query input |
 | `QQL-PARSE-EMBED` | `EMBED USING` requires `DENSE`, `SPARSE`, `MULTI`, `IMAGE`, or `MODEL` |
@@ -477,11 +503,12 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-IDENTIFIER` | Expected an identifier or quoted name |
 | `QQL-PARSE-IN` | `IN` / `NOT IN` requires a non-empty value list |
 | `QQL-PARSE-INDEX-TYPE` | Unsupported `CREATE INDEX` field type |
-| `QQL-PARSE-INTEGER` | Invalid integer literal |
 | `QQL-PARSE-LITERAL` | Expected a scalar literal |
 | `QQL-PARSE-MATCH-ANY` | `MATCH ANY` requires a non-empty exact-value list |
 | `QQL-PARSE-NUMBER` | Expected a number |
 | `QQL-PARSE-OBJECT-KEY` | Expected an object key |
+| `QQL-PARSE-BOOL` | Expected `true` or `false` |
+| `QQL-PARSE-PARAM` | Expected a parameter identifier after `:` |
 | `QQL-PARSE-PAYLOAD-SELECTOR` | `WITH PAYLOAD` requires `true`, `false`, `INCLUDE (...)`, or `EXCLUDE (...)` |
 | `QQL-PARSE-POINT-ID` | A point ID must be an unsigned integer or a string |
 | `QQL-PARSE-POINT-IDS` | A point ID list cannot be empty |
@@ -495,12 +522,15 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-TRAILING` | Unexpected trailing token |
 | `QQL-PARSE-UPDATE` | Expected `VECTOR` or `PAYLOAD` after `SET` |
 | `QQL-PARSE-VALUE` | Unexpected value token |
+| `QQL-PARSE-VECTOR-DIFF` | Malformed or unrepresentable `ALTER COLLECTION` per-vector diff (empty or duplicate nested blocks, unknown block names, `datatype`) |
 | `QQL-VALIDATION-FROM` | A top-level query lacks `FROM` |
 | `QQL-VALIDATION-PREFETCH-CTE` | A `PREFETCH` name does not resolve to a CTE |
 | `QQL-VALIDATION-FUSION-PREFETCH` | `QUERY FUSION` has no `PREFETCH` |
 | `QQL-VALIDATION-RERANK-PREFETCH` | `QUERY RERANK` has no `PREFETCH` |
 | `QQL-VALIDATION-POINTS-CLAUSE` | `QUERY POINTS` uses a clause it cannot accept |
+| `QQL-VALIDATION-UPDATE-VECTOR` | An `UPDATE … SET VECTOR VALUES` row is empty, missing `id`/`vector`, or carries extra keys |
 | `QQL-VALIDATION-UPSERT-ID` | An UPSERT point lacks a valid `id` key |
+| `QQL-VALIDATION-UPSERT-BATCH` | `upsert_many` / `upsertMany` called with `batch_size` / `batchSize` below 1 |
 | `QQL-VALIDATION-MMR` | MMR `DIVERSITY` is outside `[0, 1]` or not finite |
 | `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
 | `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
@@ -539,30 +569,39 @@ invalid fixtures are normative for those cases.
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
+| `QQL-PLAN-VECTOR-DIFF` | An `ALTER COLLECTION` per-vector diff the wire cannot express (`datatype`), or a duplicate vector diff name |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-BACKEND` | Generic backend or transport failure |
+| `QQL-BACKEND-AUTH` | Rejected credentials |
+| `QQL-BACKEND-COLLECTION-NOT-FOUND` | The backend reports a missing collection |
+| `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
+| `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
+| `QQL-BACKEND-STRICT-MODE` | The request violates strict-mode / quota limits |
 | `QQL-JSON-NONFINITE` | A non-finite float cannot be serialized to JSON |
 | `QQL-JSON-NUMBER` | A value cannot be represented as a JSON number |
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
 | `QQL-EMBEDDING-MULTI` | Multi-vector embedding returned an empty or mis-sized bag for the requested text batch |
 | `QQL-EMBEDDING-IMAGE` | Image embedding returned an empty or mis-sized batch for the requested image sources |
-| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options are not available offline |
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
-| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not available offline |
-| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
-| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP` | `GROUP BY … LOOKUP FROM` has no offline lookup collection |
+| `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS` has no offline setter |
+| `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION` has no offline setter |
+| `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR <name>` fields other than `hnsw_config` have no offline setter |
+| `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE <name>` has no offline setter |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` are not available offline |
+| `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys the offline engine excludes |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
-| `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service; use REST |
+| `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
 | `QQL-VALIDATION-IDF` | Malformed `idf` search param at parse time |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |

@@ -1,4 +1,4 @@
-import type { DocsFooterConfig, DocsHeaderConfig } from "@qql/ui-docs/types";
+import type { DocsFooterConfig, DocsHeaderConfig } from "@qql/ui/types";
 import { APPS, SITE } from "./config/site";
 
 export const headerConfig: DocsHeaderConfig = {
@@ -25,7 +25,7 @@ export const footerConfig: DocsFooterConfig = {
 			title: "Product",
 			items: [
 				{
-					label: "Getting Started",
+					label: "Start",
 					href: `${APPS.docs.url}/getting-started/`,
 				},
 				{ label: "Guides", href: `${APPS.docs.url}/guides/` },

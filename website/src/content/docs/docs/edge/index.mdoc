@@ -18,28 +18,23 @@ transport is swapped for an embedded one.
 
 ## Why edge
 
-{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
-
+{% grid style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%,18rem), 1fr)); gap:1rem;" %}
 {% glassCard title="Zero infrastructure" %}
 No Docker, no server process, no ports, no API keys. A Python script, a Node
 service, or a Rust binary can own a local vector index.
 {% /glassCard %}
-
 {% glassCard title="Fully offline" %}
 With the local ONNX embedder, inference happens on your CPU. Great for demos,
 CI, air-gapped tools, and single-node products.
 {% /glassCard %}
-
 {% glassCard title="Same language, same plans" %}
-Statements compile to the same IR and use the same response envelope as the
+Statements compile to the same IR and produce the same typed `ExecData` report as the
 REST and gRPC backends. What you write in the playground is what edge executes.
 {% /glassCard %}
-
 {% glassCard title="Honest capability errors" %}
 Cluster-only features fail loudly with stable `QQL-EDGE-UNSUPPORTED-*` codes
 and a "use remote Qdrant" hint. Edge never silently drops a clause.
 {% /glassCard %}
-
 {% /grid %}
 
 ## Architecture
@@ -88,9 +83,9 @@ process: local desktop tools, mobile-adjacent prototypes, CI test suites,
 air-gapped demos, or a product that does not want to operate a Qdrant cluster.
 
 **Use remote Qdrant** when you need a shared, multi-node service with
-replication, shard keys, `GROUP BY`, ACORN, or the full query surface. Edge
-rejects exactly those cluster features with stable error codes — see
-[capabilities](/docs/edge/capabilities/).
+replication, custom shard keys, cross-collection group lookups, or cluster
+admin (quotas). Edge rejects exactly those cluster features with stable error
+codes — see [capabilities](/docs/edge/capabilities/).
 
 ## Relationship to REST and gRPC backends
 
@@ -100,8 +95,8 @@ rejects exactly those cluster features with stable error codes — see
 | Transport | HTTP / protobuf | none (in-process) |
 | Storage | Qdrant server | `qdrant-edge` on-disk HNSW |
 | Embeddings | remote endpoint or explicit vectors | ONNX local, HTTP endpoint, or explicit vectors |
-| Cluster features (`GROUP BY`, shards, ACORN) | yes | rejected with stable codes |
-| Response envelope | `{result, status, time}` | identical |
+| Cluster features (`SHARD`, `LOOKUP FROM`, quotas) | yes | rejected with stable codes |
+| Typed response (`ExecData`) | strict per-operation parse, `QQL-BACKEND-ENVELOPE` on a missing/mistyped field | identical |
 
 Both backends implement the same `QdrantOps` trait, so a Rust application can
 switch between them without changing query code. See
@@ -112,10 +107,10 @@ full matrix.
 
 {% steps %}
 
-1. **Build the edge-enabled CLI** (edge is an opt-in feature)
+1. **Install the edge-enabled CLI** (edge is an opt-in feature)
 
-   {% terminal title="Build the CLI with edge support" %}
-   cargo build --release -p qql-cli --features edge
+   {% terminal title="Install the CLI with edge support" %}
+   cargo install qql-cli --locked --features edge
    {% /terminal %}
 
 2. **Configure a local data directory and model**

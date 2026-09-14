@@ -1,8 +1,9 @@
 ---
-title: "Queries"
+title: "QQL query expressions"
 description: "Choose QQL retrieval expressions for nearest, hybrid, recommendation, grouped, diverse, and staged search."
 sidebar:
   order: 2
+  label: "Queries"
 ---
 
 `QUERY` is the universal retrieval statement. Pick the expression that matches
@@ -25,11 +26,26 @@ QUERY 'vector database' FROM docs USING dense LIMIT 10;
 QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
 
 -- Implicit vector input (VECTOR keyword is optional for array literals)
-QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
+QUERY [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
 
 QUERY POINT 42 FROM docs USING dense LIMIT 10;
 
 QUERY POINTS (1, 2, 'point-a') FROM docs;
+```
+{% /qqlExample %}
+
+`TEXT` and `IMAGE` accept an optional `MODEL` and an opaque `OPTIONS` dict
+that passes through to the inference service. `OBJECT` is the custom inference
+payload with the same options. Parenthesized `OBJECT ({...})` parses but
+formats to the bare object.
+
+{% qqlExample title="Inference options and object input" %}
+```sql
+QUERY TEXT 'hi' MODEL 'm' OPTIONS {temperature: 0.5} FROM docs USING dense LIMIT 1;
+
+QUERY IMAGE 'https://x/y.jpg' MODEL 'clip' OPTIONS {size: 512} FROM docs USING img LIMIT 1;
+
+QUERY OBJECT {a: 1} MODEL 'm' OPTIONS {k: true} FROM docs USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 
@@ -138,6 +154,25 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
+`LOOKUP FROM` on `GROUP BY` carries payload and vector selectors for the
+joined group data. Prefetch `LOOKUP FROM` additionally routes one leg with an
+optional vector and shard key.
+
+{% qqlExample title="Lookup selectors and prefetch routing" %}
+```sql
+QUERY 'news'
+FROM docs
+GROUP BY topic SIZE 5 LOOKUP FROM topics WITH PAYLOAD INCLUDE (title) WITH VECTOR (dense)
+LIMIT 20;
+
+WITH a AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 50)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (a LOOKUP FROM docs2 VECTOR dense SHARD 'acme')
+LIMIT 10;
+```
+{% /qqlExample %}
+
 ## Context, discover, and relevance feedback
 
 `QUERY CONTEXT` pairs positive and negative inputs that define a region;
@@ -173,11 +208,15 @@ LIMIT 10;
 
 `QUERY ORDER BY` sorts by a payload field (`ASC` or `DESC`), and
 `QUERY SAMPLE RANDOM` draws a random page. Neither expression accepts `USING`
-or `PREFETCH` — there is no similarity input to resolve.
+or `PREFETCH` — there is no similarity input to resolve. `ORDER BY` accepts an
+optional `START FROM` paging origin: an integer, float, datetime string, or
+placeholder that resumes ordering from that payload value.
 
 {% qqlExample title="Ordered and random access" %}
 ```sql
 QUERY ORDER BY price ASC FROM products WHERE category = 'electronics' LIMIT 10;
+
+QUERY ORDER BY created_at DESC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 20;
 
 QUERY SAMPLE RANDOM FROM docs WITH VECTOR false LIMIT 10;
 ```
@@ -258,14 +297,48 @@ WHERE tenant_id = 'acme'
 SHARD 'acme'
 PARAMS (idf = WHERE tenant_id = 'acme')
 LIMIT 10;
+
+QUERY 'search'
+FROM docs
+USING sparse
+WHERE tenant_id = 101
+SHARD 101
+PARAMS (idf = WHERE tenant_id = 101)
+LIMIT 10;
 ```
 {% /qqlExample %}
+
+Shard keys bind like any other placeholder: `SHARD :tenant` takes its value
+from SDK `params`, with strings routed as keywords and non-negative integers
+as numbers.
 
 ## Parameter binding & prepared queries
 
 QQL queries support parameterized templates with type-safe client-side binding:
 - **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
 - **Positional Placeholders**: `?` (mapped sequentially to argument lists)
+
+A template like `QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim`
+is inert until values are bound — unbound placeholders fail at the plan
+gate (`QQL-BIND-MISSING-PARAM`) before any request leaves the client, on
+every binding path. Here is the same statement with values bound:
+
+{% qqlExample title="A bound parameterized query" %}
+```sql
+QUERY TEXT 'cardiology'
+FROM docs
+WHERE category = 'medical'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+Bind client-side with the Python `bind` / `Stmt.bind`, Node `bind` /
+`Stmt.bind`, or WASM `bind` helpers, or pass `params` straight to
+`Client.execute` — see the
+[Python](/docs/sdks/python/#parameter-binding--prepared-queries),
+[Node.js](/docs/sdks/node/#parameter-binding--prepared-queries), and
+[WebAssembly](/docs/sdks/wasm/#parameter-binding) SDK pages. Rust uses the typed
+`bind_named` / `bind_positional` twins in `qql_core::params`.
 
 {% aside type="note" title="Why :name and ? (not $name)?" %}
 In QQL, `$` is a first-class identifier character (e.g. `$score`, `$category`, `$1`). To guarantee that `$`-prefixed identifiers and formula variables are never accidentally overwritten, parameter placeholders exclusively use `:name` and `?`.
@@ -281,6 +354,16 @@ WHERE category = 'cardiology' AND rating >= 4.5
 LIMIT 10;
 ```
 {% /qqlExample %}
+
+Nested dictionaries expand to dotted keys: `{"loc": {"lat": 1.0, "lon": 2.0}}`
+binds `:loc.lat` and `:loc.lon`, and flat dotted keys work identically. For
+multi-statement batches, pass `params` as a list with one entry per statement
+(the length must match the statement count). Substitution failures carry
+stable `QQL-BIND-*` codes — mixed placeholder styles
+(`QQL-BIND-MIXED-STYLE`), missing values (`QQL-BIND-MISSING-PARAM`), extra
+positional values (`QQL-BIND-UNUSED-PARAMS`), and type mismatches
+(`QQL-BIND-TYPE-MISMATCH`) — see the
+[error code reference](/docs/reference/error-codes/).
 
 Colons in compact dictionary syntax (e.g. `{a:b}`, `{'a':b}`) are preserved as key-value separators and not treated as placeholders.
 

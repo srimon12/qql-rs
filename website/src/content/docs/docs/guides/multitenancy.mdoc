@@ -1,6 +1,6 @@
 ---
 title: "Multitenancy"
-description: "Combine QQL AST filter injection, custom shard routing, tenant indexes, and shard-key DDL safely."
+description: "Isolate tenants with AST filter injection, route requests with SHARD keys, accelerate lookups with tenant indexes, and manage shard keys."
 sidebar:
   order: 3
 ---
@@ -54,6 +54,14 @@ closed for DDL, `SHOW`, and vector updates. See the
 [Filter injection guide](/docs/guides/filter-injection/) for the full
 behavior.
 
+{% aside type="caution" title="Numeric shard keys" %}
+Keyword and number shard keys hash differently on the wire. Numeric keys
+(`SHARD 101`, `CREATE/DROP SHARD KEY 101`, integer `shard_keys` entries) stay
+typed end-to-end — parse → plan → REST/gRPC — on every statement, so a numeric
+`SHARD` reaches the numeric partition. `SHARD :tenant` binds like any other
+placeholder (strings become keywords, non-negative integers numbers).
+{% /aside %}
+
 ```python
 from pyqql import Client, parse
 
@@ -65,7 +73,34 @@ stmt.shard_key = "acme"
 report = client.execute(stmt)
 ```
 
+```javascript
+const { parse } = require("@veristamp/nqql");
+
+const [stmt] = parse(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+stmt.shardKey = "acme";
+
+const report = await client.execute(stmt);
+```
+
+```javascript
+import init, { Stmt } from "qql-wasm";
+await init();
+
+const stmt = new Stmt(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+stmt.shardKey = "acme"; // routing only — isolation comes from injectFilter
+const report = await client.executeStmt(stmt);
+```
+
 {% aside type="danger" title="Do not filter results after retrieval" %}
 Post-filtering leaks work across the tenant boundary and produces incorrect
 limits, groups, and scores. Enforce the predicate before planning.
 {% /aside %}
+
+## Per-stack recipes
+
+For copy-ready FastAPI and Express middleware wiring request tenants to
+`inject_filter` plus `SHARD` plus `is_tenant` DDL, with a cross-tenant check
+proving isolated reads return zero rows, see the
+[Multitenancy recipes guide](/docs/guides/multitenancy-recipes/).

@@ -24,15 +24,25 @@ rest = ["qql/rest"]
 # Local in-process qdrant-edge backend (no Qdrant server needed).
 # Opt-in because FastEmbed and ONNX materially increase compile time and
 # the optimized CLI binary size.
-edge = ["qql-edge", "qql-edge/http-embedding"]
+edge = ["qql-edge", "qql-edge/fastembed-local", "qql-edge/http-embedding"]
+record = ["dep:axum", "dep:reqwest", "tokio/net", "tokio/io-util"]
+# Transparent Qdrant REST recorder (`qql record`). Opt-in so default builds
+# stay lean: pulls the axum server + a direct reqwest client (both versions
+# already pinned in Cargo.lock via tonic / qql-rest).
+# Convenience for one-flag installs (`--features full`); default stays lean
+# (grpc+rest) — edge is the heavy one (ONNX), record is cheap (axum only).
+full = ["edge", "record"]
 
 [dependencies]
-qql-core = { workspace = true }
+qql-convert = { workspace = true }
+qql-core = { workspace = true, features = ["serde", "json", "std"] }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true, optional = true }
-clap = { version = "4", features = ["derive"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+axum = { version = "0.8", optional = true, default-features = false, features = ["http1", "tokio"] }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls"] }
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rustyline = "14"

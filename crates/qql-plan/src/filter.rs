@@ -22,6 +22,20 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
             should: Vec::new(),
             min_should: None,
         }),
+        // Top-level at-least-N lifts to the compound object form directly:
+        // nesting `{"min_should": …}` inside `must` is not a valid Condition.
+        FilterExpr::MinShould {
+            min_count,
+            operands,
+        } => FilterExpression::Compound(FilterCompound {
+            must: Vec::new(),
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: Some(MinShould {
+                conditions: operands.iter().map(lower_clause).collect(),
+                min_count: *min_count,
+            }),
+        }),
         other => FilterExpression::Single(Box::new(lower_clause(other))),
     }
 }
@@ -71,6 +85,33 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
                 prefix: prefix.clone(),
             })
         }),
+        FilterExpr::MatchTokens { field, text } => field_condition(field, |fc| {
+            fc.r#match = Some(MatchValue::TextAny {
+                text_any: text.clone(),
+            })
+        }),
+        FilterExpr::MatchExcept { field, values } => {
+            let except: Vec<_> = values.iter().map(value_to_json).collect();
+            field_condition(field, |fc| fc.r#match = Some(MatchValue::Except { except }))
+        }
+        FilterExpr::MinShould {
+            min_count,
+            operands,
+        } => {
+            // A bare `{"min_should": …}` is not a valid nested Condition, so
+            // nested occurrences ride a `{"filter": …}` envelope (top-level
+            // `MIN SHOULD` lifts to the compound object in `lower_filter`).
+            let min_should = MinShould {
+                conditions: operands.iter().map(lower_clause).collect(),
+                min_count: *min_count,
+            };
+            FilterClause::Filter(Box::new(FilterCompound {
+                must: Vec::new(),
+                must_not: Vec::new(),
+                should: Vec::new(),
+                min_should: Some(min_should),
+            }))
+        }
         FilterExpr::Nested { path, filter } => FilterClause::Nested(NestedCondition {
             nested: NestedParams {
                 key: path.clone(),
@@ -179,6 +220,19 @@ fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
 
 fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> FilterClause {
     if op == ComparisonOp::Eq {
+        // Qdrant `match` rejects floats at runtime (MatchInterface has no
+        // float variant); exact float equality is `range` with gte == lte.
+        if let Value::Float(_) = value {
+            let v = value_to_json(value);
+            return field_condition(field, |fc| {
+                fc.range = Some(RangeParams {
+                    gt: None,
+                    gte: Some(v.clone()),
+                    lt: None,
+                    lte: Some(v),
+                })
+            });
+        }
         return field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Value {
                 value: value_to_json(value),
@@ -271,14 +325,32 @@ fn values_count_params(op: ComparisonOp, count: u64) -> ValuesCountParams {
 }
 
 /// Convert a dynamic AST `Value` into its JSON wire representation.
+///
+/// # Invariant
+///
+/// `Param` / `PositionalParam` arms panic: `plan()` runs
+/// `ensure_no_unbound_params` first and `plan_template()` runs
+/// `validate_no_unbound_scalar_params`, so no unbound placeholder reaches
+/// here through the supported entry points. Direct callers must preserve
+/// that gating order.
 pub fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Str(s) => serde_json::Value::String(s.clone()),
         Value::Int(n) => serde_json::Value::Number((*n).into()),
+        Value::UInt(n) => serde_json::Value::Number((*n).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Null => serde_json::Value::Null,
+        Value::F32Array(values) => serde_json::Value::Array(
+            values
+                .iter()
+                .map(|f| {
+                    serde_json::Number::from_f64(*f as f64)
+                        .map_or(serde_json::Value::Null, serde_json::Value::Number)
+                })
+                .collect(),
+        ),
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
         Value::Dict(entries) => {
             let mut map = serde_json::Map::with_capacity(entries.len());
@@ -286,6 +358,14 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
                 map.insert(k.clone(), value_to_json(v));
             }
             serde_json::Value::Object(map)
+        }
+        Value::Param(name, _) => {
+            panic!("invariant violation: unbound parameter :{name} reached filter lowering");
+        }
+        Value::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached filter lowering"
+            );
         }
     }
 }
@@ -338,6 +418,21 @@ mod tests {
         assert_json(
             &lower_filter(&f),
             json!({"key": "status", "match": {"value": "active"}}),
+        );
+    }
+
+    #[test]
+    fn eq_float_lowers_to_range() {
+        // Qdrant `match` has no float variant; exact float equality must be
+        // `range` with gte == lte or the backend 400s (MatchInterface).
+        let f = FilterExpr::Compare {
+            field: "rating".into(),
+            op: ComparisonOp::Eq,
+            value: Value::Float(4.5),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "rating", "range": {"gte": 4.5, "lte": 4.5}}),
         );
     }
 
@@ -414,6 +509,94 @@ mod tests {
         assert_json(
             &lower_filter(&f),
             json!({"key": "tags", "match": {"any": ["rust", "go"]}}),
+        );
+    }
+
+    #[test]
+    fn match_tokens_lowers_to_text_any() {
+        let f = FilterExpr::MatchTokens {
+            field: "title".into(),
+            text: "red shoes".into(),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "title", "match": {"text_any": "red shoes"}}),
+        );
+    }
+
+    #[test]
+    fn match_except() {
+        let f = FilterExpr::MatchExcept {
+            field: "tags".into(),
+            values: vec![Value::Str("red".into()), Value::Str("blue".into())],
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "tags", "match": {"except": ["red", "blue"]}}),
+        );
+    }
+
+    #[test]
+    fn match_except_integer_values() {
+        let f = FilterExpr::MatchExcept {
+            field: "code".into(),
+            values: vec![Value::Int(1), Value::Int(2)],
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "code", "match": {"except": [1, 2]}}),
+        );
+    }
+
+    #[test]
+    fn min_should_lowers_to_object_form() {
+        let f = FilterExpr::MinShould {
+            min_count: 2,
+            operands: vec![
+                FilterExpr::Compare {
+                    field: "a".into(),
+                    op: ComparisonOp::Eq,
+                    value: Value::Int(1),
+                },
+                FilterExpr::Compare {
+                    field: "b".into(),
+                    op: ComparisonOp::Eq,
+                    value: Value::Int(2),
+                },
+            ],
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"min_should": {"conditions": [
+                {"key": "a", "match": {"value": 1}},
+                {"key": "b", "match": {"value": 2}}
+            ], "min_count": 2}}),
+        );
+    }
+
+    #[test]
+    fn uint_value_serializes_as_json_number() {
+        let f = FilterExpr::Compare {
+            field: "big".into(),
+            op: ComparisonOp::Eq,
+            value: Value::UInt(18446744073709551615),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "big", "match": {"value": 18446744073709551615u64}}),
+        );
+    }
+
+    #[test]
+    fn string_range_bounds_pass_through() {
+        let f = FilterExpr::Compare {
+            field: "name".into(),
+            op: ComparisonOp::Gt,
+            value: Value::Str("m".into()),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "name", "range": {"gt": "m"}}),
         );
     }
 

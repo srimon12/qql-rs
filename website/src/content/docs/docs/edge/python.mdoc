@@ -1,9 +1,12 @@
 ---
-title: "Python"
-description: "Run QQL fully in-process from Python with the pyqql-edge package."
+title: "Edge Python"
+description: "Run QQL fully in-process from Python with pyqql-edge: bundled parser, planner, local HNSW storage, and optional ONNX embeddings."
 sidebar:
   order: 4
+  label: "Python (edge)"
 ---
+
+> Remote Qdrant version: [Python SDK](/docs/sdks/python/).
 
 `pyqql-edge` is the edge-enabled Python package: the QQL parser, planner,
 runtime, in-process HNSW storage, and optional local ONNX embeddings all live
@@ -64,6 +67,7 @@ pyqql_edge.local_executor(
     reranker_model=None,
     cache_dir=None,
     show_download_progress=False,
+    wal_segment_mb=None,
 )
 ```
 
@@ -78,6 +82,7 @@ pyqql_edge.local_executor(
 | `reranker_model` | `None` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
 | `cache_dir` | `None` | Directory for downloaded models |
 | `show_download_progress` | `False` | Show Hugging Face progress bars |
+| `wal_segment_mb` | `None` *(32 MiB)* | WAL segment capacity in whole MiB; lower values shrink the pre-allocated on-disk WAL footprint |
 
 Usage example:
 
@@ -95,6 +100,13 @@ client = pyqql_edge.local_executor(
 Models are locked at construction. Passing a `USING MODEL '…'` clause that
 names a different model fails loudly instead of switching silently — see
 [models](/docs/edge/models/).
+
+qdrant-edge pre-allocates each WAL segment (default 32 MiB), which dominates
+the on-disk footprint of small embedded shards. Set `wal_segment_mb` (whole
+MiB `>= 1`) to shrink it; it seeds the collection's `edge_config.json`, a
+persisted capacity wins on later constructions, and invalid values fail closed
+with `QQL-VALIDATION-CONFIG`. qdrant-edge 0.8's own Python binding cannot set
+this.
 
 ### `http_executor()`
 
@@ -129,21 +141,33 @@ client = pyqql_edge.http_executor(
 
 | Method | Purpose |
 |---|---|
-| `client.execute(query, *, on_error="stop")` | Execute a query string, `Stmt`, or a list of either. `on_error` is `"stop"` or `"continue"` |
-| `client.execute_async(query, *, on_error="stop")` | Same, but returns an awaitable that runs on the Tokio runtime without blocking the GIL |
+| `client.execute(query, *, params=None, on_error="stop")` | Execute a query string, `Stmt`, or a list of either. `on_error` is `"stop"` or `"continue"`; `params` binds `:name` / `?` placeholders |
+| `client.execute_hits(query, *, params=None, on_error="stop")` | Typed `ScoredPoint` hits directly |
+| `client.execute_async(query, *, params=None, on_error="stop")` | Same, but returns an awaitable that runs on the Tokio runtime without blocking the GIL |
+| `client.execute_async_hits(query, *, params=None, on_error="stop")` | Async typed hits |
 | `client.explain(query)` | Human-readable plan |
 | `client.close()` | Flush and release edge storage. Idempotent |
 | `with client:` | Context manager; `close()` runs on `__exit__` |
 
 `execute` accepts a string, a pre-parsed `Stmt`, or a list of either. Arrays
-and semicolon-delimited strings are auto-batched.
+and semicolon-delimited strings are auto-batched. For a multi-statement batch,
+pass `params` as a list with one entry per statement — the length must match
+the statement count, and each entry is a dict (named) or a list of scalars
+(positional). Nested dicts expand to dotted keys (`{"loc": {"lat": 1.0}}`
+binds `:loc.lat`).
+
+`Stmt` objects expose `stmt.bind(params=None)` (a new bound `Stmt`),
+`stmt.compile_route(params=None)`, and `stmt.to_dict()` / `stmt.to_json()`.
 
 The module also exposes parser helpers with the same names as `pyqql`:
-`parse`, `parse_json`, `is_valid`, `tokenize`, `inject_filter`,
-`compile_query`, and `explain`. `inject_filter` works on a `Stmt` or a query
-string and is the supported way to scope a client to a tenant. Edge has no
-custom `SHARD` routing, so a `SHARD '…'` clause fails at execution with
-`QQL-EDGE-UNSUPPORTED-SHARD` — see [capabilities](/docs/edge/capabilities/).
+`parse`, `parse_json`, `is_valid` (parse + plan), `tokenize`, `inject_filter`,
+`compile_query(query, params=None)`, `bind(query, params=None, *,
+truncate_vectors=False)` (accepts a string or a `Stmt`; `Stmt` +
+`truncate_vectors=True` returns the readable string), and `explain`.
+`inject_filter` works on a `Stmt` or a query string and is the supported way
+to scope a client to a tenant. Edge has no custom `SHARD` routing, so a
+`SHARD '…'` clause fails at execution with `QQL-EDGE-UNSUPPORTED-SHARD` — see
+[capabilities](/docs/edge/capabilities/).
 
 ## One-shot execution
 
@@ -181,9 +205,15 @@ report = pyqql_edge.execute(
 
 Errors are raised as `RuntimeError` (execution) or `SyntaxError` (parsing)
 with structured attributes attached: `err.code` (e.g.
-`QQL-EDGE-UNSUPPORTED-GROUP-BY`), `err.kind`, and `err.span` (a
+`QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP`), `err.kind`, and `err.span` (a
 `{"start", "end"}` dict when the parser has a span). Offline-unsupported
 features always raise — never a silent no-op.
+
+Like `pyqql`, edge `execute` returns an `ExecutionReport` dict subclass with
+typed accessors: `report.hits(stmt)` / `report.points(stmt)` return
+`ScoredPoint` objects (`id`, `score`, `payload`, `text`, `collection`),
+`report.facet(stmt)` returns the normalized facet hits, and `report.count(stmt)`
+returns an integer.
 
 ## Listing models
 

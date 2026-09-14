@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{
@@ -8,7 +9,7 @@ use crate::ast::{
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 
 impl<'a> AstLowerer<'a> {
     pub fn parse_create(&mut self) -> Result<Stmt, QqlError> {
@@ -55,9 +56,10 @@ impl<'a> AstLowerer<'a> {
                             sparse_vector = Some(v);
                         }
                     } else {
-                        return Err(QqlError::syntax(
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-SYNTAX",
                             "expected VECTOR after DENSE/SPARSE",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                 }
@@ -94,9 +96,10 @@ impl<'a> AstLowerer<'a> {
                     let size_tok = self.peek()?;
                     let size = self.parse_numeric_literal()?;
                     if size <= 0.0 || size != (size as u64) as f64 {
-                        return Err(QqlError::syntax(
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-SYNTAX",
                             "vector size must be a positive integer",
-                            size_tok.pos,
+                            size_tok.span,
                         ));
                     }
                     // Qdrant rejects dimensions above 65536 (VectorParams.size
@@ -116,9 +119,10 @@ impl<'a> AstLowerer<'a> {
                         TokenKind::Euclid => VectorDistance::Euclid,
                         TokenKind::Manhattan => VectorDistance::Manhattan,
                         _ => {
-                            return Err(QqlError::syntax(
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-SYNTAX",
                                 "expected distance metric (COSINE, DOT, EUCLID, MANHATTAN)",
-                                dist_tok.pos,
+                                dist_tok.span,
                             ));
                         }
                     };
@@ -151,9 +155,10 @@ impl<'a> AstLowerer<'a> {
                             self.advance()?;
                             vec_cfg = self.parse_vectors_config_block()?.vectors;
                         } else {
-                            return Err(QqlError::syntax(
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-SYNTAX",
                                 "expected HNSW, QUANTIZATION, MULTIVECTOR, or VECTOR after WITH for vector configuration",
-                                self.peek()?.pos,
+                                self.peek()?.span,
                             ));
                         }
                     }
@@ -201,9 +206,10 @@ impl<'a> AstLowerer<'a> {
                                 modifier = mod_val;
                             }
                         } else {
-                            return Err(QqlError::syntax(
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-SYNTAX",
                                 "expected SPARSE or INDEX after WITH for sparse vector configuration",
-                                self.peek()?.pos,
+                                self.peek()?.span,
                             ));
                         }
                     }
@@ -213,16 +219,21 @@ impl<'a> AstLowerer<'a> {
                         modifier,
                     });
                 } else {
-                    return Err(QqlError::syntax(
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-SYNTAX",
                         "expected VECTOR or SPARSE after vector name",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
 
                 if self.peek()?.kind == TokenKind::Comma {
                     self.advance()?;
                 } else if self.peek()?.kind != TokenKind::Rparen {
-                    return Err(QqlError::syntax("expected comma or )", self.peek()?.pos));
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-SYNTAX",
+                        "expected comma or )",
+                        self.peek()?.span,
+                    ));
                 }
             }
             self.expect(TokenKind::Rparen)?;
@@ -254,12 +265,14 @@ impl<'a> AstLowerer<'a> {
         // Consume the SHARD token (parse_create() only peeked at it)
         self.expect(TokenKind::Shard)?;
         self.expect(TokenKind::Key)?;
-        let shard_name = self.parse_string()?;
+        let shard_name = self.parse_shard_key_atom()?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
         let mut shards_number = None;
         let mut replication_factor = None;
+        let mut placement = None;
+        let mut initial_state = None;
         if self.peek()?.kind == TokenKind::With {
             self.advance()?;
             let opts = self.parse_config_block()?;
@@ -273,11 +286,17 @@ impl<'a> AstLowerer<'a> {
                         replication_factor =
                             Some(self.positive_shard_key_u64("replication_factor", value)?);
                     }
+                    "placement" => {
+                        placement = Some(self.shard_key_placement(value)?);
+                    }
+                    "initial_state" => {
+                        initial_state = Some(self.shard_key_initial_state(value)?);
+                    }
                     _ => {
                         return Err(QqlError::parse(
                             "QQL-PARSE-SHARD-KEY-CONFIG",
                             alloc::format!(
-                                "unknown CREATE SHARD KEY parameter '{}'. Expected: shards_number, replication_factor",
+                                "unknown CREATE SHARD KEY parameter '{}'. Expected: shards_number, replication_factor, placement, initial_state",
                                 key
                             ),
                             self.peek()?.span,
@@ -291,6 +310,8 @@ impl<'a> AstLowerer<'a> {
             shard_key: shard_name,
             shards_number,
             replication_factor,
+            placement,
+            initial_state,
         })))
     }
 
@@ -311,4 +332,70 @@ impl<'a> AstLowerer<'a> {
             )),
         }
     }
+
+    /// `placement` is the list of peer ids hosting the key's shards
+    /// (OpenAPI `CreateShardingKey.placement`).
+    fn shard_key_placement(&mut self, value: &crate::ast::Value) -> Result<Vec<u64>, QqlError> {
+        match value {
+            crate::ast::Value::List(items) if !items.is_empty() => items
+                .iter()
+                .map(|item| match item {
+                    crate::ast::Value::Int(n) if *n >= 0 => Ok(*n as u64),
+                    _ => Err(QqlError::parse(
+                        "QQL-PARSE-SHARD-KEY-CONFIG",
+                        "placement entries must be non-negative integers (peer ids)",
+                        self.peek()?.span,
+                    )),
+                })
+                .collect(),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-SHARD-KEY-CONFIG",
+                "placement must be a non-empty list of peer ids",
+                self.peek()?.span,
+            )),
+        }
+    }
+
+    /// `initial_state` is the key's initial replica state (OpenAPI
+    /// `ReplicaState`). Accepted case-insensitively, stored canonical.
+    fn shard_key_initial_state(&mut self, value: &crate::ast::Value) -> Result<String, QqlError> {
+        let span = self.peek()?.span;
+        match value {
+            crate::ast::Value::Str(raw) => canonical_replica_state(raw).ok_or_else(|| {
+                QqlError::parse(
+                    "QQL-PARSE-SHARD-KEY-CONFIG",
+                    alloc::format!("unknown replica state '{raw}'"),
+                    span,
+                )
+            }),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-SHARD-KEY-CONFIG",
+                "initial_state must be a string",
+                span,
+            )),
+        }
+    }
+}
+
+/// Canonical OpenAPI `ReplicaState` names.
+const REPLICA_STATES: &[&str] = &[
+    "Active",
+    "Dead",
+    "Partial",
+    "Initializing",
+    "Listener",
+    "PartialSnapshot",
+    "Recovery",
+    "Resharding",
+    "ReshardingScaleDown",
+    "ActiveRead",
+    "ManualRecovery",
+];
+
+/// Canonicalize a replica state name (case-insensitive); `None` when unknown.
+fn canonical_replica_state(raw: &str) -> Option<String> {
+    REPLICA_STATES
+        .iter()
+        .find(|state| state.eq_ignore_ascii_case(raw))
+        .map(|state| state.to_string())
 }

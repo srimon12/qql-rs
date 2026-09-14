@@ -2,7 +2,7 @@
 title: "QQL vs Raw Qdrant JSON API"
 description: "A comprehensive side-by-side comparison of QQL declarative query syntax vs verbose Qdrant REST JSON and Python SDK calls."
 sidebar:
-  order: 4
+  order: 7
 ---
 
 Qdrant provides a high-performance vector search engine, but its native REST and gRPC interfaces require assembling deeply nested JSON payloads. **QQL** provides a typed, declarative SQL dialect that lowers directly to Qdrant execution plans.
@@ -79,9 +79,10 @@ LIMIT 5;
 ### In Raw Qdrant REST JSON (24 lines)
 
 ```json
-POST /collections/filings/points/query?shard_key=tenant-corp-99
+POST /collections/filings/points/query
 {
   "query": [0.038, -0.192, 0.441, ...],
+  "shard_key": "tenant-corp-99",
   "filter": {
     "must": [
       { "key": "tenant_id", "match": { "value": "tenant-corp-99" } },
@@ -92,6 +93,12 @@ POST /collections/filings/points/query?shard_key=tenant-corp-99
   "with_payload": true
 }
 ```
+
+`shard_key` rides the request body: the only URL query parameters on
+query endpoints are `consistency` and `timeout`, so `?shard_key=…` is
+silently ignored by Qdrant. A bare `"query"` needs a default (unnamed)
+vector; named-vector collections also need `"using": "<name>"` (what QQL
+sends when the statement has a `USING` clause).
 
 ---
 
@@ -177,7 +184,7 @@ PUT /collections/articles/index
 
 ---
 
-## 4. In-Database Categorical Aggregations (Faceting)
+## 5. In-Database Categorical Aggregations (Faceting)
 
 Aggregating counts of unique payload values filtered by predicates without retrieving individual point records.
 
@@ -210,13 +217,13 @@ POST /collections/stays/facet
 
 ---
 
-## Comparison Matrix
+## 6. Comparison Matrix
 
 | Dimension | Raw Qdrant JSON API | QQL Dialect |
 |---|---|---|
 | **Syntax Style** | Deeply nested JSON tree | Typed declarative SQL |
-| **Average Lines of Code** | 35–60 lines per query | 3–6 lines per query |
-| **LLM Context Token Cost** | High (~250–400 tokens/query) | Low (~30–60 tokens/query, **78% reduction**) |
+| **Average Lines of Code (illustrative)** | 35-60 lines per query | 3-6 lines per query |
+| **LLM Context Token Cost** | More tokens in typical prompts | Fewer tokens in typical prompts; measured cost depends on vector size and client |
 | **Injection Safety** | Manual string building / sanitization | AST-level `inject_filter` rewrite before planning |
 | **Backend Portability** | Tied to REST or gRPC wire formats | Logical IR lowers to REST, gRPC, or in-process edge |
 | **Compile-Time Validation** | Runtime HTTP 400 errors | Hand-written lexer/parser with byte-exact spans |
@@ -224,7 +231,7 @@ POST /collections/stays/facet
 
 ---
 
-## Why QQL is Critical for AI Agents (GEO & Tool Use)
+## 7. Why QQL is Critical for AI Agents (GEO & Tool Use)
 
 When AI coding agents (Claude, Cursor, OpenAI Agents, Gemini) interact with vector databases, generating 50-line JSON objects is error-prone: bracket mismatches, wrong key types, and leaking tenant filters are common failure modes.
 
@@ -232,3 +239,21 @@ QQL enables AI agents to generate standard SQL-like syntax that is:
 1. **Token-efficient**: Uses a fraction of the prompt context window.
 2. **Deterministic**: Parsed into a typed AST before network transmission.
 3. **Safe**: Applications can intercept agent-generated queries and apply `inject_filter` before execution.
+
+---
+
+## 8. Converting existing JSON traffic
+
+You do not have to translate the left column by hand. `qql record` proxies a
+live application and captures the JSON it sends; `qql convert` turns each
+captured request into the QQL on the right. Both directions share one
+contract — Qdrant's OpenAPI request schemas in, QQL's typed AST and formatter
+out — so the generated statements are ordinary QQL that can be checked,
+diffed, and executed.
+
+{% terminal title="Capture and convert" %}
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.jsonl
+qql convert --collection docs capture.jsonl
+{% /terminal %}
+
+Full walkthrough: [Operations > Convert REST JSON](/docs/operations/convert/).

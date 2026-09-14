@@ -141,9 +141,16 @@ stmt.injectFilter("tenant_id", "=", "acme");
 stmt.shardKey = "acme";
 console.log(stmt.shardKey);
 
-const route = stmt.compileRoute();          // { stmt_type, method, path, payload }
+// Bind :name (object) or ? (array) parameters; returns a new bound Stmt.
+const bound = stmt.bind({ q: "search", lim: 5 });
+
+const route = stmt.compileRoute({ q: "search", lim: 5 }); // { stmt_type, method, path, payload }
 const astJson = stmt.toJSON();              // string
 const astObject = stmt.toObject();          // plain JS object
+
+console.log(stmt.toString());          // canonical, re-parseable QQL
+console.log(stmt.toReadableString());  // readable preview; long vectors truncated
+console.log(stmt.explain());           // execution plan for this statement
 
 // Transferable byte compile.
 const routeBytes = stmt.compileRouteBytes();
@@ -157,10 +164,15 @@ Methods:
 |---|---|---|
 | `new Stmt(source)` | owned handle | Parse exactly one statement |
 | `injectFilter(field, op, value)` | void | Inject a trusted predicate (mutates in place) |
-| `shardKey` getter / setter | string or null | Assign or read QQL `SHARD` routing |
+| `shardKey` getter / setter | string, integer (`BigInt`), or null | Assign or read QQL `SHARD` routing (integers stay numeric keys) |
+| `bind(params?)` | bound `Stmt` | Substitute `:name` / `?` parameters; params optional |
+| `bound` | boolean | Whether params were already bound; passing new params to a bound `Stmt` throws `QQL-BIND-ALREADY-BOUND` |
 | `toJSON()` | string | Serialize the AST to JSON |
 | `toObject()` | object | Serialize the AST to a JS object |
-| `compileRoute()` | `{stmt_type, method, path, payload}` | Compile this statement to a Qdrant REST route |
+| `toString()` | string | Canonical, re-parseable QQL |
+| `toReadableString()` | string | Readable preview (truncated vectors, may not re-parse) |
+| `explain()` | string | Execution plan for this statement |
+| `compileRoute(params?)` | `{stmt_type, method, path, payload}` | Compile this statement to a Qdrant REST route (optionally binding params) |
 | `compileRouteBytes()` | `Uint8Array` | Transferable route compile |
 | `free()` / `[Symbol.dispose]()` | — | Release WASM memory (`using` works in TypeScript) |
 
@@ -183,12 +195,56 @@ try {
 }
 ```
 
-`execute(query | string[], options)` accepts a single statement, a
-semicolon-delimited script, or an array of independent sources. `options.onError`
-is `"stop"` (default) or `"continue"`. `options.params` is an object for `:name`
-or an array for `?` — the same shape as `bind(query, params)`. `executeStmt(stmt)`
-runs a pre-parsed `Stmt` handle. `compile(query)` and `explain(query)` inspect a
-route or plan without touching the network.
+`execute(query | Stmt | (query | Stmt)[], options)` accepts a single statement or
+script string, a pre-parsed `Stmt`, or an array of independent strings/`Stmt`s. `ExecuteOptions`
+is `{ onError?, params? }` — `onError` is `"stop"` (default) or `"continue"`,
+and `params` is an object for `:name` or an array for `?` — the same shape as
+`bind(query, params)`. For a batch or script, `params` may be an array with one
+entry per statement; the length must match the statement count exactly.
+`executeStmt(stmt, options)` runs a pre-parsed `Stmt` handle. `compile(query)`
+and `explain(query)` inspect a route or plan without touching the network.
+`explainAnalyze(query, options)` runs one statement and returns the static plan
+plus measured client timings and server telemetry (see below).
+
+The report is a plain `{ ok, results, succeeded, failed, telemetry }` object.
+Wrap it with the [`dx.js` helpers](#typed-dx-layer-dxjs) for typed `hits()` /
+`facet()` / `count()` / `groups()` accessors, `telemetry` reads, and the
+`executeHits(client, query, options)` one-shot instead of hand-rolling either.
+Row vectors accept plain arrays, `Float32Array` / `Float64Array`
+(packed, one copy), integer typed arrays, and the flat `{ data, dim }`
+multivector form everywhere params enter. A plain `number[]` of 32+ elements
+also binds as a packed `F32Array` with one copy instead of a per-element walk;
+shorter lists and nested shapes keep exact list semantics, and payload values
+are never repacked. Statement indexes in the typed
+accessors use Python list semantics on all hosts (`-1` is the last statement;
+out-of-range returns `[]` or `0`).
+
+Response shaping is strict and canonical, matching the native SDKs' typed
+`ExecData` report: every operation reads exactly its Qdrant OpenAPI response
+field (`result.points`, the bare `result` array for `QUERY POINTS`,
+`result.groups`, `result.count`, facet `result.hits`, `result.collections`,
+`result.shard_keys`, `result.config`, `CollectionInfo`) and emits the same JSON
+shapes (hits carry no separate `text`, groups are `{ groups: [{ id, hits }] }`,
+counts are `{ count }`, collections and shard keys are `{ collections }` /
+`{ shard_keys }`). A missing or mistyped backend field fails the statement with
+`QQL-BACKEND-ENVELOPE` instead of silently returning an empty or synthesized
+result. Server telemetry (`time`, `usage`) stays optional and lenient.
+
+## Bulk ingest
+
+```javascript
+const rows = [
+  { id: 1, vector: { dense: new Float32Array([0.1, 0.2, 0.3]) }, tag: "a" },
+  { id: 2, vector: { dense: [0.4, 0.5, 0.6] }, tag: "b" },
+];
+const report = await client.upsertMany("docs", rows, { batchSize: 100 });
+```
+
+One `:rows` template is prepared once, then each chunk splices through the
+point-splice path with no re-parse. The full typed-array contract lives once in
+the [API surface reference](/docs/reference/api-surface/): same row shapes on
+Python, Node, and WASM, same `QQL-BIND-TYPE-MISMATCH` for a non-array `rows`,
+same `QQL-VALIDATION-UPSERT-BATCH` for `batchSize < 1`.
 
 ```javascript
 await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
@@ -250,7 +306,76 @@ The callback is called once with the full batch, so prefer a model that embeds
 batches. `setHttpEmbedder(endpoint, model, dimension, apiKey?)` configures any
 OpenAI-compatible `{"model", "input": [...]}` endpoint and sends the whole batch
 in one request. `setRemoteEmbedder` is an alias with the same signature.
-`hasEmbedder()` reports whether either is configured.
+`hasEmbedder()` reports whether any embedder is configured.
+
+`setHttpMultiEmbedder(endpoint, model, dimension, apiKey?)` configures a multi-vector endpoint returning nested `[[...]]` bags (flat arrays are rejected). `setHttpImageEmbedder(endpoint, model, dimension, apiKey?)` configures an image endpoint. `setHttpReranker(endpoint, model, apiKey?)` configures a cross-encoder rerank endpoint. Browser calls need CORS-enabled endpoints.
+
+```javascript
+client.setHttpMultiEmbedder(
+  "https://embeddings.example.com/v1/multi",
+  "colbert-model",
+  96,
+  null,
+);
+client.setHttpImageEmbedder(
+  "https://embeddings.example.com/v1/image",
+  "clip-model",
+  512,
+  null,
+);
+client.setHttpReranker(
+  "https://rerank.example.com/rerank",
+  "bge-reranker",
+  null,
+);
+```
+
+## Typed DX layer (`dx.js`)
+
+For structured, typed result handling matching `@veristamp/nqql` and `pyqql`, `@veristamp/qql-wasm` includes the `dx.js` helper module:
+
+```javascript
+import init, { Client } from "qql-wasm";
+import { ExecutionReport, ScoredPoint, buildError, executeHits } from "qql-wasm/dx";
+
+await init();
+
+const client = new Client("http://localhost:6333");
+const raw = await client.execute("QUERY 'search text' FROM docs LIMIT 5;");
+const report = new ExecutionReport(raw);
+
+console.log(`Success: ${report.ok}, hits: ${report.succeeded}`);
+for (const hit of report.hits(0)) {
+  console.log(hit.id, hit.score, hit.payload);
+}
+```
+
+The module exports:
+- **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)` returning `[{ id, hits }]`). Negative indexes count from the end. `report.telemetry` reads aggregated server time and usage (`{ time_s, usage }` or `null`) so browser code never hand-rolls the sum.
+- **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text` (derived from `payload.text`), `.collection`, `.vector` (dense / sparse / multi-dense / named when `WITH VECTOR`), plus `.get(key, default)`. `.shard_key` is a legacy passthrough, always null on the typed path.
+- **`buildError`**: Unpacks JSON error strings into `Error` objects carrying `.code`, `.kind`, `.span`, plus `.fields` and `.request_id` when present.
+- **`wrapReport`**: Returns the input if already an `ExecutionReport`, else wraps the plain object.
+- **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly. Prefer this over manual `execute` plus `hits(0)` when only hits are needed.
+- **`scrollCursor(client, collection, options)`**: Lazy async generator over `SCROLL ... AFTER :cursor` (at most one page buffered). Same options shape as Node (`batchSize`, `where`, `params`, `withPayload`, `withVector`, `shardKey`).
+
+```javascript
+import init, { Client } from "qql-wasm";
+import { ExecutionReport, executeHits } from "qql-wasm/dx";
+
+await init();
+const client = new Client("http://localhost:6333");
+
+// One-shot hits without touching the report
+const hits = await executeHits(client, "QUERY 'search text' FROM docs LIMIT 5");
+
+// Telemetry without hand-rolled aggregation
+const report = new ExecutionReport(await client.execute("QUERY 'x' FROM docs LIMIT 5"));
+console.log(report.telemetry); // { time_s, usage } or null
+
+// Profile before optimizing: static plan plus client phases and server telemetry
+const analysis = await client.explainAnalyze("QUERY 'x' FROM docs USING dense LIMIT 5");
+console.log(analysis.plan, analysis.phases, analysis.server_time_s, analysis.usage);
+```
 
 ## Memory
 
@@ -264,23 +389,35 @@ releases it automatically.
 | `init` / `initSync` | initialized WASM module | One-time module initialization |
 | `parse`, `isValid`, `tokenize` | AST values, boolean, token list | Strict local parser primitives |
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
-| `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
+| `compile` / `compileQuery`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers (`compileQuery` is an alias of `compile`) |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
-| `bind(query, params)` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline |
+| `bind(query, params?, { truncateVectors })` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline; `params` optional — omitted returns the query unchanged |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
-| `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
+| `new Stmt(source)` | owned statement handle | `injectFilter`, bind, route compile, and shard assignment |
 | `Stmt.injectFilter`, `Stmt.shardKey` | mutated statement handle | Trusted filtering and optional routing |
+| `Stmt.bind`, `Stmt.compileRoute` | bound handle, route | Prepared-statement binding and offline route compile |
+| `Stmt.toString`, `Stmt.toReadableString`, `Stmt.explain` | text | Canonical form, readable preview, and per-statement plan |
 | `Stmt.toObject`, `toJSON`, `compileRoute` | AST or route | Inspect a single owned statement |
 | `Stmt.compileRouteBytes` | `Uint8Array` | Transferable single-statement route |
-| `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls |
+| `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls (report carries `telemetry`; wrap with `dx.js` for typed accessors) |
 | `Client.compile`, `Client.explain` | route, plan text | Inspect work before sending traffic |
-| `setEmbedder`, `setHttpEmbedder`, `hasEmbedder` | configured client | Resolve text input from JavaScript or HTTP |
+| `Client.explainAnalyze` | plan plus measured timings | Static plan, client phases, and server telemetry for one statement |
+| `setEmbedder`, `setHttpEmbedder`, `setHttpMultiEmbedder`, `setHttpImageEmbedder`, `setHttpReranker`, `hasEmbedder` | configured client | Resolve text, multi, image, and rerank input from JavaScript or HTTP (see the embedder ladder in the API surface reference) |
 | `Client.setRemoteEmbedder` | configured client | Alias for `setHttpEmbedder` |
+| `dx.js ExecutionReport` | typed accessors plus `telemetry` | `hits` / `points` / `ids` / `facet` / `count` / `groups` (negative index counts from the end; `groups` returns `[{ id, hits }]`), `telemetry`, `wrapReport`, `executeHits`, `scrollCursor` |
 | `setRouteAffinity`, `routeAffinity` | configured client, key | Pin reads via `X-Qdrant-Route-Affinity` (Qdrant 1.19+) |
 | `free()` / `[Symbol.dispose]` | released WASM allocation | Dispose `Client` and `Stmt` handles |
 
 {% aside type="caution" title="Browser capability boundary" %}
-WASM has no gRPC or edge backend. `setHttpEmbedder` configures one HTTP text
-embedder; multi-vector, image, and reranker endpoint configuration belongs in
-the Rust, Python, or Node SDKs.
+WASM has no gRPC or edge backend. `setHttpEmbedder` configures the dense text endpoint; use `setHttpMultiEmbedder`, `setHttpImageEmbedder`, and `setHttpReranker` for the other groups.
 {% /aside %}
+
+## Parameter binding
+
+`bind(query, params?)`, `Stmt.bind(params?)`, and `execute(…, { params })`
+take an object for `:name` or an array for `?` — the same contract as every
+other SDK. Vector params accept plain arrays, `Float32Array` /
+`Float64Array` (packed, one copy), integer typed arrays (sparse `indices`),
+and the flat `{ data, dim }` multivector form; raw `ArrayBuffer` without a
+float view fails closed. `parseJson` returns the AST as a raw JSON string
+with no object allocation.

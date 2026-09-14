@@ -49,32 +49,41 @@ SELECT * FROM docs WHERE id = 42;
 INSERT INTO docs VALUES {id: 1};
 
 -- @case legacy-boost
+-- @error QQL-PARSE-STATEMENT
 BOOST ($score * 2);
 
 -- @case legacy-collection-vectors-prefix
+-- @error QQL-PARSE-SEPARATOR
 CREATE COLLECTION docs VECTORS (dense VECTOR (4, COSINE));
 
 -- @case legacy-implicit-vector-name
+-- @error QQL-PARSE-SYNTAX
 CREATE COLLECTION docs (VECTOR (4, COSINE));
 
 -- @case legacy-omitted-vector-keyword
+-- @error QQL-PARSE-SYNTAX
 CREATE COLLECTION docs (dense (4, COSINE));
 
 -- @case legacy-vector-config-plural
+-- @error QQL-PARSE-SYNTAX
 CREATE COLLECTION docs (
   dense VECTOR (4, COSINE) WITH VECTORS (on_disk = true)
 );
 
 -- @case legacy-quantize
+-- @error QQL-VALIDATION-CONFIG
 ALTER COLLECTION docs WITH QUANTIZE (type = 'scalar');
 
 -- @case legacy-shard-without-key
+-- @error QQL-PARSE-EXPECTED
 CREATE SHARD 'tenant' ON COLLECTION docs;
 
 -- @case legacy-short-rrf-k
+-- @error QQL-VALIDATION-SEARCH-PARAM
 QUERY TEXT 'x' FROM docs PARAMS (k = 30);
 
 -- @case legacy-short-rrf-weights
+-- @error QQL-VALIDATION-SEARCH-PARAM
 QUERY TEXT 'x' FROM docs PARAMS (weights = [1.0]);
 
 -- @case legacy-quoted-index-type
@@ -126,3 +135,47 @@ QUERY FORMULA MIN() DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 -- @case create-collection-vector-size-above-maximum
 -- @error QQL-PARSE-VECTOR-SIZE
 CREATE COLLECTION docs (oversized VECTOR(65537, COSINE));
+
+-- @case number-exponent-overflow-value
+-- @error QQL-PARSE-FLOAT
+UPSERT INTO docs VALUES {id: 1, v: 1e999};
+
+-- @case number-exponent-overflow-formula
+-- @error QQL-PARSE-NUMBER
+QUERY FORMULA 1e999 FROM docs LIMIT 5;
+
+-- @case limit-beyond-u64-range
+-- @error QQL-PARSE-POSITIVE-INTEGER
+QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;
+
+-- @case duplicate-wait-clause
+-- @error QQL-PARSE-DUPLICATE-CLAUSE
+DELETE FROM docs WHERE id = 1 WAIT true WAIT false;
+
+-- @case alter-vector-diff-empty-body
+-- @error QQL-PARSE-VECTOR-DIFF
+ALTER COLLECTION docs WITH VECTOR dense ();
+
+-- @case alter-vector-diff-datatype
+-- @error QQL-PARSE-VECTOR-DIFF
+ALTER COLLECTION docs WITH VECTOR dense (VECTOR (datatype = 'float16'));
+
+-- @case alter-vector-diff-duplicate-name
+-- @error QQL-VALIDATION-CONFIG
+ALTER COLLECTION docs WITH VECTOR dense (HNSW (m = 16)) WITH VECTOR dense (HNSW (m = 32));
+
+-- @case recommend-empty-example-list
+-- @error QQL-PARSE-POINT-IDS
+QUERY RECOMMEND POSITIVE () FROM docs LIMIT 5;
+
+-- @case recommend-trailing-comma
+-- @error QQL-PARSE-QUERY-INPUT
+QUERY RECOMMEND POSITIVE (1,) FROM docs LIMIT 5;
+
+-- @case recommend-empty-negative-list
+-- @error QQL-PARSE-POINT-IDS
+QUERY RECOMMEND POSITIVE (1) NEGATIVE () FROM docs LIMIT 5;
+
+-- @case recommend-empty-vector-example
+-- @error QQL-VALIDATION-VECTOR
+QUERY RECOMMEND POSITIVE (VECTOR []) FROM docs LIMIT 5;

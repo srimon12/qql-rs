@@ -9,7 +9,7 @@ fn nearest_text_is_default_shorthand() {
     let s = Parser::parse("QUERY 'hello' FROM docs;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
-        input: QueryInput::Text { ref text, model: None }, ..
+        input: QueryInput::Text { ref text, model: None, .. }, ..
     } if text == "hello"));
     assert_eq!(q.collection, QueryCollection::Explicit("docs".into()));
 }
@@ -49,7 +49,7 @@ fn nearest_explicit_text_with_model() {
     let s = Parser::parse("QUERY TEXT 'search' MODEL 'all-minilm' FROM docs;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
-        input: QueryInput::Text { ref text, model: Some(ref m) }, ..
+        input: QueryInput::Text { ref text, model: Some(ref m), .. }, ..
     } if text == "search" && m == "all-minilm"));
 }
 
@@ -166,8 +166,47 @@ fn formula_query() {
 }
 
 #[test]
+fn formula_subtract_negative_literal() {
+    // The lexer folds a leading `-` into numeric literals, so `1 - -2` lowers
+    // to Sub(Constant(1), Constant(-2)) with no double negation: `-2` is one
+    // signed token, and the binary minus is the single explicit operator.
+    // (`--` after whitespace is always a line comment — see lexer_tests — so
+    // the spaced form is the only way to write this.)
+    let s = Parser::parse("QUERY FORMULA 1 - -2 FROM docs LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else {
+        panic!("expected query")
+    };
+    let QueryExpr::Formula { expression, .. } = &q.expression else {
+        panic!("expected formula, got {:?}", q.expression);
+    };
+    let FormulaExpr::Sub { left, right } = expression.as_ref() else {
+        panic!("expected Sub, got {expression:?}");
+    };
+    assert_eq!(**left, FormulaExpr::Constant { value: 1.0 });
+    assert_eq!(**right, FormulaExpr::Constant { value: -2.0 });
+}
+
+#[test]
+fn bare_nan_is_a_string_value_not_a_float() {
+    // QQL has no NaN literal: a bare `NaN` is an identifier and falls back to
+    // a string value like any bare identifier in filter position. Only
+    // *numeric* non-finite forms exist, and those are rejected (see
+    // `non_finite_float_literals_rejected`).
+    let s = Parser::parse("QUERY TEXT 'x' FROM docs WHERE score >= NaN LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else {
+        panic!("expected query")
+    };
+    let Some(FilterExpr::Compare { value, .. }) = q.filter.as_deref() else {
+        panic!("expected compare filter, got {:?}", q.filter);
+    };
+    assert!(matches!(value, Value::Str(v) if v == "NaN"));
+}
+
+#[test]
 fn formula_query_div_default() {
-    let res = Parser::parse("QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;");
+    let res = Parser::parse(
+        "QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+    );
     assert!(res.is_ok(), "failed: {:?}", res.err());
 }
 
@@ -268,6 +307,7 @@ fn using_hybrid_shorthand_expands_to_hybrid() {
             sparse_vector: Some(ref sp),
             fusion: FusionMethod::Rrf,
             model: None,
+            ..
         } if text == "search" && d == "dense" && sp == "sparse"
     ));
 }
@@ -284,6 +324,7 @@ fn using_hybrid_defaults_fusion_rrf_and_omitted_names() {
             sparse_vector: None,
             fusion: FusionMethod::Rrf,
             model: None,
+            ..
         } if text == "search"
     ));
 }
@@ -303,6 +344,7 @@ fn using_hybrid_preserves_model_and_dbsf() {
             dense_vector: Some(ref d),
             sparse_vector: Some(ref sp),
             fusion: FusionMethod::Dbsf,
+            ..
         } if text == "q" && m == "nomic" && d == "d" && sp == "s"
     ));
 }
@@ -311,10 +353,12 @@ fn using_hybrid_preserves_model_and_dbsf() {
 fn using_hybrid_rejects_non_text_nearest() {
     assert!(Parser::parse("QUERY VECTOR [0.1, 0.2] FROM docs USING HYBRID LIMIT 10;").is_err());
     assert!(Parser::parse("QUERY IMAGE '/tmp/a.png' FROM docs USING HYBRID LIMIT 10;").is_err());
-    assert!(Parser::parse(
-        "QUERY MMR TEXT 'x' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING HYBRID LIMIT 10;"
-    )
-    .is_err());
+    assert!(
+        Parser::parse(
+            "QUERY MMR TEXT 'x' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING HYBRID LIMIT 10;"
+        )
+        .is_err()
+    );
     // Front-form already Hybrid — USING HYBRID is redundant/invalid.
     assert!(Parser::parse("QUERY HYBRID TEXT 'x' FROM docs USING HYBRID LIMIT 10;").is_err());
 }
@@ -420,15 +464,16 @@ fn params_idf_global_and_corpus() {
     // Bare keyword global, and formatter round-trip of WHERE corpora.
     let s = Parser::parse("QUERY 'x' FROM docs PARAMS (idf = global) LIMIT 5;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
-    assert!(q
-        .params
-        .as_ref()
-        .unwrap()
-        .idf
-        .as_ref()
-        .unwrap()
-        .corpus
-        .is_none());
+    assert!(
+        q.params
+            .as_ref()
+            .unwrap()
+            .idf
+            .as_ref()
+            .unwrap()
+            .corpus
+            .is_none()
+    );
 
     let formatted = crate::fmt::format_stmt(
         &Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 'global') LIMIT 5;").unwrap(),
@@ -463,7 +508,10 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     let Stmt::Query(q) = &with_clause else {
         panic!()
     };
-    assert_eq!(q.shard_key.as_deref(), Some("acme"));
+    assert_eq!(
+        q.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
 
     // Host path after parse: property setter (recurses into CTEs)
     let mut stmt = Parser::parse(
@@ -473,13 +521,21 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     .unwrap();
     assert!(stmt.set_shard_key(Some("acme".into())));
     let Stmt::Query(q) = &stmt else { panic!() };
-    assert_eq!(q.shard_key.as_deref(), Some("acme"));
-    assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
-    assert!(stmt.set_shard_key(Some(String::new()))); // empty clears
+    assert_eq!(
+        q.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
+    assert_eq!(
+        q.ctes[0].query.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
+    assert!(stmt.set_shard_key(Some(crate::ast::ShardKey::Keyword(String::new())))); // empty clears
     assert_eq!(stmt.shard_key(), None);
-    assert!(!Parser::parse("SHOW COLLECTIONS")
-        .unwrap()
-        .set_shard_key(Some("x".into())));
+    assert!(
+        !Parser::parse("SHOW COLLECTIONS")
+            .unwrap()
+            .set_shard_key(Some("x".into()))
+    );
 }
 
 #[test]
@@ -488,14 +544,20 @@ fn mutation_shard_key_parses_from_qql() {
     let Stmt::ClearPayload(c) = clear else {
         panic!("expected ClearPayload");
     };
-    assert_eq!(c.shard_key.as_deref(), Some("tenant-a"));
+    assert_eq!(
+        c.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-a".into()))
+    );
 
     let del_vec =
         Parser::parse("DELETE VECTOR dense FROM docs WHERE id = 1 SHARD 'tenant-b';").unwrap();
     let Stmt::DeleteVector(d) = del_vec else {
         panic!("expected DeleteVector");
     };
-    assert_eq!(d.shard_key.as_deref(), Some("tenant-b"));
+    assert_eq!(
+        d.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-b".into()))
+    );
 
     let upd_vec =
         Parser::parse("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1 SHARD 'tenant-c';")
@@ -503,7 +565,10 @@ fn mutation_shard_key_parses_from_qql() {
     let Stmt::UpdateVector(u) = upd_vec else {
         panic!("expected UpdateVector");
     };
-    assert_eq!(u.shard_key.as_deref(), Some("tenant-c"));
+    assert_eq!(
+        u.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-c".into()))
+    );
 
     let upd_pay =
         Parser::parse("UPDATE docs SET PAYLOAD = {\"a\": 1} WHERE id = 1 SHARD 'tenant-d';")
@@ -511,11 +576,133 @@ fn mutation_shard_key_parses_from_qql() {
     let Stmt::UpdatePayload(p) = upd_pay else {
         panic!("expected UpdatePayload");
     };
-    assert_eq!(p.shard_key.as_deref(), Some("tenant-d"));
+    assert_eq!(
+        p.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-d".into()))
+    );
 
     let mut host = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
     assert!(host.set_shard_key(Some("injected".into())));
-    assert_eq!(host.shard_key(), Some("injected"));
+    assert_eq!(
+        host.shard_key(),
+        Some(&crate::ast::ShardKey::Keyword("injected".into()))
+    );
+}
+
+#[test]
+fn upsert_and_create_accept_numeric_shard_keys() {
+    let upsert = Parser::parse("UPSERT INTO docs VALUES :rows SHARD 101 WAIT true;").unwrap();
+    let Stmt::Upsert(u) = upsert else {
+        panic!("expected Upsert");
+    };
+    assert_eq!(u.shard_key, Some(crate::ast::ShardKey::Number(101)));
+
+    let create = Parser::parse("CREATE SHARD KEY 101 ON COLLECTION docs;").unwrap();
+    let Stmt::CreateShardKey(c) = create else {
+        panic!("expected CreateShardKey");
+    };
+    assert_eq!(c.shard_key, crate::ast::ShardKey::Number(101));
+}
+
+#[test]
+fn repro_numeric_shard_key_stays_typed_on_drop() {
+    // DROP SHARD KEY must address numeric partitions: currently a parse error.
+    let stmt = Parser::parse("DROP SHARD KEY 101 ON COLLECTION docs;");
+    let Ok(Stmt::DropShardKey(d)) = stmt else {
+        panic!("expected DROP SHARD KEY 101 to parse, got {stmt:?}");
+    };
+    assert_eq!(d.shard_key, crate::ast::ShardKey::Number(101));
+}
+
+#[test]
+fn repro_shard_key_accepts_placeholders() {
+    // Grammar 1.7 promises params in clauses; SDK examples bind SHARD :tenant.
+    // Currently a parse error on every statement.
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM docs SHARD :tenant LIMIT 1;");
+    let Ok(Stmt::Query(_)) = stmt else {
+        panic!("expected SHARD :tenant to parse, got {stmt:?}");
+    };
+}
+
+#[test]
+fn shard_keys_list_accepts_mixed_string_and_integer_keys() {
+    use crate::ast::ShardKey;
+    let stmt = Parser::parse(
+        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_keys = ['a', 5]);",
+    )
+    .unwrap();
+    let Stmt::CreateCollection(cc) = &stmt else {
+        panic!("expected CreateCollection");
+    };
+    let keys = cc
+        .config
+        .as_ref()
+        .and_then(|c| c.params.as_ref())
+        .and_then(|p| p.shard_keys.clone())
+        .expect("shard_keys");
+    assert_eq!(
+        keys,
+        vec![ShardKey::Keyword("a".into()), ShardKey::Number(5)]
+    );
+}
+
+#[test]
+fn numeric_shard_key_stays_typed_on_mutations() {
+    // The 1.7 silent-mistargeting fix: SHARD 101 must not become "101".
+    for (qql, expect) in [
+        (
+            "DELETE FROM docs WHERE id = 1 SHARD 101;",
+            crate::ast::ShardKey::Number(101),
+        ),
+        (
+            "UPDATE docs SET PAYLOAD = {\"a\": 1} WHERE id = 1 SHARD 7;",
+            crate::ast::ShardKey::Number(7),
+        ),
+        (
+            "CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 't';",
+            crate::ast::ShardKey::Keyword("t".into()),
+        ),
+    ] {
+        let stmt = Parser::parse(qql).unwrap();
+        assert_eq!(stmt.shard_key().cloned(), Some(expect), "{qql}");
+    }
+}
+
+#[test]
+fn shard_key_placeholder_binds_and_validates() {
+    use crate::ast::Value;
+    use crate::params::{bind_stmt, collect_statement_params, validate_no_unbound_params};
+    use alloc::collections::BTreeMap;
+
+    let mut stmt = Parser::parse("QUERY TEXT 'x' FROM docs SHARD :tenant LIMIT 1;").unwrap();
+    // Collected like any other placeholder so prepared statements require it.
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("tenant"));
+    // Unbound fails closed with the binder's own code.
+    let err = validate_no_unbound_params(&stmt).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+    // Bound values keep their form: strings route as keywords, ints numeric.
+    let mut map = BTreeMap::new();
+    map.insert("tenant".to_string(), Value::Str("acme".into()));
+    bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap();
+    assert_eq!(
+        stmt.shard_key().cloned(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
+    let mut stmt = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD :n;").unwrap();
+    let mut map = BTreeMap::new();
+    map.insert("n".to_string(), Value::Int(101));
+    bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap();
+    assert_eq!(
+        stmt.shard_key().cloned(),
+        Some(crate::ast::ShardKey::Number(101))
+    );
+    // Wrong-typed values fail with the bind type code, not a panic.
+    let mut stmt = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD :n;").unwrap();
+    let mut map = BTreeMap::new();
+    map.insert("n".to_string(), Value::Bool(true));
+    let err = bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH");
 }
 
 #[test]
@@ -533,6 +720,7 @@ fn cross_rerank_parses() {
                 model,
                 field,
                 prefetch,
+                ..
             } => {
                 assert_eq!(query, "q");
                 assert_eq!(model, "bge-reranker-base");
@@ -554,7 +742,7 @@ fn image_query_input_parses() {
     match stmt {
         Stmt::Query(q) => match &q.expression {
             QueryExpr::Nearest {
-                input: QueryInput::Image { source, model },
+                input: QueryInput::Image { source, model, .. },
                 using: Some(u),
                 ..
             } => {
@@ -727,7 +915,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
         r"UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: 'QUERY \$QUERY_TEXT FROM docs USING dense LIMIT \$LIMIT' };"
     ).unwrap();
     let Stmt::Upsert(u) = stmt else { panic!() };
-    let (_, val) = &u.points[0].payload[0];
+    let (_, val) = &(u.points[0].as_inline().expect("inline point")).payload[0];
     match val {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT")
@@ -741,7 +929,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u_raw) = raw_stmt else {
         panic!()
     };
-    let (_, val_raw) = &u_raw.points[0].payload[0];
+    let (_, val_raw) = &(u_raw.points[0].as_inline().expect("inline point")).payload[0];
     match val_raw {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT")
@@ -756,7 +944,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u_raw_bs) = raw_backslash_stmt else {
         panic!()
     };
-    let (_, val_raw_bs) = &u_raw_bs.points[0].payload[0];
+    let (_, val_raw_bs) = &(u_raw_bs.points[0].as_inline().expect("inline point")).payload[0];
     match val_raw_bs {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, r"path\to\$file");
@@ -770,7 +958,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u_triple) = triple_stmt else {
         panic!()
     };
-    let (_, val_triple) = &u_triple.points[0].payload[0];
+    let (_, val_triple) = &(u_triple.points[0].as_inline().expect("inline point")).payload[0];
     match val_triple {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, "QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;")
@@ -785,7 +973,7 @@ fn triple_quoted_strings_preserve_backslash_verbatim() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => {
             // Backslash is content, not an escape: the value is `a\nb`
@@ -802,7 +990,7 @@ fn triple_quoted_strings_preserve_doubled_quotes_verbatim() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, "it''s"),
         _ => panic!("expected string payload"),
@@ -815,7 +1003,7 @@ fn triple_quoted_double_delimited_strings_are_verbatim() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, r"a\nb"),
         _ => panic!("expected string payload"),
@@ -828,7 +1016,7 @@ fn four_quotes_decode_to_single_apostrophe() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, "'"),
         _ => panic!("expected string payload"),
@@ -841,7 +1029,7 @@ fn empty_triple_quoted_string_decodes_to_empty() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, ""),
         _ => panic!("expected string payload"),
@@ -877,6 +1065,7 @@ fn stmt_serde_round_trips_through_json() {
         "DELETE PAYLOAD title FROM docs WHERE id = 1;",
         "DELETE VECTOR dense FROM docs WHERE id = 1;",
         "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;",
+        "UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1]}, {id: 2, vector: {dense: [0.2]}};",
         "UPDATE docs SET PAYLOAD = {a: 1} WHERE id = 1;",
         "COUNT FROM docs WHERE active = true WITH (exact = true);",
     ];
@@ -915,4 +1104,149 @@ fn implicit_array_vector_literal_parses() {
     let stmt3 = Parser::parse("QUERY [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
     let stmt4 = Parser::parse("QUERY VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
     assert_eq!(stmt3, stmt4);
+}
+
+#[test]
+fn named_limit_params_are_colon_prefixed() {
+    let Stmt::Query(q) = Parser::parse("QUERY [0.1] FROM docs LIMIT :lim OFFSET :off;").unwrap()
+    else {
+        panic!("query");
+    };
+    assert_eq!(q.page.limit_param.as_deref(), Some(":lim"));
+    assert_eq!(q.page.offset_param.as_deref(), Some(":off"));
+
+    let Stmt::Scroll(s) = Parser::parse("SCROLL FROM docs LIMIT :lim;").unwrap() else {
+        panic!("scroll");
+    };
+    assert_eq!(s.limit_param.as_deref(), Some(":lim"));
+
+    let Stmt::Facet(f) = Parser::parse("FACET category FROM docs LIMIT :lim;").unwrap() else {
+        panic!("facet");
+    };
+    assert_eq!(f.limit_param.as_deref(), Some(":lim"));
+
+    let Stmt::Query(q) = Parser::parse("QUERY TEXT :q FROM docs;").unwrap() else {
+        panic!("text");
+    };
+    let QueryExpr::Nearest {
+        input: QueryInput::Text { text_param, .. },
+        ..
+    } = q.expression
+    else {
+        panic!("nearest");
+    };
+    assert_eq!(text_param.as_deref(), Some(":q"));
+}
+
+#[test]
+fn float_and_integer_keywords_are_string_values() {
+    let Stmt::Query(q) = Parser::parse("QUERY TEXT 'x' FROM docs WHERE kind = FLOAT;").unwrap()
+    else {
+        panic!("query");
+    };
+    match q.filter.as_deref() {
+        Some(FilterExpr::Compare {
+            value: Value::Str(s),
+            ..
+        }) if s.eq_ignore_ascii_case("float") => {}
+        other => panic!("expected string FLOAT, got {other:?}"),
+    }
+}
+
+#[test]
+fn quoted_identifier_decodes_escapes() {
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM \"docs\\nset\";").unwrap();
+    let Stmt::Query(q) = stmt else { panic!() };
+    assert_eq!(q.collection, QueryCollection::Explicit("docs\nset".into()));
+}
+
+#[test]
+fn payload_mutation_filter_params_are_collected_for_prepared() {
+    // Clear/DeletePayload/DeleteVector selectors never fed collection, so
+    // prepared execution rejected their filter params as unused. Shard keys
+    // ride the same arms.
+    use crate::params::collect_statement_params;
+    for (qql, expect) in [
+        (
+            "CLEAR PAYLOAD FROM docs WHERE x = :v SHARD :t;",
+            vec!["t", "v"],
+        ),
+        ("DELETE PAYLOAD k FROM docs WHERE x = :v;", vec!["v"]),
+        ("DELETE VECTOR d FROM docs WHERE id = :i;", vec!["i"]),
+    ] {
+        let stmt = Parser::parse(qql).unwrap();
+        let (named, _) = collect_statement_params(&stmt);
+        for key in expect {
+            assert!(named.contains(key), "{qql} missing :{key}");
+        }
+    }
+}
+
+#[test]
+fn batch_block_parses_and_roundtrips_fmt() {
+    for source in [
+        "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 3; }",
+        "BATCH { UPSERT INTO docs VALUES {id: 1, vector: [0.1]}; DELETE FROM docs WHERE id = 2; } WAIT false",
+        "BATCH { QUERY [0.1] FROM docs LIMIT 1; } PARAMS (timeout = 30, consistency = majority)",
+    ] {
+        let stmt = Parser::parse(source).unwrap_or_else(|e| panic!("parse {source}: {e}"));
+        let formatted = crate::fmt::format_stmt(&stmt);
+        let reparsed =
+            Parser::parse(&formatted).unwrap_or_else(|e| panic!("reparse {formatted}: {e}"));
+        assert_eq!(
+            crate::fmt::format_stmt(&reparsed),
+            formatted,
+            "not canonical: {source}"
+        );
+    }
+}
+
+#[test]
+fn batch_block_rejects_bad_members() {
+    for (source, code) in [
+        ("BATCH { }", "QQL-VALIDATION-BATCH-EMPTY"),
+        (
+            "BATCH { BATCH { QUERY [0.1] FROM docs LIMIT 1; }; }",
+            "QQL-VALIDATION-BATCH-MEMBER",
+        ),
+        ("BATCH { SHOW COLLECTIONS; }", "QQL-VALIDATION-BATCH-MEMBER"),
+        (
+            "BATCH { CREATE COLLECTION docs; }",
+            "QQL-VALIDATION-BATCH-MEMBER",
+        ),
+        ("BATCH { COUNT FROM docs; }", "QQL-VALIDATION-BATCH-MEMBER"),
+        (
+            "BATCH { SCROLL FROM docs LIMIT 1; }",
+            "QQL-VALIDATION-BATCH-MEMBER",
+        ),
+    ] {
+        let err = Parser::parse(source).expect_err("must fail");
+        assert_eq!(err.code, code, "{source}");
+    }
+}
+
+#[test]
+fn batch_block_binds_and_injects_into_members() {
+    use crate::ast::ComparisonOp;
+    use crate::ast::Value;
+    use crate::params::collect_statement_params;
+    let mut stmt = Parser::parse(
+        "BATCH { QUERY [0.1] FROM docs WHERE tenant = :t LIMIT 1; DELETE FROM docs WHERE id = :i; }",
+    )
+    .unwrap();
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("t") && named.contains("i"));
+    crate::ast::inject_filter(
+        &mut stmt,
+        "tenant",
+        ComparisonOp::Eq,
+        Value::Str("acme".to_string()),
+    )
+    .unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert_eq!(
+        formatted.matches("tenant = 'acme'").count(),
+        2,
+        "{formatted}"
+    );
 }

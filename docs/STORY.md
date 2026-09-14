@@ -7,9 +7,11 @@
 ## Today (Rust workspace)
 
 The live product is this monorepo (`qql-rs`): `qql-core` → `qql-plan` → `qql-runtime` / edge,
-with `pyqql`, `nqql`, `qql-wasm`, and `qql-cli`. Language **1.2** adds hybrid shorthand,
-multivector, CLIP, cross-encoder, request `timeout`/`consistency`, and first-class
-`SHARD` routing alongside `CREATE SHARD KEY` DDL. Canonical docs: [README](README.md).
+with `pyqql`, `nqql`, `qql-wasm`, and `qql-cli`. Language **1.7** adds placeholders
+and prepared statements, `WAIT` durability, and typed (keyword/numeric) shard
+keys alongside hybrid shorthand, multivector, CLIP, cross-encoder, request
+`timeout`/`consistency`, and first-class `SHARD` routing with `CREATE SHARD KEY`
+DDL. Canonical docs: [README](README.md).
 
 ---
 
@@ -89,7 +91,7 @@ It added CTEs (`WITH ... AS (...)`) for manual prefetch DAGs, a full formula exp
 
 **Repo:** `/data/codebases/qql-rs` — [github.com/srimon12/qql-rs](https://github.com/srimon12/qql-rs)
 
-Srimon rewrote everything in Rust. 119 commits in 22 days. 11 workspace crates. Not a port — a complete re-architecture informed by every lesson from Python and Go.
+Srimon rewrote everything in Rust. 119 commits in 22 days. 15 workspace crates. Not a port — a complete re-architecture informed by every lesson from Python and Go.
 
 ### The Three-Layer Architecture
 
@@ -136,11 +138,11 @@ Interactive browser-based QQL editor with CodeMirror 6, 163-keyword syntax highl
 
 **4. VS Code extension** — `editors/vscode/`
 
-Syntax highlighting (TextMate grammar with 170 keywords), live diagnostics (same WASM parser), and 19 snippet templates. 850 KB VSIX, zero external dependencies.
+Syntax highlighting (TextMate grammar with 171 keywords), live diagnostics (same WASM parser), and 19 snippet templates. 850 KB VSIX, zero external dependencies.
 
 **5. Language specification** — `language/v1/grammar.pest`
 
-A canonical PEG spec — 688 lines, 19 statement types, 14 query expressions. The reference parser in `qql-core` is hand-written (lexer + `AstLowerer`); pest is **not** compiled into the runtime, it exists only as a test-only harness in `qql-conformance` that executes `grammar.pest` against the fixture corpus. The spec is the authority — implementations derive from it, not the other way around. Conformance fixtures: 39 valid `.qql` files (265 statements), 56 invalid cases, and 39 canonical AST snapshots, over 170 grammar keywords.
+A canonical PEG spec — 729 lines, 22 statement types, 14 query expressions. The reference parser in `qql-core` is hand-written (lexer + `AstLowerer`); pest is **not** compiled into the runtime, it exists only as a test-only harness in `qql-conformance` that executes `grammar.pest` against the fixture corpus. The spec is the authority — implementations derive from it, not the other way around. Conformance fixtures: 40 valid `.qql` files (289 statements), 63 invalid cases, and 40 canonical AST snapshots, 174 grammar keywords.
 
 ### Published artifacts (v0.1.2)
 

@@ -1,0 +1,87 @@
+-- 1. Multi-stage hybrid retrieval with per-prefetch tuning.
+-- Dense leg is high precision on tech articles. Sparse leg is wide net.
+WITH
+  dense AS (
+    QUERY TEXT 'vector database performance' FROM articles USING dense WHERE category = 'tech' AND published_at >= 1735689600 LIMIT 200
+  ),
+  sparse AS (
+    QUERY TEXT 'vector database performance' FROM articles USING sparse LIMIT 300
+  )
+QUERY FUSION RRF FROM articles
+  PREFETCH (
+    dense SCORE THRESHOLD 0.6,
+    sparse SCORE THRESHOLD 0.3
+  )
+  LIMIT 10;
+
+-- 2. Tiered retrieval with nested CTEs.
+-- Broad dense pass, then sparse only within those candidates.
+WITH
+  broad AS (
+    QUERY TEXT 'emergency neurological assessment' FROM clinical_docs USING dense WHERE department = 'emergency' LIMIT 500
+  ),
+  narrow AS (
+    QUERY TEXT 'emergency neurological assessment' FROM clinical_docs USING sparse PREFETCH (broad) LIMIT 100
+  )
+QUERY FUSION RRF FROM clinical_docs
+  PREFETCH (narrow)
+  LIMIT 5;
+
+-- 3. Hybrid shorthand plus per-prefetch filtering.
+-- Simple dense plus sparse without per-leg filters uses the shorthand.
+QUERY TEXT 'kubernetes deployment' FROM incidents
+  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+  LIMIT 10;
+
+QUERY 'kubernetes deployment' FROM incidents USING HYBRID LIMIT 10;
+
+QUERY HYBRID TEXT 'kubernetes deployment' DENSE dense SPARSE sparse FUSION RRF
+  FROM incidents LIMIT 10;
+
+-- Same intent with per-leg priority filters and RRF tuning.
+WITH
+  high_priority AS (
+    QUERY TEXT 'kubernetes deployment' FROM incidents USING dense WHERE priority = 'critical' AND status = 'open' LIMIT 50
+  ),
+  general AS (
+    QUERY TEXT 'kubernetes deployment' FROM incidents USING dense LIMIT 200
+  ),
+  keyword AS (
+    QUERY TEXT 'kubernetes deployment' FROM incidents USING sparse LIMIT 200
+  )
+QUERY FUSION RRF FROM incidents
+  PREFETCH (
+    high_priority SCORE THRESHOLD 0.7,
+    general SCORE THRESHOLD 0.4,
+    keyword SCORE THRESHOLD 0.3
+  )
+  PARAMS (rrf_k = 60, rrf_weights = [0.5, 0.3, 0.2])
+  LIMIT 10;
+
+-- 8. Full RAG pipeline: retrieve, fuse, group by source.
+WITH
+  semantic AS (
+    QUERY TEXT 'how does transformer attention mechanism work' FROM knowledge_base USING dense WHERE doc_type IN ('paper', 'textbook', 'blog') LIMIT 300
+  ),
+  keyword AS (
+    QUERY TEXT 'transformer attention mechanism' FROM knowledge_base USING sparse LIMIT 200
+  )
+QUERY FUSION RRF FROM knowledge_base
+  PREFETCH (
+    semantic SCORE THRESHOLD 0.5,
+    keyword SCORE THRESHOLD 0.3
+  )
+  GROUP BY 'source_id' SIZE 3
+  LIMIT 20;
+
+-- 15. Hybrid prefetch plus fusion baseline.
+WITH
+  dense AS (
+    QUERY TEXT 'transformer attention mechanism' FROM papers USING dense WHERE year >= 2020 LIMIT 200
+  ),
+  sparse AS (
+    QUERY TEXT 'transformer attention mechanism' FROM papers USING sparse LIMIT 200
+  )
+QUERY FUSION RRF FROM papers
+  PREFETCH (dense SCORE THRESHOLD 0.5, sparse SCORE THRESHOLD 0.3)
+  LIMIT 10;
