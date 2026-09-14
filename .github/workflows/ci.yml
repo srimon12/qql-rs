@@ -618,7 +618,7 @@ jobs:
             printf 'No relevant changes; skipping docs validation.\nChanged files:\n%s\n' "$changed"
           fi
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.relevant.outputs.relevant == 'true'
         with:
           version: 11
