@@ -1,11 +1,8 @@
 <div align="center">
 
-  <img src="https://raw.githubusercontent.com/srimon12/qql-rs/main/docs/assets/qql-banner.png" alt="QQL Banner" width="600" />
+  <img src="https://raw.githubusercontent.com/srimon12/qql-rs/main/docs/assets/qql-banner.png" alt="QQL banner: the QQL wordmark, the words Query Language for Qdrant, a sample search.qql query, and the host list Rust, Python, Node, WASM, and Edge" width="600" />
 
-  # QQL — Declarative SQL for Qdrant & Vector Search
-
-  **QQL is to Qdrant what SQL is to PostgreSQL.**  
-  Write expressive, declarative queries for dense, sparse, and hybrid vector search, filtering, multitenancy, and analytics — in one universal language.
+  # QQL: SQL for Qdrant and vector search
 
   [![CI](https://github.com/srimon12/qql-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/srimon12/qql-rs/actions/workflows/ci.yml)
   [![Release](https://img.shields.io/github/v/release/srimon12/qql-rs?color=blue)](https://github.com/srimon12/qql-rs/releases)
@@ -14,398 +11,401 @@
   [![npm](https://img.shields.io/npm/v/@veristamp/nqql.svg)](https://www.npmjs.com/package/@veristamp/nqql)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-  [Documentation](docs/README.md) • [Syntax Guide](docs/syntax.md) • [Interactive Playground](https://qql.veristamp.com/playground/) • [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=srimon12.qql-lang) • [Python SDK](crates/pyqql) • [Node.js SDK](crates/nqql)
+  [Documentation](https://qql.veristamp.in/docs/) • [Syntax](docs/syntax.md) • [Playground](https://qql.veristamp.in/playground/) • [VS Code extension](https://marketplace.visualstudio.com/items?itemName=srimon12.qql-lang) • [Python SDK](crates/pyqql/README.md) • [Node.js SDK](crates/nqql/README.md)
 
 </div>
 
----
+QQL is the Qdrant Query Language, a SQL-style language and toolchain for the Qdrant vector database. It covers vector search, hybrid search, semantic search, filtering, multitenancy, and DDL. One grammar and one typed plan run from the CLI, Python, Node.js, Rust, WebAssembly, and an in-process edge engine, over REST or gRPC, against the same Qdrant server or no server at all.
 
-## Why QQL?
+## One query, every host
 
-Why write 40+ lines of nested JSON payloads or complex SDK builder chains for a single vector search?
-
-```json
-// Raw Qdrant REST Request (40+ lines of nested JSON)
-POST /collections/articles/points/query
-{
-  "query": { "nearest": [0.12, 0.45, 0.78, 0.03] },
-  "using": "dense",
-  "filter": {
-    "must": [
-      { "key": "category", "match": { "value": "tech" } },
-      { "key": "year", "range": { "gte": 2024 } }
-    ]
-  },
-  "limit": 5
-}
-```
+The same statement runs on every host. Each client below sends it as the `sql` string:
 
 ```sql
--- In QQL: Clean, readable, and intuitive
-QUERY [0.12, 0.45, 0.78, 0.03] FROM articles
-USING dense
-WHERE category = 'tech' AND year >= 2024
-LIMIT 5;
-```
-
-- ⚡ **80% Less Boilerplate**: Replace sprawling dictionary hierarchies and builder objects with clean, self-documenting SQL.
-- 🎯 **Automatic Vector & Text Detection**: Pass raw float arrays `[0.1, 0.2, ...]` or string literals `'search text'` directly — `VECTOR` and `TEXT` keywords are completely optional.
-- 🔀 **One-Line Hybrid & Rerank**: Run full Dense + BM25 search via `QUERY HYBRID '...'` or two-stage neural scoring with `QUERY RERANK`.
-- 📦 **High-Throughput Batching**: Run multiple queries or mutations in a single network roundtrip using `BATCH { ... }`.
-- 🧠 **In-Process Embeddings**: QQL resolves dense vectors and wire-compatible BM25 sparse vectors on the fly in-process — zero out-of-band glue code.
-- 🏢 **First-Class Multitenancy**: Explicit `SHARD 'tenant_1'` partition routing eliminates cross-shard network broadcast, while AST-level `inject_filter` prevents data leaks.
-- 🚀 **Zero-Overhead Compilation**: Compiles directly to optimized Qdrant REST routes or high-performance typed gRPC protobuf (`tonic`).
-- 💻 **Offline & Embedded Mode**: Run full vector search locally in-process without spinning up a Qdrant server (`qdrant-edge` + `fastembed-rs`).
-- 🔌 **Standalone Runtimes**: Zero dependency on official SDK wrappers. Native PyO3 (`pyqql`), N-API (`nqql`), WebAssembly (`qql-wasm`), and Rust (`qql`).
-
----
-
-## 30-Second Quickstart
-
-### 1. CLI (Instant Querying & REPL)
-
-Install the standalone binary (Linux, macOS, Windows):
-
-```bash
-# Linux & macOS
-curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
-
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
-```
-
-Run queries against any Qdrant instance:
-
-```bash
-# Query with raw vector floats
-qql --url http://localhost:6333 "QUERY [0.12, 0.45, 0.78, 0.03] FROM articles LIMIT 5"
-
-# Query with natural text (auto-detected string, embedded via BM25 / dense model)
-qql --url http://localhost:6333 "QUERY 'machine learning' FROM papers LIMIT 5"
-
-# Single-line hybrid search (Dense + BM25 RRF fusion)
-qql --url http://localhost:6333 "QUERY HYBRID 'latency optimization' FROM docs LIMIT 5"
-
-# Start the interactive REPL
-qql repl --url http://localhost:6333
-```
-
----
-
-### 2. Python (`pyqql`)
-
-```bash
-pip install pyqql
+QUERY [0.12, 0.45, 0.78, 0.03] FROM articles USING dense LIMIT 10;
 ```
 
 ```python
 import pyqql
 
-# Connect to Qdrant (REST: 6333 or gRPC: 6334)
-client = pyqql.Client("http://localhost:6333")
-
-# Query using raw vector floats or auto-detected text strings
-report = client.execute("""
-    QUERY [0.12, 0.45, 0.78, 0.03] FROM articles
-    WHERE category = 'tech' AND year >= 2024
-    LIMIT 5
-""")
-
-for hit in report.hits():
-    print(f"ID: {hit.id} | Score: {hit.score:.3f} | Title: {hit.payload.get('title')}")
+report = pyqql.Client("http://localhost:6333").execute(sql)
 ```
 
----
+```javascript
+const { Client } = require("@veristamp/nqql");
 
-### 3. TypeScript / Node.js (`@veristamp/nqql`)
-
-```bash
-npm install @veristamp/nqql
+const report = await new Client({ url: "http://localhost:6333" }).execute(sql);
 ```
 
-```typescript
-import { Client } from "@veristamp/nqql";
+```rust
+use qql::executor::{Executor, OnError};
 
-const client = new Client("http://localhost:6333");
-
-// Query with raw vector floats or auto-detected text strings
-const report = await client.execute(`
-  QUERY [0.12, 0.45, 0.78, 0.03] FROM articles
-  WHERE category = 'tech' AND year >= 2024
-  LIMIT 5
-`);
-
-for (const hit of report.hits()) {
-  console.log(`[${hit.score.toFixed(3)}] ${hit.id} - ${hit.payload.title}`);
-}
+// in an async fn
+let report = Executor::grpc("http://localhost:6334", None)?.execute(sql, OnError::Stop).await?;
 ```
 
----
+```javascript
+import init, { Client } from "qql-wasm";
 
-### 4. Local In-Process Edge Engine (Zero Server, Zero Network)
-
-Need embedded vector search without running Docker or an external Qdrant instance?
-
-```bash
-pip install pyqql-edge
-# or: npm install @veristamp/nqql-edge
+await init();
+const report = await new Client("http://localhost:6333", null).execute(sql);
 ```
+
+The CLI runs the same text with `qql run`. The edge SDKs run it with no server at all: `pyqql-edge` and `@veristamp/nqql-edge` ship local executors backed by an in-process qdrant-edge store with FastEmbed models, and the Rust `qql-edge` crate exposes the same executor over its `EdgeQdrant` backend.
 
 ```python
 import pyqql_edge
 
-# In-process HNSW storage + local FastEmbed ONNX model
 client = pyqql_edge.local_executor("./qdrant_data", model="BGESmallENV15")
-
-report = client.execute("QUERY 'embedded search' FROM notes LIMIT 5")
-for hit in report.hits():
-    print(hit.id, hit.score, hit.payload)
+report = client.execute("QUERY 'offline search' FROM notes USING dense LIMIT 5")
 ```
 
----
+## Why QQL
 
-### 5. Native Rust (`qql`)
+Qdrant's official Python client is the reference client for building requests, and it stays the right choice for Python applications. QQL adds a language layer over the same operations, so one search can be written either way:
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, MatchValue, Range
+
+client = QdrantClient("http://localhost:6333")
+points = client.query_points(
+    collection_name="articles",
+    query=[0.12, 0.45, 0.78, 0.03],
+    using="dense",
+    query_filter=Filter(must=[
+        FieldCondition(key="category", match=MatchValue(value="tech")),
+        FieldCondition(key="year", range=Range(gte=2024)),
+    ]),
+    limit=5,
+).points
+```
+
+```sql
+-- The same search in QQL
+QUERY [0.12, 0.45, 0.78, 0.03]
+FROM articles
+USING dense
+WHERE category = 'tech' AND year >= 2024
+LIMIT 5;
+```
+
+What the language layer adds:
+
+- **Search.** Dense, sparse, and hybrid retrieval with RRF or DBSF fusion, reranking, faceting, grouped search, scroll, and count.
+- **Batching.** Several queries or mutations from one collection travel in a single request. `BATCH { ... }` maps to `/points/query/batch` or `/points/batch`.
+- **Embeddings in the pipeline.** Text resolves to dense vectors or wire-compatible BM25 sparse vectors during execution. Application code does not call an embedding service separately.
+- **Shard routing.** `SHARD 'tenant'` becomes a request-level shard key on REST and gRPC, so a tenant query does not fan out across partitions.
+- **Typed plan.** The planner emits one transport-neutral `PlannedOperation`. REST, gRPC, and the edge engine are projections of it, so every transport executes the same plan.
+- **Standalone runtimes.** PyO3, N-API, and wasm-bindgen bindings, plus the Rust crate, talk to Qdrant directly.
+- **Fail-closed isolation.** `inject_filter` rewrites the AST with a tenant predicate and rejects statements it cannot rewrite.
+- **Qdrant 1.19 surface.** Quotas, memory placement, `MATCH PREFIX`, `SLICE`, sparse `idf`, and `turbo4`, on the backends that support each.
+
+## Quickstart
 
 ```bash
-cargo add qql
+# Linux and macOS
+curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
+
+# or install from crates.io
+cargo install qql-cli --locked
+
+# Run a query, run a script, or open the REPL
+qql run "QUERY [0.12, 0.45, 0.78, 0.03] FROM articles LIMIT 5"
+qql --url http://localhost:6333 run "QUERY 'machine learning' FROM papers LIMIT 5"
+qql repl --url http://localhost:6333
 ```
 
+Sparse text embeds locally with BM25. Dense text needs an embedding endpoint (`EMBED_URL`) or the edge backend with its FastEmbed models.
+
+| Host | Install | Reference |
+|------|---------|-----------|
+| Python | `pip install pyqql` | [Python SDK](crates/pyqql/README.md) |
+| Node.js | `npm install @veristamp/nqql` | [Node.js SDK](crates/nqql/README.md) |
+| Rust | `cargo add qql` | [Rust crate](crates/qql-runtime/README.md) |
+| WASM | `npm install qql-wasm` | [WASM SDK](crates/qql-wasm/README.md) |
+| Python edge | `pip install pyqql-edge` | [Edge SDK](crates/pyqql-edge/README.md) |
+| Node.js edge | `npm install @veristamp/nqql-edge` | [Edge SDK](crates/nqql-edge/README.md) |
+
+Python:
+
+```python
+import pyqql
+
+client = pyqql.Client("http://localhost:6333")  # use_grpc=True for gRPC
+report = client.execute(
+    "QUERY [0.12, 0.45, 0.78, 0.03] FROM articles WHERE category = 'tech' LIMIT 5"
+)
+for hit in report.hits():
+    print(hit.id, hit.score, hit.get("title"))
+```
+
+Node.js:
+
+```javascript
+const { Client } = require("@veristamp/nqql");
+
+const client = new Client({ url: "http://localhost:6333" }); // useGrpc: true for gRPC
+const report = await client.execute(
+  "QUERY [0.12, 0.45, 0.78, 0.03] FROM articles WHERE category = 'tech' LIMIT 5",
+);
+for (const hit of report.hits()) console.log(hit.id, hit.score, hit.payload);
+```
+
+Rust:
+
 ```rust
-use qql::client::Client;
+use qql::executor::{Executor, OnError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::connect_grpc("http://localhost:6334").await?;
-
-    let report = client
-        .execute("QUERY [0.12, 0.45, 0.78, 0.03] FROM crates WHERE downloads > 1000 LIMIT 5")
-        .await?;
-
-    for hit in report.hits(0) {
-        println!("Hit: id={:?} score={:.3}", hit.id, hit.score);
+    let exec = Executor::grpc("http://localhost:6334", None)?; // Executor::rest for REST
+    let report = exec.execute("QUERY [0.12, 0.45, 0.78, 0.03] FROM articles LIMIT 5", OnError::Stop).await?;
+    for hit in report.hits(0).unwrap_or_default() {
+        println!("{} {:.3}", hit.id, hit.score);
     }
     Ok(())
 }
 ```
 
----
+## Query patterns
 
-## Cheat Sheet: Common Query Patterns
+### Vector and text search
 
-### 1. Vector & Text Search (Auto-Detection)
-Pass raw vector array literals or text strings directly — `VECTOR` and `TEXT` keywords are optional:
+The `VECTOR` and `TEXT` keywords are optional.
 
 ```sql
--- Raw float vector search with filters
-QUERY [0.12, 0.45, 0.78, 0.03] FROM articles
-WHERE category = 'ai' AND rating >= 4.5
-LIMIT 10;
-
--- Auto-detected text search (embedded on the fly via BM25 / dense model)
-QUERY 'distributed consensus protocols' FROM papers
-WHERE year >= 2023
+QUERY [0.12, 0.45, 0.78, 0.03]
+FROM articles
+USING dense
+WHERE category = 'tech' AND year >= 2024
 LIMIT 5;
 
--- Target a specific named vector index
-QUERY [0.12, 0.45, 0.78, 0.03] FROM articles
-USING dense
+QUERY 'distributed consensus protocols' FROM papers WHERE year >= 2023 LIMIT 5;
+```
+
+### Hybrid search
+
+Dense plus BM25 in one statement, fused with RRF (the default) or DBSF.
+
+```sql
+QUERY HYBRID TEXT 'latency optimization' FUSION RRF FROM docs LIMIT 10;
+
+QUERY HYBRID TEXT 'latency optimization' DENSE dense SPARSE bm25 FUSION RRF
+FROM docs
 LIMIT 10;
 ```
 
-### 2. Native Hybrid Search & Reranking
-Run multi-modal vector search and re-scoring with concise native statements:
+### Reranking
 
-```sql
--- Single-line hybrid search (Dense semantic + BM25 sparse with automatic RRF fusion)
-QUERY HYBRID 'latency optimization' FROM docs LIMIT 10;
-
--- Hybrid search with explicit vector targets
-QUERY HYBRID 'latency optimization' DENSE dense SPARSE bm25 FUSION RRF FROM docs LIMIT 10;
-
--- Two-stage neural reranking
-QUERY RERANK 'neural ranking' MODEL 'bge-reranker-base' FROM docs LIMIT 10;
-
--- Client-side cross-encoder reranking
-QUERY CROSS RERANK 'query' MODEL 'bge-reranker-large' ON FIELD content FROM docs LIMIT 10;
-```
-
-### 3. Advanced Fusion with Prefetch CTEs
-Combine arbitrary sub-queries with Reciprocal Rank Fusion (RRF) or Distribution-Based Score Fusion (DBSF):
+Late-interaction rerank over prefetch candidates, or a client-side cross-encoder pass.
 
 ```sql
 WITH
-  v_dense  AS (QUERY 'latency optimization' FROM docs USING dense  LIMIT 50),
-  v_sparse AS (QUERY 'latency optimization' FROM docs USING sparse LIMIT 50)
-QUERY FUSION RRF FROM docs PREFETCH (v_dense, v_sparse)
+  candidates AS (QUERY 'vector database latency' FROM docs USING dense LIMIT 100)
+QUERY RERANK TEXT 'vector database latency' MODEL 'answerai-colbert-small-v1'
+FROM docs
+USING colbert AS MULTI
+PREFETCH (candidates)
+LIMIT 10;
+
+WITH
+  candidates AS (QUERY 'vector database latency' FROM docs USING dense LIMIT 50)
+QUERY CROSS RERANK TEXT 'vector database latency' MODEL 'bge-reranker-base' ON FIELD text
+FROM docs
+PREFETCH (candidates)
 LIMIT 10;
 ```
 
-### 4. High-Throughput Batching (`BATCH { ... }`)
-Execute multiple queries or mutations in a single network roundtrip (routes to `/points/query/batch` or `/points/batch`):
+### Fusion with prefetch CTEs
+
+Compose sub-queries and fuse their rankings. Swap RRF for DBSF when score scales differ.
 
 ```sql
--- Batch multiple queries in a single network roundtrip
+WITH
+  v_dense AS (QUERY 'latency optimization' FROM docs USING dense LIMIT 50),
+  v_sparse AS (QUERY 'latency optimization' FROM docs USING sparse LIMIT 50)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (v_dense, v_sparse)
+LIMIT 10;
+```
+
+### Batching
+
+Each block is one roundtrip to `/points/query/batch` or `/points/batch`.
+
+```sql
 BATCH {
   QUERY [0.1, 0.2, 0.3] FROM products WHERE category = 'tech' LIMIT 5;
   QUERY [0.8, 0.9, 0.1] FROM products WHERE category = 'books' LIMIT 5;
-}
+};
 
--- Batch atomic mutations in one call
 BATCH {
-  UPSERT INTO users (id, vector, role) VALUES (1, [0.1, 0.2], 'admin');
+  UPSERT INTO users VALUES {id: 1, vector: [0.1, 0.2], role: 'admin'};
   DELETE FROM users WHERE last_login < '2023-01-01T00:00:00Z';
-}
+};
 ```
 
-### 5. Multi-Tenancy & Partition Routing
-Direct queries to specific tenant partitions for zero-broadcast efficiency:
+### Multitenancy
+
+`SHARD` routes the request to a tenant partition. Filter injection isolates the data. Routing alone is not a security boundary.
 
 ```sql
--- Filter tenant data AND route directly to partition 'tenant_corp_99'
-QUERY [0.12, 0.45, 0.78, 0.03] FROM financial_records
+QUERY [0.12, 0.45, 0.78, 0.03]
+FROM financial_records
 WHERE tenant_id = 'tenant_corp_99' AND status = 'audited'
 SHARD 'tenant_corp_99'
 LIMIT 10;
 ```
 
-### 6. In-Database Categorical Facets (Aggregations)
-Aggregate value distributions in Qdrant without pulling point payloads over the wire:
-
-```sql
-FACET category FROM products
-WHERE in_stock = true AND price <= 500.0
-LIMIT 10
-EXACT true;
+```python
+stmt = pyqql.parse("QUERY [0.12, 0.45, 0.78, 0.03] FROM financial_records LIMIT 10")[0]
+pyqql.inject_filter(stmt, "tenant_id", "=", "tenant_corp_99")
+client.execute(stmt)
 ```
 
-### 7. Safe Parameterized Queries
-Prevent injection and reuse compiled query plans across calls:
+### Facets
+
+Value counts computed inside Qdrant.
 
 ```sql
-QUERY :query_vector FROM articles
-WHERE author = :author AND category IN :categories
+FACET category FROM products WHERE in_stock = true AND price <= 500.0 LIMIT 10 EXACT true;
+```
+
+### Parameters
+
+Bind `:name` from a dict or object, `?` from a list or array. Values are escaped at bind time.
+
+```sql
+QUERY :query
+FROM articles
+WHERE author = :author AND category = :category
 LIMIT :limit;
 ```
 
-### 8. Ingestion & Bulk Upserts
-```sql
--- Upsert records with vectors and JSON payloads
-UPSERT INTO products (id, vector, title, price) VALUES
-  (1, [0.12, 0.45, 0.78], 'Mechanical Keyboard', 129.99),
-  (2, [0.89, 0.22, 0.05], 'Wireless Mouse', 49.99);
+### Ingestion
 
--- Delete by filter
+Points are data, so vectors or text travel with the payload.
+
+```sql
+UPSERT INTO products VALUES
+  {id: 1, vector: [0.12, 0.45, 0.78], title: 'Mechanical Keyboard', price: 129.99},
+  {id: 2, vector: [0.89, 0.22, 0.05], title: 'Wireless Mouse', price: 49.99};
+
+UPSERT INTO docs VALUES {id: 3, title: 'portable keyboard cover'} USING DENSE MODEL 'all-minilm:l6-v2';
+
 DELETE FROM products WHERE in_stock = false AND updated_at < '2024-01-01T00:00:00Z';
 ```
 
-### 9. Schema & DDL Management
-```sql
--- Create collection with dense and sparse vectors
-CREATE COLLECTION articles WITH (
-  vectors = (dense = (size = 384, distance = 'Cosine')),
-  sparse_vectors = (bm25 = ())
-);
+### Reads
 
--- Create payload index for fast filtering
-CREATE INDEX ON articles (category) TYPE 'keyword';
+Fetch points by ID or count a filtered subset.
+
+```sql
+QUERY POINTS (1, 2, 'point-a') FROM docs;
+
+COUNT FROM products WHERE in_stock = true;
 ```
 
----
+### DDL
 
-## Migration Suite: From Qdrant to QQL
+Collections, payload indexes, and tenant partitions are statements too.
 
-Whether migrating cluster data, legacy application code, or running services, QQL provides dedicated migration tools.
+```sql
+CREATE COLLECTION articles (
+  dense VECTOR(384, COSINE),
+  sparse SPARSE
+);
 
-### 1. Logical Cluster & Data Migration (`qql migrate`)
+CREATE INDEX ON COLLECTION articles FOR category TYPE keyword;
 
-[`qql migrate`](crates/qql-cli/src/migrate/README.md) performs high-speed streaming migration of collections across clusters, minor versions, or configurations (unlike binary snapshots which require identical minor versions and immutable schemas):
+CREATE INDEX ON COLLECTION articles FOR tenant_id TYPE keyword WITH (is_tenant = true);
+
+CREATE SHARD KEY 'acme' ON COLLECTION articles WITH (shards_number = 2);
+```
+
+## Migration and tooling
+
+### qql migrate
+
+`qql migrate` copies a collection as schema plus points, so the target can differ in version, shard count, sharding method, or quantization. Checkpoints land under `.qql-migrate/` and resume an interrupted run without re-sending points. Verification compares exact counts by default.
 
 ```bash
-# Same-cluster copy with on-the-fly TurboQuant 4-bit quantization
-qql --url grpc://localhost:6334 migrate articles \
-  --to articles_quantized \
-  --quantize turbo4 \
-  --workers 4
-
-# Cross-cluster migration with tenant shard promotion and zero-downtime cutover
+# Cross-cluster migration with tenant shard promotion and cutover
 qql --url grpc://old-cluster:6334 migrate docs \
   --target-url grpc://new-cluster:6334 \
   --to docs \
   --shard-key-field tenant_id \
   --cutover docs \
   --recreate
+
+# Re-quantize to 4-bit TurboQuant during the stream
+qql --url grpc://localhost:6334 migrate articles \
+  --to articles_turbo4 \
+  --quantize turbo --quantize-bits 4 \
+  --workers 4
 ```
 
-- **Cross-version leap**: Migrate directly between non-adjacent versions (e.g. `1.15` → `1.19.1`).
-- **In-flight quantization**: Re-quantize to `scalar`, `binary`, or `turbo4` during stream.
-- **Resharding & Multitenancy**: Dynamically re-hash across new shard counts or custom shard keys.
-- **Crash-resilient checkpoints**: Resumes interrupted migrations without re-transferring points.
-- See the full [Migration Guide](crates/qql-cli/src/migrate/README.md) and [Quickstart](crates/qql-cli/src/migrate/QUICKSTART.md).
+Full guides: [migration guide](crates/qql-cli/src/migrate/README.md), [quickstart](crates/qql-cli/src/migrate/QUICKSTART.md).
 
-### 2. Instant Query & Code Translation (`qql convert`)
+### qql convert
 
-Convert raw Qdrant REST JSON, HTTP snippets, or pasted `curl` commands directly into canonical QQL:
+`qql convert` turns Qdrant REST JSON, HTTP snippets, or curl command text into canonical QQL. It reads from a file or stdin.
 
 ```bash
-# Convert a pasted curl command directly to QQL
-qql convert "curl -X POST http://localhost:6333/collections/docs/points/query -d '{\"query\": [0.1, 0.2], \"limit\": 5}'"
-
-# Convert an existing Qdrant JSON payload file
-cat search.json | qql convert --collection docs
-
-# Convert multiple queries from a JSONL capture
-qql convert --collection docs capture.jsonl
+qql convert search.json                 # wrapped request
+qql convert --collection docs body.json # bare REST body
+qql convert curl.txt                    # a pasted curl command
 ```
 
-### 3. Zero-Code App Migration via Transparent Proxy (`qql record`)
+### qql record
 
-Capture queries from running applications in any language (Python, TypeScript, Go, Java) with zero code changes:
+`qql record` is a transparent proxy that captures live traffic from any application and writes `.qql` files. It needs the `record` feature at install time.
 
 ```bash
-# Start the transparent recording proxy (proxy on 6334 -> Qdrant on 6333)
+cargo install qql-cli --locked --features record
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --qql-out app_queries.qql
 ```
 
-Point your existing application to port `6334`. Requests forward to Qdrant unchanged while automatically logging clean, production-ready `.qql` query files.
+### Editor and agent tooling
 
----
+- [VS Code and Cursor extension](https://marketplace.visualstudio.com/items?itemName=srimon12.qql-lang): syntax highlighting, live WASM diagnostics, plan hovers, CodeLens, and completions for `.qql` files.
+- [Web playground](https://qql.veristamp.in/playground/): run queries and inspect compiled plans in the browser, using the WASM build.
+- [Agent skill](skills/qql-skill/README.md): reference map for coding agents (`npx skills add srimon12/qql-rs --skill qql-skill`).
 
-## Ecosystem & Tools
+## Documentation
 
-- 🖥️ **[VS Code & Cursor Extension](https://marketplace.visualstudio.com/items?itemName=srimon12.qql-lang)**: Syntax highlighting, live WASM diagnostics, plan hovers, CodeLens, and completions for `.qql` files.
-- 🌐 **[Interactive Web Playground](https://qql.veristamp.com/playground/)**: Test QQL queries and inspect compiled execution plans in real time in your browser (compiled via WebAssembly).
-- 🤖 **[AI Agent Skill](skills/qql-skill/README.md)**: Drop-in MCP / Agent skill for Cursor, Claude Code, and Codex (`npx skills add srimon12/qql-rs --skill qql-skill`).
-- 🚚 **[Cluster Migrator (`qql migrate`)](crates/qql-cli/src/migrate/README.md)**: High-speed logical streaming collection migration across clusters and versions.
-- 🔄 **CLI REST Converter (`qql convert`)**: Automatically translate raw Qdrant REST JSON, curl commands, or HTTP snippets into clean, canonical QQL queries.
-- ⏺️ **Transparent Recorder (`qql record`)**: Intercept existing application traffic to generate `.qql` scripts with zero code changes.
-
----
-
-## Documentation Index
-
-| Guide | Description |
-|---|---|
-| 📖 [Syntax Reference](docs/syntax.md) | Complete grammar: `QUERY`, `HYBRID`, `RERANK`, `BATCH`, `FUSION`, `FACET`, DML, DDL |
-| 🔍 [Filters & Operators](docs/filters.md) | `WHERE` clauses, comparison ops, ranges, geo predicates, `MATCH PREFIX`, `SLICE` |
-| 🏢 [Multitenancy & Security](docs/inject_filter.md) | Partition sharding vs isolation, AST filter injection security |
-| 🚚 [Cluster Migration Guide](crates/qql-cli/src/migrate/README.md) | Logical streaming migration (`qql migrate`), in-flight quantization, resharding |
-| 🔁 [Query Conversion & Recording](skills/qql-skill/references/convert-migration.md) | Convert curl / REST JSON, zero-code proxy recording with `qql record` |
-| 🐍 [Python SDK (`pyqql`)](crates/pyqql/README.md) | PyO3 client reference, async usage, offline compilation |
-| 🟨 [Node.js SDK (`nqql`)](crates/nqql/README.md) | N-API client reference, TypeScript types, streaming |
-| 🦀 [Rust Crate (`qql`)](crates/qql-runtime/README.md) | Direct Rust runtime, gRPC tonic client, custom embedder integration |
-| ⚙️ [Edge Embedded Mode](crates/qql-edge/README.md) | In-process vector database with zero network footprint |
-
----
+| Guide | Covers |
+|-------|--------|
+| [Documentation site](https://qql.veristamp.in/docs/) | Rendered guides for the language, SDKs, and operations |
+| [Documentation index](docs/README.md) | Architecture, typed pipeline, Qdrant 1.19 language highlights |
+| [Syntax reference](docs/syntax.md) | `QUERY`, `HYBRID`, `RERANK`, `BATCH`, `FUSION`, `FACET`, DML, DDL |
+| [Filters and operators](docs/filters.md) | `WHERE`, `IN`, ranges, geo predicates, `MATCH PREFIX`, `SLICE` |
+| [Parameters](docs/parameters.md) | `:name` and `?` binding, prepared statements |
+| [Multitenancy](docs/inject_filter.md) | Shard routing, isolation, AST filter injection |
+| [CLI reference](crates/qql-cli/README.md) | Commands, configuration, edge backend, script format |
+| [Cluster migration](crates/qql-cli/src/migrate/README.md) | `qql migrate`, in-flight quantization, resharding |
+| [Convert and record](skills/qql-skill/references/convert-migration.md) | curl and REST JSON conversion, `qql record` proxy |
+| [Python SDK](crates/pyqql/README.md) | PyO3 client, async usage, offline compilation |
+| [Node.js SDK](crates/nqql/README.md) | N-API client, TypeScript types, streaming scroll |
+| [Rust crate](crates/qql-runtime/README.md) | Executor, REST and gRPC backends, custom embedders |
+| [Edge mode](crates/qql-edge/README.md) | In-process database, zero network |
+| [Examples](examples/README.md) | Multi-tenant RAG over SEC 10-K filings, Berlin geo search, and more |
 
 ## Compatibility
 
-- **Qdrant Server**: `≥ 1.19.0` (supports Quotas, `memory` tiering, `MATCH PREFIX`, `SLICE`, sparse `idf`, `turbo4`)
-- **Python**: `3.10+`
-- **Node.js**: `18+`
-- **Rust**: `1.98+` (2024 edition)
+- Qdrant server: `>= 1.19.0` (quotas, `memory` tiers, `MATCH PREFIX`, `SLICE`, sparse `idf`, `turbo4`)
+- Python: `3.10+`
+- Node.js: `18+`
+- Rust: `1.98+` (2024 edition)
+- Edge: qdrant-edge `0.8`, no server. Cluster-only features such as custom `SHARD`, quotas, and `GROUP BY ... LOOKUP FROM` return `QQL-EDGE-UNSUPPORTED-*` codes; use remote Qdrant for those.
 
 ---
 
 <div align="center">
-  <sub>QQL is an open-source project licensed under the MIT License. Not officially affiliated with Qdrant.</sub>
+  <sub>QQL is open source under the MIT License. Not affiliated with Qdrant.</sub>
 </div>
