@@ -7,6 +7,7 @@ interface Props {
 	installs: readonly {
 		name: string;
 		cmd: string;
+		display?: string;
 		href: string;
 		note?: string;
 	}[];
@@ -33,7 +34,7 @@ const { heading, sub, installs, footHref, footLabel } = Astro.props;
               <a class="link font-mono text-[0.6875rem]" href={item.href}>Docs →</a>
             </div>
             <div class="flex items-center gap-3">
-              <code class="min-w-0 flex-1 break-all whitespace-normal leading-relaxed font-mono text-[0.72rem] text-[var(--sl-color-gray-2)]" title={item.cmd}>{item.cmd}</code>
+              <code class="min-w-0 flex-1 break-all whitespace-normal leading-relaxed font-mono text-[0.72rem] text-[var(--sl-color-gray-2)]" title={item.cmd}>{item.display ?? item.cmd}</code>
               <CopyButton
                 text={item.cmd}
                 class="shrink-0"

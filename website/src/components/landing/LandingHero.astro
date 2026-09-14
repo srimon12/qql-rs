@@ -1,6 +1,7 @@
 ---
 import { Code } from "@astrojs/starlight/components";
 import CopyButton from "@qql/ui/CopyButton.astro";
+import { cliInstall } from "../../data/landing";
 
 interface Props {
 	headline: string;
@@ -30,8 +31,8 @@ const {
 	stats,
 } = Astro.props;
 
-const installCmd =
-	"curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh";
+const installCmd = cliInstall.cmd;
+const installDisplay = cliInstall.display;
 
 const heroLines = specimenQql.trim().split("\n");
 ---
@@ -57,7 +58,7 @@ const heroLines = specimenQql.trim().split("\n");
       </div>
       <p class="reveal m-0 mt-5 flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]" style="--d:260ms">
         <span class="text-[var(--sl-color-accent)]" aria-hidden="true">$</span>
-        <code class="min-w-0 break-all">{installCmd}</code>
+        <code class="min-w-0 break-all" title={installCmd}>{installDisplay}</code>
         <CopyButton
           text={installCmd}
           variant="icon"
