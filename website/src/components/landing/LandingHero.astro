@@ -1,6 +1,7 @@
 ---
 import { Code } from "@astrojs/starlight/components";
 import CopyButton from "@qql/ui/CopyButton.astro";
+import { cliInstall } from "../../data/landing";
 
 interface Props {
 	headline: string;
@@ -30,8 +31,8 @@ const {
 	stats,
 } = Astro.props;
 
-const installCmd =
-	"curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh";
+const installCmd = cliInstall.cmd;
+const installDisplay = cliInstall.display;
 
 const heroLines = specimenQql.trim().split("\n");
 ---
@@ -57,7 +58,7 @@ const heroLines = specimenQql.trim().split("\n");
       </div>
       <p class="reveal m-0 mt-5 flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]" style="--d:260ms">
         <span class="text-[var(--sl-color-accent)]" aria-hidden="true">$</span>
-        <code class="min-w-0 break-all">{installCmd}</code>
+        <code class="min-w-0 break-all" title={installCmd}>{installDisplay}</code>
         <CopyButton
           text={installCmd}
           variant="icon"
@@ -67,14 +68,22 @@ const heroLines = specimenQql.trim().split("\n");
       </p>
     </div>
 
-    <figure class="code-card reveal min-w-0" style="--d:280ms; border-color: color-mix(in srgb, var(--sl-color-accent) 20%, transparent)" aria-label="Example QQL query">
+    <figure class="code-card reveal min-w-0" data-copy-managed style="--d:280ms; border-color: color-mix(in srgb, var(--sl-color-accent) 20%, transparent)" aria-label="Example QQL query">
       <figcaption class="code-card__head">
         <span class="code-card__tick" aria-hidden="true"></span>
         <span class="inline-flex min-w-0 items-center gap-1.5 justify-self-center rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-2.5 py-0.5 font-mono text-[0.6875rem] text-[var(--sl-color-gray-2)]">
           <span class="text-[var(--sl-color-accent)]" aria-hidden="true">&gt;_</span>
           <span class="truncate">{specimenTitle}</span>
         </span>
-        <span class="code-card__meta">{specimenMeta}</span>
+        <span class="flex min-w-0 shrink-0 items-center gap-2">
+          <span class="code-card__meta truncate">{specimenMeta}</span>
+          <CopyButton
+            text={specimenQql}
+            variant="icon"
+            title="Copy QQL query"
+            ariaLabel="Copy QQL query"
+          />
+        </span>
       </figcaption>
 
       <div class="grid grid-cols-[minmax(0,1fr)] gap-2 px-5 sm:grid-cols-[2rem_minmax(0,1fr)]">

@@ -88,7 +88,12 @@ export function extractText(el: HTMLElement): string {
 }
 
 export function resolveCopyText(btn: HTMLElement): string | null {
-	if (btn.dataset.copy !== undefined) return btn.dataset.copy;
+	// An empty literal (bare `data-copy` attribute) must never shadow a valid
+	// target, article source, or enclosing frame. Astro omits undefined attrs
+	// but renders "" as a bare attribute, which previously resolved to "" and
+	// hit the silent no-op in handleCopy with zero feedback (dead button).
+	const literal = btn.dataset.copy;
+	if (literal !== undefined && literal !== "") return literal;
 	const selector = btn.dataset.copyTarget;
 	if (selector) {
 		const target = document.querySelector<HTMLElement>(selector);
@@ -132,14 +137,19 @@ function flash(btn: HTMLElement, ok: boolean): void {
 
 async function handleCopy(btn: HTMLElement): Promise<void> {
 	const text = resolveCopyText(btn);
-	if (text == null || text === "") return;
+	// Every click answers. An unresolvable button flashes its failed state
+	// instead of dying silently, so a missing target is visible, not a mystery.
+	if (text == null || text === "") {
+		flash(btn, false);
+		return;
+	}
 	flash(btn, await writeClipboard(text));
 }
 
 /** Wire every copy button under `root` (idempotent). */
 export function mountCopyButtons(root: ParentNode = document): void {
 	for (const btn of root.querySelectorAll<HTMLElement>(
-		"[data-copy], [data-copy-target], [data-copy-source]",
+		"[data-copy], [data-copy-target], [data-copy-source], [data-copy-frame]",
 	)) {
 		bind(btn);
 	}
@@ -214,6 +224,10 @@ function mountCodeFrameButtons(): void {
 			title: "Copy code",
 		});
 		btn.setAttribute("aria-label", "Copy code");
+		// Mount hook only: resolution flows through the closest-frame fallback
+		// in resolveCopyText. Without it these buttons are invisible to
+		// mountCopyButtons' selector and survive on their one direct bind.
+		btn.dataset.copyFrame = "true";
 		bind(btn);
 		frame.append(btn);
 	}
