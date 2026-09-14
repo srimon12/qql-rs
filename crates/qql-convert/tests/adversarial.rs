@@ -17,9 +17,11 @@ use qql_plan::{plan, to_rest_route};
 /// Re-plan an emitted statement and project it back to its REST body.
 fn replanned_body(statement: &str) -> serde_json::Value {
     let parsed = Parser::parse(&format!("{statement};")).unwrap_or_else(|e| panic!("reparse: {e}"));
-    let op = plan(&parsed).unwrap_or_else(|e| panic!("plan {statement}: {e}"));
+    // Omit `statement` from failure messages: UUID round-trip fixtures embed
+    // synthetic identifiers that must not reach logs (rust/cleartext-logging).
+    let op = plan(&parsed).unwrap_or_else(|e| panic!("plan failed: {e}"));
     to_rest_route(&op)
-        .unwrap_or_else(|e| panic!("route {statement}: {e:?}"))
+        .unwrap_or_else(|e| panic!("route failed: {e:?}"))
         .body_json()
         .expect("statement has a request body")
 }

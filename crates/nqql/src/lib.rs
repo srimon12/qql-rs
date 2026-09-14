@@ -9,6 +9,17 @@ use napi_derive::napi;
 
 use nqql_common as common;
 
+// SAFETY (CodeQL rust/access-invalid-pointer false positive): `#[napi]` on
+// these structs expands via napi-derive into unsafe Node-API glue that
+// dereferences raw `napi_env`/`napi_value` pointers. That generated code is
+// audited upstream (napi-rs) and upholds safety via the Node-API runtime
+// (valid env, main-thread calls, `catch_unwind` on every entry point). This
+// crate contains no manual `unsafe` blocks or raw-pointer dereferences.
+// codeql[rust/access-invalid-pointer]: napi-derive generated FFI, not manual unsafe.
+// (Inline suppression is forward-compat: Rust has no AlertSuppression.ql yet,
+// see github/codeql#21637; current alerts are dismissed as false positives.)
+
+/// Thin `#[napi]` handle over the parsed QQL AST (logic lives in nqql-common).
 #[napi]
 #[derive(Clone)]
 pub struct Stmt {
@@ -420,6 +431,8 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
     Ok(exec)
 }
 
+/// Node-API client handle (REST/gRPC executor + route affinity).
+/// See SAFETY note at the top of this file for the `#[napi]` false positive.
 #[napi(js_name = "Client")]
 pub struct JsClient {
     inner: qql::executor::Executor,

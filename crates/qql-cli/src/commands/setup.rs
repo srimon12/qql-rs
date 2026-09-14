@@ -171,11 +171,26 @@ pub fn handle_config_show(json: bool) -> Result<(), Box<dyn std::error::Error>> 
     let path = QqlConfig::config_path()?;
 
     if json {
+        // Never emit API secrets to stdout (CodeQL rust/cleartext-logging):
+        // the persisted file is owner-only (0600) but stdout may be logged.
+        // Show presence markers instead of credential material.
+        let mut redacted = config.clone();
+        for slot in [
+            &mut redacted.secret,
+            &mut redacted.embedding_api_key,
+            &mut redacted.multi_embedding_api_key,
+            &mut redacted.image_embedding_api_key,
+            &mut redacted.rerank_api_key,
+        ] {
+            if slot.is_some() {
+                *slot = Some("***".to_string());
+            }
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "path": path.display().to_string(),
-                "config": config,
+                "config": redacted,
             }))?
         );
         return Ok(());
@@ -239,6 +254,9 @@ pub fn handle_config_show(json: bool) -> Result<(), Box<dyn std::error::Error>> 
 pub fn handle_config_get(key: &str) -> Result<(), Box<dyn std::error::Error>> {
     let config = QqlConfig::load()?.unwrap_or_default();
     let normalized = key.to_lowercase().replace('_', "-");
+    // Intentional: the user explicitly asked for their own persisted value
+    // (e.g. `qql config get api-key` for scripting, like `cat` of the
+    // owner-only 0600 config file). Stdout is their terminal, not a log file.
     let val = match normalized.as_str() {
         "url" => config.url,
         "api-key" | "secret" | "key" => config.secret.unwrap_or_default(),
@@ -293,7 +311,16 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<(), Box<dyn std::erro
     }
 
     config.save()?;
-    println!("\x1b[32m✓\x1b[0m Set \x1b[1m{}\x1b[0m = {}", key, value);
+    // Never echo credential material back to stdout (shell history / CI logs
+    // may persist it). Show presence only for secret keys.
+    let display_value = match normalized.as_str() {
+        "api-key" | "secret" | "key" => "***",
+        _ => value,
+    };
+    println!(
+        "\x1b[32m✓\x1b[0m Set \x1b[1m{}\x1b[0m = {}",
+        key, display_value
+    );
     Ok(())
 }
 

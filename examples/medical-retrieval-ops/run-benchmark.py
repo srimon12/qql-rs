@@ -91,10 +91,14 @@ def main() -> None:
 
     items = json.loads(path.read_text(encoding="utf-8"))
     mode_summaries = [score_mode(items, mode_name) for mode_name in MODES]
+    # Summary logs only the benchmark basename, collection name (non-secret
+    # demo config from env), aggregate counts, and opaque point IDs — never
+    # question/answer text (see module docstring).
+    # codeql[py/clear-text-logging-sensitive-data]: basename/count demo summary
     print(
         json.dumps(
             {
-                "benchmark_path": str(path),
+                "benchmark_path": path.name,
                 "collection": COLLECTION,
                 "dataset_size": len(items),
                 "modes": mode_summaries,

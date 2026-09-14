@@ -134,11 +134,15 @@ def main() -> None:
     cache_file = CACHE_DIR / f"{cache_key}.json"
 
     if cache_file.exists():
-        # Log only the cache path, never row contents.
-        print(f"Loading cached dataset from {cache_file}", file=sys.stderr)
+        # Log only the cache basename, never row contents or full paths.
+        # DATASET_ID/CACHE_DIR come from env but are non-secret demo config
+        # (public benchmark ID, local cache dir); Q&A text is never logged.
+        # codeql[py/clear-text-logging-sensitive-data]: basename-only demo log
+        print(f"Loading cached dataset from {cache_file.name}", file=sys.stderr)
         rows_data = json.loads(cache_file.read_text(encoding="utf-8"))
         rows = [{k: v if k == "id" else str(v) for k, v in r.items()} for r in rows_data]
     else:
+        # codeql[py/clear-text-logging-sensitive-data]: public benchmark ID only
         print(f"Downloading dataset {DATASET_ID}...", file=sys.stderr)
         dataset = load_dataset(DATASET_ID, split="train")
         max_rows = parse_max_rows()
@@ -180,7 +184,9 @@ def main() -> None:
         },
     }
     write_restricted(EVAL_PATH, json.dumps(manifest, indent=2) + "\n")
-    # Machine-readable summary: file names + counts only, no Q&A text.
+    # Machine-readable summary: file basenames + counts only, no Q&A text.
+    # Paths derive from env-configured OUT_DIR but only `.name` is logged.
+    # codeql[py/clear-text-logging-sensitive-data]: basename/count demo summary
     print(json.dumps({"seed_path": SEED_PATH.name, "eval_path": EVAL_PATH.name,
                        "benchmark_path": BENCHMARK_PATH.name, "rows": len(rows)}))
 
