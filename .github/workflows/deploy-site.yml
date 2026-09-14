@@ -67,7 +67,7 @@ jobs:
       # lives outside git: no repo bloat, keyed on inputs so a stale hit is
       # impossible — a docs edit misses and regenerates just that slug.
       - name: Restore OG image cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             website/public/open-graph
@@ -79,7 +79,7 @@ jobs:
       # wasm-pack's own download cache (wasm-bindgen binaries). Restored after
       # install because `node_modules` is recreated by pnpm.
       - name: Restore wasm-pack cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: website/node_modules/.cache/qql-docs-wasm-pack
           key: wasm-pack-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'crates/qql-wasm/**') }}
@@ -91,7 +91,7 @@ jobs:
         run: pnpm check
 
       - name: Deploy
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
