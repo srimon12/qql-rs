@@ -176,7 +176,7 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
     },
-    /// Record Qdrant REST traffic while proxying it unchanged (needs `--features record`)
+    /// Record Qdrant REST traffic while proxying it unchanged (opt-in build; install with `cargo install qql-cli --locked --features record`)
     #[cfg(feature = "record")]
     Record {
         /// Address to listen on (the app points here instead of Qdrant)
@@ -852,7 +852,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = (collection, json, quiet);
                     Err(
-                        "edge support is not installed; reinstall qql-cli with --features edge"
+                        "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
                             .into(),
                     )
                 }
@@ -884,7 +884,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = (collection, from, api_key, shard_id, force, json, quiet);
                     Err(
-                        "edge support is not installed; reinstall qql-cli with --features edge"
+                        "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
                             .into(),
                     )
                 }

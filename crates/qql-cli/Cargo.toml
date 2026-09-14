@@ -29,6 +29,9 @@ record = ["dep:axum", "dep:reqwest", "tokio/net", "tokio/io-util"]
 # Transparent Qdrant REST recorder (`qql record`). Opt-in so default builds
 # stay lean: pulls the axum server + a direct reqwest client (both versions
 # already pinned in Cargo.lock via tonic / qql-rest).
+# Convenience for one-flag installs (`--features full`); default stays lean
+# (grpc+rest) — edge is the heavy one (ONNX), record is cheap (axum only).
+full = ["edge", "record"]
 
 [dependencies]
 qql-convert = { workspace = true }

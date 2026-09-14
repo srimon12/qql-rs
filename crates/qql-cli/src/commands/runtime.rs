@@ -138,7 +138,8 @@ pub(crate) fn executor_for(
         #[cfg(not(feature = "edge"))]
         {
             return Err(
-                "edge support is not installed; reinstall qql-cli with --features edge".into(),
+                "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
+                    .into(),
             );
         }
     }

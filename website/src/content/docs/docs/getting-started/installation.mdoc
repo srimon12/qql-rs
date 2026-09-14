@@ -90,13 +90,33 @@ cd qql-rs
 cargo build --release --workspace
 {% /terminal %}
 
+### Feature builds (lean by default)
+
+The default binary — including the prebuilt archives fetched by the
+installer above — is `rest` + `grpc` only. `edge` (ONNX/FastEmbed, heavy)
+and `record` (axum proxy, cheap) stay opt-in so the default download stays
+small. Install a feature build from crates.io with one command (no clone):
+
+{% terminal title="Feature installs (no clone needed)" %}
+cargo install qql-cli --locked --features edge
+cargo install qql-cli --locked --features record
+cargo install qql-cli --locked --features full
+{% /terminal %}
+
+Run `qql version` to confirm: its `features` array lists what the binary
+supports. Python/Node stay split the same way — `pyqql` /
+`@veristamp/nqql` are lean, `pyqql-edge` / `@veristamp/nqql-edge` (plus
+`uv pip install pyqql-edge` / `uv add pyqql-edge`) carry the edge runtime.
+
 ### Edge runtime
 
 The in-process edge backend is an opt-in build. Compile the CLI with the `edge`
 feature to enable `--edge` and `qql config edge`:
 
 {% terminal title="Edge-enabled CLI build" %}
-cargo build --release -p qql-cli --features edge
+cargo install qql-cli --locked --features edge
+# ... or from a local checkout:
+# cargo build --release -p qql-cli --features edge
 {% /terminal %}
 
 See [the edge backend overview](/docs/edge/) for capabilities and limits.
