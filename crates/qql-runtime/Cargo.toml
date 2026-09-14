@@ -38,7 +38,7 @@ tokio = { workspace = true, features = ["macros", "time", "sync"] }
 [build-dependencies]
 typify = "0.8"
 serde_json = "1"
-schemars = "0.8"
+schemars = "1.2"
 prettyplease = "0.3"
 syn = "2"
 tonic-prost-build = "0.14"
