@@ -39,7 +39,7 @@ tokio = { workspace = true, features = ["macros", "time", "sync"] }
 typify = "0.8"
 serde_json = "1"
 schemars = "0.8"
-prettyplease = "0.2"
+prettyplease = "0.3"
 syn = "2"
 tonic-prost-build = "0.14"
 protoc-bin-vendored = "3"
