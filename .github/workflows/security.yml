@@ -26,7 +26,7 @@ jobs:
     name: cargo audit (crates.io advisories)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked || cargo install cargo-audit --locked
       - name: Run cargo audit
@@ -36,7 +36,7 @@ jobs:
     name: cargo deny (advisories, licenses, sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories bans licenses sources
@@ -48,8 +48,8 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
         with:
           languages: rust
           build-mode: manual
@@ -57,7 +57,7 @@ jobs:
       # published core/plan/runtime/cli surface plus the FFI bindings.
       - name: Build workspace (edge excluded)
         run: cargo check --workspace --all-targets --exclude qql-edge --exclude pyqql-edge --exclude nqql-edge
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: "/language:rust"
 
@@ -65,7 +65,7 @@ jobs:
     name: npm audit (nqql, nqql-edge)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The packages are lockfile-less in CI (see ci.yml); build the lock
       # in-memory first — `npm audit` requires one.
       - name: nqql audit
@@ -83,8 +83,8 @@ jobs:
     name: pnpm audit (website)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
       - name: pnpm audit

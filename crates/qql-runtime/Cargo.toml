@@ -36,16 +36,16 @@ prost-types = { version = "0.14", optional = true }
 tokio = { workspace = true, features = ["macros", "time", "sync"] }
 
 [build-dependencies]
-typify = "0.7"
+typify = "0.8"
 serde_json = "1"
 schemars = "0.8"
-prettyplease = "0.2"
-syn = "2"
+prettyplease = "0.3"
+syn = "3"
 tonic-prost-build = "0.14"
 protoc-bin-vendored = "3"
 
 [dev-dependencies]
-jsonschema = "0.26"
+jsonschema = "0.56"
 
 [lints]
 workspace = true

@@ -293,7 +293,7 @@ jobs:
       # rate-limited intermittently (PR #73). Cached per-job (separate key:
       # same-key saves race when both jobs miss), warm step retries cold path.
       - name: Cache fastembed model
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/hf-home
           key: fastembed-bge-small-en-v1.5-python
@@ -348,7 +348,7 @@ jobs:
       # happens at most once; the warm step retries the cold path.
       - name: Cache fastembed model
         if: matrix.package == 'nqql-edge'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/hf-home
           key: fastembed-bge-small-en-v1.5-node
@@ -618,7 +618,7 @@ jobs:
             printf 'No relevant changes; skipping docs validation.\nChanged files:\n%s\n' "$changed"
           fi
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.relevant.outputs.relevant == 'true'
         with:
           version: 11
