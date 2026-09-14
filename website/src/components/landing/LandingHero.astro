@@ -55,15 +55,21 @@ const heroLines = specimenQql.trim().split("\n");
         </a>
         <a class="btn btn--ghost" href={secondaryCta.href}>{secondaryCta.label}</a>
       </div>
+      <p class="reveal m-0 mt-5 flex items-center gap-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]" style="--d:260ms">
+        <span class="text-[var(--sl-color-accent)]" aria-hidden="true">$</span>
+        <code class="min-w-0 break-all">{installCmd}</code>
+        <CopyButton
+          text={installCmd}
+          variant="icon"
+          title="Copy install command"
+          ariaLabel="Copy install command"
+        />
+      </p>
     </div>
 
-    <figure class="code-card reveal min-w-0 shadow-[0_0_48px_-32px_var(--sl-color-accent)]" style="--d:280ms; border-color: color-mix(in srgb, var(--sl-color-accent) 20%, transparent)" aria-label="Example QQL query">
+    <figure class="code-card reveal min-w-0" style="--d:280ms; border-color: color-mix(in srgb, var(--sl-color-accent) 20%, transparent)" aria-label="Example QQL query">
       <figcaption class="code-card__head">
-        <span class="flex items-center gap-1.5" aria-hidden="true">
-          <span class="h-2.5 w-2.5 rounded-full bg-[#ff5f57]/90"></span>
-          <span class="h-2.5 w-2.5 rounded-full bg-[#febc2e]/90"></span>
-          <span class="h-2.5 w-2.5 rounded-full bg-[#28c840]/90"></span>
-        </span>
+        <span class="code-card__tick" aria-hidden="true"></span>
         <span class="inline-flex min-w-0 items-center gap-1.5 justify-self-center rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-2.5 py-0.5 font-mono text-[0.6875rem] text-[var(--sl-color-gray-2)]">
           <span class="text-[var(--sl-color-accent)]" aria-hidden="true">&gt;_</span>
           <span class="truncate">{specimenTitle}</span>
@@ -71,23 +77,11 @@ const heroLines = specimenQql.trim().split("\n");
         <span class="code-card__meta">{specimenMeta}</span>
       </figcaption>
 
-      <div class="flex items-center gap-3 border-b border-[var(--sl-color-gray-5)] px-3 py-2.5">
-        <span class="shrink-0 font-mono text-[0.8125rem] text-[var(--sl-color-accent)]" aria-hidden="true">$</span>
-        <code class="min-w-0 flex-1 truncate font-mono text-[0.8125rem] text-[var(--sl-color-gray-2)]" title={installCmd}>{installCmd}</code>
-        <CopyButton
-          text={installCmd}
-          variant="page"
-          title="Copy install command"
-          ariaLabel="Copy install command"
-          class="shrink-0"
-        />
-      </div>
-
-      <div class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 px-5">
-        <div class="flex select-none flex-col border-r border-[var(--sl-color-gray-5)] py-3 pr-2 text-right font-mono text-[0.8125rem] leading-[1.65] text-[var(--sl-color-gray-4)]" aria-hidden="true">
+      <div class="grid grid-cols-[minmax(0,1fr)] gap-2 px-5 sm:grid-cols-[2rem_minmax(0,1fr)]">
+        <div class="hidden select-none flex-col border-r border-[var(--sl-color-gray-5)] py-3 pr-2 text-right font-mono text-[0.8125rem] leading-[1.65] text-[var(--sl-color-gray-4)] sm:flex" aria-hidden="true">
           {heroLines.map((_, i) => <span>{String(i + 1).padStart(2, "0")}</span>)}
         </div>
-        <div class="code-flat min-w-0">
+        <div class="code-flat code-wrap min-w-0">
           <Code code={specimenQql} lang="qql" frame="none" />
         </div>
       </div>
@@ -97,11 +91,7 @@ const heroLines = specimenQql.trim().split("\n");
           <span class="shrink-0 rounded-full border border-[color-mix(in_srgb,var(--q-ok)_55%,transparent)] px-2 py-0.5 font-semibold text-[var(--q-ok)]">200 OK</span>
           <span class="min-w-0 truncate">{specimenRoute}</span>
         </span>
-        <span class="hidden shrink-0 items-center gap-3 sm:flex">
-          <span class="inline-flex items-center gap-1"><span class="text-[var(--q-ok)]" aria-hidden="true">✓</span> AST verified by qql-core</span>
-          <span class="inline-flex items-center gap-1"><span class="text-[var(--q-ok)]" aria-hidden="true">✓</span> Shard-routed</span>
-          <span class="tabular-nums">{specimenStatus}</span>
-        </span>
+        <span class="shrink-0 tabular-nums">{specimenStatus}</span>
       </div>
     </figure>
   </div>

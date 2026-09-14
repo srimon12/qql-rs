@@ -26,14 +26,14 @@ const { heading, sub, installs, footHref, footLabel } = Astro.props;
 
     <ul class="mt-10 grid list-none grid-cols-1 gap-px overflow-hidden rounded-[10px] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-5)] p-0 sm:grid-cols-2 lg:grid-cols-3">
       {
-        installs.map((item, idx) => (
-          <li class:list={["flex min-w-0 flex-col gap-3 p-5", idx === 0 || item.note ? "bg-[color-mix(in_srgb,var(--sl-color-accent)_7%,var(--sl-color-bg))]" : "bg-[var(--sl-color-bg)]"]}>
+        installs.map((item) => (
+          <li class="flex min-w-0 flex-col gap-3 p-5 bg-[var(--sl-color-bg)]">
             <div class="flex items-center justify-between gap-3">
               <h3 class="m-0 text-base font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">{item.name}</h3>
               <a class="link font-mono text-[0.6875rem]" href={item.href}>Docs →</a>
             </div>
             <div class="flex items-center gap-3">
-              <code class="min-w-0 flex-1 break-all whitespace-normal leading-relaxed font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] lg:truncate lg:whitespace-nowrap" title={item.cmd}>{item.cmd}</code>
+              <code class="min-w-0 flex-1 break-all whitespace-normal leading-relaxed font-mono text-[0.72rem] text-[var(--sl-color-gray-2)]" title={item.cmd}>{item.cmd}</code>
               <CopyButton
                 text={item.cmd}
                 class="shrink-0"

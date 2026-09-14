@@ -171,6 +171,7 @@ body:not(.app-shell) :is(h1, h2) {
 	font-size: 0.6875rem;
 	color: var(--sl-color-gray-3);
 }
+.code-card__foot--stack { display: flex; flex-direction: column; align-items: stretch; gap: 0.15rem; padding-block: 0.4rem; }
 
 /* Expressive-code neutralization for specimens that sit inside our cards. */
 .code-flat .expressive-code,
@@ -178,6 +179,7 @@ body:not(.app-shell) :is(h1, h2) {
 .code-flat .expressive-code pre { background: transparent; border: 0; box-shadow: none; margin: 0; padding: 0; }
 .code-flat .expressive-code pre { overflow-x: auto; scrollbar-width: none; }
 .code-flat .expressive-code pre > code { padding-block: 0.75rem; font-size: 0.8125rem; line-height: 1.65; }
+.code-wrap .expressive-code pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
 .terminal-wrap .expressive-code pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; padding-right: 2.85rem; }
 
 /* ── Landing ────────────────────────────────────────────────────────────── */
@@ -377,6 +379,7 @@ body.app-shell .site-footer { display: none; }
 .app-action:disabled { cursor: not-allowed; opacity: 0.45; }
 .app-action[aria-selected="true"] { border-color: var(--sl-color-accent); background: color-mix(in srgb, var(--sl-color-accent) 22%, var(--sl-color-gray-6)); color: var(--sl-color-white); font-weight: 600; }
 .app-action[aria-pressed="true"] { border-color: var(--sl-color-accent); background: var(--sl-color-accent); color: #fff; font-weight: 600; }
+.app-action--tint[aria-pressed="true"] { border-color: var(--sl-color-accent); background: color-mix(in srgb, var(--sl-color-accent) 22%, var(--sl-color-gray-6)); color: var(--sl-color-white); font-weight: 600; }
 .app-action--lg { min-height: 2.25rem; padding: 0 0.85rem; }
 .app-action--primary { border-color: var(--sl-color-accent); background: var(--sl-color-accent); color: #fff; font-weight: 600; }
 .app-action--primary:hover { border-color: color-mix(in srgb, var(--sl-color-accent) 88%, #fff); background: color-mix(in srgb, var(--sl-color-accent) 88%, #fff); color: #fff; }
