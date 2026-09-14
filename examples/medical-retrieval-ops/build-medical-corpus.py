@@ -134,11 +134,8 @@ def main() -> None:
     cache_file = CACHE_DIR / f"{cache_key}.json"
 
     if cache_file.exists():
-        # Log only the cache basename, never row contents or full paths.
-        # DATASET_ID/CACHE_DIR come from env but are non-secret demo config
-        # (public benchmark ID, local cache dir); Q&A text is never logged.
-        # codeql[py/clear-text-logging-sensitive-data]: basename-only demo log
-        print(f"Loading cached dataset from {cache_file.name}", file=sys.stderr)
+        # Avoid logging env/path-derived values; emit constant status only.
+        print("Loading cached dataset", file=sys.stderr)
         rows_data = json.loads(cache_file.read_text(encoding="utf-8"))
         rows = [{k: v if k == "id" else str(v) for k, v in r.items()} for r in rows_data]
     else:
