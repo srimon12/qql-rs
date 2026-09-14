@@ -109,9 +109,9 @@ Fields QQL cannot represent fail with typed `ConvertError` values `UnsupportedEn
 1. `qql record --out capture.jsonl` with the app pointed at the recorder.
 2. `qql convert --collection <name> capture.jsonl` and review plain QQL.
 3. `qql check "<statement>"` for staged triage, or `qql explain` for plan inspection.
-4. `qql execute capture.qql` after dropping `# ERROR` lines, or migrate data when the target is a new cluster.
+4. `qql run capture.qql` after dropping `# ERROR` lines, or migrate data when the target is a new cluster.
 
-Converted output is normal QQL. No compatibility mode. It runs with `qql exec` and `qql execute` and SDK `Client.execute`.
+Converted output is normal QQL. No compatibility mode. It runs with `qql run` and SDK `Client.execute`.
 
 ## Cluster migration with qql migrate
 
@@ -201,9 +201,9 @@ Key decisions:
 
 ```bash
 qql dump my_collection output.qql
-qql execute output.qql --stop-on-error
+qql run output.qql --stop-on-error
 ```
 
-`dump` writes a collection to a QQL script for backup, inspection, and restore. Replay with `qql execute`. For cluster moves with reshard or requantize, prefer `migrate`. For traffic capture, prefer `record` plus `convert`.
+`dump` writes a collection to a QQL script for backup, inspection, and restore. Replay with `qql run`. For cluster moves with reshard or requantize, prefer `migrate`. For traffic capture, prefer `record` plus `convert`.
 
 Full product docs live at `website/src/content/docs/docs/operations/convert.mdoc` and `cluster-migration.mdoc`.

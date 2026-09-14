@@ -54,8 +54,10 @@ need no embedder, then add text embeddings once Ollama is running.
    ollama pull all-minilm:l6-v2
    {% /terminal %}
 
-   {% terminal title="Environment" %}
-   export QDRANT_URL=http://localhost:6333
+   Configure QQL connection and embedder settings (via `qql setup` or environment variables):
+
+   {% terminal title="Setup" %}
+   qql setup --url http://localhost:6333 --yes
    export EMBED_URL=http://localhost:11434/v1/embeddings
    export EMBED_MODEL=all-minilm:l6-v2
    export EMBED_DIM=384
@@ -98,14 +100,15 @@ need no embedder, then add text embeddings once Ollama is running.
 
 {% /steps %}
 
-Save the statements as `quickstart.qql`, then execute the whole script:
+Save the statements as `quickstart.qql`. Verify it offline with `qql lint`, then execute it with `qql run`:
 
-{% terminal title="Execute the script" %}
-qql execute quickstart.qql
+{% terminal title="Lint and execute the script" %}
+qql lint quickstart.qql
+qql run quickstart.qql
 {% /terminal %}
 
-Use `qql explain "QUERY ..."` to inspect a plan without sending it to Qdrant.
-Use `qql check "QUERY ..."` to triage format, explain, embedder dim, vector
+Use `qql explain "QUERY ..."` to inspect a plan offline without sending it to Qdrant.
+Use `qql doctor "QUERY ..."` (or `qql check`) to triage format, explain, embedder dim, vector
 topology, and backend health in one pass.
 
 ## Already have a Qdrant application?

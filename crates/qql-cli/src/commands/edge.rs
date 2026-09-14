@@ -26,7 +26,7 @@ pub fn handle_configure_edge(
     qql::embedder::Bm25Params::resolve(config.bm25_k1, config.bm25_b, config.bm25_avg_len)?;
     let path = crate::config::EdgeConfig::write_object(&merged)?;
     println!("Saved edge configuration to {}", path.display());
-    println!("Use it with: qql --edge exec \"SHOW COLLECTIONS\"");
+    println!("Use it with: qql --edge run \"SHOW COLLECTIONS\"");
     Ok(())
 }
 
@@ -203,7 +203,7 @@ async fn edge_optimize_inner(
 /// Emit a structured `--json` failure for a one-shot edge command.
 ///
 /// Mirrors the `ok` / `operation` / `message` triple of the `ExecResponse`
-/// results every `qql exec --json` run reports (and the `check` / `doctor`
+/// results every `qql run --json` run reports (and the `check` / `doctor`
 /// JSON shapes), plus the command's `collection`. The caller still returns
 /// `Err`, so the exit code is unchanged and stdout stays machine-parseable.
 #[cfg(feature = "edge")]

@@ -47,7 +47,7 @@ def setup_edge():
 
 
 def edge(stmt: str) -> dict:
-    cmd = [QQL, "--edge", "exec", stmt, "--json"]
+    cmd = [QQL, "--edge", "run", stmt, "--json"]
     if DRY_RUN:
         print(f"    {stmt[:100]}{'...' if len(stmt)>100 else ''}")
         return {"ok": True}

@@ -46,10 +46,10 @@ Binary: `target/release/qql`.
 
 ```bash
 # Execute a query
-qql exec "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
+qql run "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
 
 # Execute from file
-qql execute script.qql --stop-on-error
+qql run script.qql --stop-on-error
 
 # Explain (no Qdrant needed)
 qql explain "QUERY 'hello' FROM docs USING dense LIMIT 5"

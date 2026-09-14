@@ -10,9 +10,14 @@ use super::runtime::{
 pub async fn handle_doctor(
     url: &str,
     use_edge: bool,
+    query: Option<&str>,
+    params: Option<&serde_json::Value>,
     json: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(q) = query {
+        return super::check::handle_check(url, use_edge, q, params, json, quiet).await;
+    }
     let executor = executor(url, use_edge)?;
     let hosts = doctor_host_summary(executor.config(), use_edge);
     let ping = executor

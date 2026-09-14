@@ -178,7 +178,20 @@ export function createCopyButton(options: {
 	btn.dataset.copyLabel = label;
 	btn.dataset.copiedLabel = copiedLabel;
 	if (options.title) btn.title = options.title;
-	btn.innerHTML = `${iconSvg("copy")}${iconSvg("check")}<span class="copy-btn__label" data-copy-label>${label}</span><span class="sr-only" data-copy-status aria-live="polite"></span>`;
+	// `iconSvg` bodies are static literals; the caller-supplied `label` must
+	// never flow through `innerHTML` (CodeQL js/xss). Build label/status via
+	// textContent so library input cannot inject markup.
+	btn.innerHTML = `${iconSvg("copy")}${iconSvg("check")}`;
+	const labelSpan = document.createElement("span");
+	labelSpan.className = "copy-btn__label";
+	labelSpan.setAttribute("data-copy-label", "");
+	labelSpan.textContent = label;
+	btn.append(labelSpan);
+	const statusSpan = document.createElement("span");
+	statusSpan.className = "sr-only";
+	statusSpan.setAttribute("data-copy-status", "");
+	statusSpan.setAttribute("aria-live", "polite");
+	btn.append(statusSpan);
 	return btn;
 }
 
@@ -269,11 +282,19 @@ function codeFence(pre: HTMLElement): string {
 	return `\`\`\`${lang}\n${code}\n\`\`\``;
 }
 
+function escapeTableCell(text: string): string {
+	// Escape backslashes first so `\|` round-trips, then pipes, then fold
+	// newlines (CodeQL js/incomplete-sanitization: backslash must be escaped).
+	return text
+		.trim()
+		.replace(/\\/g, "\\\\")
+		.replace(/\|/g, "\\|")
+		.replace(/\r?\n/g, " ");
+}
+
 function tableMarkdown(table: HTMLElement, out: string[]): void {
 	const rows = [...table.querySelectorAll("tr")].map((tr) =>
-		[...tr.children].map((cell) =>
-			inlineText(cell).trim().replace(/\|/g, "\\|"),
-		),
+		[...tr.children].map((cell) => escapeTableCell(inlineText(cell))),
 	);
 	if (rows.length === 0) return;
 	out.push(`| ${rows[0].join(" | ")} |`);

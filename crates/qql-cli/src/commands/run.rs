@@ -1,10 +1,37 @@
-//! `qql exec` / `execute` / `explain` / `connect`.
+//! `qql run` / `explain` / `repl`.
 
 use super::runtime::{executor, explain_query_bound};
 use crate::output;
 use crate::script;
 
-pub async fn handle_exec(
+pub async fn handle_run_smart(
+    url: &str,
+    use_edge: bool,
+    query_or_file: &str,
+    params: Option<&serde_json::Value>,
+    stop_on_error: bool,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let p = std::path::Path::new(query_or_file);
+    let looks_like_path = query_or_file.ends_with(".qql")
+        || ((query_or_file.contains('/') || query_or_file.contains('\\'))
+            && !query_or_file.contains(char::is_whitespace));
+    let is_file = p.is_file() || (!query_or_file.contains('\n') && looks_like_path);
+    if is_file {
+        if params.is_some() {
+            return Err(
+                "--param/--params-file cannot be used with a script file; bind values per statement instead"
+                    .into(),
+            );
+        }
+        handle_run_file(url, use_edge, query_or_file, stop_on_error).await
+    } else {
+        handle_run(url, use_edge, query_or_file, params, json, quiet).await
+    }
+}
+
+pub async fn handle_run(
     url: &str,
     use_edge: bool,
     query: &str,
@@ -46,7 +73,7 @@ pub async fn handle_exec(
     Ok(())
 }
 
-pub async fn handle_execute_file(
+pub async fn handle_run_file(
     url: &str,
     use_edge: bool,
     path: &str,
@@ -93,13 +120,13 @@ pub async fn handle_execute_file(
     }
 
     let msg = format!(
-        "Executed script {} ({} succeeded, {} failed)",
+        "Ran script {} ({} succeeded, {} failed)",
         path, ok_count, fail_count
     );
 
     let resp = output::ScriptResponse {
         ok: fail_count == 0,
-        command: "execute".to_string(),
+        command: "run".to_string(),
         path: path.to_string(),
         succeeded: ok_count,
         failed: fail_count,

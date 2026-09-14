@@ -35,11 +35,13 @@ curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/instal
 irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
 {% /terminal %}
 
-The installed binary is `qql`.
+The installed binary is `qql`. Run `qql setup` to configure your Qdrant
+connection and embedding defaults, then run `qql doctor` to verify connectivity.
 
-{% terminal title="Verify the CLI" %}
+{% terminal title="Configure and verify the CLI" %}
 qql version
-qql doctor --json
+qql setup
+qql doctor
 {% /terminal %}
 
 {% aside type="note" title="Editors" %}

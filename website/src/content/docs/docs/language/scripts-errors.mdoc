@@ -98,11 +98,20 @@ planner or executor.
 The [Playground](/playground/) shows the same source, AST, compiled route, and
 explanation without connecting to Qdrant until you choose to run it.
 
-## Debug with qql check
+## Offline linting with qql lint
 
-Run `qql check "<statement>"` before executing an unfamiliar statement. It
-runs five stages in order and prints one line per stage with the QQL-* code
-on failure:
+Before deploying or committing scripts, use `qql lint` for static syntax, plan, and style verification:
+
+{% terminal title="Lint scripts offline" %}
+qql lint scripts/queries.qql
+qql lint --fix
+{% /terminal %}
+
+`qql lint` is completely offline: it parses statements with error recovery, compiles them through the query planner, flags redundant `WITH PAYLOAD true` clauses, and checks canonical formatting without connecting to a cluster.
+
+## Live query triage with qql doctor / qql check
+
+When troubleshooting live execution against a running cluster, run `qql doctor "<statement>"` (or `qql check "<statement>"`). It runs five stages in order and prints one line per stage with the QQL-* code on failure:
 
 1. Format check of the input.
 2. Offline explain (no backend needed).
@@ -113,9 +122,9 @@ on failure:
 5. Backend doctor (Qdrant reachability, with unreachable and auth failures
    reported distinctly).
 
-{% terminal title="Triage a statement" %}
-qql check "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
-qql check "QUERY 'typed query language' FROM docs USING dense LIMIT 5"
+{% terminal title="Triage a statement against a live cluster" %}
+qql doctor "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+qql doctor "QUERY 'typed query language' FROM docs USING dense LIMIT 5"
 {% /terminal %}
 
 Fix the first failing stage and rerun. Literal-vector statements pass the

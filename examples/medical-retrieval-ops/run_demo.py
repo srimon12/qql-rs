@@ -44,7 +44,7 @@ def step(label: str) -> None:
 
 
 def run(label: str, stmt: str, *, explain: bool = False) -> None:
-    cmd = "explain" if explain else "exec"
+    cmd = "explain" if explain else "run"
     try:
         r = qql(cmd, "--quiet", "--json", stmt)
         if explain:
@@ -73,7 +73,7 @@ def load_eval() -> dict:
 
 def check_collection_exists() -> bool:
     try:
-        r = qql("exec", "--quiet", "--json", f"SHOW COLLECTION {COLLECTION}")
+        r = qql("run", "--quiet", "--json", f"SHOW COLLECTION {COLLECTION}")
         pts = r.get("data", {}).get("points_count", 0)
         return pts > 0
     except Exception:
@@ -114,7 +114,7 @@ def main():
         # ── upsert ──
         step(f"Upsert ({Path(GENERATED / '02-seed.qql').stat().st_size // 1024} KB seed file)")
         t0 = time.time()
-        r = qql("execute", str(GENERATED / "02-seed.qql"))
+        r = qql("run", str(GENERATED / "02-seed.qql"))
         elapsed = time.time() - t0
         print(f"  {r['message']} in {elapsed:.1f}s")
 

@@ -143,7 +143,8 @@ impl QqlConfig {
         Ok(Some(config))
     }
 
-    /// Persist this config to the config file as pretty JSON.
+    /// Persist this config to the config file as pretty JSON with owner-only
+    /// permissions (the file may hold the Qdrant API secret).
     pub fn save(&self) -> Result<(), QqlError> {
         let path = Self::config_path()?;
         let data = serde_json::to_string_pretty(self).map_err(|e| {
@@ -153,9 +154,35 @@ impl QqlConfig {
                 None,
             )
         })?;
-        std::fs::write(&path, data).map_err(|e| {
-            QqlError::execution("QQL-CONFIG", format!("failed to write config: {}", e), None)
-        })?;
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::os::unix::fs::PermissionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)
+                .map_err(|e| {
+                    QqlError::execution(
+                        "QQL-CONFIG",
+                        format!("failed to write config: {}", e),
+                        None,
+                    )
+                })?;
+            file.write_all(data.as_bytes()).map_err(|e| {
+                QqlError::execution("QQL-CONFIG", format!("failed to write config: {}", e), None)
+            })?;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&path, &data).map_err(|e| {
+                QqlError::execution("QQL-CONFIG", format!("failed to write config: {}", e), None)
+            })?;
+        }
         Ok(())
     }
 }

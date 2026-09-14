@@ -261,7 +261,9 @@ mod tests {
             PayloadFieldSchema::FieldParams(PayloadSchemaParams::Keyword(params)) => {
                 assert_eq!(params.is_tenant, Some(true));
             }
-            other => panic!("expected keyword params, got {other:?}"),
+            // Omit the debug payload: the mismatched variant can be a `Uuid`
+            // schema, which CodeQL treats as sensitive (rust/cleartext-logging).
+            _other => panic!("expected keyword params"),
         }
     }
 
@@ -309,7 +311,8 @@ mod tests {
                     serde_json::json!(["a", "the"])
                 );
             }
-            other => panic!("expected text params, got {other:?}"),
+            // Omit debug payload (may be a `Uuid` schema variant).
+            _other => panic!("expected text params"),
         }
     }
 
@@ -329,7 +332,8 @@ mod tests {
                 let value = serde_json::to_value(&params).expect("text params serialize");
                 assert_eq!(value["stemmer"]["type"], "none");
             }
-            other => panic!("expected text params, got {other:?}"),
+            // Omit debug payload (may be a `Uuid` schema variant).
+            _other => panic!("expected text params"),
         }
     }
 

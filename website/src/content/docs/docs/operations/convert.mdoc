@@ -145,8 +145,8 @@ their typed QQL predicates.
 
 {% aside type="note" title="Converted output is normal QQL" %}
 There is no compatibility mode. The output uses the same statements as any
-hand-written QQL, runs with `qql exec` or `qql execute`, and can be fed to
-`qql check` for staged triage before executing.
+hand-written QQL, can be verified offline with `qql lint`, executed with
+`qql run`, and triaged with `qql doctor "<statement>"`.
 {% /aside %}
 
 ## A migration path in practice
@@ -155,10 +155,11 @@ hand-written QQL, runs with `qql exec` or `qql execute`, and can be fed to
    (`qql record --out capture.jsonl`).
 2. **Convert** them (`qql convert --collection <name> capture.jsonl`) and
    review the file; it is plain QQL.
-3. **Check** representative statements (`qql check "<statement>"`).
-4. **Move** data with [Cluster migration](/docs/operations/cluster-migration/)
+3. **Lint** the converted script offline (`qql lint capture.qql`).
+4. **Triage** representative statements if needed (`qql doctor "<statement>"`).
+5. **Move** data with [Cluster migration](/docs/operations/cluster-migration/)
    when the target is a new cluster, or **replay** the script with
-   `qql execute`.
+   `qql run capture.qql`.
 
 Related references: [CLI](/docs/tools/cli/),
 [QQL vs raw Qdrant JSON API](/docs/guides/qql-vs-qdrant-json/).

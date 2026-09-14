@@ -9,8 +9,10 @@ use qql_core::fmt::format_stmt;
 use qql_core::parser::Parser;
 
 pub(crate) fn convert_with(input: &str, collection: &str) -> Vec<String> {
-    let stmts = convert_json(input, Some(collection))
-        .unwrap_or_else(|e| panic!("conversion failed for {input}: {e}"));
+    // Test-only panic: omit `input` so synthetic identifiers (e.g. UUID
+    // fixtures) never reach stderr logs (CodeQL rust/cleartext-logging).
+    let stmts =
+        convert_json(input, Some(collection)).unwrap_or_else(|e| panic!("conversion failed: {e}"));
     assert_canonical(&stmts, input);
     stmts
 }
@@ -20,15 +22,15 @@ pub(crate) fn convert(input: &str) -> Vec<String> {
 }
 
 pub(crate) fn assert_canonical(stmts: &[String], input: &str) {
-    assert!(
-        !stmts.is_empty(),
-        "conversion produced no statements for {input}"
-    );
+    // Omit `input` from failure messages: callers pass synthetic UUID
+    // fixtures that must not reach logs. Length + diff output is enough.
+    let _ = input;
+    assert!(!stmts.is_empty(), "conversion produced no statements");
     for stmt in stmts {
         let parsed = Parser::parse(&format!("{stmt};"))
-            .unwrap_or_else(|e| panic!("emitted statement failed to parse: {stmt} ({e})"));
+            .unwrap_or_else(|e| panic!("emitted statement failed to parse: {e}"));
         let again = format_stmt(&parsed);
-        assert_eq!(&again, stmt, "not canonical for input {input}");
+        assert_eq!(&again, stmt, "not canonical");
     }
 }
 
@@ -47,14 +49,15 @@ pub(crate) fn wrapped_query(
 
 /// Canonical form of an expected QQL statement.
 pub(crate) fn canon(source: &str) -> String {
-    let parsed =
-        Parser::parse(source).unwrap_or_else(|e| panic!("expected QQL must parse: {source} ({e})"));
+    // Omit `source` from the panic: expected strings can embed synthetic
+    // UUID fixtures in UUID round-trip tests.
+    let parsed = Parser::parse(source).unwrap_or_else(|e| panic!("expected QQL must parse: {e}"));
     format_stmt(&parsed)
 }
 
 /// Assert the converter emits exactly the canonical form of `expected`.
 pub(crate) fn expect_one(input: &str, expected: &str) {
-    assert_eq!(convert(input), [canon(expected)], "input: {input}");
+    assert_eq!(convert(input), [canon(expected)]);
 }
 
 pub(crate) fn convert_err(input: &str) -> ConvertError {

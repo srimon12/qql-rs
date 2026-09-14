@@ -4,7 +4,7 @@
 ///
 /// Only sequences recognized by `qql-core`'s `decode_string` are emitted:
 /// `\\`, `\'`, `\n`, `\r`, `\t`. Null bytes and other control chars are
-/// stripped so the dump remains round-trippable via `qql execute`.
+/// stripped so the dump remains round-trippable via `qql run`.
 pub fn escape_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {

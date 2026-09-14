@@ -44,7 +44,7 @@ class Result:
 
 
 def execute_json(query: str) -> Result:
-    cmd = [QQL_BIN, "exec", "--json", query]
+    cmd = [QQL_BIN, "run", "--json", query]
     env = os.environ.copy()
     env.setdefault("EMBEDDER", "http")
     env.setdefault("EMBED_URL", "http://localhost:11434/v1/embeddings")
