@@ -7,7 +7,9 @@ Zero-code capture, REST JSON conversion, cluster migration, edge seed and publis
 Problem: an existing Qdrant app speaks REST JSON. Rewriting by hand is slow and lossy.
 
 ```bash
-cargo build --release -p qql-cli --features record
+cargo install qql-cli --locked --features record
+# ... or from a local checkout:
+# cargo build --release -p qql-cli --features record
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.jsonl --qql-out capture.qql
 qql record
 ```

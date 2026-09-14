@@ -107,10 +107,10 @@ full matrix.
 
 {% steps %}
 
-1. **Build the edge-enabled CLI** (edge is an opt-in feature)
+1. **Install the edge-enabled CLI** (edge is an opt-in feature)
 
-   {% terminal title="Build the CLI with edge support" %}
-   cargo build --release -p qql-cli --features edge
+   {% terminal title="Install the CLI with edge support" %}
+   cargo install qql-cli --locked --features edge
    {% /terminal %}
 
 2. **Configure a local data directory and model**

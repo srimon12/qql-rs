@@ -90,7 +90,7 @@ qql doctor
 ### Verify Installation
 
 ```bash
-./target/release/qql version
+qql version
 ```
 
 ## Rust Library (`qql`)

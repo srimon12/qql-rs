@@ -26,7 +26,9 @@ appended to a JSONL capture.
 `qql record` is opt-in because it pulls in the proxy runtime:
 
 ```bash
-cargo build --release -p qql-cli --features record
+cargo install qql-cli --locked --features record
+# ... or from a local checkout:
+# cargo build --release -p qql-cli --features record
 ```
 
 {% terminal title="Record once, convert after" %}

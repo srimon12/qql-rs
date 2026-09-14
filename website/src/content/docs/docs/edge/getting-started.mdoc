@@ -5,24 +5,20 @@ sidebar:
   order: 1
 ---
 
-This page walks through a complete end-to-end local session: build the
+This page walks through a complete end-to-end local session: install the
 edge-enabled CLI, configure it, create a collection, upsert documents, and
-search — all in-process, with no Qdrant server running.
+search with no Qdrant server running.
 
-## 1. Build the edge-enabled CLI
+## 1. Install the edge-enabled CLI
 
 Edge support is an **opt-in cargo feature**. The default `qql-cli` build ships
-with `grpc` and `rest` only; `--edge` refuses to run until you build with the
-`edge` feature (FastEmbed and ONNX materially increase compile time and binary
-size).
+with `grpc` and `rest` only. Install the edge build from crates.io. No clone is needed.
 
-{% terminal title="Build the edge-enabled CLI" %}
-git clone https://github.com/srimon12/qql-rs.git
-cd qql-rs
-cargo build --release -p qql-cli --features edge
+{% terminal title="Install the edge-enabled CLI" %}
+cargo install qql-cli --locked --features edge
 {% /terminal %}
 
-The binary is `target/release/qql`. A default build without the flag would
+The binary is `~/.cargo/bin/qql`. Check it with `qql version`. It reports the enabled `features` array. Contributors building from a local checkout can `git clone` the repo and `cargo build` with the edge feature, then use `target/release/qql`. A default build without the flag would
 answer `qql --edge exec "SHOW COLLECTIONS"` with:
 
 {% terminal title="Edge disabled" %}
