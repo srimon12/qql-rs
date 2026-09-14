@@ -58,8 +58,13 @@ const {
 </button>
 
 <script>
-  import { mountCopyButtons } from "../scripts/copy";
+  import { mountDocsCopy } from "../scripts/copy";
 
-  mountCopyButtons();
-  document.addEventListener("astro:page-load", () => mountCopyButtons());
+  // mountDocsCopy is a superset of mountCopyButtons (buttons + docs page
+  // action + per-frame buttons) and fully idempotent, so pages that render
+  // CopyButton directly (landing, playground) also grow frame buttons instead
+  // of silently skipping them. On non-docs pages the page action no-ops (no
+  // main h1#_top) and frame injection only fires on real EC frames.
+  mountDocsCopy();
+  document.addEventListener("astro:page-load", () => mountDocsCopy());
 </script>
