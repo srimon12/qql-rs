@@ -64,7 +64,7 @@ const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
             />
           </span>
         </header>
-        <div class="code-flat px-4">
+        <div class="code-flat code-wrap px-4">
           <Code code={featured.code} lang="qql" frame="none" />
         </div>
         <div class="code-card__foot">
@@ -73,8 +73,8 @@ const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
       </article>
 
       {
-        samples.map((sample, idx) => (
-          <article data-copy-managed class:list={["code-card", idx === 0 && "border-[color-mix(in_srgb,var(--sl-color-accent)_40%,var(--sl-color-gray-5))] bg-[color-mix(in_srgb,var(--sl-color-accent)_5%,var(--sl-color-gray-6))]"]}>
+        samples.map((sample) => (
+          <article data-copy-managed class:list={["code-card"]}>
             <header class="code-card__head">
               <span class="code-card__tick" aria-hidden="true"></span>
               <span class="mono-label">{sample.kind}</span>
@@ -88,7 +88,7 @@ const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
                 />
               </span>
             </header>
-            <div class="code-flat overflow-x-auto px-4 [mask-image:linear-gradient(to_right,#000_92%,transparent)]">
+            <div class="code-flat code-wrap px-4">
               <Code code={sample.code} lang="qql" frame="none" />
             </div>
             <div class="code-card__foot">

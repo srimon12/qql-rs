@@ -108,10 +108,14 @@ Key decisions:
 ## Build features
 
 ```bash
+cargo install qql-cli --locked
+cargo install qql-cli --locked --features edge
+cargo install qql-cli --locked --features record
+cargo install qql-cli --locked --features full
 cargo build --release -p qql-cli --no-default-features --features rest
 cargo build --release -p qql-cli --no-default-features --features rest,grpc
 cargo build --release -p qql-cli --features edge
 cargo build --release -p qql-cli --features record
 ```
 
-Binary is `target/release/qql`. Features are `rest`, `grpc`, `edge`, `record`.
+Binary is `~/.cargo/bin/qql` for installs and `target/release/qql` for checkouts. Features are `rest`, `grpc`, `edge`, `record`, `full`.

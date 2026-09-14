@@ -118,7 +118,8 @@ live application and captures what it sends, and `qql convert` turns that
 captured REST JSON into the QQL statements above.
 
 {% terminal title="Capture live traffic, then convert" %}
-cargo build --release -p qql-cli --features record
+cargo install qql-cli --locked --features record
+# ... or from a local checkout: cargo build --release -p qql-cli --features record
 
 # Qdrant keeps its address; point the app at the recorder.
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \

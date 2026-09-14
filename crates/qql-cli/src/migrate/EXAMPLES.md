@@ -1,7 +1,7 @@
 # `qql migrate` examples
 
 Commands below were run against a live Qdrant **1.19.1** on `localhost:6334`
-(gRPC). Binary: `target/release/qql`.
+(gRPC). Binary: `qql` on PATH (via installer or cargo install).
 
 Source collections (untouched):
 
@@ -13,14 +13,14 @@ Source collections (untouched):
 ## Dry-run (no writes)
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_copy --dry-run
 ```
 
 ## Same-cluster copy (durable default: `WAIT true`)
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_copy \
   --recreate --workers 4 --batch-size 128
 ```
@@ -32,7 +32,7 @@ the default is `20000` when the source sets none).
 ## Faster ingest (`WAIT false`)
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_copy \
   --recreate --restart --workers 4 --batch-size 128 --no-wait
 ```
@@ -43,7 +43,7 @@ catches up (a raw COUNT immediately after `--no-wait` can lag).
 ## ColBERT / multivector collection
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate nyayarag_legal_precedents --to nyaya_copy \
   --recreate --workers 2 --batch-size 64
 ```
@@ -55,7 +55,7 @@ default is too small).
 ## Filtered extract
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_mitte \
   --recreate --where "neighbourhood_group = 'Mitte'"
 ```
@@ -65,7 +65,7 @@ Live: **1982 / 1982 verified in 0.867 s**.
 ## Alias cutover
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_copy \
   --recreate --cutover stays
 ```
@@ -78,7 +78,7 @@ collection you still need).
 ## In-flight scalar quantization (plan only)
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_q --quantize scalar --dry-run
 ```
 
@@ -91,7 +91,7 @@ vectors on disk).
 ## Reshard / tenant split (clustered Qdrant only)
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_sharded \
   --shard-number 4 --replication-factor 1 \
   --shard-key-field neighbourhood_group \
@@ -120,7 +120,7 @@ Do not wait for ingest — `CREATE SHARD KEY` is unimplemented there.
 ## Cross-cluster + alias cutover
 
 ```bash
-./target/release/qql --url grpc://old:6334 \
+qql --url grpc://old:6334 \
   migrate docs \
   --target-url grpc://new:6334 \
   --to docs_v2 \

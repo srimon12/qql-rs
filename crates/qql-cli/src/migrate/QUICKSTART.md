@@ -4,11 +4,13 @@ Copy a collection as **schema + points** (not a Qdrant snapshot). The target can
 be another cluster, another minor version, another shard count, or a quantized
 schema.
 
-## 1. Build
+## 1. Install
 
 ```bash
-cargo build --release -p qql-cli
-# binary: target/release/qql
+cargo install qql-cli --locked
+# ... or from a local checkout:
+# cargo build --release -p qql-cli
+# binary: ~/.cargo/bin/qql (or target/release/qql for checkouts)
 ```
 
 Use gRPC (`:6334` / `grpc://`) for the ingest path. REST (`:6333`) works too.
@@ -16,7 +18,7 @@ Use gRPC (`:6334` / `grpc://`) for the ingest path. REST (`:6333`) works too.
 ## 2. Inspect the plan (no writes)
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_copy --dry-run
 ```
 
@@ -28,14 +30,14 @@ the `ALTER COLLECTION` that restores `indexing_threshold` after bulk load.
 Same cluster, new collection:
 
 ```bash
-./target/release/qql --url grpc://localhost:6334 \
+qql --url grpc://localhost:6334 \
   migrate geosmart_berlin_stays --to geosmart_copy --recreate
 ```
 
 Cross cluster:
 
 ```bash
-./target/release/qql --url grpc://old-host:6334 \
+qql --url grpc://old-host:6334 \
   migrate docs \
   --target-url grpc://new-host:6334 \
   --to docs \

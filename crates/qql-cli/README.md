@@ -4,18 +4,34 @@ CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, migrate, doctor, o
 
 ## Install
 
+Default binary is lean (`rest` + `grpc` only) — edge (ONNX) and record
+(axum) stay opt-in. Prebuilt archives from GitHub releases are default-only;
+feature builds install from crates.io with one command (no clone needed):
+
 ```bash
-# Default: rest + grpc
+# Default: rest + grpc (matches the release archives)
+cargo install qql-cli --locked
+
+# REST only (smallest)
+cargo install qql-cli --locked --no-default-features --features rest
+
+# Local edge backend, no server (`--edge`, `qql edge`, `qql config edge`)
+cargo install qql-cli --locked --features edge
+
+# REST traffic recorder (`qql record`)
+cargo install qql-cli --locked --features record
+
+# Everything at once
+cargo install qql-cli --locked --features full
+
+# From a local checkout instead
 cargo build --release -p qql-cli
-
-# REST only (smaller)
 cargo build --release -p qql-cli --no-default-features --features rest
-
-# Edge + FastEmbed (opt-in; heavier)
 cargo build --release -p qql-cli --features edge
 ```
 
-Binary: `target/release/qql`.
+Check what's installed: `qql version` reports the enabled `features` array.
+Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 
 ## Commands
 
@@ -157,7 +173,9 @@ preserved); collection and quota routes are appended as wrapped
 Bodyless `SHOW` / `DROP` routes are recorded with no `body`.
 
 ```bash
-cargo build -p qql-cli --features record
+cargo install qql-cli --locked --features record
+# ... or from a local checkout:
+# cargo build -p qql-cli --features record
 # Qdrant stays on :6333, the app now points at the recorder on :6334:
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
   --out capture.jsonl --qql-out capture.qql
@@ -205,6 +223,7 @@ LIMIT 10;
 | `grpc` | yes | gRPC |
 | `edge` | no | In-process edge + FastEmbed |
 | `record` | no | Transparent REST recorder (`qql record`; axum + reqwest, versions already pinned) |
+| `full` | no | Convenience alias for `edge,record` |
 
 ## Docs
 

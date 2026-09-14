@@ -326,6 +326,7 @@ const scenarios: {
 	id: string;
 	label: string;
 	hint: string;
+	dispatch: string;
 	qql: string;
 	codes: Record<FormatId, string>;
 	qqlNote: string;
@@ -335,6 +336,7 @@ const scenarios: {
 		id: "hybrid",
 		label: "Hybrid RRF",
 		hint: "Dense + Sparse",
+		dispatch: "POST /collections/docs/points/query",
 		qql: hybridQql,
 		codes: {
 			rest: restHybrid,
@@ -350,6 +352,7 @@ const scenarios: {
 		id: "tenant",
 		label: "Shard + filter",
 		hint: "Multi-tenancy",
+		dispatch: "POST /collections/filings/points/query",
 		qql: tenantQql,
 		codes: {
 			rest: restTenant,
@@ -365,6 +368,7 @@ const scenarios: {
 		id: "filters",
 		label: "Boolean filters",
 		hint: "Compound logic",
+		dispatch: "POST /collections/products/points/query",
 		qql: filtersQql,
 		codes: {
 			rest: restFilters,
@@ -426,7 +430,7 @@ const DEFAULT_FORMAT: FormatId = "rest";
             data-target={format.id}
             aria-pressed={format.id === DEFAULT_FORMAT ? "true" : "false"}
             title={`${format.label} (${format.badge})`}
-            class="app-action min-h-8 px-3 py-1.5 text-[0.75rem]"
+            class="app-action app-action--tint min-h-8 px-3 py-1.5 text-[0.75rem]"
           >
             {format.label}
           </button>
@@ -504,7 +508,7 @@ const DEFAULT_FORMAT: FormatId = "rest";
                   </span>
                 </header>
                 <div
-                  class="code-flat h-[16rem] max-h-[16rem] min-h-0 overflow-auto px-4 [mask-image:linear-gradient(to_bottom,#000_88%,transparent)] lg:h-[22rem] lg:max-h-[22rem] [&_pre]:wrap-normal"
+                  class="code-flat code-wrap h-[16rem] max-h-[16rem] min-h-0 overflow-auto px-4 [mask-image:linear-gradient(to_bottom,#000_88%,transparent)] lg:h-[22rem] lg:max-h-[22rem]"
                   id={`cmp-qql-${scenario.id}`}
                   tabindex="0"
                   role="region"
@@ -512,13 +516,16 @@ const DEFAULT_FORMAT: FormatId = "rest";
                 >
                   <Code code={scenario.qql} lang="qql" frame="none" />
                 </div>
-                <footer class="code-card__foot">
-                  <span class="min-w-0 truncate">{scenario.qqlNote}</span>
-                  <span
-                    class="shrink-0 font-semibold text-[var(--sl-color-accent-high)] tabular-nums"
-                    data-reduction
-                  >
-                    −{reduction}%
+                <footer class="code-card__foot code-card__foot--stack">
+                  <span class="min-w-0 truncate">{scenario.dispatch} · 200 · 1.2ms</span>
+                  <span class="flex items-center justify-between gap-4">
+                    <span class="min-w-0 truncate">{scenario.qqlNote}</span>
+                    <span
+                      class="shrink-0 font-semibold text-[var(--sl-color-accent-high)] tabular-nums"
+                      data-reduction
+                    >
+                      −{reduction}%
+                    </span>
                   </span>
                 </footer>
               </article>

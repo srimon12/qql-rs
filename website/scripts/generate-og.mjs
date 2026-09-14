@@ -39,7 +39,7 @@ const outDir = join(websiteRoot, "public", "open-graph");
 const manifestPath = join(websiteRoot, ".cache", "og-manifest.json");
 
 // Bump to invalidate every cached image when the template design changes.
-const TEMPLATE_VERSION = 1;
+const TEMPLATE_VERSION = 2;
 const FALLBACK_DESCRIPTION = "Declarative vector search for Qdrant.";
 
 function escapeXml(unsafe) {
@@ -57,29 +57,18 @@ function wrapText(text, maxCharsPerLine, maxLines) {
 	let currentLine = "";
 
 	for (const word of words) {
-		if (`${currentLine} ${word}`.trim().length <= maxCharsPerLine) {
+		if (!currentLine || `${currentLine} ${word}`.length <= maxCharsPerLine) {
 			currentLine = `${currentLine} ${word}`.trim();
 		} else {
-			if (currentLine) {
-				lines.push(currentLine);
+			lines.push(currentLine);
+			if (lines.length === maxLines) {
+				lines[maxLines - 1] = `${lines[maxLines - 1].replace(/[.,;:]$/, "")}…`;
+				return lines;
 			}
 			currentLine = word;
-			if (lines.length >= maxLines - 1) {
-				break;
-			}
 		}
 	}
-	if (currentLine && lines.length < maxLines) {
-		lines.push(currentLine);
-	}
-
-	if (lines.length === maxLines && words.length > 0) {
-		const lastLine = lines[maxLines - 1];
-		if (text.length > lines.join(" ").length) {
-			lines[maxLines - 1] = `${lastLine.replace(/[.,;:]?$/, "")}…`;
-		}
-	}
-
+	if (currentLine) lines.push(currentLine);
 	return lines;
 }
 
@@ -98,89 +87,108 @@ function getCategoryFromSlug(slug) {
 	return "DOCUMENTATION";
 }
 
-function generateSvg({ title, description, category }) {
-	const titleLines = wrapText(title, 34, 2);
-	const descLines = wrapText(description, 58, 3);
+const SPECIMEN_CODE = [
+	[["QUERY ", "ffab98"], ["'chest pain' ", "9fe3b8"], ["FROM ", "ffab98"], ["medical", null]],
+	[["USING ", "ffab98"], ["dense", null]],
+	[["WHERE ", "ffab98"], ["department ", null], ["= ", "8b8880"], ["'cardio'", "9fe3b8"]],
+	[["SHARD ", "ffab98"], ["'hospital-east'", "9fe3b8"]],
+	[["LIMIT ", "ffab98"], ["5", "f2c983"], [";", "8b8880"]],
+];
+
+function specimenBody(description) {
+	const codeLines = SPECIMEN_CODE.map(
+		(tokens, i) =>
+			`    <text x="32" y="${76 + i * 25}" xml:space="preserve" font-family="DejaVu Sans Mono, monospace" font-size="14.5" fill="#dedbd3">${tokens
+				.map(([text, color]) =>
+					color
+						? `<tspan fill="#${color}">${escapeXml(text)}</tspan>`
+						: escapeXml(text),
+				)
+				.join("")}</text>`,
+	).join("\n");
+
+	return `  <!-- Headline & description -->
+  <text x="80" y="203" font-family="DejaVu Serif, Georgia, serif" font-size="58" fill="#f6f4ee" letter-spacing="-1">SQL for Qdrant.</text>
+  <text x="80" y="246" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" fill="#b6b3aa">${escapeXml(description)}</text>
+
+  <!-- Specimen card -->
+  <g transform="translate(80, 278)">
+    <rect width="1040" height="224" rx="10" fill="#1c1b19" stroke="#2b2a26"/>
+    <rect x="18" y="15" width="1" height="12" fill="#ba5442"/>
+    <text x="32" y="25" font-family="DejaVu Sans Mono, monospace" font-size="12" fill="#b6b3aa">search.qql</text>
+    <text x="1022" y="25" font-family="DejaVu Sans Mono, monospace" font-size="11" fill="#8b887e" text-anchor="end">QQL · MIT</text>
+    <line x1="0" y1="36" x2="1040" y2="36" stroke="#2b2a26"/>
+${codeLines}
+    <line x1="0" y1="192" x2="1040" y2="192" stroke="#2b2a26"/>
+    <text x="18" y="213" font-family="DejaVu Sans Mono, monospace" font-size="11" fill="#8b887e">200 OK</text>
+    <text x="82" y="213" font-family="DejaVu Sans Mono, monospace" font-size="11" fill="#8b887e">POST /collections/medical/points/query</text>
+    <text x="1022" y="213" font-family="DejaVu Sans Mono, monospace" font-size="11" fill="#8b887e" text-anchor="end">1.2ms</text>
+  </g>`;
+}
+
+function editorialBody(title, description) {
+	const titleLines = wrapText(title, 30, 2);
+	const descLines = wrapText(description, 62, 3);
+	const descStartY = 244 + (titleLines.length - 1) * 62 + 126;
 
 	const titleTspans = titleLines
-		.map(
-			(line, i) =>
-				`<tspan x="80" y="${250 + i * 56}" font-weight="700">${escapeXml(line)}</tspan>`,
-		)
+		.map((line, i) => `<tspan x="80" y="${244 + i * 62}">${escapeXml(line)}</tspan>`)
 		.join("\n");
-
-	const descStartY = 250 + titleLines.length * 56 + 18;
 	const descTspans = descLines
-		.map(
-			(line, i) =>
-				`<tspan x="80" y="${descStartY + i * 32}">${escapeXml(line)}</tspan>`,
-		)
+		.map((line, i) => `<tspan x="80" y="${descStartY + i * 30}">${escapeXml(line)}</tspan>`)
 		.join("\n");
 
+	return `  <!-- Title & Description -->
+  <g>
+    <text font-family="DejaVu Serif, Georgia, serif" font-size="52" fill="#f6f4ee" letter-spacing="-0.8">
+      ${titleTspans}
+    </text>
+    <text font-family="DejaVu Sans, Arial, sans-serif" font-size="19" fill="#b6b3aa">
+      ${descTspans}
+    </text>
+  </g>`;
+}
+
+function generateSvg({ title, description, category, specimen }) {
 	return `
 <svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#181816"/>
-      <stop offset="50%" stop-color="#141413"/>
-      <stop offset="100%" stop-color="#0f0f0e"/>
+      <stop offset="55%" stop-color="#141413"/>
+      <stop offset="100%" stop-color="#101010"/>
     </linearGradient>
-    <radialGradient id="glowGrad" cx="0.8" cy="0.2" r="0.6">
-      <stop offset="0%" stop-color="#d96b43" stop-opacity="0.18"/>
-      <stop offset="60%" stop-color="#d96b43" stop-opacity="0.03"/>
-      <stop offset="100%" stop-color="#d96b43" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="glowGrad2" cx="0.15" cy="0.85" r="0.5">
-      <stop offset="0%" stop-color="#ba5442" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#ba5442" stop-opacity="0"/>
-    </radialGradient>
     <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
-      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#262623" stroke-width="1" stroke-opacity="0.6"/>
+      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#262623" stroke-width="1" stroke-opacity="0.55"/>
     </pattern>
   </defs>
 
   <!-- Background -->
   <rect width="1200" height="630" fill="url(#bgGrad)"/>
   <rect width="1200" height="630" fill="url(#grid)" opacity="0.8"/>
-  <rect width="1200" height="630" fill="url(#glowGrad)"/>
-  <rect width="1200" height="630" fill="url(#glowGrad2)"/>
 
   <!-- Outer frame border -->
   <rect x="36" y="36" width="1128" height="558" rx="16" fill="none" stroke="#2e2e2a" stroke-width="1.5"/>
 
   <!-- Top bar -->
-  <g transform="translate(80, 80)">
+  <g transform="translate(80, 54)">
     <!-- Veristamp mark: ring, double-slit V -->
     <mask id="vslit"><rect width="32" height="32" fill="#fff"/><line x1="23.54" y1="9.02" x2="16" y2="22.59" stroke="#000" stroke-width="1.6"/></mask>
-    <g transform="scale(1.125)">
     <circle cx="16" cy="16" r="12.64" fill="none" stroke="#b04930" stroke-width="2.56"/>
     <path fill="#f4efe6" mask="url(#vslit)" d="M6.698 9.998 L16 26.741 L25.302 9.998 L21.777 8.04 L16 18.439 L10.223 8.04 Z"/>
-    </g>
-    <text x="48" y="25" font-family="DejaVu Serif, Georgia, serif" font-size="24" font-weight="700" fill="#f5f4ed" letter-spacing="-0.5">QQL</text>
-    <text x="108" y="24" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" font-weight="500" fill="#78716c" letter-spacing="0.5">/ ${escapeXml(SITE.org)}</text>
-    
-    <!-- Category Badge -->
-    <rect x="740" y="2" width="300" height="30" rx="6" fill="#1c1c1a" stroke="#383834" stroke-width="1"/>
-    <text x="890" y="21" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#d96b43" letter-spacing="1.2" text-anchor="middle">${escapeXml(category)}</text>
+    <text x="46" y="25" font-family="DejaVu Serif, Georgia, serif" font-size="24" font-weight="400" fill="#f6f4ee" letter-spacing="-0.5">QQL</text>
+    <text x="106" y="24" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#8b887e" letter-spacing="0.4">/ ${escapeXml(SITE.org)}</text>
+    <text x="1040" y="22" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#d29084" letter-spacing="1.2" text-anchor="end">${escapeXml(category)}</text>
   </g>
 
-  <!-- Title & Description -->
-  <g>
-    <text font-family="DejaVu Serif, Georgia, serif" font-size="46" fill="#f5f4ed" letter-spacing="-0.8">
-      ${titleTspans}
-    </text>
-    <text font-family="DejaVu Sans, Arial, sans-serif" font-size="20" fill="#a8a29e" letter-spacing="-0.2">
-      ${descTspans}
-    </text>
-  </g>
+${specimen ? specimenBody(description) : editorialBody(title, description)}
 
   <!-- Bottom status bar -->
   <g transform="translate(80, 535)">
     <line x1="0" y1="0" x2="1040" y2="0" stroke="#2a2a26" stroke-width="1"/>
     <text x="0" y="28" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="600" fill="#f5f4ed" letter-spacing="0.5">qql.veristamp.in</text>
-    <circle cx="160" cy="24" r="2.5" fill="#52524e"/>
-    <text x="175" y="28" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#78716c">SQL for Qdrant vector search</text>
-    <text x="1040" y="28" font-family="DejaVu Sans Mono, monospace" font-size="12" fill="#d96b43" text-anchor="end">Rust, Python, Node, WASM</text>
+    <text x="175" y="28" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#8b887e">SQL for Qdrant vector search</text>
+    <text x="1040" y="28" font-family="DejaVu Sans Mono, monospace" font-size="12" fill="#d29084" text-anchor="end">Rust, Python, Node, WASM</text>
   </g>
 </svg>`.trim();
 }
@@ -190,13 +198,13 @@ const SPECIALS = [
 		slug: "home",
 		title: "QQL: SQL for Qdrant Vector Search",
 		description:
-			"One typed declarative query language for hybrid search, filtering, mutations, multitenancy, and schema across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
+			"One query language for hybrid search, filters, mutations, and schema. Every runtime.",
 	},
 	{
 		slug: "og-image",
 		title: "QQL: SQL for Qdrant Vector Search",
 		description:
-			"One typed declarative query language for hybrid search, filtering, mutations, multitenancy, and schema across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
+			"One query language for hybrid search, filters, mutations, and schema. Every runtime.",
 	},
 	{
 		slug: "playground",
@@ -251,6 +259,7 @@ function collectEntries() {
 		title: special.title,
 		description: special.description,
 		category: getCategoryFromSlug(special.slug),
+		specimen: special.slug === "home" || special.slug === "og-image",
 	}));
 	for (const file of filesUnder(docsRoot).filter((path) =>
 		/\.(mdoc|md)$/.test(path),
@@ -262,6 +271,7 @@ function collectEntries() {
 			title: frontmatter.title || "Documentation",
 			description: frontmatter.description || FALLBACK_DESCRIPTION,
 			category: getCategoryFromSlug(slug),
+			specimen: false,
 		});
 	}
 	for (const entry of entries) {

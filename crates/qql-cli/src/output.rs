@@ -20,6 +20,10 @@ pub struct VersionResponse {
     pub ok: bool,
     pub command: String,
     pub version: String,
+    /// Cargo features enabled in this binary (e.g. `["grpc", "rest"]`;
+    /// edge/record builds add `"edge"` / `"record"`). Lets users check
+    /// whether `--edge` / `record` / `edge` subcommands are installed.
+    pub features: Vec<String>,
     pub message: String,
 }
 

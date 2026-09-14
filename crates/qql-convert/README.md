@@ -26,7 +26,9 @@ cargo add qql-convert
 CLI entry point (no library code needed for one-off migration):
 
 ```bash
-cargo build --release -p qql-cli
+cargo install qql-cli --locked
+# ... or from a local checkout:
+# cargo build --release -p qql-cli
 qql convert --collection docs capture.jsonl
 ```
 
