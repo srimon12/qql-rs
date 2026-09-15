@@ -179,8 +179,9 @@ ast_json = parse_json("QUERY 'a' FROM docs LIMIT 5")  # JSON string of the AST a
 `execute()` accepts four input types. Lists and semicolon-delimited scripts are
 automatically batched. Pass `on_error="continue"` to collect per-statement
 failures; the default is `"stop"`.
-Every input form returns an `ExecutionReport` dict with `ok`, ordered
-`results`, `succeeded`, and `failed` fields.
+Every input form returns a native typed `ExecutionReport` (PyO3 class with
+dict-style `[]` / `.get()` access and report-level `ok` / `results` /
+`succeeded` / `failed` / `telemetry` — see §8).
 
 Typed exceptions: every error is a `pyqql.QqlError` subclass carrying
 `.code` / `.kind` / `.span` — catch `QqlSyntaxError`, `QqlValidationError`,
@@ -279,6 +280,9 @@ stmt.inject_filter("tenant_id", "=", "acme")
 # Serialise to JSON string or Python dict
 print(stmt.to_json())
 print(stmt.to_dict())
+
+# `inject_filter` takes equality and range ops (`=`, `>`, `>=`, `<`, `<=`,
+# case-insensitive); `!=` is rejected — use equality or rewrite the query.
 ```
 
 ---
@@ -494,7 +498,9 @@ tokenized = pyqql.tokenize("QUERY 'x' FROM docs LIMIT 5")   # Lex into tokens
 result = pyqql.inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter
 route = pyqql.compile_query("QUERY 'x' FROM docs LIMIT 5")  # Lower to REST route (no execute)
 
-# Hierarchical ASCII tree plan
+# Hierarchical ASCII tree plan. Unlike `nqql` / `qql-wasm` `explain`
+# (which throw on invalid QQL), this never raises: bad input yields
+# `{"ok": False, "query": ..., "error": ...}`.
 plan_dict = pyqql.explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10")
 print(plan_dict["plan"])
 # Query Plan

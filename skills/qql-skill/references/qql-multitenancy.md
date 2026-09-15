@@ -1,5 +1,7 @@
 # QQL Multi-Tenancy Guide
 
+> Agent-oriented view — canonical language source is `docs/inject_filter.md` (website syncs from `docs/`).
+
 One collection, many tenants. Isolation is a **filter**. Custom sharding is optional **routing** for performance and blast-radius.
 
 ## Two layers (do not conflate them)

@@ -224,6 +224,11 @@ pub async fn run_repl(
         let _ = rl.add_history_entry(&full_query);
 
         let effective_query = if !session_params.is_empty() {
+            // NOTE: session params are named-only (`:name`). Positional `?`
+            // placeholders have no REPL surface — adding one (e.g. an ordered
+            // `\p ? v` list mixed with the named map) is ambiguous about
+            // ordering vs. the map, so `?` queries must go through
+            // `qql run --params-file` with a JSON array instead.
             match qql_core::params_json::bind_str_with_params(
                 &full_query,
                 &serde_json::Value::Object(session_params.clone()),
@@ -358,6 +363,7 @@ fn print_repl_help() {
 \n  \x1b[36mhelp\x1b[0m, \x1b[36m\\h\x1b[0m, \x1b[36m?\x1b[0m       Show this help card (note: bare ? triggers help)\n\
   \x1b[36mdoctor\x1b[0m, \x1b[36m\\d\x1b[0m         Check connection health and loaded model hosts\n\
   \x1b[36mparam [k=v]\x1b[0m, \x1b[36m\\p\x1b[0m    Set, inspect, or clear session query parameters\n\
+  (named `:name` params only; positional `?` needs `qql run --params-file`)\n\
   \x1b[36mfmt <qql>\x1b[0m, \x1b[36m\\f\x1b[0m      Format QQL into canonical syntax\n\
   \x1b[36mexplain <qql>\x1b[0m     Show hierarchical tree query execution plan\n\
   \x1b[36mrun <file>\x1b[0m, \x1b[36m\\e\x1b[0m      Run a .qql script file against Qdrant\n\

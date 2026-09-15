@@ -301,7 +301,7 @@ const route = compile(bound);
 Validate and inject filters in the browser -- no server round-trip needed.
 
 ```js
-import init, { parse, isValid, inject_filter } from 'qql-wasm';
+import init, { parse, isValid, injectFilter } from 'qql-wasm';
 await init();
 
 // Validate user input instantly
@@ -310,10 +310,11 @@ if (!isValid("QUERY 'machine learning' FROM papers LIMIT 20")) {
 }
 
 // Inject tenant filter into a raw query string
-const safe = inject_filter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
+// (`inject_filter` snake_case alias also exported for back-compat)
+const safe = injectFilter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
 ```
 
-Note: `inject_filter` does not support `!=`. Use equality and wrap with `NOT`, or rewrite the query.
+Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or rewrite the query.
 
 ---
 
@@ -396,7 +397,7 @@ console.log(planTree);
 ## 9. Free Functions
 
 ```js
-import init, { parse, parseJson, isValid, inject_filter,
+import init, { parse, parseJson, isValid, injectFilter,
               tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
@@ -404,7 +405,7 @@ parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an arra
 parseJson("QUERY 'x' FROM docs LIMIT 5");              // Raw JSON string, no object allocation
 parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statement
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
-inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
+injectFilter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
 compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
@@ -420,7 +421,8 @@ For rich client responses and error handling matching `nqql` / `pyqql`, import f
 
 ```js
 import init, { Client } from 'qql-wasm';
-import { ExecutionReport, ScoredPoint, buildError, executeHits } from 'qql-wasm/dx';
+import { ExecutionReport, ScoredPoint, buildError, executeHits,
+         scrollCursor, scrollStream } from 'qql-wasm/dx';
 await init();
 
 const client = new Client('http://localhost:6333');
@@ -436,5 +438,12 @@ if (report.ok) {
 
 // One-shot reads without manual wrapping:
 const hits = await executeHits(client, "QUERY 'health' FROM docs LIMIT 5");
+
+// Lazy SCROLL paging / streaming (module functions taking the client first —
+// the wasm-bindgen Client class cannot grow JS-side methods like nqql's wrapper):
+for await (const point of scrollCursor(client, "docs", { batchSize: 500 })) {
+    await processPoint(point);
+}
+const stream = scrollStream(client, "docs", { batchSize: 500 }); // WHATWG ReadableStream
 ```
 

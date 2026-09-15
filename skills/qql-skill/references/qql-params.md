@@ -1,5 +1,7 @@
 # QQL params reference
 
+> Agent-oriented view — canonical language source is `docs/parameters.md` (website syncs from `docs/`).
+
 Placeholders, binding, prepared statements, search params, and inference inputs. One contract across Python, Node, WASM, and Rust.
 
 ## Placeholder grammar

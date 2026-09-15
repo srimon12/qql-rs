@@ -1,6 +1,7 @@
 > Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
 > Operations guides live in `website/src/content/docs/docs/operations/`.
 > This `docs/` file is the source text; edit here, then sync the website copy.
+> Agent quick views live in `skills/qql-skill/references/qql-query.md`.
 
 # QQL Syntax Guide
 
@@ -75,7 +76,7 @@ QQL supports three vector input forms for semantic search:
 - **Point reference**: `QUERY POINT 42 FROM docs ...`
 
 ### Payload Selection Defaults
-By default, queries return all point payloads (`WITH PAYLOAD true`). To minimize network payload bandwidth when payload attributes are not needed, pass explicit `WITH PAYLOAD false`:
+Queries return all point payloads by default — omit the clause entirely. Pass explicit `WITH PAYLOAD false` only to minimize network bandwidth when payload attributes are not needed:
 ```sql
 QUERY 'search' FROM docs WITH PAYLOAD false LIMIT 10;
 ```

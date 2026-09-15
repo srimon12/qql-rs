@@ -370,7 +370,8 @@ tokenize("QUERY 'x'");
 compileQuery("QUERY 'x' FROM docs LIMIT 5");                   // Route object
 compileQuery("QUERY TEXT :q FROM docs LIMIT :lim", { q: "x", lim: 5 }); // With parameter binding
 
-// Hierarchical ASCII tree plan
+// Hierarchical ASCII tree plan (throws on invalid QQL — unlike pyqql's
+// `explain`, which returns `{ok: false, error}` instead of raising)
 const planTree = explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10");
 console.log(planTree);
 // Query Plan
@@ -378,6 +379,11 @@ console.log(planTree);
 //     ├── Query: text('hello') via dense
 //     └── Limit: 10
 ```
+
+> **Cross-SDK parity notes.** `formatQuery` (canonical formatter) and
+> `analyze` (tokens + AST + routes + explain in one call) exist only in
+> `qql-wasm` — they target browser/edge IDE use; use `qql fmt` /
+> `qql lint` for the same offline from the CLI.
 
 ---
 

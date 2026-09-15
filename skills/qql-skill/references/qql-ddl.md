@@ -171,3 +171,17 @@ Key decisions:
 - `SET QUOTA` is a full replace, not a merge. Omitted keys are unset. `null` clears one limit.
 - Percent fields validate ranges at plan time with `QQL-PLAN-QUOTA`.
 - `WAIT true` is a query param, not a body field.
+
+## Collection aliases (host-only, no QQL statement)
+
+Aliases are managed through the host `change_aliases` hook, not QQL — there is no `CREATE ALIAS` syntax. One batch maps to `POST /collections/aliases`:
+
+```rust
+// Rust (`QdrantOps` extension hook; edge and custom backends reject)
+ops.change_aliases(&[
+    AliasAction::Create { collection: "docs_v2".into(), alias: "docs".into() },
+    AliasAction::Delete { alias: "docs_v1".into() },
+]).await?;
+```
+
+`qql migrate --cutover <alias>` performs this batch after verification (falling back to create when the alias is missing). Remote REST/gRPC backends support it; edge rejects with `QQL-VALIDATION-ALIASES`.
