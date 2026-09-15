@@ -521,10 +521,7 @@ impl QdrantOps for EdgeQdrant {
                 ExecData::Collection(self.get_collection_info(collection).await?)
             }
             CrossRerank { .. } => {
-                return Err(EdgeUnsupported::Route {
-                    path_hint: "CROSS RERANK",
-                }
-                .error());
+                return Err(EdgeUnsupported::CrossRerank.error());
             }
             Batch { .. } => {
                 return Err(EdgeUnsupported::Route {
@@ -552,11 +549,18 @@ impl QdrantOps for EdgeQdrant {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
-        _timeout: Option<u64>,
-        _consistency: Option<qql_plan::types::ReadConsistencyParam>,
+        timeout: Option<u64>,
+        consistency: Option<qql_plan::types::ReadConsistencyParam>,
     ) -> Result<Vec<BackendResponse>, QqlError> {
-        // In-process execution applies immediately: timeout / consistency
-        // have no meaning against the local engine and are accepted silently.
+        // Fail closed like the single-query path (`reject_request_level`):
+        // the local engine has no RPC deadline and no replica levels, so a
+        // batch that sets either must not silently run without it.
+        if timeout.is_some() {
+            return Err(EdgeUnsupported::Timeout.error());
+        }
+        if consistency.is_some() {
+            return Err(EdgeUnsupported::Consistency.error());
+        }
         for request in &batch.searches {
             reject_shard_key(request.shard_key.as_ref())?;
         }
@@ -574,10 +578,17 @@ impl QdrantOps for EdgeQdrant {
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-        _wait: bool,
+        wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
         // In-process execution is synchronous: every op is applied before the
-        // call returns, so `wait` is trivially satisfied.
+        // call returns, so `wait: true` is satisfied by construction. `false`
+        // is only reachable via an explicit `WAIT false` (every producer
+        // defaults to `true`), which asks for fire-and-forget acknowledgement
+        // the engine has no path for — fail closed instead of silently
+        // over-delivering durability semantics the caller opted out of.
+        if !wait {
+            return Err(EdgeUnsupported::Wait.error());
+        }
         let mut results = Vec::with_capacity(batch.operations.len());
         for op in &batch.operations {
             match op {

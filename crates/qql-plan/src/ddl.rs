@@ -969,7 +969,7 @@ pub(crate) fn lower_set_quota(
                     return Err(QqlError::validation(
                         "QQL-PLAN-QUOTA",
                         "enabled must be true or false",
-                        None,
+                        value.param_span(),
                     ));
                 }
             },
@@ -1018,7 +1018,7 @@ fn apply_quota_percent(
             return Err(QqlError::validation(
                 "QQL-PLAN-QUOTA",
                 format!("{key} must be an integer in [{min}, {max}] or null"),
-                None,
+                value.param_span(),
             ));
         }
     }
