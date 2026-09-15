@@ -22,9 +22,9 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 // Codes are `QQL-<AREA>-<DETAIL>` (kebab, uppercase); SDK exception classes
 // key off [`ErrorKind`](qql_core::error::ErrorKind), never the code string,
 // so renames stay behavior-compatible. Bare (unsuffixed) codes are retired —
-// `QQL-TRANSPORT` → `QQL-TRANSPORT-BUILD` / `QQL-TRANSPORT-REQUEST`,
-// `QQL-BACKEND` → `QQL-BACKEND-READ` (and siblings), `QQL-PARSE` (script
-// splitting) → `QQL-PARSE-DELIMITER`, `QQL-CLI` (file IO) → `QQL-CLI-IO`.
+// transports, backend reads, script splitting, and file IO now use suffixed
+// codes (`QQL-TRANSPORT-BUILD` / `QQL-TRANSPORT-REQUEST`, `QQL-BACKEND-READ`,
+// `QQL-PARSE-DELIMITER`, `QQL-CLI-IO`).
 //
 // - `QQL-LEX-*`, `QQL-PARSE-*` (grammar), `QQL-BIND-*`, `QQL-VALIDATION-*` →
 //   `qql-core` (parser, params, validation).
@@ -40,8 +40,8 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 //   (sanctioned: the CLI's `qql config edge` surface in
 //   `qql-cli/src/config.rs`) — never constructed elsewhere.
 // - `QQL-CLI-*`, `QQL-PARSE-DELIMITER` (script splitting) → `qql-cli`.
-// - `QQL-CONFIG` (runtime `config.rs`), bare `QQL-EXECUTION` (test mocks)
-//   predate this registry and are next in line for suffixing.
+// - `QQL-CONFIG` (runtime `config.rs`) and the bare execution code used by
+//   test mocks predate this registry and are next in line for suffixing.
 
 #[cfg(any(feature = "rest", feature = "grpc"))]
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);

@@ -308,6 +308,12 @@ export function explainBytes(query: string): Uint8Array;
  */
 export function formatQuery(input: string): string;
 
+/**
+ * camelCase alias for [`inject_filter`] (JS convention, parity with
+ * `nqql`'s `injectFilter`). The snake_case export keeps working.
+ */
+export function injectFilter(query: string, field: string, op: string, value: any): any;
+
 export function inject_filter(query: string, field: string, op: string, value: any): any;
 
 export function isValid(input: string): boolean;

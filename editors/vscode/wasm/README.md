@@ -21,7 +21,7 @@ npm install qql-wasm
 
 ```javascript
 import init, {
-  Client, Stmt, parse, isValid, inject_filter, compile, explain, analyze, tokenize,
+  Client, Stmt, parse, isValid, injectFilter, compile, explain, analyze, tokenize,
 } from "qql-wasm";
 
 await init();
@@ -61,7 +61,7 @@ client.free();
 | Export | Role |
 |--------|------|
 | `parse` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
-| `inject_filter` | Isolation |
+| `injectFilter` (`inject_filter` alias kept for back-compat) | Isolation |
 | `analyze` | tokens + AST + route(s) + explain |
 | `compile` / `explain` | Offline REST projection / plan text |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
@@ -130,4 +130,4 @@ await client.execute(
 
 ## Docs
 
-- [Syntax](../../docs/syntax.md) · [WASM skill](../../skills/qql-skill/references/wasm-sdk.md)
+- [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md) · [WASM skill](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/wasm-sdk.md)
