@@ -107,6 +107,13 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 ---
 
+## Host-only backend hooks (no QQL syntax)
+
+Some backend operations have no QQL statement — call them from the host SDK:
+
+- `optimize_collection(collection)` runs backend storage optimizers (segment merge / index build). Default rejects with `QQL-BACKEND-OPTIMIZE`; only an in-process backend overrides it. CLI equivalent: `qql edge optimize <collection>`.
+- `change_aliases(actions)` atomically updates collection aliases (`POST /collections/aliases`). Actions are `AliasAction::Create { collection, alias }` / `AliasAction::Delete { alias }`; edge and custom backends reject with `QQL-VALIDATION-ALIASES`. `qql migrate --cutover <alias>` uses this after verification.
+
 ## Practical fallbacks
 
 | Need | Pattern |

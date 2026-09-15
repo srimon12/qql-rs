@@ -198,6 +198,7 @@ Key decisions:
 - Single-shard sources auto-discover. Multi-shard sources fail closed with `QQL-SNAPSHOT-SHARD` unless `--shard-id` is given. Existing locals replace only after snapshot verifies, or immediately with `--force`.
 - Edge to remote publish is supported. `qql --edge migrate <coll> --target-url <url>` or `--source-edge` streams points to the server. Edge to edge copies fail closed before executors start. A local directory is not a network endpoint. Seed other devices with `edge bootstrap`. Continuous bidirectional sync is not provided. The documented pattern is dual-write plus partial snapshots against a server collection.
 - Never tar or copy shard directories by hand. Back up via server snapshots or `qql dump`. Edge snapshot creation is unsupported. qdrant-edge 0.8 unpacks and applies only.
+- Rust hosts use `qql::snapshots` directly (outside `QdrantOps` — snapshots are transport helpers, not plan operations): `RemoteSnapshotClient::new(url, api_key)` streams shard snapshots, `select_shard_id` resolves the shard (auto-discover for single-shard sources, `QQL-SNAPSHOT-SHARD` otherwise). Pair with `RestQdrant::with_read_timeout` for the streaming read profile.
 
 ## Dump and restore
 

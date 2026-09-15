@@ -19,13 +19,7 @@ pub async fn handle_run_smart(
             && !query_or_file.contains(char::is_whitespace));
     let is_file = p.is_file() || (!query_or_file.contains('\n') && looks_like_path);
     if is_file {
-        if params.is_some() {
-            return Err(
-                "--param/--params-file cannot be used with a script file; bind values per statement instead"
-                    .into(),
-            );
-        }
-        handle_run_file(url, use_edge, query_or_file, stop_on_error).await
+        handle_run_file(url, use_edge, query_or_file, params, stop_on_error).await
     } else {
         handle_run(url, use_edge, query_or_file, params, json, quiet).await
     }
@@ -77,9 +71,19 @@ pub async fn handle_run_file(
     url: &str,
     use_edge: bool,
     path: &str,
+    params: Option<&serde_json::Value>,
     stop_on_error: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let statements = script::read_script(path).map_err(|e| format!("{}", e))?;
+    // Statement-scoped binding (same contract as the SDK `execute` batch
+    // path): an array whose entries are all objects/arrays binds entry `i`
+    // to statement `i` — a length mismatch fails closed here, before any
+    // statement runs (`QQL-BIND-BATCH-LENGTH`). Any other shape binds
+    // identically to every statement.
+    let plan = params
+        .map(|p| qql_core::params_json::plan_statement_params(p, statements.len()))
+        .transpose()
+        .map_err(|e| format!("{}", e))?;
     let executor = executor(url, use_edge)?;
     let mut ok_count = 0;
     let mut fail_count = 0;
@@ -91,7 +95,32 @@ pub async fn handle_run_file(
         } else {
             qql::executor::OnError::Continue
         };
-        match executor.execute(statement, on_err).await {
+        let step = match plan.as_ref() {
+            None => executor.execute(statement, on_err).await,
+            Some(plan) => match qql_core::params_json::param_for(plan, index) {
+                serde_json::Value::Object(obj) => {
+                    let mut map = std::collections::HashMap::new();
+                    for (k, v) in obj {
+                        map.insert(k.clone(), qql_core::ast::Value::from_json(v.clone())?);
+                    }
+                    executor.execute_with_params(statement, &map, on_err).await
+                }
+                serde_json::Value::Array(arr) => {
+                    let items: Vec<qql_core::ast::Value> = arr
+                        .iter()
+                        .cloned()
+                        .map(qql_core::ast::Value::from_json)
+                        .collect::<Result<_, _>>()?;
+                    executor
+                        .execute_with_positional_params(statement, &items, on_err)
+                        .await
+                }
+                _ => {
+                    return Err("--params-file must contain a JSON object or array".into());
+                }
+            },
+        };
+        match step {
             Ok(report) => {
                 ok_count += report.succeeded;
                 fail_count += report.failed;

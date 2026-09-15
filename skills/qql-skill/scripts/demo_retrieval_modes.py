@@ -255,7 +255,7 @@ EXAMPLES = [
         "query": (
             "QUERY 'machine learning' FROM research_papers USING dense\n"
             "  GROUP BY author_id SIZE 5\n"
-            "  LOOKUP FROM author_metadata WITH PAYLOAD true LIMIT 20"
+            "  LOOKUP FROM author_metadata LIMIT 20"
         ),
         "setup": [],
         "requires_index": [],

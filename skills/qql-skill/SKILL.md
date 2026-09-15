@@ -21,7 +21,7 @@ Human docs (product-facing): `docs/`. This skill is for agents writing QQL and S
 | Doc | When to open it |
 |-----|-----------------|
 | [qql-query.md](references/qql-query.md) | All 13 `QUERY` forms, prefetch, fusion, rerank, formula, hybrid |
-| [qql-filters.md](references/qql-filters.md) | All 20 `FilterExpr` forms, logic, geo, text match |
+| [qql-filters.md](references/qql-filters.md) | All 23 `FilterExpr` forms, logic, geo, text match |
 | [qql-mutations.md](references/qql-mutations.md) | `UPSERT`, `DELETE`, payload and vector mutations, conditional writes |
 | [qql-read.md](references/qql-read.md) | `SCROLL`, `COUNT`, `FACET`, `GROUP BY`, `BATCH`, ordering and paging |
 | [qql-ddl.md](references/qql-ddl.md) | Collections, indexes, shard keys, quotas, memory and quantization |

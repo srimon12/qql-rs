@@ -1,5 +1,7 @@
 # `inject_filter` (skill reference)
 
+> Agent-oriented view — canonical language source is `docs/inject_filter.md` (website syncs from `docs/`).
+
 Host-side **logical isolation**. Recursively ANDs a comparison into the AST before plan/execute.
 
 ## Do / don’t

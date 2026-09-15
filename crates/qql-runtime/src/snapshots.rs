@@ -176,7 +176,7 @@ impl RemoteSnapshotClient {
                         return Err(truncated_error(dest, expected, written, &error.to_string()));
                     }
                     return Err(QqlError::transport(
-                        "QQL-TRANSPORT",
+                        "QQL-TRANSPORT-REQUEST",
                         format!("snapshot download interrupted: {error}"),
                         None,
                     ));

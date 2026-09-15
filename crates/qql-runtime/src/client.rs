@@ -17,6 +17,32 @@ pub use crate::backend::CollectionInfo;
 /// misbehaving server response can be traced in Qdrant's own log lines.
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
+// Error-code prefix → owning crate registry.
+//
+// Codes are `QQL-<AREA>-<DETAIL>` (kebab, uppercase); SDK exception classes
+// key off [`ErrorKind`](qql_core::error::ErrorKind), never the code string,
+// so renames stay behavior-compatible. Bare (unsuffixed) codes are retired —
+// `QQL-TRANSPORT` → `QQL-TRANSPORT-BUILD` / `QQL-TRANSPORT-REQUEST`,
+// `QQL-BACKEND` → `QQL-BACKEND-READ` (and siblings), `QQL-PARSE` (script
+// splitting) → `QQL-PARSE-DELIMITER`, `QQL-CLI` (file IO) → `QQL-CLI-IO`.
+//
+// - `QQL-LEX-*`, `QQL-PARSE-*` (grammar), `QQL-BIND-*`, `QQL-VALIDATION-*` →
+//   `qql-core` (parser, params, validation).
+// - `QQL-PLAN-*`, `QQL-REST-*` → `qql-plan` (planner, REST projection).
+// - `QQL-EMBEDDING-*`, `QQL-VECTOR-KIND`, `QQL-MISSING-USING`,
+//   `QQL-RERANK-*`, `QQL-UNKNOWN-VECTOR` → `qql-embed` (resolution);
+//   the runtime `HttpEmbedder` reuses `QQL-EMBEDDING` for endpoint failures.
+// - `QQL-TRANSPORT-*`, `QQL-TIMEOUT` → `qql-runtime` transports (`rest.rs`,
+//   `snapshots.rs`).
+// - `QQL-BACKEND-*` → `qql-runtime` backend adapters (REST/gRPC envelopes).
+// - `QQL-GRPC-*` → `qql-runtime` proto conversion (`grpc_route`).
+// - `QQL-EDGE-*` → `qql-edge` engine only, except `QQL-EDGE-CONFIG`
+//   (sanctioned: the CLI's `qql config edge` surface in
+//   `qql-cli/src/config.rs`) — never constructed elsewhere.
+// - `QQL-CLI-*`, `QQL-PARSE-DELIMITER` (script splitting) → `qql-cli`.
+// - `QQL-CONFIG` (runtime `config.rs`), bare `QQL-EXECUTION` (test mocks)
+//   predate this registry and are next in line for suffixing.
+
 #[cfg(any(feature = "rest", feature = "grpc"))]
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -45,6 +71,12 @@ pub struct VectorTopology {
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Send/Sync bound helper for `QdrantOps` backends on native targets.
+///
+/// WASM builds are single-threaded, so the `wasm32` twin below drops the
+/// bounds (via `async_trait(?Send)` on the trait); native targets keep
+/// `Send + Sync` so backends move across threads. Mirrors the
+/// `EmbedderBound` twin in `qql-embed` for the same reason — one shim per
+/// trait, no shared abstraction (each documents its own target split).
 pub trait QdrantOpsBound: Send + Sync {}
 #[cfg(not(target_arch = "wasm32"))]
 impl<T: Send + Sync> QdrantOpsBound for T {}
