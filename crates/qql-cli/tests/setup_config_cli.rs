@@ -114,7 +114,7 @@ fn run_is_the_only_execution_subcommand() {
 }
 
 #[test]
-fn run_rejects_params_with_script_file() {
+fn run_binds_params_with_script_file() {
     let home = temp_home("run_params");
     let dir = std::env::temp_dir().join(format!(
         "qql-run-params-{}-{}",
@@ -125,13 +125,35 @@ fn run_rejects_params_with_script_file() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
+    // Object params bind into every statement: SHOW takes no params, so the
+    // binder fails closed per statement instead of the CLI rejecting --param.
+    // Fails before any backend is touched: no Qdrant needed.
     let script = dir.join("s.qql");
     std::fs::write(&script, "SHOW COLLECTIONS;\n").unwrap();
-    // Fails before any backend is touched: no Qdrant needed.
     let out = qql(&["run", script.to_str().unwrap(), "-p", "q=x"], &home);
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("QQL-BIND-UNSUPPORTED-STATEMENT"),
+        "params must reach the binder, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Statement-scoped arrays fail closed on length mismatch, also before
+    // any backend is touched.
+    let two = dir.join("two.qql");
+    std::fs::write(&two, "SHOW COLLECTIONS;\nSHOW COLLECTIONS;\n").unwrap();
+    let params = dir.join("p.json");
+    std::fs::write(&params, r#"[{"a":1}]"#).unwrap();
+    let out = qql(
+        &[
+            "run",
+            two.to_str().unwrap(),
+            "--params-file",
+            params.to_str().unwrap(),
+        ],
+        &home,
+    );
     assert!(!out.status.success());
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("--param"),
+        String::from_utf8_lossy(&out.stderr).contains("QQL-BIND-BATCH-LENGTH"),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
