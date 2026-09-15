@@ -166,7 +166,7 @@ pub enum OnError {
 }
 
 /// Normalized search hit returned inside `ExecResponse` data.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
     /// Point ID (integer or string/UUID).
     pub id: PlanPointId,
@@ -193,21 +193,23 @@ pub struct SearchHit {
 /// Serialize an f32 with its shortest round-trip decimal (`0.95`), matching
 /// Qdrant's JSON text and the Python `ScoredPoint.score` getter, instead of
 /// serde_json's default f64 widening (`0.949999988079071`).
+///
+/// `serde_json` already formats `f32` with the shortest round-trip algorithm,
+/// so serializing directly is byte-identical to the old
+/// `to_string` + `parse::<f64>` detour without the per-hit double conversion.
 fn serialize_score_f32<S>(score: &f32, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    match score.to_string().parse::<f64>() {
-        Ok(value) => serializer.serialize_f64(value),
-        Err(_) => serializer.serialize_f32(*score),
-    }
+    serializer.serialize_f32(*score)
 }
 
 /// Grouped query result: one group key with its ordered hits.
 ///
 /// Serializes to Qdrant's group shape `{"id": …, "hits": […]}` so report JSON
 /// and SDK `.groups()` consumers read the same field names as the backend.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// `Deserialize` mirrors it for wire round-trips.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupedSearchResult {
     /// Group key value as returned by Qdrant.
     #[serde(rename = "id")]
@@ -217,7 +219,7 @@ pub struct GroupedSearchResult {
 }
 
 /// One facet entry: value + occurrence count.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FacetHit {
     /// Facet value as returned by Qdrant.
     pub value: PlanFacetValue,

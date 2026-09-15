@@ -10,8 +10,10 @@ use qql_core::ast::{
 use qql_core::error::QqlError;
 
 pub use crate::ddl_rest::{
-    CreateCollectionDeferredParams, CreateCollectionRestBody, CreateIndexRestBody,
-    create_collection_deferred_params_rest, create_collection_rest_body, create_index_rest_body,
+    CreateCollectionDeferredParams, CreateCollectionRestBody, CreateIndexRestBody, RestDdlStep,
+    create_collection_deferred_params_rest, create_collection_rest_body,
+    create_collection_rest_steps, create_index_op, create_index_rest_body, drop_index_op,
+    update_collection_op,
 };
 
 /// Lower `CREATE COLLECTION` to the transport-neutral create request.

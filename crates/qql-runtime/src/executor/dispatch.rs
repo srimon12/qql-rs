@@ -108,7 +108,7 @@ impl Executor {
             | PlannedOperation::DropCollection { collection }
             | PlannedOperation::CreateIndex { collection, .. }
             | PlannedOperation::DropIndex { collection, .. } => {
-                self.invalidate_collection_schema(collection);
+                self.invalidate_collection_schema(collection).await;
             }
             _ => {}
         }

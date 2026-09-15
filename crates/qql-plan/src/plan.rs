@@ -10,7 +10,7 @@ use crate::ddl::{
 use crate::mutation::{
     lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
     lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
-    lower_update_vector_request, lower_upsert_request,
+    lower_update_vector_request, lower_upsert_request, validate_scroll_after,
 };
 use crate::query::{lower_query_groups_request, lower_query_request};
 use crate::rerank::plan_cross_rerank;
@@ -546,18 +546,21 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 request: lower_query_request(query)?,
             })
         }
-        Stmt::Scroll(scroll) => Ok(PlannedOperation::Scroll {
-            collection: scroll.collection.clone(),
-            request: lower_scroll_request(
-                scroll.limit,
-                scroll.filter.as_deref(),
-                scroll.after.as_ref(),
-                scroll.order_by.as_ref(),
-                scroll.shard_key.clone(),
-                scroll.with_payload.as_ref(),
-                scroll.with_vector.as_ref(),
-            ),
-        }),
+        Stmt::Scroll(scroll) => {
+            validate_scroll_after(scroll.after.as_ref())?;
+            Ok(PlannedOperation::Scroll {
+                collection: scroll.collection.clone(),
+                request: lower_scroll_request(
+                    scroll.limit,
+                    scroll.filter.as_deref(),
+                    scroll.after.as_ref(),
+                    scroll.order_by.as_ref(),
+                    scroll.shard_key.clone(),
+                    scroll.with_payload.as_ref(),
+                    scroll.with_vector.as_ref(),
+                ),
+            })
+        }
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
             request: lower_upsert_request(upsert),

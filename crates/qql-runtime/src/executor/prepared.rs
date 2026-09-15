@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use qql_core::ast::{self, Stmt, Value};
 use qql_core::error::QqlError;
@@ -21,7 +22,7 @@ pub struct PreparedStatement {
     /// Collection schema fetched once at [`Executor::prepare`] for templates
     /// with point placeholders, reused by every point-splice execution
     /// instead of re-fetching per call.
-    pub(crate) upsert_schema: Option<CollectionInfo>,
+    pub(crate) upsert_schema: Option<Arc<CollectionInfo>>,
 }
 
 impl PreparedStatement {
@@ -189,25 +190,42 @@ impl Executor {
         self.ensure_open()?;
         let (named_params, positional_count) = qql_core::params::collect_statement_params(&stmt);
         let has_point_params = qql_core::params::stmt_has_point_params(&stmt);
-        let planned = match self.prepare_statement(stmt.clone()).await {
-            Ok(prep) => plan_template(&prep).ok(),
-            Err(_) => None,
+        // Borrow probe first: a template that cannot plan needs no expensive
+        // preparation (schema I/O, embeddings, backend-mutating auto-create)
+        // and no whole-`Stmt` clone. Only clone + prepare when the probe says
+        // the template is plannable; outcomes match the old always-prepare
+        // probe in every case (`None` whenever either stage fails).
+        let planned = if plan_template(&stmt).is_ok() {
+            match self.prepare_statement(stmt.clone()).await {
+                Ok(prep) => plan_template(&prep).ok(),
+                Err(_) => None,
+            }
+        } else {
+            None
         };
         // Point-placeholder templates resolve bound points against this
         // schema on every execution instead of re-fetching per call. Fetched
         // once here; `None` (missing collection) disables the fast path and
-        // every execution takes the checking slow path instead.
+        // every execution takes the checking slow path instead. Cache-first:
+        // a hit costs no round trip; a miss probes existence (one GET) and
+        // fetches schema only when the collection exists, so a missing
+        // collection never pays for a fetch.
         let upsert_schema = if has_point_params {
-            if let Stmt::Upsert(upsert) = &stmt
-                && self
+            if let Stmt::Upsert(upsert) = &stmt {
+                if let Some(info) = self.peek_cached_collection_info(&upsert.collection).await {
+                    Some(info)
+                } else if self
                     .client
                     .collection_exists(&upsert.collection)
                     .await
                     .unwrap_or(false)
-            {
-                self.get_cached_collection_info(&upsert.collection)
-                    .await
-                    .ok()
+                {
+                    self.get_cached_collection_info(&upsert.collection)
+                        .await
+                        .ok()
+                } else {
+                    None
+                }
             } else {
                 None
             }
