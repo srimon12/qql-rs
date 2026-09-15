@@ -70,7 +70,7 @@ In production multitenancy, queries require both **logical tenant isolation** (`
 ```sql
 QUERY 'supply chain risk analysis'
 FROM filings
-WHERE department = 'finance'
+WHERE tenant_id = 'tenant-corp-99' AND department = 'finance'
 SHARD 'tenant-corp-99'
 LIMIT 5;
 ```

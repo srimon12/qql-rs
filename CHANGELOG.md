@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **P0 correctness fail-closed**: curl-converter unsupported flags / OpenAPI variants return `ConvertError` instead of panicking; `SCROLL AFTER` max / UUID-max rejected; `compile_statement` surfaces `SerializeFailed`; `CROSS RERANK` on non-`Hits` envelopes errors; `usize` overflow guarded; `MATCH EXCEPT` contract case added.
+- **DDL / edge fail-closed**: `SHARD` placeholder binding for DDL (`CreateShardKey` / `DropShardKey` / `CreateCollection` shard keys); edge rejects `timeout` / `consistency` / `wait` with typed codes (`QQL-EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); quota span threading; `qql-wasm` workspace deps with dead non-`wasm32` stubs dropped.
+
+### Added
+- **SDK typed paths**: Node `execute` / `explain_analyze` via `ExecOptionsInput` + `plan_value_params` (`Float32Array`-safe) with edge parity; WASM JSON errors with `.code`, `injectFilter` alias.
+- **SDK parity**: `ExecutionReport` `collections()` / `collection()` / `shard_keys()` / `quotas()`; `ScoredPoint.get` attribute-first; native-hit `groups()`; `withoutPayload()`; vector types; Python `Stmt.bound`; Node `Stmt.explain()`; Python edge `scroll_cursor`; WASM `scrollStream`; `HttpEmbedder` validation mirror; CLI script scoped params; READMEs.
+
+### Changed
+- **Perf**: batched sparse / multi / image embeddings (single-walk query jobs, per-model batching); typed REST single-serialize/deserialize; owned response parses; typed gRPC responses; `Arc` schema cache + single metadata probe; prepared borrow-probe; batch retry by reference; upsert single-pass schema + topology guard; scroll validator wiring; `ddl_rest` steps.
+- **Docs & CI**: `AGENTS.md` truth pass; skill references; `error-codes.mdoc` new codes (`BACKEND-READ`, `TRANSPORT-BUILD` / `REQUEST`, `CLI-IO`, `PARSE-DELIMITER`, `PLAN-SCROLL-AFTER`, `EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); editor WASM bundle rebuilt; script-params test moved to the scoped-binding contract.
+
 ## [0.4.0] - 2026-09-12
 
 ### 🚀 Prepared Statements, Parameters & Bulk Ingestion

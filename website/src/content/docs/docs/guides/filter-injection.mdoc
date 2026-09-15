@@ -106,8 +106,9 @@ Only comparison operators that keep the predicate deniable are supported:
 
 > inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query
 
-There is no `NOT`-wrapped negation for injected predicates. If you need an
-exclusion rule, model it in the source query or rewrite the statement yourself.
+There is no `NOT`-wrapping inside the injection itself. If you need an
+exclusion rule, inject the positive equality and wrap the statement with `NOT`
+yourself, or model the exclusion in the source query.
 
 Every SDK accepts the same operator aliases:
 

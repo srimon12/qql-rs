@@ -115,7 +115,7 @@ UPDATE docs SET PAYLOAD = {a: 1} KEY 'a.b' WHERE id = 1;
 
 The vector form replaces vectors on existing points. Compact `WHERE id =`
 targets one point (optionally one named vector, or a name map). `VALUES` is
-the batch form that maps 1:1 onto REST `PUT /points/vectors` and gRPC
+the batch form that maps 1:1 onto REST `PUT /collections/{c}/points/vectors` and gRPC
 `UpdatePointVectors`:
 
 ```text
@@ -148,7 +148,7 @@ DELETE FROM docs WHERE status = 'expired';
 
 `KEY` merges at that nested path. `OVERWRITE` replaces the full payload and
 runs only inside a `BATCH` block — a lone `OVERWRITE` fails closed with
-`QQL-REST-OVERWRITE-BATCH-ONLY` because `POST /points/payload` is merge-only:
+`QQL-REST-OVERWRITE-BATCH-ONLY` because `POST /collections/{c}/points/payload` is merge-only:
 
 {% qqlExample title="Full payload replace inside a batch" %}
 ```sql
@@ -188,7 +188,7 @@ datetime string, or placeholder). `WITH PAYLOAD` takes `false`, `INCLUDE
 ## In-database faceting (FACET)
 
 `FACET` calculates categorical value distributions for any indexed payload key
-using Qdrant's `/collections/{collection}/facet` endpoint (or `Points.Facet` over gRPC), returning hit counts
+using Qdrant's `/collections/{c}/facet` endpoint (or `Points.Facet` over gRPC), returning hit counts
 per unique value without fetching full point records.
 
 {% qqlExample title="Facet counts with filtering and exact accuracy" %}
@@ -196,7 +196,7 @@ per unique value without fetching full point records.
 -- Compute top 5 room types in a hospitality collection under €150/night
 FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;
 
--- Shard-routed facet using key front syntax
+-- Shard-routed facets (keyword and numeric keys)
 FACET category FROM catalog LIMIT 10 SHARD 'tenant_1';
 FACET category FROM catalog LIMIT 10 SHARD 101;
 ```

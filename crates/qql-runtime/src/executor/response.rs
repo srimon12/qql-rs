@@ -190,18 +190,24 @@ pub struct SearchHit {
     pub vector: Option<PlanVectorStruct>,
 }
 
-/// Serialize an f32 with its shortest round-trip decimal (`0.95`), matching
-/// Qdrant's JSON text and the Python `ScoredPoint.score` getter, instead of
-/// serde_json's default f64 widening (`0.949999988079071`).
+/// Serialize an f32 score as an f64 holding its shortest round-trip decimal
+/// (`0.95`, not `0.949999988079071`), matching Qdrant's JSON text and the
+/// Python `ScoredPoint.score` getter, instead of a raw f32→f64 widening.
 ///
-/// `serde_json` already formats `f32` with the shortest round-trip algorithm,
-/// so serializing directly is byte-identical to the old
-/// `to_string` + `parse::<f64>` detour without the per-hit double conversion.
+/// The f64 matters beyond JSON bytes: `pyqql`'s `results` getter builds
+/// Python floats through `pythonize` over this serde data model, and
+/// `pythonize` widens a serialized f32 to `0.949999988079071`. Emitting f64
+/// keeps the JSON report view and every native view in agreement. Do NOT
+/// "optimize" this back to `serialize_f32` — JSON output is byte-identical
+/// either way, but the native views regress (see `score_emits_f64_shortest`).
 fn serialize_score_f32<S>(score: &f32, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    serializer.serialize_f32(*score)
+    match score.to_string().parse::<f64>() {
+        Ok(value) => serializer.serialize_f64(value),
+        Err(_) => serializer.serialize_f32(*score),
+    }
 }
 
 /// Grouped query result: one group key with its ordered hits.
@@ -455,5 +461,27 @@ impl ExecResponse {
                 .map(|entry| (entry.value.clone(), entry.count))
                 .collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The score must serialize as an f64 holding the shortest round-trip
+    /// decimal — not a raw f32. `pyqql`'s `results` getter builds Python
+    /// floats through `pythonize` over this data model, which widens a
+    /// serialized f32 to `0.949999988079071` (regression: stack-05 perf pass).
+    #[test]
+    fn score_emits_f64_shortest() {
+        let hit = SearchHit {
+            id: PlanPointId::Number(1),
+            score: 0.95f32,
+            payload: None,
+            collection: None,
+            vector: None,
+        };
+        let value = serde_json::to_value(&hit).expect("hit serializes");
+        assert_eq!(value["score"], serde_json::json!(0.95));
     }
 }
