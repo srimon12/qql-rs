@@ -5,6 +5,7 @@ use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 use super::client::Client;
+use super::functions::qql_err_to_js;
 use super::params::WasmOnError;
 use super::report::{WasmReport, exec_response, exec_response_with_telemetry};
 use super::response::{parse_query_batch, parse_update_batch, wasm_success_response};
@@ -23,7 +24,7 @@ impl Client {
         let stmts = match Parser::parse_all(query) {
             Ok(stmts) => stmts,
             Err(error) if on_error == WasmOnError::Stop => {
-                return Err(JsValue::from_str(&error.to_string()));
+                return Err(qql_err_to_js(error));
             }
             Err(error) => {
                 return Ok(WasmReport::single(exec_response(
@@ -113,7 +114,7 @@ impl Client {
         // embedding so `USING sparse` embeds sparse, not dense-by-default.
         self.resolve_stmt_vector_kinds(&mut stmt).await?;
         self.resolve_stmt_embeddings(&mut stmt).await?;
-        qql_plan::plan(&stmt).map_err(|error| JsValue::from_str(&error.to_string()))
+        qql_plan::plan(&stmt).map_err(qql_err_to_js)
     }
     pub(crate) async fn execute_planned_inner(
         &self,
@@ -231,7 +232,7 @@ impl Client {
                     if let Err(err) =
                         verify_batch_cardinality("query", operations.len(), items.len())
                     {
-                        let error = JsValue::from_str(&err.to_string());
+                        let error = qql_err_to_js(err);
                         if on_error == WasmOnError::Stop {
                             return Err(error);
                         }
@@ -260,13 +261,12 @@ impl Client {
                 }
             },
             qql_plan::BatchKey::Mutation(_) => {
-                let (_, labels, _) = build_update_batch(&operations)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let (_, labels, _) = build_update_batch(&operations).map_err(qql_err_to_js)?;
                 match parse_update_batch(&response) {
                     Ok(received) => {
                         if let Err(err) = verify_batch_cardinality("update", labels.len(), received)
                         {
-                            let error = JsValue::from_str(&err.to_string());
+                            let error = qql_err_to_js(err);
                             if on_error == WasmOnError::Stop {
                                 return Err(error);
                             }
@@ -322,8 +322,7 @@ impl Client {
         }
         match &operations[0] {
             PlannedOperation::Query { .. } => {
-                let (collection, batch) = build_query_batch(&operations)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let (collection, batch) = build_query_batch(&operations).map_err(qql_err_to_js)?;
                 let expected = batch.searches.len();
                 let path = format!("/collections/{collection}/points/query/batch");
                 let body = serde_json::to_value(&batch)
@@ -334,7 +333,7 @@ impl Client {
                             if let Err(err) =
                                 verify_batch_cardinality("query", expected, items.len())
                             {
-                                let error = JsValue::from_str(&err.to_string());
+                                let error = qql_err_to_js(err);
                                 if on_error == WasmOnError::Stop {
                                     return Err(error);
                                 }
@@ -380,8 +379,8 @@ impl Client {
                 }
             }
             _ => {
-                let (collection, labels, batch) = build_update_batch(&operations)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let (collection, labels, batch) =
+                    build_update_batch(&operations).map_err(qql_err_to_js)?;
                 let expected = batch.operations.len();
                 let path = format!("/collections/{collection}/points/batch?wait=true");
                 let body = serde_json::to_value(&batch)
@@ -391,7 +390,7 @@ impl Client {
                         Ok(received) => {
                             if let Err(err) = verify_batch_cardinality("update", expected, received)
                             {
-                                let error = JsValue::from_str(&err.to_string());
+                                let error = qql_err_to_js(err);
                                 if on_error == WasmOnError::Stop {
                                     return Err(error);
                                 }

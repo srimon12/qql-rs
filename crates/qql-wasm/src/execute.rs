@@ -6,7 +6,7 @@ use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 use super::client::Client;
-use super::functions::{compile, to_js_value};
+use super::functions::{compile, qql_err_to_js, to_js_value};
 use super::params::{
     WasmOnError, batch_size_from, bind_stmt_values, bind_value_params, extract_ast_stmt,
     jsvalue_to_value, maybe_bind, options_params, parse_on_error,
@@ -35,10 +35,9 @@ impl Client {
             let mut all_results: Vec<serde_json::Value> = Vec::new();
 
             let plan = match params.as_ref() {
-                Some(p) => Some(
-                    qql_core::params_json::plan_value_params(p, len)
-                        .map_err(|e| JsValue::from_str(&e.to_string()))?,
-                ),
+                Some(p) => {
+                    Some(qql_core::params_json::plan_value_params(p, len).map_err(qql_err_to_js)?)
+                }
                 None => None,
             };
 
@@ -100,8 +99,7 @@ impl Client {
 
         if let Some(mut stmt) = extract_ast_stmt(&query) {
             if let Some(ref p) = params {
-                let plan = qql_core::params_json::plan_value_params(p, 1)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let plan = qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
                 bind_stmt_values(&mut stmt, qql_core::params_json::param_value_for(&plan, 0))?;
             }
             let val = self.execute_stmt_inner(&stmt).await?;
@@ -120,10 +118,9 @@ impl Client {
                             .iter()
                             .all(|e| matches!(e, Value::Dict(_) | Value::List(_))))
             {
-                let parsed_stmts =
-                    Parser::parse_all(&s).map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let parsed_stmts = Parser::parse_all(&s).map_err(qql_err_to_js)?;
                 let plan = qql_core::params_json::plan_value_params(p, parsed_stmts.len())
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                    .map_err(qql_err_to_js)?;
                 if let qql_core::params_json::ValueParamPlan::Scoped(_) = &plan {
                     let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
                     for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
@@ -158,8 +155,8 @@ impl Client {
             }
             let bound = match params.as_ref() {
                 Some(p) => {
-                    let plan = qql_core::params_json::plan_value_params(p, 1)
-                        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                    let plan =
+                        qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
                     bind_value_params(&s, qql_core::params_json::param_value_for(&plan, 0), false)?
                 }
                 None => s.clone(),
@@ -185,9 +182,8 @@ impl Client {
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
         let on_error = parse_on_error(options.as_ref())?;
-        let batch_size =
-            batch_size_from(options.as_ref()).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let rows = jsvalue_to_value(&rows).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let batch_size = batch_size_from(options.as_ref()).map_err(qql_err_to_js)?;
+        let rows = jsvalue_to_value(&rows).map_err(qql_err_to_js)?;
         let rows = match rows {
             Value::List(rows) => rows,
             _ => {
@@ -231,7 +227,7 @@ impl Client {
                 &mut stmt,
                 &Value::Dict(vec![("rows".to_string(), Value::List(chunk))]),
             )
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(qql_err_to_js)?;
             match self.execute_stmt_inner(&stmt).await {
                 Ok(val) => results.push(val),
                 Err(e) if !stop => results.push(exec_response(
@@ -267,8 +263,7 @@ impl Client {
         }
         let mut inner = stmt.inner.clone();
         if let Some(ref p) = params {
-            let plan = qql_core::params_json::plan_value_params(p, 1)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let plan = qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
             bind_stmt_values(&mut inner, qql_core::params_json::param_value_for(&plan, 0))?;
         }
         let val = self.execute_stmt_inner(&inner).await?;
@@ -319,6 +314,6 @@ impl Client {
     /// Parse and explain the query — no server needed.
     #[wasm_bindgen]
     pub fn explain(&self, query: &str) -> Result<String, JsValue> {
-        qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+        qql_core::explain::explain(query).map_err(qql_err_to_js)
     }
 }

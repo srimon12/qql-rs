@@ -17,10 +17,22 @@ pub(crate) fn safe_owned_uint8_array(bytes: &[u8]) -> js_sys::Uint8Array {
     js_sys::Uint8Array::from(bytes)
 }
 
+/// Map a [`QqlError`](qql_core::error::QqlError) to a JS error value carrying
+/// structured `.code` / `.kind` / `.span` / `.fields`.
+///
+/// `dx.js buildError` recovers those fields via `JSON.parse` — a plain
+/// `Display` string (`"[CODE] message"`) does NOT survive, so every
+/// `QqlError` thrown to JS must go through here. Non-QQL failures (serde,
+/// host traps, transport strings) keep their `Display` mapping at each
+/// call site.
+pub(crate) fn qql_err_to_js(err: qql_core::error::QqlError) -> JsValue {
+    JsValue::from_str(&serde_json::to_string(&err).unwrap_or_else(|_| err.to_string()))
+}
+
 #[wasm_bindgen(unchecked_return_type = "unknown[]")]
 pub fn parse(input: &str) -> Result<JsValue, JsValue> {
     // Always parse as a script — returns a list even for single statements.
-    let stmts = Parser::parse_all(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let stmts = Parser::parse_all(input).map_err(qql_err_to_js)?;
     to_js_value(&stmts)
 }
 
@@ -28,7 +40,7 @@ pub fn parse(input: &str) -> Result<JsValue, JsValue> {
 /// mirroring `parseJson` on the Node SDK.
 #[wasm_bindgen(js_name = parseJson, unchecked_return_type = "string")]
 pub fn parse_json(input: &str) -> Result<String, JsValue> {
-    let stmts = Parser::parse_all(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let stmts = Parser::parse_all(input).map_err(qql_err_to_js)?;
     serde_json::to_string(&stmts).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -46,19 +58,29 @@ pub fn inject_filter(
     op: &str,
     value: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let val =
-        super::params::jsvalue_to_value(&value).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let val = super::params::jsvalue_to_value(&value).map_err(qql_err_to_js)?;
     let cmp = parse_comparison_op(op)?;
-    let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    ast::inject_filter(&mut stmt, field, cmp, val)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mut stmt = Parser::parse(query).map_err(qql_err_to_js)?;
+    ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_err_to_js)?;
     to_js_value(&stmt)
+}
+
+/// camelCase alias for [`inject_filter`] (JS convention, parity with
+/// `nqql`'s `injectFilter`). The snake_case export keeps working.
+#[wasm_bindgen(js_name = injectFilter)]
+pub fn inject_filter_camel(
+    query: &str,
+    field: &str,
+    op: &str,
+    value: JsValue,
+) -> Result<JsValue, JsValue> {
+    inject_filter(query, field, op, value)
 }
 
 pub(crate) fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
     // Single source in qql-core: supported operators and rejection messages
     // stay identical across every SDK binding.
-    qql_core::ast::ComparisonOp::parse_inject_op(op).map_err(|e| JsValue::from_str(&e.to_string()))
+    qql_core::ast::ComparisonOp::parse_inject_op(op).map_err(qql_err_to_js)
 }
 
 // ── Core: tokenize ────────────────────────────────────────────────
@@ -68,7 +90,7 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
     let lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     for token_result in lexer {
-        let token = token_result.map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let token = token_result.map_err(qql_err_to_js)?;
         let obj = js_sys::Object::new();
         js_sys::Reflect::set(
             &obj,
@@ -225,15 +247,13 @@ fn build_compile_output(
 ) -> Result<serde_json::Value, JsValue> {
     let bound = match params {
         Some(p) if !p.is_undefined() && !p.is_null() => {
-            let parsed = super::params::jsvalue_to_value(&p)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let parsed = super::params::jsvalue_to_value(&p).map_err(qql_err_to_js)?;
             super::params::bind_value_params(query, &parsed, false)?
         }
         _ => query.to_string(),
     };
-    let stmt = Parser::parse(&bound).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let compiled =
-        routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let stmt = Parser::parse(&bound).map_err(qql_err_to_js)?;
+    let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
     Ok(compiled_route_json(&compiled))
 }
 
@@ -266,20 +286,19 @@ pub fn compile_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
 
 #[wasm_bindgen]
 pub fn explain(query: &str) -> Result<String, JsValue> {
-    qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+    qql_core::explain::explain(query).map_err(qql_err_to_js)
 }
 
 #[wasm_bindgen(js_name = explainBytes)]
 pub fn explain_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
-    let exp_str =
-        qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let exp_str = qql_core::explain::explain(query).map_err(qql_err_to_js)?;
     Ok(safe_owned_uint8_array(exp_str.as_bytes()))
 }
 
 /// Format a QQL string into canonical form.
 #[wasm_bindgen(js_name = formatQuery)]
 pub fn format_query(input: &str) -> Result<String, JsValue> {
-    qql_core::fmt::format(input).map_err(|e| JsValue::from_str(&e.to_string()))
+    qql_core::fmt::format(input).map_err(qql_err_to_js)
 }
 
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
@@ -299,8 +318,7 @@ pub fn bind(
         .unwrap_or(false);
     match params {
         Some(p) if !p.is_null() && !p.is_undefined() => {
-            let parsed = super::params::jsvalue_to_value(&p)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let parsed = super::params::jsvalue_to_value(&p).map_err(qql_err_to_js)?;
             super::params::bind_value_params(query, &parsed, truncate)
         }
         _ => Ok(query.to_string()),
