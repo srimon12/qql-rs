@@ -408,18 +408,36 @@ pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
 pub struct CompiledStatement {
     /// Stable snake_case type id from `compile_stmt_type`.
     pub stmt_type: &'static str,
-    /// Projected REST route; `None` for client-side-only operations.
+    /// Projected REST route; `None` for client-side-only or batch-only operations.
     pub route: Option<Route>,
 }
 
 /// Compile a statement from the planner IR.
 ///
 /// Always sets `stmt_type` from [`crate::plan::PlannedOperation::compile_stmt_type`].
-/// REST path/method/payload are present only when a real Qdrant route exists.
+/// REST path/method/payload are present only when a real Qdrant route exists
+/// (`None` for client-side-only and batch-only operations).
 pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core::error::QqlError> {
     let op = plan(statement)?;
     let stmt_type = op.compile_stmt_type();
-    let route = to_rest_route(&op).ok();
+    let route = match to_rest_route(&op) {
+        Ok(route) => Some(route),
+        // No single Qdrant route exists, but the statement itself compiled:
+        // SDKs surface `stmt_type` with no route.
+        Err(
+            RestProjectionError::ClientSideOnly { .. }
+            | RestProjectionError::OverwriteRequiresBatch,
+        ) => None,
+        // A serialization failure is a plan-IR regression, not a missing
+        // route — surface it instead of swallowing it as "client-side".
+        Err(RestProjectionError::SerializeFailed { message }) => {
+            return Err(QqlError::execution(
+                "QQL-PLAN-SERIALIZE",
+                format!("plan IR REST request body serialization failed: {message}"),
+                None,
+            ));
+        }
+    };
     Ok(CompiledStatement { stmt_type, route })
 }
 

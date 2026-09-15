@@ -285,7 +285,17 @@ fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
             lt: None,
             lte: Some(v),
         },
-        ComparisonOp::Eq => unreachable!(),
+        // `lower_compare` diverts `Eq` before this point, so this arm is a
+        // drift guard, not a live path. Lower equality as an exact range
+        // (`gte == lte`), mirroring the float-`Eq` handling in
+        // `lower_compare` and the `Eq` arm of `values_count_params` — the
+        // infallible pipeline stays total, so no future caller can panic here.
+        ComparisonOp::Eq => RangeParams {
+            gt: None,
+            gte: Some(v.clone()),
+            lt: None,
+            lte: Some(v),
+        },
     }
 }
 
@@ -434,6 +444,16 @@ mod tests {
             &lower_filter(&f),
             json!({"key": "rating", "range": {"gte": 4.5, "lte": 4.5}}),
         );
+    }
+
+    #[test]
+    fn comparison_range_eq_is_an_exact_range() {
+        // Drift guard for the `Eq` fallback in `comparison_range`
+        // (`lower_compare` diverts `Eq` first): equality must lower to an
+        // exact range, never panic.
+        let range = comparison_range(ComparisonOp::Eq, &Value::Int(5));
+        let json = serde_json::to_value(&range).unwrap();
+        assert_eq!(json, json!({"gte": 5, "lte": 5}));
     }
 
     #[test]
