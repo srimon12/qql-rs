@@ -140,6 +140,13 @@ impl Stmt {
         common::stmt_readable(&self.inner)
     }
 
+    /// Tree-formatted plan explanation for this statement (mirrors the free
+    /// `explainStmt` and `qql-wasm`'s `Stmt.explain`).
+    #[napi(catch_unwind)]
+    pub fn explain(&self) -> String {
+        common::explain_stmt(&self.inner)
+    }
+
     /// Compile this Stmt AST directly into its transport route without re-parsing.
     /// Optionally accepts `params` to bind before compiling.
     #[napi(catch_unwind)]
@@ -479,9 +486,10 @@ impl JsClient {
     pub async fn execute(
         &self,
         query: serde_json::Value,
-        options: Option<serde_json::Value>,
+        options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<String> {
-        let report = common::execute::execute_dispatch(&self.inner, query, options.as_ref())
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+        let report = common::execute::execute_dispatch_typed(&self.inner, query, on_error, params)
             .await
             .map_err(common::to_napi_err)?;
         serde_json::to_string(&report).map_err(common::serde_napi_err)
@@ -503,10 +511,11 @@ impl JsClient {
     pub async fn explain_analyze(
         &self,
         query: serde_json::Value,
-        options: Option<serde_json::Value>,
+        options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<String> {
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
         let report =
-            common::execute::explain_analyze_dispatch(&self.inner, query, options.as_ref())
+            common::execute::explain_analyze_dispatch_typed(&self.inner, query, on_error, params)
                 .await
                 .map_err(common::to_napi_err)?;
         serde_json::to_string(&report).map_err(common::serde_napi_err)
@@ -567,19 +576,20 @@ impl JsClient {
 
 /// Execute a pre-parsed Stmt directly via a new temporary client.
 #[napi(catch_unwind, ts_args_type = "stmt: Stmt, options?: object")]
-pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
-    let client = JsClient::new(options.clone())?;
+pub async fn execute_stmt(
+    stmt: &Stmt,
+    options: Option<common::execute::ExecOptionsInput>,
+) -> napi::Result<String> {
+    let raw = options.as_ref().map(|o| o.raw.clone());
+    let params = options.as_ref().and_then(|o| o.params.as_ref());
+    let client = JsClient::new(raw)?;
     let resp = common::execute::run_then_close(&client.inner, async {
         let mut inner = stmt.inner.clone();
-        if let Some(p) = options
-            .as_ref()
-            .and_then(|o| o.get("params"))
-            .filter(|p| !p.is_null())
-        {
-            let plan = qql_core::params_json::plan_statement_params(p, 1)?;
-            qql_core::params_json::bind_stmt_with_params(
+        if let Some(p) = params {
+            let plan = qql_core::params_json::plan_value_params(p, 1)?;
+            qql_core::params_json::bind_stmt_with_values(
                 &mut inner,
-                qql_core::params_json::param_for(&plan, 0),
+                qql_core::params_json::param_value_for(&plan, 0),
             )?;
         }
         client.inner.execute_node(inner).await
@@ -596,12 +606,14 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
 )]
 pub async fn execute(
     query: serde_json::Value,
-    options: Option<serde_json::Value>,
+    options: Option<common::execute::ExecOptionsInput>,
 ) -> napi::Result<String> {
-    let client = JsClient::new(options.clone())?;
+    let raw = options.as_ref().map(|o| o.raw.clone());
+    let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+    let client = JsClient::new(raw)?;
     let report = common::execute::run_then_close(
         &client.inner,
-        common::execute::execute_dispatch(&client.inner, query, options.as_ref()),
+        common::execute::execute_dispatch_typed(&client.inner, query, on_error, params),
     )
     .await
     .map_err(common::to_napi_err)?;

@@ -274,6 +274,13 @@ fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
         "embedDim": 4,
     });
 
+    // No `params` key in the bag, so `params: None` — exactly what the
+    // napi `FromNapiValue` impl produces for a params-less options object.
+    let options = common::execute::ExecOptionsInput {
+        raw: options,
+        params: None,
+    };
+
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

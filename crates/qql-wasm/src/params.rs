@@ -10,6 +10,8 @@ use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 use wasm_bindgen::prelude::*;
 
+use super::functions::qql_err_to_js;
+
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WasmOnError {
@@ -53,9 +55,7 @@ pub(crate) fn options_params(options: Option<&JsValue>) -> Result<Option<Value>,
     if value.is_undefined() || value.is_null() {
         return Ok(None);
     }
-    jsvalue_to_value(&value)
-        .map(Some)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    jsvalue_to_value(&value).map(Some).map_err(qql_err_to_js)
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -77,13 +77,12 @@ pub(crate) fn bind_value_params(
     truncate_vectors: bool,
 ) -> Result<String, JsValue> {
     qql_core::params_json::bind_str_with_values(query, params, truncate_vectors)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        .map_err(qql_err_to_js)
 }
 
 /// Map a params binding into a statement AST via the shared typed contract.
 pub(crate) fn bind_stmt_values(stmt: &mut ast::Stmt, params: &Value) -> Result<(), JsValue> {
-    qql_core::params_json::bind_stmt_with_values(stmt, params)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    qql_core::params_json::bind_stmt_with_values(stmt, params).map_err(qql_err_to_js)
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]

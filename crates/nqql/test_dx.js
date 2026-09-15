@@ -2,7 +2,9 @@
 
 // ============================================================================
 // DX test suite for the prepared-statement / parameter surface.
-// Network-free: parse, bind, compileRoute, toString, and report accessors.
+// Offline-first: parse, bind, compileRoute, toString, and report accessors.
+// The §11 transport check needs no Qdrant — it points at a dead port, so a
+// transport error (not a bind error) proves typed-array params bound fine.
 // Mirrors crates/pyqql/tests/test_dx.py (the cross-SDK parity spec).
 // ============================================================================
 
@@ -248,12 +250,91 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   // A non-groups operation never guesses.
   assert.deepStrictEqual(report.groups(1), []);
 
+  // Group hits are ScoredPoint instances (pyqql parity).
+  assert.ok(grouped.groups()[0].hits[0] instanceof sdk.ScoredPoint);
+  assert.strictEqual(grouped.groups()[0].hits[0].id, 1);
+
+  // get() resolves attributes first, then payload keys, then the default.
+  assert.strictEqual(hits[0].get('id'), 1);
+  assert.strictEqual(hits[0].get('score'), 0.95);
+  assert.strictEqual(hits[0].get('name'), 'first');
+  assert.deepStrictEqual(hits[0].get('vector'), [0.1, 0.2]);
+  assert.strictEqual(hits[0].get('missing', 'dflt'), 'dflt');
+  assert.strictEqual(hits[1].get('vector', 'dflt'), 'dflt'); // null vector falls back
+
+  // withoutPayload() strips the payload, keeping id/score (original untouched).
+  const stripped = hits[0].withoutPayload();
+  assert.ok(stripped instanceof sdk.ScoredPoint);
+  assert.strictEqual(stripped.payload, null);
+  assert.strictEqual(stripped.text, null);
+  assert.strictEqual(stripped.id, 1);
+  assert.strictEqual(hits[0].payload.name, 'first');
+
   // Facet report
   assert.strictEqual(report.facet(1).length, 2);
   assert.strictEqual(report.facet(1)[0].value, 'red');
 
   // Count report
   assert.strictEqual(report.count(2), 42);
+}
+
+// 8b. Metadata accessors: collections / collection / shardKeys / quotas
+// (pyqql parity — SHOW_* results need no hand-digging into results[].data).
+{
+  const meta = new sdk.ExecutionReport({
+    ok: true,
+    succeeded: 4,
+    failed: 0,
+    results: [
+      {
+        ok: true,
+        operation: 'SHOW_COLLECTIONS',
+        message: 'Collections listed',
+        data: { collections: ['docs', 'articles'] },
+      },
+      {
+        ok: true,
+        operation: 'SHOW_COLLECTION',
+        message: 'Collection shown',
+        data: { status: 'green', points_count: 42 },
+      },
+      {
+        ok: true,
+        operation: 'SHOW_SHARD_KEYS',
+        message: 'Shard keys listed',
+        data: { shard_keys: ['acme', 101] },
+      },
+      {
+        ok: true,
+        operation: 'SHOW_QUOTAS',
+        message: 'Quotas shown',
+        data: { enabled: true },
+      },
+    ],
+  });
+
+  assert.deepStrictEqual(meta.collections(), ['docs', 'articles']);
+  assert.deepStrictEqual(meta.collections(0), ['docs', 'articles']);
+  assert.deepStrictEqual(meta.collections(1), []); // wrong op → empty
+  assert.deepStrictEqual(meta.collections(9), []);
+  assert.deepStrictEqual(meta.collection(1), { status: 'green', points_count: 42 });
+  assert.strictEqual(meta.collection(0), null);
+  assert.deepStrictEqual(meta.shardKeys(2), ['acme', 101]);
+  assert.deepStrictEqual(meta.shardKeys(-2), ['acme', 101]); // negative index
+  assert.deepStrictEqual(meta.shardKeys(0), []);
+  assert.deepStrictEqual(meta.quotas(3), { enabled: true });
+  assert.strictEqual(meta.quotas(0), null);
+
+  // SET_QUOTA answers the quotas() accessor too.
+  const setQuota = new sdk.ExecutionReport({
+    ok: true,
+    succeeded: 1,
+    failed: 0,
+    results: [
+      { ok: true, operation: 'SET_QUOTA', message: 'ok', data: { enabled: false } },
+    ],
+  });
+  assert.deepStrictEqual(setQuota.quotas(), { enabled: false });
 }
 
 // 9. executeHits wrapper check
@@ -343,4 +424,40 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(dx.normalizeUpsertRows('nope'), 'nope');
 }
 
-console.log(`All ${LABEL} DX unit tests passed successfully!`);
+// 11. Typed-array execute params survive the napi boundary (P0-1).
+// Server SDK only (`LABEL === 'nqql'`): binding runs before any I/O, so a
+// dead port proves the params bound — a transport error means the
+// Float32Array bound fine, while a bind error would mean it mangled.
+(async () => {
+  if (LABEL === 'nqql') {
+    const probing = new sdk.Client({ url: 'http://127.0.0.1:9' });
+    const transportErr = await probing
+      .execute('QUERY :v FROM docs USING dense LIMIT 1', {
+        params: { v: new Float32Array([0.1, 0.2, 0.3, 0.4]) },
+      })
+      .then(
+        () => null,
+        (err) => err,
+      );
+    assert.ok(transportErr, 'expected a transport error, not success');
+    assert.ok(
+      transportErr.code && transportErr.code.startsWith('QQL-TRANSPORT'),
+      `expected QQL-TRANSPORT-*, got ${transportErr.code}: ${transportErr.message}`,
+    );
+    // Control: missing params still fail closed before any I/O.
+    const bindErr = await probing
+      .execute('QUERY :v FROM docs USING dense LIMIT 1', {})
+      .then(
+        () => null,
+        (err) => err,
+      );
+    assert.ok(bindErr, 'expected a bind error, not success');
+    assert.strictEqual(bindErr.code, 'QQL-BIND-MISSING-PARAM');
+    await probing.close();
+  }
+
+  console.log(`All ${LABEL} DX unit tests passed successfully!`);
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
