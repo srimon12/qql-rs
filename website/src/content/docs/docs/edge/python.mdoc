@@ -185,7 +185,8 @@ report = pyqql_edge.execute(
 
 ## Return shape and errors
 
-`execute` returns the canonical report:
+`execute` returns the canonical report with typed `data` per operation
+(no `result` envelope — query hits are a bare array, matching `pyqql`):
 
 ```json
 {
@@ -195,7 +196,7 @@ report = pyqql_edge.execute(
       "ok": true,
       "operation": "QUERY",
       "message": "Found 10 hits",
-      "data": {"result": {"points": [{"id": 1, "score": 0.75, "payload": {"text": "hello"}}]}}
+      "data": [{"id": 1, "score": 0.75, "payload": {"text": "hello"}}]
     }
   ],
   "succeeded": 1,
@@ -210,10 +211,24 @@ with structured attributes attached: `err.code` (e.g.
 features always raise — never a silent no-op.
 
 Like `pyqql`, edge `execute` returns an `ExecutionReport` dict subclass with
-typed accessors: `report.hits(stmt)` / `report.points(stmt)` return
-`ScoredPoint` objects (`id`, `score`, `payload`, `text`, `collection`),
-`report.facet(stmt)` returns the normalized facet hits, and `report.count(stmt)`
-returns an integer.
+typed accessors: `report.hits(stmt)` / `report.points(stmt)` / `report.ids(stmt)`
+return `ScoredPoint` objects (`id`, `score`, `payload`, `text`, `collection`;
+`.get(key, default)` is attribute-first, `.without_payload()` strips the
+payload), `report.facet(stmt)` returns the normalized facet hits,
+`report.count(stmt)` returns an integer, `report.groups(stmt)` returns
+`[{"id": <group key>, "hits": [...]}, ...]`, and `report.collections()` /
+`report.collection()` / `report.shard_keys()` read the inspect results.
+
+## Lazy scroll
+
+`pyqql_edge.scroll_cursor(client, collection, ...)` pages lazily through a
+collection with `SCROLL ... AFTER :cursor` (at most one page buffered), plus
+`scroll_cursor_async(client, collection, ...)` for async hosts — the same
+options shape as `pyqql.Client.scroll_cursor` (`batch_size`, `where`, `params`,
+`shard_key`, `with_payload`, `with_vector`). Unlike `pyqql`, the helpers are
+module-level functions that take the client first (mirroring
+`nqql-edge`'s `scrollCursor(client, …)`); the edge `Client` itself only
+exposes `execute` / `execute_async` / `execute_hits` / `explain` / `close`.
 
 ## Listing models
 

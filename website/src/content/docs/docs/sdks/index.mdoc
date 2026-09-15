@@ -34,7 +34,7 @@ QUERY 'portable query' FROM docs USING dense LIMIT 5;
 |---|---|---|---|---|
 | Parse | `Parser::parse_all` | `parse` | `parse` | `parse` |
 | Validate | parse result | `is_valid` | `isValid` | `isValid` |
-| Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
+| Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `injectFilter` / `Stmt.injectFilter` |
 | Explain and compile | planner/runtime | `explain`, `compile_query` | `explain`, `compileQuery` | `analyze`, `compile` |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
 | Parse to JSON string | — | `parse_json` | `parseJson` | `parseJson` |

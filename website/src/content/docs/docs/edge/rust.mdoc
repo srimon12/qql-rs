@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let report = executor
         .execute("QUERY 'hello' FROM docs USING dense LIMIT 5", OnError::Stop)
         .await?;
-    println!("found {} hits", report.results[0].data.map(|d| d.to_string()).unwrap_or_default());
+    println!("found {} hits", report.first_hits().map(|h| h.len()).unwrap_or(0));
 
     executor.close().await?; // flush before deleting the data directory
     Ok(())

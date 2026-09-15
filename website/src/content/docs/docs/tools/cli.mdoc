@@ -181,7 +181,7 @@ qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=database -p lim=5
 qql run migrations/seed.qql --stop-on-error
 
 # Run with JSON output
-qql run --json "COUNT docs"
+qql run --json "COUNT FROM docs"
 {% /terminal %}
 
 ### `qql doctor "<query>"` (alias: `qql check "<query>"`)

@@ -62,8 +62,10 @@ bound_qql = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}
 ```
 
 Parse once, then reuse the statement. `stmt.bind(params)` returns a new bound
-`Stmt`, and `stmt.compile_route(params=...)` lowers the bound statement to its
-Qdrant route without re-parsing:
+`Stmt` (`stmt.bound` reports whether params were already bound — binding again
+raises `QQL-BIND-ALREADY-BOUND`), `stmt.compile_route(params=...)` lowers the
+bound statement to its Qdrant route without re-parsing, and `stmt.explain()`
+returns this statement's `{ok, query, plan}` dict:
 
 ```python
 stmt = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
@@ -328,7 +330,9 @@ from pyqql import compile_query, explain, tokenize
 
 route = compile_query(query)
 print(route["method"], route["path"])
-print(explain(query))
+print(explain(query))  # {ok, query, plan} — or {ok: False, query, error} on
+                       # invalid source (never raises for a parse failure;
+                       # Node/WASM `explain` throws a coded Error instead)
 print(tokenize(query))
 ```
 
@@ -348,8 +352,9 @@ print(tokenize(query))
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
 | `parse_json(source)` | JSON string of the AST array | Forward a parse over HTTP/IPC without Python object overhead |
-| `Stmt.bind(params)` | bound `Stmt` | Substitute `:name` / `?` parameters into a prepared statement |
+| `Stmt.bind(params)` | bound `Stmt` | Substitute `:name` / `?` parameters into a prepared statement (`stmt.bound` reports whether binding already happened; re-binding raises `QQL-BIND-ALREADY-BOUND`) |
 | `Stmt.compile_route(params=...)` | route dictionary | Compile a prepared statement to its Qdrant route without re-parsing |
+| `Stmt.explain()` | `{ok, query, plan}` dictionary | Per-statement plan without raising |
 | `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
 | `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
 | `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools (`is_valid` runs parse + plan) |
