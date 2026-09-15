@@ -159,14 +159,37 @@ fn rest_grpc_relevance_feedback_parity() {
 
 #[test]
 fn match_except_filter_contract_matches_openapi() {
-    // `MatchValue::Except` has no QQL surface syntax (there is no
-    // `MATCH EXCEPT` keyword in `qql-core`), so it is covered at the
-    // typed level: serialize the plan type and validate the REST shape.
+    // `MATCH EXCEPT` is QQL surface syntax (`qql-core` parses it to
+    // `FilterExpr::MatchExcept`), so it is covered both ways: first the
+    // end-to-end lowered route body, then the typed plan shape directly.
     // The gRPC half is covered by
     // `grpc_exact_list_match_is_homogeneous_and_fallible`.
     let Some(openapi) = openapi_or_skip() else {
         return;
     };
+
+    // 1. QQL surface: parse → route → OpenAPI Filter.
+    let stmt =
+        Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE tags MATCH EXCEPT ('a', 'b');")
+            .expect("MATCH EXCEPT parses");
+    let body = to_rest_route(&plan(&stmt).expect("MATCH EXCEPT plans"))
+        .expect("MATCH EXCEPT routes")
+        .body_json()
+        .expect("MATCH EXCEPT has a body");
+    let filter = body.get("filter").expect("route body carries a filter");
+    let norm_filter = if filter.get("must").is_none()
+        && filter.get("should").is_none()
+        && filter.get("must_not").is_none()
+    {
+        serde_json::json!({ "must": [filter] })
+    } else {
+        filter.clone()
+    };
+    assert_eq!(
+        norm_filter["must"][0]["match"]["except"],
+        serde_json::json!(["a", "b"])
+    );
+    validate_ref(&openapi, "Filter", &norm_filter);
     use qql_plan::{FieldCondition, FilterClause, MatchValue};
     let clause = FilterClause::Field(Box::new(FieldCondition {
         key: "tag".into(),

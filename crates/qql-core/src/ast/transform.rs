@@ -104,14 +104,40 @@ impl Stmt {
                 true
             }
             Self::Batch(batch) => {
-                let mut ok = true;
-                for member in &mut batch.statements {
-                    ok &= member.set_shard_key(shard_key.clone());
+                // Pre-check before mutating: a mixed batch (e.g. containing
+                // DDL/SHOW) must report failure without half-applying keys to
+                // the members that precede the unsupported one.
+                if !batch.statements.iter().all(can_carry_shard_key) {
+                    return false;
                 }
-                ok
+                for member in &mut batch.statements {
+                    member.set_shard_key(shard_key.clone());
+                }
+                true
             }
             _ => false,
         }
+    }
+}
+
+/// Whether a statement can carry `SHARD` routing: mirrors the capable arms
+/// of [`Stmt::set_shard_key`]. Used to pre-check batches before mutating so a
+/// mixed batch never half-applies.
+fn can_carry_shard_key(statement: &Stmt) -> bool {
+    match statement {
+        Stmt::Query(_)
+        | Stmt::Scroll(_)
+        | Stmt::Count(_)
+        | Stmt::Facet(_)
+        | Stmt::Upsert(_)
+        | Stmt::Delete(_)
+        | Stmt::ClearPayload(_)
+        | Stmt::DeletePayload(_)
+        | Stmt::DeleteVector(_)
+        | Stmt::UpdateVector(_)
+        | Stmt::UpdatePayload(_) => true,
+        Stmt::Batch(batch) => batch.statements.iter().all(can_carry_shard_key),
+        _ => false,
     }
 }
 
@@ -153,6 +179,17 @@ pub fn inject_filter(
         Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
+        // Explicit deny (not an oversight): point-vector replacement addresses
+        // points by ID list and carries no selector, so there is nothing to
+        // merge a tenant filter into. Filter by IDs before building the
+        // statement instead.
+        Stmt::UpdateVector(_) => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                "inject_filter does not apply to this statement type (UPDATE VECTOR): point-vector replacement has no selector; address points by ID",
+                None,
+            ));
+        }
         Stmt::Upsert(_) if operator != ComparisonOp::Eq || field.eq_ignore_ascii_case("id") => {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-FILTER-INJECT",
@@ -191,6 +228,9 @@ pub fn inject_filter(
                     .iter_mut()
                     .find(|(key, _)| key.eq_ignore_ascii_case(field))
                 {
+                    // Last-writer-wins: re-stamp the field with the injected
+                    // value. A pre-existing conflicting value is overwritten,
+                    // never merged — required for tenant stamping.
                     *current = value.clone();
                 } else {
                     inline.payload.push((field.to_string(), value.clone()));

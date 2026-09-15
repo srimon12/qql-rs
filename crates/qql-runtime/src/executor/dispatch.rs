@@ -220,33 +220,44 @@ impl Executor {
             )
         })?;
 
-        let mut by_key: HashMap<(String, qql_plan::PlanPointId), SearchHit> = HashMap::new();
-        for (collection, request) in candidates {
+        // Deduplicate candidates by (collection, id) without cloning
+        // collection names per hit: hits live in one Vec, `seen` maps to
+        // indices, and names resolve once at materialization.
+        let mut hits: Vec<SearchHit> = Vec::new();
+        let mut hit_coll: Vec<usize> = Vec::new();
+        let mut seen: HashMap<(usize, qql_plan::PlanPointId), usize> = HashMap::new();
+        for (ci, (collection, request)) in candidates.iter().enumerate() {
             let op = PlannedOperation::Query {
                 collection: collection.clone(),
                 request: request.clone(),
             };
             let response = self.dispatch_raw(&op).await?;
-            let hits = match response.data {
+            let batch = match response.data {
                 ExecData::Hits(hits) => hits,
-                ExecData::Groups(_)
-                | ExecData::Count(_)
-                | ExecData::Facet(_)
-                | ExecData::Mutation { .. }
-                | ExecData::Collections(_)
-                | ExecData::Collection(_)
-                | ExecData::ShardKeys(_)
-                | ExecData::Quotas(_) => Vec::new(),
+                // Candidates are always planned queries, so any other shape
+                // is a backend contract break — fail closed instead of
+                // silently scoring zero documents.
+                _ => {
+                    return Err(QqlError::backend(
+                        "QQL-BACKEND-ENVELOPE",
+                        format!(
+                            "CROSS RERANK candidate query on '{collection}' returned a non-hits response"
+                        ),
+                        None,
+                    ));
+                }
             };
-            for mut hit in hits {
-                hit.collection = Some(collection.clone());
-                by_key
-                    .entry((collection.clone(), hit.id.clone()))
-                    .or_insert(hit);
+            for hit in batch {
+                // `insert` needs an owned key: one id clone per hit (the
+                // per-hit collection clone is gone).
+                if seen.insert((ci, hit.id.clone()), hits.len()).is_none() {
+                    hit_coll.push(ci);
+                    hits.push(hit);
+                }
             }
         }
 
-        if by_key.is_empty() {
+        if hits.is_empty() {
             return Ok(ExecResponse {
                 ok: true,
                 operation: "CROSS_RERANK".into(),
@@ -258,21 +269,24 @@ impl Executor {
             });
         }
 
-        let mut hits: Vec<SearchHit> = by_key.into_values().collect();
-        hits.sort_by(|a, b| {
-            a.collection
-                .as_deref()
-                .unwrap_or("")
-                .cmp(b.collection.as_deref().unwrap_or(""))
-                .then_with(|| a.id.cmp(&b.id))
+        // Deterministic pre-order (collection, id) over indices: ties in
+        // rerank scores keep this order through the stable index sort below.
+        let mut order: Vec<usize> = (0..hits.len()).collect();
+        order.sort_by(|&a, &b| {
+            candidates[hit_coll[a]]
+                .0
+                .cmp(&candidates[hit_coll[b]].0)
+                .then_with(|| hits[a].id.cmp(&hits[b].id))
         });
 
-        let mut docs = Vec::with_capacity(hits.len());
-        let mut keep_idx = Vec::with_capacity(hits.len());
-        for (i, hit) in hits.iter().enumerate() {
+        // Borrow rerank texts out of the hits; only surviving documents pay
+        // for owned Strings at the `&[String]` trait boundary below.
+        let mut doc_idx: Vec<usize> = Vec::with_capacity(order.len());
+        let mut doc_refs: Vec<&str> = Vec::with_capacity(order.len());
+        for &i in &order {
             // The rerank field always comes from the payload: hits no longer
             // carry a denormalized `text` mirror.
-            let text = hit
+            let text = hits[i]
                 .payload
                 .as_ref()
                 .and_then(|p| p.get(field))
@@ -281,10 +295,10 @@ impl Executor {
             if text.is_empty() {
                 continue;
             }
-            docs.push(text.to_string());
-            keep_idx.push(i);
+            doc_idx.push(i);
+            doc_refs.push(text);
         }
-        if docs.is_empty() {
+        if doc_refs.is_empty() {
             return Err(QqlError::execution(
                 "QQL-RERANK-CROSS-FIELD",
                 format!(
@@ -295,37 +309,57 @@ impl Executor {
             ));
         }
 
+        let docs: Vec<String> = doc_refs.iter().map(|s| s.to_string()).collect();
         let scores = embedder.rerank_pairs(query, &docs, model).await?;
-        if scores.len() != docs.len() {
+        if scores.len() != doc_refs.len() {
             return Err(QqlError::execution(
                 "QQL-RERANK-CROSS",
                 format!(
                     "rerank_pairs returned {} scores for {} documents",
                     scores.len(),
-                    docs.len()
+                    doc_refs.len()
                 ),
                 None,
             ));
         }
 
-        let mut ranked: Vec<(f32, SearchHit)> = keep_idx
+        // Rank (score, position) pairs — losers are never cloned — then
+        // paginate the index run and materialize only the output slice.
+        let mut ranked: Vec<(f32, usize)> = scores
             .into_iter()
-            .zip(scores)
-            .map(|(i, score)| {
-                let mut h = hits[i].clone();
-                h.score = score;
-                (score, h)
-            })
+            .enumerate()
+            .map(|(k, s)| (s, k))
             .collect();
         ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        let skip = offset as usize;
-        let take = limit as usize;
+        // Pagination applies after empty-field filtering: candidates lacking
+        // the rerank field are dropped before OFFSET/LIMIT, so page boundaries
+        // shift with payload quality (documented contract, not wire parity).
+        let skip = usize::try_from(offset).map_err(|_| {
+            QqlError::validation(
+                "QQL-VALIDATION-LIMIT-OVERFLOW",
+                format!("CROSS RERANK OFFSET {offset} overflows pointer width; reduce OFFSET"),
+                None,
+            )
+        })?;
+        let take = usize::try_from(limit).map_err(|_| {
+            QqlError::validation(
+                "QQL-VALIDATION-LIMIT-OVERFLOW",
+                format!("CROSS RERANK LIMIT {limit} overflows pointer width; reduce LIMIT"),
+                None,
+            )
+        })?;
         let out: Vec<SearchHit> = ranked
             .into_iter()
             .skip(skip)
             .take(take)
-            .map(|(_, h)| h)
+            .map(|(score, k)| {
+                let i = doc_idx[k];
+                let mut h = hits[i].clone();
+                h.score = score;
+                h.collection = Some(candidates[hit_coll[i]].0.clone());
+                h
+            })
             .collect();
         let n = out.len();
         Ok(ExecResponse {

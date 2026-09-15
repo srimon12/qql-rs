@@ -1,10 +1,12 @@
 use crate::filter::{point_id_req_typed, top_level_filter, value_to_json};
 use crate::semantic::PlanShardKey;
 use crate::types::*;
+use alloc::format;
 use qql_core::ast::{
     ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointEntry, PointSelector,
     UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
+use qql_core::error::QqlError;
 
 /// Lower `UPSERT INTO` to the `PUT /collections/{c}/points` request body.
 ///
@@ -190,28 +192,85 @@ pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorReque
     }
 }
 
-/// Increment a 128-bit UUID point ID string by 1 to implement exclusive
-/// cursor pagination (`id > after`), matching integer `AFTER n -> offset n+1`.
-fn increment_uuid_point_id(s: &str) -> Option<String> {
+/// Parse a UUID point ID string (dashes optional) into its 128-bit value.
+fn uuid_to_u128(s: &str) -> Option<u128> {
     let clean: String = s.chars().filter(|c| *c != '-').collect();
     if clean.len() == 32 {
-        let val = u128::from_str_radix(&clean, 16).ok()?;
-        let next = val.saturating_add(1);
-        Some(format!(
-            "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-            (next >> 96) as u32,
-            ((next >> 80) & 0xffff) as u16,
-            ((next >> 64) & 0xffff) as u16,
-            ((next >> 48) & 0xffff) as u16,
-            (next & 0xffff_ffff_ffff) as u64
-        ))
+        u128::from_str_radix(&clean, 16).ok()
     } else {
         None
     }
 }
 
+/// Increment a 128-bit UUID point ID string by 1 to implement exclusive
+/// cursor pagination (`id > after`), matching integer `AFTER n -> offset n+1`.
+///
+/// Returns `None` for non-UUID strings and for the maximum UUID (which has
+/// no successor); both cases are rejected by [`validate_scroll_after`].
+fn increment_uuid_point_id(s: &str) -> Option<String> {
+    let val = uuid_to_u128(s)?;
+    let next = val.checked_add(1)?;
+    Some(format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        (next >> 96) as u32,
+        ((next >> 80) & 0xffff) as u16,
+        ((next >> 64) & 0xffff) as u16,
+        ((next >> 48) & 0xffff) as u16,
+        (next & 0xffff_ffff_ffff) as u64
+    ))
+}
+
+/// Validate a `SCROLL ... AFTER` cursor before lowering.
+///
+/// The cursor contract is exclusive (`id > after`): integers advance by one
+/// and UUIDs to their successor. Cursors with no successor fail closed
+/// instead of emitting a request that silently re-scans or loops forever:
+/// - `u64::MAX` / UUID-max are already the last representable ID, so there
+///   is no next page (`saturating_add` would echo the anchor back forever).
+///
+/// Opaque (non-UUID) strings pass through: they have no computable
+/// successor, so lowering resumes at the anchor unchanged (pinned by
+/// `scroll_with_vector_after_string_id`). Only integer and UUID cursors get
+/// exclusive advancement.
+///
+/// Placeholders (`:name` / `?N`) pass through: they are gated earlier by
+/// `ensure_no_unbound_params` (or bound before planning), so there is no
+/// concrete cursor to judge yet.
+///
+/// Planners must call this before [`lower_scroll_request`], which stays
+/// infallible for its single wired call site.
+pub fn validate_scroll_after(after: Option<&qql_core::ast::PointId>) -> Result<(), QqlError> {
+    let Some(id) = after else {
+        return Ok(());
+    };
+    match id {
+        qql_core::ast::PointId::Number(n) if *n == u64::MAX => Err(QqlError::validation(
+            "QQL-PLAN-SCROLL-AFTER",
+            "SCROLL AFTER is already the maximum point ID; there is no next page",
+            None,
+        )),
+        qql_core::ast::PointId::Number(_) => Ok(()),
+        qql_core::ast::PointId::String(s) => match uuid_to_u128(s) {
+            Some(v) if v == u128::MAX => Err(QqlError::validation(
+                "QQL-PLAN-SCROLL-AFTER",
+                "SCROLL AFTER is already the maximum UUID; there is no next page",
+                None,
+            )),
+            // UUIDs advance to their successor; opaque strings have no
+            // successor and lower unchanged (see `lower_scroll_request`).
+            _ => Ok(()),
+        },
+        qql_core::ast::PointId::Param(..) | qql_core::ast::PointId::PositionalParam(..) => Ok(()),
+    }
+}
+
 /// Lower `SCROLL` to the `/points/scroll` body: payload on, vectors off,
 /// plus optional payload selection and payload-key ordering.
+///
+/// The `after` cursor lowers exclusively (`AFTER n` → `offset n + 1`,
+/// UUIDs to their successor); opaque strings pass through unchanged.
+/// Callers must run [`validate_scroll_after`] first to reject cursors with
+/// no next page (`u64::MAX` / UUID-max).
 pub fn lower_scroll_request(
     limit: u64,
     filter: Option<&qql_core::ast::FilterExpr>,
@@ -359,5 +418,48 @@ pub fn planned_to_update_operation(
             },
         )),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql_core::ast::PointId;
+
+    #[test]
+    fn scroll_after_accepts_incrementable_cursors() {
+        assert!(validate_scroll_after(None).is_ok());
+        assert!(validate_scroll_after(Some(&PointId::Number(42))).is_ok());
+        assert!(
+            validate_scroll_after(Some(&PointId::String(
+                "00000000-0000-0000-0000-00000000002a".into()
+            )))
+            .is_ok()
+        );
+        // Placeholders are gated by the binder, not the cursor check.
+        assert!(validate_scroll_after(Some(&PointId::param("after"))).is_ok());
+        assert!(validate_scroll_after(Some(&PointId::positional_param(0))).is_ok());
+    }
+
+    #[test]
+    fn scroll_after_passes_through_opaque_strings() {
+        // No computable successor exists, so lowering resumes at the anchor
+        // unchanged (pinned by `scroll_with_vector_after_string_id`); only
+        // cursors with no next page at all are rejected.
+        assert!(validate_scroll_after(Some(&PointId::String("id-with-quote".into()))).is_ok());
+    }
+
+    #[test]
+    fn scroll_after_rejects_maximum_ids() {
+        // `saturating_add` would echo the anchor back: no next page exists.
+        let err = validate_scroll_after(Some(&PointId::Number(u64::MAX)))
+            .expect_err("u64::MAX has no successor");
+        assert_eq!(err.code, "QQL-PLAN-SCROLL-AFTER");
+        let err = validate_scroll_after(Some(&PointId::String(
+            "ffffffff-ffff-ffff-ffff-ffffffffffff".into(),
+        )))
+        .expect_err("UUID-max has no successor");
+        assert_eq!(err.code, "QQL-PLAN-SCROLL-AFTER");
+        assert!(increment_uuid_point_id("ffffffff-ffff-ffff-ffff-ffffffffffff").is_none());
     }
 }

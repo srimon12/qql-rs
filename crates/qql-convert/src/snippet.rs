@@ -498,7 +498,14 @@ fn parse_shorts(
                 'X' => *method = Some(value),
                 'd' => datas.push(check_data_value(&value)?),
                 'u' | 'H' | 'A' | 'e' | 'm' | 'o' | 'w' => {} // credentials / tuning: inert
-                _ => unreachable!(),
+                // Drift guard: `SHORT_VALUE_FLAGS` membership was checked
+                // above, so every table member is covered. Fail closed (never
+                // panic) if the flag table and this match ever drift apart.
+                _ => {
+                    return Err(ConvertError::undecodable(format!(
+                        "curl: unsupported flag `-{c}` in `{w}`"
+                    )));
+                }
             }
             break; // the remainder was the value
         } else if SHORT_BOOL_FLAGS.contains(c) {

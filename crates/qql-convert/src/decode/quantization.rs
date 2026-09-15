@@ -130,7 +130,15 @@ pub(crate) fn quantization(value: &Value, path: &str) -> Result<QuantizationConf
             query_encoding: None,
             memory,
         },
-        other => unreachable!("variant {other}"),
+        // Drift guard: `kind` comes from the fixed `variants` table above,
+        // so every member is covered. Fail closed (never panic) if the key
+        // table and this match ever drift apart.
+        other => {
+            return Err(invalid(
+                path,
+                format!("unsupported quantization variant '{other}'"),
+            ));
+        }
     };
     Ok(config)
 }
