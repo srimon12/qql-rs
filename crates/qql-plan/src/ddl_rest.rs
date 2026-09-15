@@ -3,9 +3,19 @@
 //! Each function returns a typed view over the plan IR; the caller serializes
 //! it (`routing::serialize_body` / the runtime REST adapter). No JSON maps are
 //! built here.
+//!
+//! `create_collection_rest_steps` additionally sequences the multi-step REST
+//! create (PUT, conditional PATCH, per-key shard PUTs) as pure data: the
+//! runtime only sends the steps. Single-step DDL likewise builds through
+//! `*_op` constructors so every transport shares one op-assembly point.
 
+use crate::plan::PlannedOperation;
+use crate::semantic::PlanShardKey;
 use crate::types::*;
 use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 use serde::Serialize;
 
 // ── REST OpenAPI wire projection (distinct from internal plan IR) ─────────
@@ -144,4 +154,86 @@ pub fn create_collection_deferred_params_rest(
             read_fan_out_delay_ms: params.read_fan_out_delay_ms,
         },
     })
+}
+
+/// One step of the multi-step `CREATE COLLECTION` REST sequence: HTTP verb,
+/// absolute path, and serialized JSON body. Pure plan knowledge — the runtime
+/// only sends the steps in order.
+#[derive(Debug)]
+pub struct RestDdlStep {
+    /// HTTP verb for this step.
+    pub method: Method,
+    /// Absolute path with the collection interpolated.
+    pub path: String,
+    /// Serialized JSON body.
+    pub body: serde_json::Value,
+}
+
+/// OpenAPI `PUT /collections/{collection}/shards` body for one custom shard key.
+#[derive(Debug, Serialize)]
+struct ShardKeyRestBody<'a> {
+    shard_key: &'a PlanShardKey,
+}
+
+/// Expand a planned create into its REST sequence: `PUT` the collection body,
+/// a conditional `PATCH` for update-only params, then one `PUT …/shards` per
+/// custom shard key (the REST projection creates them after the collection,
+/// never as a `CreateCollection` field).
+pub fn create_collection_rest_steps(
+    collection: &str,
+    req: &CreateCollectionRequest,
+) -> Result<Vec<RestDdlStep>, serde_json::Error> {
+    let mut steps = Vec::new();
+    steps.push(RestDdlStep {
+        method: Method::Put,
+        path: format!("/collections/{collection}"),
+        body: serde_json::to_value(create_collection_rest_body(req))?,
+    });
+    if let Some(patch) = create_collection_deferred_params_rest(req) {
+        steps.push(RestDdlStep {
+            method: Method::Patch,
+            path: format!("/collections/{collection}"),
+            body: serde_json::to_value(patch)?,
+        });
+    }
+    if let Some(keys) = &req.shard_keys {
+        for key in keys {
+            steps.push(RestDdlStep {
+                method: Method::Put,
+                path: format!("/collections/{collection}/shards"),
+                body: serde_json::to_value(ShardKeyRestBody { shard_key: key })?,
+            });
+        }
+    }
+    Ok(steps)
+}
+
+/// Build the `PlannedOperation` for a trait-level update-collection call, so
+/// every transport shares one op-assembly point (mirrors the gRPC DDL split).
+pub fn update_collection_op(
+    collection: &str,
+    request: &UpdateCollectionRequest,
+) -> PlannedOperation {
+    PlannedOperation::UpdateCollection {
+        collection: String::from(collection),
+        request: request.clone(),
+    }
+}
+
+/// Build the `PlannedOperation` for a trait-level create-index call.
+/// Index creation always waits (matches the historical REST default).
+pub fn create_index_op(collection: &str, request: &CreateIndexRequest) -> PlannedOperation {
+    PlannedOperation::CreateIndex {
+        collection: String::from(collection),
+        request: request.clone(),
+        wait: true,
+    }
+}
+
+/// Build the `PlannedOperation` for a trait-level drop-index call.
+pub fn drop_index_op(collection: &str, field: &str) -> PlannedOperation {
+    PlannedOperation::DropIndex {
+        collection: String::from(collection),
+        field: String::from(field),
+    }
 }

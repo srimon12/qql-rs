@@ -5,6 +5,12 @@ use crate::sparse::{self, Bm25Params, SparseVector};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Send/Sync bound helper for `Embedder` implementations on native targets.
+///
+/// Kept as a twin of `QdrantOpsBound` in `qql-runtime` (not shared): sharing
+/// would couple the crates backwards (`qql-embed` must stay dependency-free
+/// of the runtime) or mistype the bound (`QdrantOps: EmbedderBound` reads as
+/// an is-a relationship that does not exist). One shim per trait, each
+/// documenting its own target split.
 pub trait EmbedderBound: Send + Sync {}
 #[cfg(not(target_arch = "wasm32"))]
 impl<T: Send + Sync> EmbedderBound for T {}
@@ -17,12 +23,15 @@ impl<T> EmbedderBound for T {}
 
 /// Host-agnostic embedding backend.
 ///
-/// Dense calls should batch when possible (`embed_dense_batch` → one HTTP
-/// request or one ONNX batch). Sparse is role-split: [`Self::embed_sparse_query`]
-/// (unit weights) for search text and [`Self::embed_sparse_document`]
-/// (BM25 tf saturation) for ingestion text, both defaulting to local
-/// wire-compatible BM25. Multivector (ColBERT-style) uses
-/// [`Self::embed_multi`] → `Vec<Vec<f32>>`.
+/// Calls should batch when possible (`*_batch` → one HTTP request or one ONNX
+/// batch): `resolve_embeddings` batches dense, sparse-query, multi, and image
+/// jobs alike (grouped by model, one `*_batch` call per model), so remote
+/// backends must override the batch variants for real batching instead of
+/// relying on the sequential single-call defaults. Sparse is role-split:
+/// [`Self::embed_sparse_query`] (unit weights) for search text and
+/// [`Self::embed_sparse_document`] (BM25 tf saturation) for ingestion text,
+/// both defaulting to local wire-compatible BM25. Multivector (ColBERT-style)
+/// uses [`Self::embed_multi`] → `Vec<Vec<f32>>`.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {

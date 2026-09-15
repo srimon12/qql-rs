@@ -259,10 +259,13 @@ impl Executor {
             let mut collection: Option<String> = None;
             let mut run: Vec<qql_plan::PlannedOperation> = Vec::new();
             for operation in operations {
-                let op_collection = operation.collection().map(str::to_owned);
+                // Borrow the member key for comparison: only the first
+                // member's key is owned (one alloc per group instead of one
+                // per member); the rest compare as `&str`.
+                let op_collection = operation.collection();
                 if collection
-                    .as_ref()
-                    .is_some_and(|c| Some(c.as_str()) != op_collection.as_deref())
+                    .as_deref()
+                    .is_some_and(|c| Some(c) != op_collection)
                 {
                     return Err(QqlError::execution(
                         "QQL-BATCH-INVARIANT",
@@ -271,7 +274,7 @@ impl Executor {
                     ));
                 }
                 if collection.is_none() {
-                    collection = op_collection;
+                    collection = op_collection.map(str::to_owned);
                 }
                 if qql_plan::mutation::planned_to_update_operation(&operation).is_some() {
                     run.push(operation);
@@ -387,14 +390,14 @@ impl Executor {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations.clone(), results)
+                        self.retry_forced_members_individually(operations, results)
                             .await?;
                     }
                     Err(error) => {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations.clone(), results)
+                        self.retry_forced_members_individually(operations, results)
                             .await?;
                     }
                 }
@@ -419,14 +422,14 @@ impl Executor {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations.clone(), results)
+                        self.retry_forced_members_individually(operations, results)
                             .await?;
                     }
                     Err(error) => {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations.clone(), results)
+                        self.retry_forced_members_individually(operations, results)
                             .await?;
                     }
                 }
@@ -443,12 +446,12 @@ impl Executor {
     /// [`Self::dispatch_planned`] non-recursive.
     async fn retry_forced_members_individually(
         &self,
-        operations: Vec<qql_plan::PlannedOperation>,
+        operations: &[qql_plan::PlannedOperation],
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         for operation in operations {
-            match self.dispatch_raw(&operation).await {
-                Ok(response) => results.push(Self::normalize_planned(&operation, response)?),
+            match self.dispatch_raw(operation).await {
+                Ok(response) => results.push(Self::normalize_planned(operation, response)?),
                 Err(error) => results.push(ExecResponse {
                     ok: false,
                     operation: operation.operation_label().to_string(),
