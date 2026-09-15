@@ -8,6 +8,8 @@ use gloo_net::http::Request;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
+use super::functions::qql_err_to_js;
+
 enum EmbedMode {
     None,
     /// JS function: `async (texts: string[]) => number[][]` (already batched).
@@ -98,8 +100,7 @@ impl Client {
     /// all finite.
     #[wasm_bindgen(js_name = setBm25Params)]
     pub fn set_bm25_params(&mut self, k1: f64, b: f64, avg_len: f64) -> Result<(), JsValue> {
-        let params = qql_embed::Bm25Params::new(k1, b, avg_len)
-            .map_err(|e| JsValue::from_str(&format!("{}: {}", e.code, e.message)))?;
+        let params = qql_embed::Bm25Params::new(k1, b, avg_len).map_err(qql_err_to_js)?;
         self.bm25 = params;
         Ok(())
     }
@@ -698,16 +699,9 @@ impl Client {
         }
         qql_embed::resolve_embeddings(stmt, self)
             .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(qql_err_to_js)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) async fn resolve_stmt_embeddings(
-        &self,
-        _stmt: &mut qql_core::ast::Stmt,
-    ) -> Result<(), JsValue> {
-        Ok(())
-    }
     /// Fetch collection topology and resolve `USING` vector kinds.
     #[cfg(target_arch = "wasm32")]
     pub(crate) async fn resolve_stmt_vector_kinds(
@@ -725,16 +719,7 @@ impl Client {
         }
         let collection = collection.clone();
         let topology = self.fetch_vector_topology(&collection).await?;
-        qql_embed::resolve_query_vector_kinds(&collection, query, &topology)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) async fn resolve_stmt_vector_kinds(
-        &self,
-        _stmt: &mut qql_core::ast::Stmt,
-    ) -> Result<(), JsValue> {
-        Ok(())
+        qql_embed::resolve_query_vector_kinds(&collection, query, &topology).map_err(qql_err_to_js)
     }
 
     #[cfg(target_arch = "wasm32")]
