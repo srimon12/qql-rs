@@ -24,8 +24,10 @@ export class ScoredPoint {
   payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
+  vector: unknown | null;
   [key: string]: unknown;
   get(key: string, defaultValue?: unknown): unknown;
+  withoutPayload(): ScoredPoint;
 }
 
 export interface ExecResponse {
@@ -96,7 +98,11 @@ export class ExecutionReport {
   ids(stmt?: number): Array<string | number>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
-  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
+  groups(stmt?: number): Array<{ id: unknown; hits: ScoredPoint[] }>;
+  collections(stmt?: number): string[];
+  collection(stmt?: number): Record<string, unknown> | null;
+  shardKeys(stmt?: number): Array<string | number>;
+  quotas(stmt?: number): Record<string, unknown> | null;
 }
 
 export interface ExecuteOptions {

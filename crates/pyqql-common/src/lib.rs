@@ -458,6 +458,8 @@ pub struct PyStmt {
     /// Whether parameters have already been bound into this statement.
     /// Binding again — or passing params to `execute` / `compile_route` —
     /// would be silently ignored, so both raise `QQL-BIND-ALREADY-BOUND`.
+    /// Read-only (mirrors `nqql` / `qql-wasm` `Stmt.bound`).
+    #[pyo3(get)]
     pub bound: bool,
 }
 

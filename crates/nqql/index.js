@@ -72,10 +72,23 @@ class HttpEmbedder {
     if (apiKey !== undefined && typeof apiKey !== 'string') {
       throw new TypeError('HttpEmbedder apiKey must be a string');
     }
-    for (const key of ['multiApiKey', 'imageApiKey']) {
-      const value = options[key] ?? options[key === 'multiApiKey' ? 'multi_api_key' : 'image_api_key'];
+    // Optional endpoint/model/apiKey fields: type-checked here like pyqql's
+    // HttpEmbedder extractor (non-strings raise instead of failing later at
+    // the native layer). Empty strings stay unset, matching pyqql's filter.
+    for (const [camel, snake] of [
+      ['multiEndpoint', 'multi_endpoint'],
+      ['multiApiKey', 'multi_api_key'],
+      ['multiModel', 'multi_model'],
+      ['imageEndpoint', 'image_endpoint'],
+      ['imageApiKey', 'image_api_key'],
+      ['imageModel', 'image_model'],
+      ['rerankEndpoint', 'rerank_endpoint'],
+      ['rerankApiKey', 'rerank_api_key'],
+      ['rerankModel', 'rerank_model'],
+    ]) {
+      const value = options[camel] ?? options[snake];
       if (value !== undefined && typeof value !== 'string') {
-        throw new TypeError(`HttpEmbedder ${key} must be a string`);
+        throw new TypeError(`HttpEmbedder ${camel} must be a string`);
       }
     }
     for (const key of ['multiDimension', 'imageDimension']) {

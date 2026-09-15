@@ -84,6 +84,10 @@ class ExecutionReport:
 class Stmt:
     # NOTE: Stmt has no constructor — instances come from `parse()`.
     @property
+    def bound(self) -> bool:
+        """Whether parameters have already been bound (re-binding raises `QQL-BIND-ALREADY-BOUND`)."""
+        ...
+    @property
     def shard_key(self) -> Optional[Union[str, int]]:
         """Keyword keys read as `str`, numeric keys as `int` (`None` when unset)."""
         ...

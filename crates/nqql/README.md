@@ -15,7 +15,7 @@ Language surface tracks **Qdrant ≥ 1.19** (quotas, `memory` placement,
 npm install @veristamp/nqql
 ```
 
-Node **≥ 18**. Platforms: Linux x64 glibc, macOS x64/arm64, Windows x64.
+Node **≥ 18**. Platforms: Linux x64/arm64 glibc, macOS x64/arm64, Windows x64.
 
 ## Quick start
 

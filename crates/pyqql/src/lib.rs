@@ -80,7 +80,7 @@ impl PyClient {
     ///
     /// Supports all QQL retrieval, mutation, DDL, and aggregation operations
     /// (`QUERY`, `SCROLL`, `COUNT`, `FACET`, `UPSERT`, `UPDATE`, `DELETE`, etc.).
-    /// Queries include point payloads by default (`WITH PAYLOAD true`).
+    /// Point payloads are included by default (pass `WITH PAYLOAD false` to strip them).
     /// Lists of same-collection QUERY statements are automatically batched into
     /// a single network call.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]

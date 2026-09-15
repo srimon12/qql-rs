@@ -133,10 +133,34 @@ class ScoredPoint {
   }
 
   get(key, defaultValue = null) {
+    // Attribute fields first (mirrors pyqql `ScoredPoint.get`): `id` and
+    // `score` always resolve; nullable attributes fall back to `defaultValue`
+    // when unset. Everything else reads through to the payload.
+    if (key === 'id' || key === 'score') {
+      return this[key];
+    }
+    if (
+      key === 'payload' ||
+      key === 'text' ||
+      key === 'collection' ||
+      key === 'vector' ||
+      key === 'shard_key'
+    ) {
+      const value = this[key];
+      return value === null || value === undefined ? defaultValue : value;
+    }
     if (this.payload && typeof this.payload === 'object' && key in this.payload) {
       return this.payload[key];
     }
     return defaultValue;
+  }
+
+  /**
+   * Return a copy with `payload` stripped (`scrollCursor({ withPayload: false })`
+   * uses this; mirrors pyqql `ScoredPoint.without_payload()`).
+   */
+  withoutPayload() {
+    return new ScoredPoint({ ...this, payload: null });
   }
 }
 
@@ -192,7 +216,59 @@ class ExecutionReport {
     const res = this.#resultAt(stmt);
     if (!res || res.operation !== 'QUERY_GROUPS') return [];
     const groups = res.data?.groups;
-    return Array.isArray(groups) ? groups : [];
+    if (!Array.isArray(groups)) return [];
+    return groups.map((group) => ({
+      ...group,
+      hits: Array.isArray(group?.hits)
+        ? group.hits.map((hit) => new ScoredPoint(hit))
+        : [],
+    }));
+  }
+
+  /**
+   * `SHOW COLLECTIONS` names for statement `stmt` (mirrors pyqql
+   * `ExecutionReport.collections()`).
+   */
+  collections(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || res.operation !== 'SHOW_COLLECTIONS') return [];
+    const names = res.data?.collections;
+    return Array.isArray(names) ? names : [];
+  }
+
+  /**
+   * `SHOW COLLECTION` metadata as an object, or `null` (mirrors pyqql
+   * `ExecutionReport.collection()`).
+   */
+  collection(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || res.operation !== 'SHOW_COLLECTION') return null;
+    const data = res.data;
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  }
+
+  /**
+   * `SHOW SHARD KEYS` keys (`string | number`) for statement `stmt`
+   * (mirrors pyqql `ExecutionReport.shard_keys()`).
+   */
+  shardKeys(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || res.operation !== 'SHOW_SHARD_KEYS') return [];
+    const keys = res.data?.shard_keys;
+    return Array.isArray(keys) ? keys : [];
+  }
+
+  /**
+   * `SHOW QUOTAS` / `SET QUOTA` configuration as an object, or `null`
+   * (mirrors pyqql `ExecutionReport.quotas()`).
+   */
+  quotas(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || (res.operation !== 'SHOW_QUOTAS' && res.operation !== 'SET_QUOTA')) {
+      return null;
+    }
+    const data = res.data;
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
   }
 }
 

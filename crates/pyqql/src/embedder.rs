@@ -158,6 +158,10 @@ fn opt_f64_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
 pub fn extract_embedder_config(
     embedder: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<ParsedEmbedderConfig> {
+    // NOTE (cross-SDK convention): the dict path accepts snake_case keys
+    // only (`api_key`, `multi_endpoint`, …). `nqql`'s `HttpEmbedder` accepts
+    // both camelCase and snake_case aliases; keep that asymmetry in mind
+    // when porting embedder configs between the Python and Node SDKs.
     let mut out = ParsedEmbedderConfig::default();
 
     if let Some(emb) = embedder {
