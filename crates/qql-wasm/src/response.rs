@@ -690,6 +690,29 @@ mod tests {
     }
 
     #[test]
+    fn snowflake_u64_ids_survive_shaping_exactly() {
+        // Geosmart point IDs are u64 snowflakes above MAX_SAFE_INTEGER
+        // (real hit: 1479834607549681654 > 9007199254740991). The Rust shaping
+        // layer must keep them exact — the JS-boundary BigInt mapping in
+        // `to_js_value` relies on receiving the full u64 here, never a
+        // rounded f64.
+        const SNOWFLAKE: u64 = 1479834607549681654;
+        let response = wasm_success_response(
+            &planned("SCROLL FROM docs LIMIT 1"),
+            &json!({
+                "result": {"points": [{
+                    "id": SNOWFLAKE,
+                    "payload": {"name": "x"},
+                }]},
+                "status": "ok",
+            }),
+        )
+        .expect("strict parse");
+        assert_eq!(response["data"][0]["id"], json!(SNOWFLAKE));
+        assert_eq!(response["data"][0]["id"].as_u64(), Some(SNOWFLAKE));
+    }
+
+    #[test]
     fn batch_items_are_strict_and_carry_telemetry() {
         let parsed = parse_query_batch(&json!({
             "result": [

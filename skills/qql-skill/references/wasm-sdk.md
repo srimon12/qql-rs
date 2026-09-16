@@ -203,6 +203,23 @@ config). A missing or mistyped field fails the statement with
 fallback shapes. Server telemetry (`time`, `usage`) remains optional and
 lenient: absent or misshapen telemetry never fails a successful response.
 
+Integers cross losslessly: values a JS `Number` holds exactly (counts,
+spans, limits, small IDs and payloads) arrive as numbers, exactly as before;
+anything larger arrives as a `BigInt`, never a rounded `Number`. Qdrant
+snowflake point IDs exceed `MAX_SAFE_INTEGER`, so this is exactness, not
+pedantry:
+
+```js
+const hits = report.hits(0);
+typeof hits[0].id; // 'bigint' for snowflakes — e.g. 1479834607549681654n
+typeof hits[0].id; // 'number' for small sequential IDs — e.g. 691
+report.count(0);   // dx.js narrows counts to Number (exact in practice)
+// Pass BigInts straight back: params and cursor round-trip exactly.
+await client.execute("SCROLL FROM docs AFTER :cursor LIMIT 100", {
+    params: { cursor: hits.at(-1).id },
+});
+```
+
 ---
 
 ## 3b. Bulk ingest

@@ -73,7 +73,27 @@ function humanizeExecutionError(error: unknown, qdrantUrl: string): string {
 }
 
 function pretty(value: unknown): string {
-	return JSON.stringify(value, null, 2);
+	// u64/i64 (point IDs, counts, integer payloads) cross the WASM boundary
+	// as BigInt, which JSON.stringify rejects. Safe-range values render as
+	// the plain digits they always were (they paste straight back into QQL);
+	// larger ones keep the `n` literal suffix so snowflake IDs stay exact and
+	// visibly numeric instead of rounding into a Number.
+	return JSON.stringify(
+		value,
+		(_key, nested: unknown) =>
+			typeof nested === "bigint"
+				? printableBigInt(nested)
+				: (nested as unknown),
+		2,
+	);
+}
+
+function printableBigInt(value: bigint): string {
+	const digits = value.toString();
+	const safe =
+		value <= BigInt(Number.MAX_SAFE_INTEGER) &&
+		value >= BigInt(Number.MIN_SAFE_INTEGER);
+	return safe ? digits : `${digits}n`;
 }
 
 function loadStored<T>(key: string, fallback: T): T {

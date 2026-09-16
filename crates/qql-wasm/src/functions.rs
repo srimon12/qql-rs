@@ -207,13 +207,87 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
     })
 }
 
+/// Largest-magnitude integers a JS `Number` holds exactly. Larger ones must
+/// cross as `BigInt`; silently rounding them would mistarget points.
+const MAX_SAFE_INTEGER: i64 = 9007199254740991;
+const MIN_SAFE_INTEGER: i64 = -9007199254740991;
+
+/// How one JSON number maps onto JS: exactly, or not at all.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum IntegerMapping {
+    /// Fits a JS `Number` exactly — stays a number (full back-compat for
+    /// counts, spans, limits, small IDs and payloads).
+    Safe(f64),
+    /// Unsigned snowflake (Qdrant u64 point IDs) — must be a `BigInt`.
+    BigU(u64),
+    /// Negative beyond the safe range — must be a `BigInt`.
+    BigI(i64),
+    /// Non-integer JSON number — a JS `Number` as always.
+    Float(f64),
+}
+
+/// Classify one JSON number for the JS boundary. Pure over
+/// `serde_json::Number`, so the boundary rule is unit-testable without a JS
+/// runtime; the `JsValue` construction itself is a trivial follow-on.
+fn classify_number(raw: &serde_json::Number) -> IntegerMapping {
+    if let Some(signed) = raw.as_i64() {
+        if (MIN_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&signed) {
+            return IntegerMapping::Safe(signed as f64);
+        }
+        // Anything that fits `i64` but not the safe range keeps its sign.
+        return IntegerMapping::BigI(signed);
+    }
+    if let Some(unsigned) = raw.as_u64() {
+        // Reached only above `i64::MAX`: always beyond the safe range.
+        return IntegerMapping::BigU(unsigned);
+    }
+    IntegerMapping::Float(raw.as_f64().unwrap_or(f64::NAN))
+}
+
+/// Map a JSON value onto JS with one rule: integers the JS `Number` type
+/// holds exactly stay numbers; anything larger (Qdrant snowflake point IDs)
+/// becomes a `BigInt` instead of failing closed (`json_compatible`) or
+/// rounding silently. Single choke point for every JS-facing output:
+/// execute, analyze, parse, compile, Stmt.
+pub(crate) fn json_value_to_js(value: &serde_json::Value) -> JsValue {
+    match value {
+        serde_json::Value::Null => JsValue::NULL,
+        serde_json::Value::Bool(flag) => JsValue::from_bool(*flag),
+        serde_json::Value::Number(raw) => match classify_number(raw) {
+            IntegerMapping::Safe(number) | IntegerMapping::Float(number) => {
+                JsValue::from_f64(number)
+            }
+            IntegerMapping::BigU(unsigned) => js_sys::BigInt::from(unsigned).into(),
+            IntegerMapping::BigI(signed) => js_sys::BigInt::from(signed).into(),
+        },
+        serde_json::Value::String(text) => JsValue::from_str(text),
+        serde_json::Value::Array(items) => {
+            let array = js_sys::Array::new_with_length(items.len() as u32);
+            for (index, item) in items.iter().enumerate() {
+                array.set(index as u32, json_value_to_js(item));
+            }
+            array.into()
+        }
+        serde_json::Value::Object(fields) => {
+            let object = js_sys::Object::new();
+            for (key, item) in fields {
+                // Infallible on a fresh object with string keys; a host trap
+                // here is unrecoverable, so there is no `QqlError` to carry.
+                let _ =
+                    js_sys::Reflect::set(&object, &JsValue::from_str(key), &json_value_to_js(item));
+            }
+            object.into()
+        }
+    }
+}
+
 pub(crate) fn to_js_value<T: serde::Serialize>(val: &T) -> Result<JsValue, JsValue> {
-    // The JSON-compatible serializer emits plain JavaScript objects/arrays,
-    // including for serde_json::Value. Keep serialized JSON/bytes behind
-    // explicit APIs such as compileBytes, not the default JS-facing contract.
-    let serializer = serde_wasm_bindgen::Serializer::json_compatible();
-    val.serialize(&serializer)
-        .map_err(|error| JsValue::from_str(&error.to_string()))
+    // Serialize through JSON first: `serde_json::Value` preserves full u64
+    // precision from Rust, and `json_value_to_js` then applies the
+    // safe-or-BigInt rule uniformly — typed structs and raw JSON alike, with
+    // no per-field mapping to rot.
+    let json = serde_json::to_value(val).map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(json_value_to_js(&json))
 }
 
 #[wasm_bindgen(unchecked_return_type = "AnalysisResult")]
@@ -322,5 +396,68 @@ pub fn bind(
             super::params::bind_value_params(query, &parsed, truncate)
         }
         _ => Ok(query.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn classify(json: serde_json::Value) -> IntegerMapping {
+        let number = match &json {
+            serde_json::Value::Number(raw) => raw.clone(),
+            other => panic!("expected a JSON number, got {other}"),
+        };
+        classify_number(&number)
+    }
+
+    #[test]
+    fn safe_integers_stay_numbers() {
+        for (json, expected) in [
+            (serde_json::json!(0), 0.0),
+            (serde_json::json!(7), 7.0),
+            (serde_json::json!(-3), -3.0),
+            (serde_json::json!(9007199254740991i64), 9007199254740991.0),
+            (serde_json::json!(-9007199254740991i64), -9007199254740991.0),
+        ] {
+            assert_eq!(classify(json), IntegerMapping::Safe(expected));
+        }
+    }
+
+    #[test]
+    fn snowflake_ids_map_to_bigint_exactly() {
+        // Real geosmart hit: must survive the boundary without rounding.
+        assert_eq!(
+            classify(serde_json::json!(1479834607549681654u64)),
+            IntegerMapping::BigI(1479834607549681654)
+        );
+        // Just past the safe range, both signs.
+        assert_eq!(
+            classify(serde_json::json!(9007199254740992u64)),
+            IntegerMapping::BigI(9007199254740992)
+        );
+        assert_eq!(
+            classify(serde_json::json!(-9007199254740992i64)),
+            IntegerMapping::BigI(-9007199254740992)
+        );
+        // Above `i64::MAX` keeps the unsigned value.
+        assert_eq!(
+            classify(serde_json::Value::Number(serde_json::Number::from(
+                u64::MAX
+            ))),
+            IntegerMapping::BigU(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn floats_pass_through_untouched() {
+        assert_eq!(
+            classify(serde_json::json!(0.95)),
+            IntegerMapping::Float(0.95)
+        );
+        assert_eq!(
+            classify(serde_json::json!(1e21)),
+            IntegerMapping::Float(1e21)
+        );
     }
 }
