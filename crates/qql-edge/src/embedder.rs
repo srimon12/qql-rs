@@ -11,9 +11,10 @@ use fastembed::{
 };
 
 use ordered_float::NotNan;
+use qdrant_edge::TokenizerType;
 use qdrant_edge::bm25_embed::{EdgeBm25, EdgeBm25Config};
 use qql_core::error::QqlError;
-use qql_embed::{Bm25Params, Embedder, JointEmbeddingOutput, SparseVector};
+use qql_embed::{Bm25Params, Bm25TextConfig, Embedder, JointEmbeddingOutput, SparseVector};
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
     QqlError::execution("QQL-EDGE-EMBED", msg, None)
@@ -27,22 +28,42 @@ fn to_qql_sparse(sv: qdrant_edge::SparseVector) -> SparseVector {
     }
 }
 
-/// Map validated [`Bm25Params`] onto qdrant-edge's [`EdgeBm25Config`]
-/// (document-side `k`/`b`/`avg_len` only; tokenizer/stemming/stopwords keep
-/// the engine defaults).
+/// Map a validated [`Bm25TextConfig`] onto qdrant-edge's [`EdgeBm25Config`].
+///
+/// `k`/`b`/`avg_len`, `tokenizer`, `language`, `lowercase`, `ascii_folding`,
+/// and token length limits forward one-to-one (same names, same defaults).
+/// Explicit stemmer/stopword-set overrides stay at the language defaults:
+/// qdrant-edge does not re-export `StemmingAlgorithm`/`StopwordsInterface`,
+/// so they are unrepresentable from outside — language-driven stemming and
+/// stopwords (Qdrant's documented path) still apply inside `EdgeBm25::new`.
+/// `Multilingual` forwards to the real engine, which ships the segmentation
+/// stack (unlike the lean core pipeline).
 ///
 /// [`Bm25Params::new`] already rejects NaN/±Inf, so the `NotNan` conversions
 /// are infallible in practice; they are mapped instead of unwrapped so an
 /// impossible failure would still surface as a typed error.
-fn edge_bm25_config(params: &Bm25Params) -> Result<EdgeBm25Config, QqlError> {
+fn edge_bm25_config(text: &Bm25TextConfig) -> Result<EdgeBm25Config, QqlError> {
+    let params = &text.params;
     let k = NotNan::new(params.k1()).map_err(|e| err(format!("invalid bm25 k1: {e}")))?;
     let b = NotNan::new(params.b()).map_err(|e| err(format!("invalid bm25 b: {e}")))?;
     let avg_len =
         NotNan::new(params.avg_len()).map_err(|e| err(format!("invalid bm25 avg_len: {e}")))?;
+    let tokenizer = match text.tokenizer {
+        qql_embed::Tokenizer::Word => TokenizerType::Word,
+        qql_embed::Tokenizer::Whitespace => TokenizerType::Whitespace,
+        qql_embed::Tokenizer::Prefix => TokenizerType::Prefix,
+        qql_embed::Tokenizer::Multilingual => TokenizerType::Multilingual,
+    };
     Ok(EdgeBm25Config {
         k,
         b,
         avg_len,
+        tokenizer,
+        language: Some(text.language.name().to_string()),
+        lowercase: Some(text.lowercase),
+        ascii_folding: Some(text.ascii_folding),
+        min_token_len: text.min_token_len,
+        max_token_len: text.max_token_len,
         ..Default::default()
     })
 }
@@ -157,6 +178,22 @@ pub struct FastEmbedderOptions {
     /// Client-side BM25 expected average document length in tokens; `None` →
     /// `256`. See [`Self::bm25_k1`].
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language (Qdrant name/alias); `None` keeps
+    /// English. Forwards to the engine (drives its stopwords/stemmer).
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer (`"word"`, `"whitespace"`, `"prefix"`,
+    /// `"multilingual"` — the engine ships the segmentation stack, so all
+    /// four work here); `None` keeps `"word"`.
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching; `None` keeps `true`.
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing; `None` keeps `false`.
+    pub bm25_ascii_folding: Option<bool>,
+    /// Drop tokens shorter than this (chars); `None` keeps no minimum.
+    pub bm25_min_token_len: Option<usize>,
+    /// Drop over-long tokens on the document path (chars); `None` keeps no
+    /// maximum.
+    pub bm25_max_token_len: Option<usize>,
 }
 
 struct DenseSlot {
@@ -208,6 +245,10 @@ pub struct FastEmbedder {
     /// Validated parameters the fallback `bm25` was built with (exposed via
     /// [`Embedder::bm25_params`]).
     bm25_params: Bm25Params,
+    /// Full text configuration the fallback `bm25` was built with (exposed
+    /// via [`Embedder::bm25_text_config`], so estimators measure with the
+    /// same language/tokenizer the engine embeds with).
+    bm25_text: Bm25TextConfig,
 }
 
 type CacheKey = (String, String);
@@ -264,13 +305,32 @@ impl FastEmbedder {
             bm25_k1: None,
             bm25_b: None,
             bm25_avg_len: None,
+            bm25_language: None,
+            bm25_tokenizer: None,
+            bm25_lowercase: None,
+            bm25_ascii_folding: None,
+            bm25_min_token_len: None,
+            bm25_max_token_len: None,
         })
     }
 
     /// Construct from high-level options (dense + optional multi, cache, progress).
     pub fn try_with_options(opts: FastEmbedderOptions) -> Result<Self, QqlError> {
-        // Validate client-side BM25 parameters before any model work.
-        let bm25_params = Bm25Params::resolve(opts.bm25_k1, opts.bm25_b, opts.bm25_avg_len)?;
+        // Validate the full BM25 text configuration before any model work.
+        let bm25_text = Bm25TextConfig::resolve(
+            opts.bm25_k1,
+            opts.bm25_b,
+            opts.bm25_avg_len,
+            opts.bm25_language.as_deref(),
+            opts.bm25_tokenizer.as_deref(),
+            opts.bm25_lowercase,
+            opts.bm25_ascii_folding,
+            None,
+            None,
+            opts.bm25_min_token_len,
+            opts.bm25_max_token_len,
+        )?;
+        let bm25_params = bm25_text.params;
 
         let dense_model = match opts.model.as_deref() {
             None | Some("") => EmbeddingModel::default(),
@@ -500,11 +560,13 @@ impl FastEmbedder {
             multi,
             image,
             reranker,
-            // Document-side k/b/avg_len come from validated `Bm25Params`;
-            // tokenizer/stemming/stopwords keep the engine's English defaults.
-            bm25: EdgeBm25::new(edge_bm25_config(&bm25_params)?)
+            // The fallback encoder is Qdrant's own pipeline: text knobs
+            // forward one-to-one (explicit stemmer/stopword overrides stay
+            // at the language defaults — see `edge_bm25_config`).
+            bm25: EdgeBm25::new(edge_bm25_config(&bm25_text)?)
                 .map_err(|e| err(format!("edge BM25 init failed: {e}")))?,
             bm25_params,
+            bm25_text,
         })
     }
 
@@ -1019,6 +1081,13 @@ impl Embedder for FastEmbedder {
         self.bm25_params
     }
 
+    /// Full text configuration the fallback encoder was built with. The
+    /// embedding itself runs in Qdrant's engine; this mirror keeps estimators
+    /// and default-path consumers on the same language/tokenizer.
+    fn bm25_text_config(&self) -> Bm25TextConfig {
+        self.bm25_text.clone()
+    }
+
     // image_dimension is not on Embedder trait; use dimension() for dense CLIP text.
     // Image dim available via FastEmbedder::image_dimension().
 
@@ -1473,21 +1542,40 @@ mod tests {
 
     #[test]
     fn edge_bm25_config_maps_validated_params() {
-        let params = Bm25Params::resolve(Some(2.0), Some(0.5), Some(12.0)).unwrap();
-        let cfg = edge_bm25_config(&params).unwrap();
+        let text = Bm25TextConfig::resolve(
+            Some(2.0),
+            Some(0.5),
+            Some(12.0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let cfg = edge_bm25_config(&text).unwrap();
         assert_eq!(cfg.k.into_inner(), 2.0);
         assert_eq!(cfg.b.into_inner(), 0.5);
         assert_eq!(cfg.avg_len.into_inner(), 12.0);
-        assert_eq!(cfg.language, None, "language defaults stay untouched");
+        // Unset text knobs forward as explicit Qdrant defaults.
+        assert_eq!(cfg.language.as_deref(), Some("english"));
+        assert_eq!(cfg.tokenizer, TokenizerType::Word);
+        assert_eq!(cfg.lowercase, Some(true));
+        assert_eq!(cfg.ascii_folding, Some(false));
+        assert_eq!(cfg.min_token_len, None);
+        assert_eq!(cfg.max_token_len, None);
     }
 
     #[test]
     fn edge_bm25_config_default_matches_engine_default() {
-        // `Bm25Params::default` must map onto the engine's own defaults, so an
-        // unset configuration changes nothing for existing edge documents.
-        let mapped = edge_bm25_config(&Bm25Params::default()).unwrap();
-        assert_eq!(mapped, EdgeBm25Config::default());
-
+        // Our defaults forward as explicit English config, which is what the
+        // engine resolves internally — so an unset configuration changes
+        // nothing for existing edge documents (behavioral equality, not
+        // struct equality: `None` vs explicit-English differ textually).
+        let mapped = edge_bm25_config(&Bm25TextConfig::default()).unwrap();
         let engine_default = EdgeBm25::new(EdgeBm25Config::default()).unwrap();
         let engine_mapped = EdgeBm25::new(mapped).unwrap();
         let text = "Recipe for baking chocolate chip cookies";
@@ -1501,11 +1589,24 @@ mod tests {
     fn edge_bm25_config_applied_params_change_document_vectors() {
         // Non-default k1/b/avg_len must land in the document weights, and the
         // engine encoder must agree with `qql_embed::sparse` to f32 tolerance.
-        let params = Bm25Params::resolve(Some(2.0), Some(0.25), Some(4.0)).unwrap();
-        let engine = EdgeBm25::new(edge_bm25_config(&params).unwrap()).unwrap();
+        let text_config = Bm25TextConfig::resolve(
+            Some(2.0),
+            Some(0.25),
+            Some(4.0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let engine = EdgeBm25::new(edge_bm25_config(&text_config).unwrap()).unwrap();
         let text = "cat sat mat cat";
         let got = engine.embed_document(text);
-        let want = qql_embed::sparse::embed_document_with_params(text, &params);
+        let want = qql_embed::sparse::embed_document_with_params(text, &text_config.params);
         assert_eq!(got.indices, want.indices);
         for (g, w) in got.values.iter().zip(&want.values) {
             assert!((g - w).abs() < 1e-6, "edge {g} != qql-embed {w}");
@@ -1517,5 +1618,156 @@ mod tests {
             got.values,
             "configured params must differ from the engine defaults"
         );
+    }
+
+    /// Our reimplemented pipeline must agree with Qdrant's real engine
+    /// across languages, tokenizers, folding, and length limits — same
+    /// config in, same sparse vector out. (No network: both sides are pure.)
+    ///
+    /// Only engine-representable configs participate: explicit stemmer /
+    /// stopword-set overrides stay at the language defaults on the engine
+    /// side (see `edge_bm25_config`), so those are covered by qql-embed's
+    /// own unit tests instead.
+    #[test]
+    fn local_pipeline_matches_engine_across_configs() {
+        let cases: &[(&str, Bm25TextConfig)] = &[
+            ("The Time Machine", Bm25TextConfig::default()),
+            (
+                "La Máquina del Tiempo",
+                Bm25TextConfig::resolve(
+                    None,
+                    None,
+                    None,
+                    Some("spanish"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ),
+            (
+                "Le temps des cerises",
+                Bm25TextConfig::resolve(
+                    None,
+                    None,
+                    None,
+                    Some("french"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ),
+            (
+                "Die Verwandlung",
+                Bm25TextConfig::resolve(
+                    None,
+                    None,
+                    Some(5.0),
+                    Some("german"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ),
+            (
+                "Mieville café",
+                Bm25TextConfig::resolve(
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(true),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ),
+            (
+                "hello-world",
+                Bm25TextConfig::resolve(
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some("whitespace"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ),
+            (
+                "prefix test",
+                Bm25TextConfig::resolve(
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some("prefix"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(2),
+                    Some(4),
+                )
+                .unwrap(),
+            ),
+        ];
+        for (text, config) in cases {
+            let engine = EdgeBm25::new(edge_bm25_config(config).unwrap()).unwrap();
+            let pipeline = config.pipeline();
+            for (got, want) in [
+                (
+                    engine.embed_query(text),
+                    pipeline.embed_query(text).expect("query embeds"),
+                ),
+                (
+                    engine.embed_document(text),
+                    pipeline.embed_document(text).expect("doc embeds"),
+                ),
+            ] {
+                let want_qql = qql_embed::SparseVector {
+                    indices: want.indices.clone(),
+                    values: want.values.clone(),
+                };
+                assert_eq!(
+                    got.indices, want_qql.indices,
+                    "index mismatch for {text:?} with {config:?}"
+                );
+                assert_eq!(
+                    got.values.len(),
+                    want_qql.values.len(),
+                    "value count mismatch for {text:?} with {config:?}"
+                );
+                for (g, w) in got.values.iter().zip(&want_qql.values) {
+                    assert!(
+                        (g - w).abs() < 1e-6,
+                        "weight mismatch for {text:?} with {config:?}: edge {g} != local {w}"
+                    );
+                }
+            }
+        }
     }
 }
