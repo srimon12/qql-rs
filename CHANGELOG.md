@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fail-closed drift guards**: embed apply walks consume the collect job list through a mismatch-erroring cursor; edge unsupported catalog test covers every variant.
 - **Strict transport parsing**: alias actions serialize from a real type; `collection_exists` goes through the typed envelope parser.
 
+### Removed
+- **Filter lowering panics**: `top_level_filter` / `lower_filter` and the mutation lowerers return `Result`; mistyped range bounds fail with `QQL-PLAN-RANGE-TYPE`, and `PlanFormula::from_expr` replaces the infallible `From`.
+
+### Changed
+- **DDL spans complete**: every DDL error carries the offending value's span; gRPC rejects non-double range bounds with `QQL-GRPC-RANGE-TYPE`; CLI scripts print one JSON shape on both modes with one lint-clean rule.
+- **Score path**: stack-buffer shortest-repr rounding with no heap alloc; cross-rerank sorts stored scores with NaN last.
+
 ### Fixed
 - **Score precision contract**: `SearchHit.score` is now `f64`, rounded once at ingestion via `score_f64` — the custom `serialize_f32` widened through `pythonize` to `0.949999988079071` in `results` / DBAPI rows while `hits()` said `0.95`. Custom serializer and pyqql twin deleted; regression test pins it. Vectors stay `Vec<f32>` passthrough by deliberate asymmetry (scalars get compared, vectors don't).
 - **Range bounds typed**: `RangeParams` uses `PlanRangeBound` (`Int` / `Float` / `DateTime` / `Text`); bool / null / array / object RHS to range operators is a parse error (fail-closed).
