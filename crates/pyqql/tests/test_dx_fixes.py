@@ -228,6 +228,7 @@ class TestBm25EmbedderParams(unittest.TestCase):
             bm25_stemmer="none",
             bm25_min_token_len=2,
             bm25_max_token_len=9,
+            bm25_stopwords_languages=["fr"],
         )
         self.assertIsNotNone(emb)
 

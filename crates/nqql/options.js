@@ -61,6 +61,8 @@ function normalizeClientOptions(options) {
           bm25AsciiFolding:
             options.embedder.bm25AsciiFolding ?? options.embedder.bm25_ascii_folding,
           bm25Stopwords: options.embedder.bm25Stopwords ?? options.embedder.bm25_stopwords,
+          bm25StopwordsLanguages:
+            options.embedder.bm25StopwordsLanguages ?? options.embedder.bm25_stopwords_languages,
           bm25Stemmer: options.embedder.bm25Stemmer ?? options.embedder.bm25_stemmer,
           bm25MinTokenLen:
             options.embedder.bm25MinTokenLen ?? options.embedder.bm25_min_token_len,

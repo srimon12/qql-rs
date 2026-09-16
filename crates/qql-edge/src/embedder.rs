@@ -32,12 +32,13 @@ fn to_qql_sparse(sv: qdrant_edge::SparseVector) -> SparseVector {
 ///
 /// `k`/`b`/`avg_len`, `tokenizer`, `language`, `lowercase`, `ascii_folding`,
 /// and token length limits forward one-to-one (same names, same defaults).
-/// Explicit stemmer/stopword-set overrides stay at the language defaults:
-/// qdrant-edge does not re-export `StemmingAlgorithm`/`StopwordsInterface`,
-/// so they are unrepresentable from outside — language-driven stemming and
-/// stopwords (Qdrant's documented path) still apply inside `EdgeBm25::new`.
-/// `Multilingual` forwards to the real engine, which ships the segmentation
-/// stack (unlike the lean core pipeline).
+/// Explicit stemmer/stopword overrides forward through a serde JSON
+/// round-trip (`EdgeBm25Config` derives both directions, so the unexported
+/// `StemmingAlgorithm`/`StopwordsInterface` types never need naming): the
+/// JSON shapes mirror Qdrant's REST `Bm25Config`, pinned by
+/// `edge_bm25_overrides_round_trip` below. `Multilingual` forwards to the
+/// real engine, which ships the segmentation stack (unlike the lean core
+/// pipeline).
 ///
 /// [`Bm25Params::new`] already rejects NaN/±Inf, so the `NotNan` conversions
 /// are infallible in practice; they are mapped instead of unwrapped so an
@@ -54,7 +55,7 @@ fn edge_bm25_config(text: &Bm25TextConfig) -> Result<EdgeBm25Config, QqlError> {
         qql_embed::Tokenizer::Prefix => TokenizerType::Prefix,
         qql_embed::Tokenizer::Multilingual => TokenizerType::Multilingual,
     };
-    Ok(EdgeBm25Config {
+    let mut cfg = EdgeBm25Config {
         k,
         b,
         avg_len,
@@ -65,7 +66,62 @@ fn edge_bm25_config(text: &Bm25TextConfig) -> Result<EdgeBm25Config, QqlError> {
         min_token_len: text.min_token_len,
         max_token_len: text.max_token_len,
         ..Default::default()
-    })
+    };
+    if text.stopwords.is_some() || text.stemmer.is_some() {
+        cfg = merge_text_overrides(cfg, text)?;
+    }
+    Ok(cfg)
+}
+
+/// Merge explicit stopword/stemmer overrides into an [`EdgeBm25Config`]
+/// through its serde JSON form (see [`edge_bm25_config`]).
+///
+/// Shapes mirror Qdrant's REST `Bm25Config`: stopwords become
+/// `{"languages": [...], "custom": [...]}` (an empty selection disables
+/// filtering, exactly like Qdrant's empty `Set`); stemmers become
+/// `{"type": "snowball", "language": "<name>"}` or `{"type": "none"}`.
+/// A shape mismatch (third-party drift) fails closed instead of silently
+/// dropping the overrides.
+fn merge_text_overrides(
+    cfg: EdgeBm25Config,
+    text: &Bm25TextConfig,
+) -> Result<EdgeBm25Config, QqlError> {
+    let mut json = serde_json::to_value(&cfg)
+        .map_err(|e| err(format!("edge BM25 config serialize failed: {e}")))?;
+    if let Some(selection) = &text.stopwords {
+        let languages: Vec<&str> = selection
+            .languages
+            .iter()
+            .map(|language| language.name())
+            .collect();
+        json["stopwords"] = serde_json::json!({
+            "languages": languages,
+            "custom": selection.custom,
+        });
+    }
+    if let Some(stemmer) = &text.stemmer {
+        json["stemmer"] = match stemmer {
+            qql_embed::Stemmer::Snowball(language) => {
+                if language.stem_algorithm().is_none() {
+                    // Directly constructed (parse rejects these): the engine
+                    // has no such stemmer either, so fail here with the cause.
+                    return Err(err(format!(
+                        "edge BM25 stemmer unavailable for language {:?}",
+                        language.name()
+                    )));
+                }
+                serde_json::json!({"type": "snowball", "language": language.name()})
+            }
+            qql_embed::Stemmer::Armenian => {
+                serde_json::json!({"type": "snowball", "language": "armenian"})
+            }
+            qql_embed::Stemmer::Tamil => {
+                serde_json::json!({"type": "snowball", "language": "tamil"})
+            }
+            qql_embed::Stemmer::Disabled => serde_json::json!({"type": "none"}),
+        };
+    }
+    serde_json::from_value(json).map_err(|e| err(format!("edge BM25 override shape mismatch: {e}")))
 }
 
 /// Validate `model` against the embedder's sparse configuration: with a
@@ -183,7 +239,9 @@ pub struct FastEmbedderOptions {
     pub bm25_language: Option<String>,
     /// BM25 tokenizer (`"word"`, `"whitespace"`, `"prefix"`,
     /// `"multilingual"` — the engine ships the segmentation stack, so all
-    /// four work here); `None` keeps `"word"`.
+    /// four work here); `None` keeps `"word"`. Note: `multilingual` writes
+    /// succeed, but the core `avg_len` estimator cannot measure multilingual
+    /// pipelines (no segmentation stack there) and fails closed on them.
     pub bm25_tokenizer: Option<String>,
     /// Lowercase before matching; `None` keeps `true`.
     pub bm25_lowercase: Option<bool>,
@@ -194,6 +252,14 @@ pub struct FastEmbedderOptions {
     /// Drop over-long tokens on the document path (chars); `None` keeps no
     /// maximum.
     pub bm25_max_token_len: Option<usize>,
+    /// Custom stopwords **replacing** the language default (`None` keeps it;
+    /// `Some(vec![])` disables filtering). Compared post-normalization.
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Stemmer override (`None` = language default; `Some("none")` disables;
+    /// `Some("<language>")` overrides with that language's Snowball stemmer).
+    pub bm25_stemmer: Option<String>,
+    /// Additional language stopword lists merged with `bm25_stopwords`.
+    pub bm25_stopwords_languages: Option<Vec<String>>,
 }
 
 struct DenseSlot {
@@ -311,6 +377,9 @@ impl FastEmbedder {
             bm25_ascii_folding: None,
             bm25_min_token_len: None,
             bm25_max_token_len: None,
+            bm25_stopwords: None,
+            bm25_stemmer: None,
+            bm25_stopwords_languages: None,
         })
     }
 
@@ -325,10 +394,11 @@ impl FastEmbedder {
             opts.bm25_tokenizer.as_deref(),
             opts.bm25_lowercase,
             opts.bm25_ascii_folding,
-            None,
-            None,
+            opts.bm25_stopwords.clone(),
+            opts.bm25_stemmer.as_deref(),
             opts.bm25_min_token_len,
             opts.bm25_max_token_len,
+            opts.bm25_stopwords_languages.clone(),
         )?;
         let bm25_params = bm25_text.params;
 
@@ -1554,6 +1624,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         let cfg = edge_bm25_config(&text).unwrap();
@@ -1601,6 +1672,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         let engine = EdgeBm25::new(edge_bm25_config(&text_config).unwrap()).unwrap();
@@ -1623,11 +1695,6 @@ mod tests {
     /// Our reimplemented pipeline must agree with Qdrant's real engine
     /// across languages, tokenizers, folding, and length limits — same
     /// config in, same sparse vector out. (No network: both sides are pure.)
-    ///
-    /// Only engine-representable configs participate: explicit stemmer /
-    /// stopword-set overrides stay at the language defaults on the engine
-    /// side (see `edge_bm25_config`), so those are covered by qql-embed's
-    /// own unit tests instead.
     #[test]
     fn local_pipeline_matches_engine_across_configs() {
         let cases: &[(&str, Bm25TextConfig)] = &[
@@ -1639,6 +1706,7 @@ mod tests {
                     None,
                     None,
                     Some("spanish"),
+                    None,
                     None,
                     None,
                     None,
@@ -1663,6 +1731,7 @@ mod tests {
                     None,
                     None,
                     None,
+                    None,
                 )
                 .unwrap(),
             ),
@@ -1673,6 +1742,7 @@ mod tests {
                     None,
                     Some(5.0),
                     Some("german"),
+                    None,
                     None,
                     None,
                     None,
@@ -1697,6 +1767,7 @@ mod tests {
                     None,
                     None,
                     None,
+                    None,
                 )
                 .unwrap(),
             ),
@@ -1708,6 +1779,7 @@ mod tests {
                     None,
                     None,
                     Some("whitespace"),
+                    None,
                     None,
                     None,
                     None,
@@ -1731,6 +1803,7 @@ mod tests {
                     None,
                     Some(2),
                     Some(4),
+                    None,
                 )
                 .unwrap(),
             ),
@@ -1769,5 +1842,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Explicit stemmer/stopword overrides must survive the serde round-trip
+    /// into the engine and behave identically on both sides.
+    #[test]
+    fn edge_bm25_overrides_round_trip() {
+        use qql_embed::{Stemmer, Stopwords};
+
+        // Disabled stemmer + no stopwords: inflections stay distinct.
+        let config = Bm25TextConfig {
+            stemmer: Some(Stemmer::Disabled),
+            stopwords: Some(Stopwords::default()),
+            ..Bm25TextConfig::default()
+        };
+        let engine = EdgeBm25::new(edge_bm25_config(&config).unwrap()).unwrap();
+        let local = config
+            .pipeline()
+            .embed_document("running run")
+            .expect("doc");
+        assert_eq!(engine.embed_document("running run").indices.len(), 2);
+        assert_eq!(local.indices.len(), 2);
+
+        // Custom stopwords replace the default list.
+        let config = Bm25TextConfig {
+            stopwords: Some(Stopwords {
+                languages: Vec::new(),
+                custom: vec!["cat".to_string()],
+            }),
+            stemmer: Some(Stemmer::Disabled),
+            ..Bm25TextConfig::default()
+        };
+        let engine = EdgeBm25::new(edge_bm25_config(&config).unwrap()).unwrap();
+        let local = config.pipeline().embed_document("the cat").expect("doc");
+        assert_eq!(engine.embed_document("the cat").indices.len(), 1);
+        assert_eq!(local.indices.len(), 1);
+
+        // Explicit Snowball stemmer (French over French text).
+        let config = Bm25TextConfig {
+            language: qql_embed::Language::French,
+            stemmer: Some(Stemmer::Snowball(qql_embed::Language::French)),
+            ..Bm25TextConfig::default()
+        };
+        let engine = EdgeBm25::new(edge_bm25_config(&config).unwrap()).unwrap();
+        let local = config.pipeline().embed_document("chats chat").expect("doc");
+        assert_eq!(engine.embed_document("chats chat").indices, local.indices);
+
+        // A directly constructed unreachable stemmer fails closed here, not
+        // silently inside the engine.
+        let config = Bm25TextConfig {
+            stemmer: Some(Stemmer::Snowball(qql_embed::Language::Chinese)),
+            ..Bm25TextConfig::default()
+        };
+        edge_bm25_config(&config).expect_err("chinese snowball must fail closed");
     }
 }

@@ -124,21 +124,25 @@ impl Client {
         stopwords: Option<Vec<String>>,
         min_token_len: Option<usize>,
         max_token_len: Option<usize>,
+        stopwords_languages: Option<Vec<String>>,
     ) -> Result<(), JsValue> {
-        let resolved = qql_embed::Bm25TextConfig::resolve(
-            Some(self.bm25.params.k1()),
-            Some(self.bm25.params.b()),
-            Some(self.bm25.params.avg_len()),
-            language.as_deref().filter(|s| !s.is_empty()),
-            tokenizer.as_deref().filter(|s| !s.is_empty()),
-            lowercase,
-            ascii_folding,
-            stopwords,
-            stemmer.as_deref().filter(|s| !s.is_empty()),
-            min_token_len,
-            max_token_len,
-        )
-        .map_err(qql_err_to_js)?;
+        // Incremental update: `null` keeps the current value (seeded inside
+        // `with_text_options`), so consecutive calls compose instead of
+        // resetting untouched knobs to defaults.
+        let resolved = self
+            .bm25
+            .with_text_options(
+                language.as_deref(),
+                tokenizer.as_deref(),
+                lowercase,
+                ascii_folding,
+                stopwords,
+                stemmer.as_deref(),
+                min_token_len,
+                max_token_len,
+                stopwords_languages,
+            )
+            .map_err(qql_err_to_js)?;
         self.bm25 = resolved;
         Ok(())
     }

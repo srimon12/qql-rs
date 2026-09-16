@@ -4,7 +4,7 @@
 //! Attribution: (c) Qdrant contributors, Apache-2.0
 //! (<https://github.com/qdrant/qdrant/blob/master/LICENSE>). Word lists are
 //! emitted verbatim (sorted, deduped — `phf_set!` rejects duplicate keys);
-//! empty upstream lists stay empty. Re-sync with `gen_stopwords.py`.
+//! empty upstream lists stay empty. Re-sync with `scripts/gen_bm25_stopwords.py`.
 //!
 //! GENERATED — do not hand-edit; re-run the generator instead.
 

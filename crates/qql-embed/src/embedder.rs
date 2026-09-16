@@ -349,7 +349,9 @@ pub struct JointEmbeddingOutput {
     pub multi: Option<Vec<Vec<f32>>>,
 }
 
-/// Local sparse-only helper (no dense model).
+/// Local sparse-only helper (no dense model). Default English pipeline
+/// only — hosts needing other languages use [`Bm25TextConfig`](crate::Bm25TextConfig)
+/// / [`Bm25Pipeline`](crate::Bm25Pipeline) directly.
 pub struct SparseEmbedder;
 
 impl SparseEmbedder {

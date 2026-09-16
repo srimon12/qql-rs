@@ -52,19 +52,25 @@ async fn estimate_uses_real_sampled_lengths() {
 }
 
 #[tokio::test]
-async fn estimate_supports_dotted_paths_and_arrays() {
+async fn estimate_matches_writer_field_rules() {
+    // Writer rule (`collect_text_targets`): top-level key,
+    // ASCII-case-insensitive, non-empty strings only. Arrays, nested
+    // objects, dotted paths, and empty strings are never embedded — and
+    // must not dilute the estimate either.
     let mut client = MockQdrantClient::default();
     client.exists = true;
     client.info = Some(collection_with_vectors(&["dense"], &["sparse"]));
     let payload: HashMap<String, serde_json::Value> = HashMap::from([
-        (
-            "meta".to_string(),
-            serde_json::json!({"title": "alpha beta"}),
-        ),
+        ("Title".to_string(), serde_json::json!("alpha beta")),
         (
             "tags".to_string(),
             serde_json::json!(["gamma delta", "epsilon"]),
         ),
+        (
+            "meta".to_string(),
+            serde_json::json!({"title": "zeta eta theta"}),
+        ),
+        ("empty".to_string(), serde_json::json!("")),
         ("count".to_string(), serde_json::json!(7)),
     ]);
     client.point_map.lock().unwrap().insert(
@@ -78,27 +84,25 @@ async fn estimate_supports_dotted_paths_and_arrays() {
         }]),
     );
     let executor = Executor::new(Box::new(client), None);
-    let dotted = executor
-        .estimate_bm25_avg_len("docs", "meta.title", 10)
+    // Case-insensitive top-level match.
+    let estimate = executor
+        .estimate_bm25_avg_len("docs", "title", 10)
         .await
         .expect("estimate")
-        .expect("dotted path resolves");
-    assert_eq!(dotted.mean, 2.0);
-    let array = executor
-        .estimate_bm25_avg_len("docs", "tags", 10)
-        .await
-        .expect("estimate")
-        .expect("array elements count");
-    assert_eq!(array.docs, 2);
-    assert_eq!(array.mean, 1.5);
-    assert!(
-        executor
-            .estimate_bm25_avg_len("docs", "count", 10)
-            .await
-            .expect("estimate")
-            .is_none(),
-        "non-string fields contribute nothing"
-    );
+        .expect("Title matches title");
+    assert_eq!(estimate.docs, 1);
+    assert_eq!(estimate.mean, 2.0);
+    // Arrays, nested paths, empty strings, and non-strings measure nothing.
+    for field in ["tags", "meta.title", "meta", "empty", "count", "missing"] {
+        assert!(
+            executor
+                .estimate_bm25_avg_len("docs", field, 10)
+                .await
+                .expect("estimate")
+                .is_none(),
+            "{field} must contribute no documents"
+        );
+    }
 }
 
 #[tokio::test]

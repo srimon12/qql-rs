@@ -24,6 +24,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use qql_core::error::QqlError;
+use rust_stemmers::Algorithm;
 use rust_stemmers::Stemmer as SnowballStemmer;
 
 use super::bm25_fold::fold_to_ascii_cow;
@@ -55,7 +56,8 @@ pub enum Tokenizer {
 
 impl Tokenizer {
     /// Parse a Qdrant `tokenizer` name (`"word"`, `"whitespace"`, `"prefix"`,
-    /// `"multilingual"`), ASCII-case-insensitively. Anything else fails closed.
+    /// `"multilingual"`), ASCII-case-insensitively (superset of Qdrant's
+    /// case-sensitive spelling, same accepted set). Anything else fails closed.
     pub fn parse(name: &str) -> Result<Self, QqlError> {
         match name.to_ascii_lowercase().as_str() {
             "word" => Ok(Self::Word),
@@ -83,20 +85,33 @@ impl Tokenizer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stemmer {
     /// Snowball stemmer for an explicit language (Qdrant's `Snowball`).
-    /// Only the 17 Snowball languages are reachable; the rest fail closed at
-    /// parse time, exactly like Qdrant's edge builder.
+    /// Covers Qdrant's `SnowballLanguage` set, including Armenian and Tamil
+    /// (which have no `Language` variant and are only reachable this way —
+    /// Qdrant has no stopword lists for them either).
     Snowball(Language),
+    /// Armenian Snowball stemmer (explicit-only, like Qdrant).
+    Armenian,
+    /// Tamil Snowball stemmer (explicit-only, like Qdrant).
+    Tamil,
     /// Explicitly no stemming (Qdrant's `{"type": "none"}`). Differs from
     /// leaving `stemmer` unset, which falls back to the language default.
     Disabled,
 }
 
 impl Stemmer {
-    /// Parse `"none"` (disable) or a language name/alias. Anything else —
-    /// including languages without a Snowball stemmer — fails closed.
+    /// Parse `"none"` (disable), a language name/alias (its Snowball
+    /// stemmer), or `"armenian"`/`"hy"`/`"tamil"`/`"ta"`. Anything else —
+    /// including languages without any Snowball stemmer — fails closed.
     pub fn parse(name: &str) -> Result<Self, QqlError> {
         if name.eq_ignore_ascii_case("none") {
             return Ok(Self::Disabled);
+        }
+        let lower = name.to_ascii_lowercase();
+        if lower == "armenian" || lower == "hy" {
+            return Ok(Self::Armenian);
+        }
+        if lower == "tamil" || lower == "ta" {
+            return Ok(Self::Tamil);
         }
         let language = Language::parse(name)?;
         if language.stem_algorithm().is_none() {
@@ -106,6 +121,16 @@ impl Stemmer {
             )));
         }
         Ok(Self::Snowball(language))
+    }
+
+    /// The Snowball algorithm, if this selection stems at all.
+    pub fn algorithm(self) -> Option<Algorithm> {
+        match self {
+            Self::Snowball(language) => language.stem_algorithm(),
+            Self::Armenian => Some(Algorithm::Armenian),
+            Self::Tamil => Some(Algorithm::Tamil),
+            Self::Disabled => None,
+        }
     }
 }
 
@@ -178,7 +203,12 @@ impl Bm25TextConfig {
     /// `QQL-VALIDATION-CONFIG`.
     ///
     /// - `stopwords`: `None` = language default; `Some(list)` **replaces**
-    ///   it with exactly `list` (empty disables filtering).
+    ///   it with exactly `list` (empty disables filtering). Use
+    ///   `stopwords_languages` to merge additional language lists instead.
+    /// - `stopwords_languages`: additional language lists merged with
+    ///   `stopwords` (Qdrant `Set.languages`). An explicit selection
+    ///   replaces the default, so include the processing language to keep
+    ///   its words. Invalid names fail closed.
     /// - `stemmer`: `None` = language default; `Some("none")` disables;
     ///   `Some("<language>")` overrides.
     /// - `tokenizer`: `"multilingual"` parses here but fails at embed time
@@ -196,7 +226,14 @@ impl Bm25TextConfig {
         stemmer: Option<&str>,
         min_token_len: Option<usize>,
         max_token_len: Option<usize>,
+        stopwords_languages: Option<Vec<String>>,
     ) -> Result<Self, QqlError> {
+        let mut languages = Vec::new();
+        if let Some(names) = stopwords_languages {
+            for name in &names {
+                languages.push(Language::parse(name)?);
+            }
+        }
         Ok(Self {
             params: Bm25Params::resolve(k1, b, avg_len)?,
             tokenizer: match tokenizer {
@@ -209,10 +246,17 @@ impl Bm25TextConfig {
             },
             lowercase: lowercase.unwrap_or(true),
             ascii_folding: ascii_folding.unwrap_or(false),
-            stopwords: stopwords.map(|custom| Stopwords {
-                languages: Vec::new(),
-                custom,
-            }),
+            stopwords: match (stopwords, languages.is_empty()) {
+                // No override at all: the processing language's list.
+                (None, true) => None,
+                // Otherwise exactly the merged selection (Qdrant `Set`
+                // semantics: an explicit list replaces the default, so
+                // include the processing language to keep its words).
+                (custom, _) => Some(Stopwords {
+                    languages,
+                    custom: custom.unwrap_or_default(),
+                }),
+            },
             stemmer: match stemmer {
                 None => None,
                 Some(name) => Some(Stemmer::parse(name)?),
@@ -222,14 +266,70 @@ impl Bm25TextConfig {
         })
     }
 
+    /// Update text knobs over the current config: `None` (or empty names)
+    /// keeps `self`'s value, explicit values replace it. Unlike
+    /// [`Bm25TextConfig::resolve`], where `None` means "Qdrant default",
+    /// this is the incremental-update path (WASM `setBm25Text`, REPL-style
+    /// tuning): previously configured values survive untouched knobs.
+    /// Names validate exactly like [`Bm25TextConfig::resolve`]. There is no
+    /// reset-to-default signal: to restore defaults, resolve a fresh
+    /// [`Bm25TextConfig::default`] instead of updating.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_text_options(
+        &self,
+        language: Option<&str>,
+        tokenizer: Option<&str>,
+        lowercase: Option<bool>,
+        ascii_folding: Option<bool>,
+        stopwords: Option<Vec<String>>,
+        stemmer: Option<&str>,
+        min_token_len: Option<usize>,
+        max_token_len: Option<usize>,
+        stopwords_languages: Option<Vec<String>>,
+    ) -> Result<Self, QqlError> {
+        let mut next = self.clone();
+        if let Some(name) = language.filter(|s| !s.is_empty()) {
+            next.language = Language::parse(name)?;
+        }
+        if let Some(name) = tokenizer.filter(|s| !s.is_empty()) {
+            next.tokenizer = Tokenizer::parse(name)?;
+        }
+        if let Some(lowercase) = lowercase {
+            next.lowercase = lowercase;
+        }
+        if let Some(ascii_folding) = ascii_folding {
+            next.ascii_folding = ascii_folding;
+        }
+        if stopwords.is_some() || stopwords_languages.is_some() {
+            let mut languages = Vec::new();
+            if let Some(names) = stopwords_languages {
+                for name in &names {
+                    languages.push(Language::parse(name)?);
+                }
+            }
+            next.stopwords = Some(Stopwords {
+                languages,
+                custom: stopwords.unwrap_or_default(),
+            });
+        }
+        if let Some(name) = stemmer.filter(|s| !s.is_empty()) {
+            next.stemmer = Some(Stemmer::parse(name)?);
+        }
+        if min_token_len.is_some() {
+            next.min_token_len = min_token_len;
+        }
+        if max_token_len.is_some() {
+            next.max_token_len = max_token_len;
+        }
+        Ok(next)
+    }
+
     /// Compile into an executable pipeline. Infallible: names already
     /// validated at parse/resolve time; remaining choices are total.
     pub fn pipeline(&self) -> Bm25Pipeline {
         let stemmer = match self.stemmer {
             Some(Stemmer::Disabled) => None,
-            Some(Stemmer::Snowball(language)) => {
-                language.stem_algorithm().map(SnowballStemmer::create)
-            }
+            Some(stemmer) => stemmer.algorithm().map(SnowballStemmer::create),
             None => self.language.stem_algorithm().map(SnowballStemmer::create),
         };
         // Mirror Qdrant's `StopwordsFilter`: entries are lowercased at build
@@ -378,7 +478,9 @@ impl Bm25Pipeline {
 
     /// Document path: expand every n-gram in `min..=max` (Qdrant's
     /// `PrefixTokenizer::tokenize`; `max` unbounded emits up to the full word
-    /// and always emits the full word last).
+    /// and always emits the full word last). Note: `min_token_len = 0` emits
+    /// a phantom empty token (`nth(0)`), exactly like Qdrant's own
+    /// implementation — shared quirk kept for parity, not fixed.
     fn for_each_prefix_doc<F>(&self, text: &str, mut f: F)
     where
         F: FnMut(&str),
@@ -503,8 +605,11 @@ impl Bm25Pipeline {
         }
         let doc_len = token_ids.len() as f64;
         // Same fused operation order as Qdrant `lib/bm25`, so weights agree
-        // bit-for-bit, not just algebraically: `n * (k1 + 1)` over
-        // `k1.mul_add(1 - b + b * doc_len / avgdl, n)`.
+        // bit-for-bit absent murmur3 collisions — not just algebraically:
+        // `n * (k1 + 1)` over `k1.mul_add(1 - b + b * doc_len / avgdl, n)`.
+        // (On a collision Qdrant counts per string and overwrites while we
+        // count per ID and sum, so collided IDs carry no cross-impl contract
+        // either way — same caveat as the server documents.)
         let k1p1 = k1 + 1.0;
         let norm = 1.0 - b + b * doc_len / avgdl;
         token_ids.sort_unstable();

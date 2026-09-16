@@ -19,6 +19,7 @@ fn plain(language: &str) -> Bm25Pipeline {
         None,
         None,
         None,
+        None,
     )
     .expect("valid language")
     .pipeline()
@@ -41,8 +42,11 @@ fn language_parse_accepts_names_and_aliases() {
 
 #[test]
 fn stemmer_coverage_matches_qdrant() {
-    // Exactly Qdrant's 17 Snowball-via-language set: every other language has
+    // Qdrant's 17 Snowball-via-language set: every other language has
     // no default stemmer (tokens pass through, stopwords still apply).
+    // Armenian and Tamil round out Qdrant's 19 Snowball languages as
+    // explicit-stemmer-only (no Language variant, no stopword lists —
+    // reachable via Stemmer::parse, like Qdrant's explicit config).
     let stemmed = [
         "arabic",
         "danish",
@@ -94,6 +98,19 @@ fn stemmer_coverage_matches_qdrant() {
         30,
         "every language must be classified"
     );
+
+    // Explicit-only Snowball languages (Qdrant's SnowballLanguage set minus
+    // the 17 language-reachable ones): parseable as stemmers, not languages.
+    for (name, stemmer) in [
+        ("armenian", Stemmer::Armenian),
+        ("hy", Stemmer::Armenian),
+        ("tamil", Stemmer::Tamil),
+        ("ta", Stemmer::Tamil),
+    ] {
+        assert_eq!(Stemmer::parse(name).expect("explicit stemmer"), stemmer);
+    }
+    assert!(Language::parse("armenian").is_err());
+    assert!(Language::parse("tamil").is_err());
 }
 
 #[test]
@@ -144,6 +161,7 @@ fn disabled_stemmer_keeps_inflections_distinct() {
         Some("none"),
         None,
         None,
+        None,
     )
     .expect("valid");
     let unstemmed = config.pipeline();
@@ -172,6 +190,7 @@ fn custom_stopwords_replace_the_default() {
         None,
         None,
         None,
+        None,
     )
     .expect("valid");
     let tokens = config.pipeline().doc_tokens("the cat").unwrap();
@@ -187,6 +206,7 @@ fn custom_stopwords_replace_the_default() {
         None,
         Some(vec!["cat".to_string()]),
         Some("none"),
+        None,
         None,
         None,
     )
@@ -211,6 +231,7 @@ fn ascii_folding_normalizes_before_lowercase() {
         Some("none"),
         None,
         None,
+        None,
     )
     .expect("valid")
     .pipeline();
@@ -224,6 +245,7 @@ fn ascii_folding_normalizes_before_lowercase() {
         None,
         None,
         Some("none"),
+        None,
         None,
         None,
     )
@@ -254,6 +276,7 @@ fn lowercase_off_keeps_case_distinct() {
         Some("none"),
         None,
         None,
+        None,
     )
     .expect("valid")
     .pipeline();
@@ -282,6 +305,7 @@ fn token_length_limits_apply_in_chars() {
         Some("none"),
         Some(4),
         Some(4),
+        None,
     )
     .expect("valid");
     assert_eq!(
@@ -302,6 +326,7 @@ fn whitespace_tokenizer_keeps_hyphenated_forms() {
         None,
         None,
         Some("none"),
+        None,
         None,
         None,
     )
@@ -334,6 +359,7 @@ fn prefix_tokenizer_expands_docs_and_truncates_queries() {
         Some("none"),
         Some(2),
         None,
+        None,
     )
     .expect("valid");
     let pipe = config.pipeline();
@@ -361,6 +387,7 @@ fn prefix_tokenizer_expands_docs_and_truncates_queries() {
         Some("none"),
         Some(2),
         Some(3),
+        None,
     )
     .expect("valid")
     .pipeline();
@@ -380,6 +407,7 @@ fn multilingual_fails_closed() {
         None,
         None,
         Some("multilingual"),
+        None,
         None,
         None,
         None,
@@ -465,7 +493,7 @@ fn resolve_rejects_bad_names() {
         (None, None, Some("yoda")),
     ] {
         let err = Bm25TextConfig::resolve(
-            None, None, None, language, tokenizer, None, None, None, stemmer, None, None,
+            None, None, None, language, tokenizer, None, None, None, stemmer, None, None, None,
         )
         .expect_err("bad option must fail closed");
         assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
@@ -483,6 +511,7 @@ fn resolve_rejects_bad_names() {
         Some("none"),
         None,
         None,
+        None,
     )
     .expect("valid");
     assert_eq!(config.stemmer, Some(Stemmer::Disabled));
@@ -498,7 +527,159 @@ fn resolve_rejects_bad_names() {
         Some("french"),
         None,
         None,
+        None,
     )
     .expect("valid");
     assert_eq!(config.stemmer, Some(Stemmer::Snowball(Language::French)));
+}
+
+/// Vendored stopword lists keep Qdrant's exact entries, including the
+/// easily "normalized away" ones: hinglish carries both apostrophe forms
+/// (`aint` and `ain't`); tajik keeps trailing-space and hyphenated forms
+/// verbatim (dead or live exactly as upstream); arabic keeps its diacritics.
+/// Guards the `scripts/gen_bm25_stopwords.py` port against well-meaning
+/// cleanup. See `bm25_stopwords.rs` header for re-sync.
+#[test]
+fn vendored_stopwords_keep_upstream_entries_verbatim() {
+    use crate::bm25_stopwords::stopwords_for;
+
+    let hinglish = stopwords_for(Language::Hinglish);
+    for word in ["aint", "ain't", "well", "we'll", "were", "we're"] {
+        assert!(hinglish.contains(word), "hinglish must keep {word:?}");
+    }
+    let tajik = stopwords_for(Language::Tajik);
+    for word in ["агар ", "аз-баски ", "чун-ки", "то даме ки", "то даме ки "]
+    {
+        assert!(tajik.contains(word), "tajik must keep {word:?} verbatim");
+    }
+    let arabic = stopwords_for(Language::Arabic);
+    for word in ["ّأيّان", "لا سيما"] {
+        assert!(arabic.contains(word), "arabic must keep {word:?} verbatim");
+    }
+    let kazakh = stopwords_for(Language::Kazakh);
+    assert!(kazakh.contains("әттеген-ай"));
+    let hungarian = stopwords_for(Language::Hungarian);
+    assert!(hungarian.contains("ill"));
+}
+
+/// Incremental updates keep untouched knobs (the WASM `setBm25Text`
+/// contract): setting the tokenizer must not reset the language.
+#[test]
+fn with_text_options_keeps_untouched_knobs() {
+    let spanish = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        Some("spanish"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("valid");
+    let updated = spanish
+        .with_text_options(
+            None,
+            Some("whitespace"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid update");
+    assert_eq!(updated.language, Language::Spanish);
+    assert_eq!(updated.tokenizer, Tokenizer::Whitespace);
+    assert_eq!(updated.params, spanish.params);
+    // Empty names behave like None (JS empty-string convention).
+    let same = spanish
+        .with_text_options(Some(""), Some(""), None, None, None, None, None, None, None)
+        .expect("valid update");
+    assert_eq!(same, spanish);
+    // Invalid names still fail closed on the update path.
+    let err = spanish
+        .with_text_options(
+            Some("klingon"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("bad language rejects");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+}
+
+/// Additional language lists merge with custom words (Qdrant `Set`
+/// semantics): an explicit selection replaces the default.
+#[test]
+fn stopwords_languages_merge() {
+    // French + custom: "le" (french) and "zzz" (custom) filter; english
+    // "the" survives because the default list is replaced, not merged.
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(vec!["french".to_string()]),
+    )
+    .expect("valid");
+    let tokens = config
+        .pipeline()
+        .doc_tokens("le the zzz abc")
+        .expect("tokens");
+    assert_eq!(tokens, vec!["the", "zzz", "abc"], "got {tokens:?}");
+
+    // Custom words ride alongside merged languages.
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(vec!["abc".to_string()]),
+        None,
+        None,
+        None,
+        Some(vec!["french".to_string()]),
+    )
+    .expect("valid");
+    let tokens = config.pipeline().doc_tokens("le abc").expect("tokens");
+    assert!(tokens.is_empty(), "got {tokens:?}");
+
+    // Unknown language names fail closed.
+    let err = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(vec!["klingon".to_string()]),
+    )
+    .expect_err("bad stopwords language rejects");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
 }

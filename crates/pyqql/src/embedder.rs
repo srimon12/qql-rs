@@ -28,6 +28,7 @@ pub struct PyHttpEmbedder {
     pub bm25_ascii_folding: Option<bool>,
     pub bm25_stopwords: Option<Vec<String>>,
     pub bm25_stemmer: Option<String>,
+    pub bm25_stopwords_languages: Option<Vec<String>>,
     pub bm25_min_token_len: Option<usize>,
     pub bm25_max_token_len: Option<usize>,
 }
@@ -35,7 +36,7 @@ pub struct PyHttpEmbedder {
 #[pymethods]
 impl PyHttpEmbedder {
     #[new]
-    #[pyo3(signature = (endpoint, model, dimension, api_key=None, multi_endpoint=None, multi_api_key=None, multi_model=None, multi_dimension=None, image_endpoint=None, image_api_key=None, image_model=None, image_dimension=None, rerank_endpoint=None, rerank_api_key=None, rerank_model=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_stopwords=None, bm25_stemmer=None, bm25_min_token_len=None, bm25_max_token_len=None))]
+    #[pyo3(signature = (endpoint, model, dimension, api_key=None, multi_endpoint=None, multi_api_key=None, multi_model=None, multi_dimension=None, image_endpoint=None, image_api_key=None, image_model=None, image_dimension=None, rerank_endpoint=None, rerank_api_key=None, rerank_model=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_stopwords=None, bm25_stemmer=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords_languages=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         endpoint: &str,
@@ -64,6 +65,7 @@ impl PyHttpEmbedder {
         bm25_stemmer: Option<String>,
         bm25_min_token_len: Option<usize>,
         bm25_max_token_len: Option<usize>,
+        bm25_stopwords_languages: Option<Vec<String>>,
     ) -> PyResult<Self> {
         if endpoint.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -92,6 +94,7 @@ impl PyHttpEmbedder {
             bm25_stemmer.as_deref(),
             bm25_min_token_len,
             bm25_max_token_len,
+            bm25_stopwords_languages.clone(),
         )?;
         Ok(PyHttpEmbedder {
             endpoint: endpoint.to_string(),
@@ -112,14 +115,15 @@ impl PyHttpEmbedder {
             bm25_k1,
             bm25_b,
             bm25_avg_len,
-            bm25_language: bm25_language.filter(|s| !s.trim().is_empty()),
-            bm25_tokenizer: bm25_tokenizer.filter(|s| !s.trim().is_empty()),
+            bm25_language,
+            bm25_tokenizer,
             bm25_lowercase,
             bm25_ascii_folding,
             bm25_stopwords,
-            bm25_stemmer: bm25_stemmer.filter(|s| !s.trim().is_empty()),
+            bm25_stemmer,
             bm25_min_token_len,
             bm25_max_token_len,
+            bm25_stopwords_languages,
         })
     }
 }
@@ -141,6 +145,7 @@ fn validate_bm25_text(
     stemmer: Option<&str>,
     min_token_len: Option<usize>,
     max_token_len: Option<usize>,
+    stopwords_languages: Option<Vec<String>>,
 ) -> PyResult<()> {
     qql::embedder::Bm25TextConfig::resolve(
         k1,
@@ -154,6 +159,7 @@ fn validate_bm25_text(
         stemmer,
         min_token_len,
         max_token_len,
+        stopwords_languages,
     )
     .map(|_| ())
     .map_err(pyqql_common::qql_py_value_error)
@@ -186,6 +192,7 @@ pub struct ParsedEmbedderConfig {
     pub bm25_ascii_folding: Option<bool>,
     pub bm25_stopwords: Option<Vec<String>>,
     pub bm25_stemmer: Option<String>,
+    pub bm25_stopwords_languages: Option<Vec<String>>,
     pub bm25_min_token_len: Option<usize>,
     pub bm25_max_token_len: Option<usize>,
 }
@@ -295,6 +302,7 @@ pub fn extract_embedder_config(
             out.bm25_lowercase = py_emb.bm25_lowercase;
             out.bm25_ascii_folding = py_emb.bm25_ascii_folding;
             out.bm25_stopwords = py_emb.bm25_stopwords.clone();
+            out.bm25_stopwords_languages = py_emb.bm25_stopwords_languages.clone();
             out.bm25_stemmer = py_emb.bm25_stemmer.clone();
             out.bm25_min_token_len = py_emb.bm25_min_token_len;
             out.bm25_max_token_len = py_emb.bm25_max_token_len;
@@ -365,12 +373,13 @@ pub fn extract_embedder_config(
             out.bm25_k1 = opt_f64_key(dict, "bm25_k1")?;
             out.bm25_b = opt_f64_key(dict, "bm25_b")?;
             out.bm25_avg_len = opt_f64_key(dict, "bm25_avg_len")?;
-            out.bm25_language = opt_nonempty_string_key(dict, "bm25_language")?;
-            out.bm25_tokenizer = opt_nonempty_string_key(dict, "bm25_tokenizer")?;
+            out.bm25_language = opt_string_key(dict, "bm25_language")?;
+            out.bm25_tokenizer = opt_string_key(dict, "bm25_tokenizer")?;
             out.bm25_lowercase = opt_bool_key(dict, "bm25_lowercase")?;
             out.bm25_ascii_folding = opt_bool_key(dict, "bm25_ascii_folding")?;
             out.bm25_stopwords = opt_string_list_key(dict, "bm25_stopwords")?;
-            out.bm25_stemmer = opt_nonempty_string_key(dict, "bm25_stemmer")?;
+            out.bm25_stopwords_languages = opt_string_list_key(dict, "bm25_stopwords_languages")?;
+            out.bm25_stemmer = opt_string_key(dict, "bm25_stemmer")?;
             out.bm25_min_token_len = opt_usize_opt_key(dict, "bm25_min_token_len")?;
             out.bm25_max_token_len = opt_usize_opt_key(dict, "bm25_max_token_len")?;
         } else {
@@ -432,6 +441,7 @@ pub fn create_executor(
         parsed.bm25_stemmer.as_deref(),
         parsed.bm25_min_token_len,
         parsed.bm25_max_token_len,
+        parsed.bm25_stopwords_languages.clone(),
     )?;
     config.bm25_k1 = parsed.bm25_k1;
     config.bm25_b = parsed.bm25_b;
@@ -441,6 +451,7 @@ pub fn create_executor(
     config.bm25_lowercase = parsed.bm25_lowercase;
     config.bm25_ascii_folding = parsed.bm25_ascii_folding;
     config.bm25_stopwords = parsed.bm25_stopwords;
+    config.bm25_stopwords_languages = parsed.bm25_stopwords_languages;
     config.bm25_stemmer = parsed.bm25_stemmer;
     config.bm25_min_token_len = parsed.bm25_min_token_len;
     config.bm25_max_token_len = parsed.bm25_max_token_len;
@@ -505,6 +516,7 @@ pub fn create_executor(
                     bm25_lowercase: config.bm25_lowercase,
                     bm25_ascii_folding: config.bm25_ascii_folding,
                     bm25_stopwords: config.bm25_stopwords.clone(),
+                    bm25_stopwords_languages: config.bm25_stopwords_languages.clone(),
                     bm25_stemmer: config.bm25_stemmer.clone(),
                     bm25_min_token_len: config.bm25_min_token_len,
                     bm25_max_token_len: config.bm25_max_token_len,

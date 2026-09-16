@@ -270,6 +270,7 @@ pub(crate) fn executor_for(
                         bm25_stemmer: config.bm25_stemmer.clone(),
                         bm25_min_token_len: config.bm25_min_token_len,
                         bm25_max_token_len: config.bm25_max_token_len,
+                        bm25_stopwords_languages: config.bm25_stopwords_languages.clone(),
                     },
                 )?;
                 Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
@@ -328,6 +329,9 @@ pub(crate) fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::er
                 bm25_ascii_folding: config.bm25_ascii_folding,
                 bm25_min_token_len: config.bm25_min_token_len,
                 bm25_max_token_len: config.bm25_max_token_len,
+                bm25_stopwords: config.bm25_stopwords,
+                bm25_stemmer: config.bm25_stemmer,
+                bm25_stopwords_languages: config.bm25_stopwords_languages,
             };
             qql_edge::local_executor_with_options(config.data_dir, options)
                 .map_err(|error| format!("edge initialization failed: {error}").into())
@@ -363,10 +367,11 @@ pub(crate) fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::er
                     bm25_tokenizer: config.bm25_tokenizer.clone(),
                     bm25_lowercase: config.bm25_lowercase,
                     bm25_ascii_folding: config.bm25_ascii_folding,
-                    bm25_stopwords: None,
-                    bm25_stemmer: None,
+                    bm25_stopwords: config.bm25_stopwords.clone(),
+                    bm25_stemmer: config.bm25_stemmer.clone(),
                     bm25_min_token_len: config.bm25_min_token_len,
                     bm25_max_token_len: config.bm25_max_token_len,
+                    bm25_stopwords_languages: config.bm25_stopwords_languages.clone(),
                 },
             )
             .map_err(|error| format!("edge initialization failed: {error}").into())

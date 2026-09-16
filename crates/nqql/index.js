@@ -138,6 +138,15 @@ class HttpEmbedder {
         throw new TypeError('HttpEmbedder bm25Stopwords must be an array of strings');
       }
     }
+    {
+      const value = options.bm25StopwordsLanguages ?? options.bm25_stopwords_languages;
+      if (
+        value !== undefined &&
+        !(Array.isArray(value) && value.every((item) => typeof item === 'string'))
+      ) {
+        throw new TypeError('HttpEmbedder bm25StopwordsLanguages must be an array of strings');
+      }
+    }
     for (const [camel, snake] of [
       ['bm25MinTokenLen', 'bm25_min_token_len'],
       ['bm25MaxTokenLen', 'bm25_max_token_len'],
@@ -170,6 +179,7 @@ class HttpEmbedder {
     this.bm25Lowercase = options.bm25Lowercase ?? options.bm25_lowercase;
     this.bm25AsciiFolding = options.bm25AsciiFolding ?? options.bm25_ascii_folding;
     this.bm25Stopwords = options.bm25Stopwords ?? options.bm25_stopwords;
+    this.bm25StopwordsLanguages = options.bm25StopwordsLanguages ?? options.bm25_stopwords_languages;
     this.bm25Stemmer = options.bm25Stemmer ?? options.bm25_stemmer;
     this.bm25MinTokenLen = options.bm25MinTokenLen ?? options.bm25_min_token_len;
     this.bm25MaxTokenLen = options.bm25MaxTokenLen ?? options.bm25_max_token_len;

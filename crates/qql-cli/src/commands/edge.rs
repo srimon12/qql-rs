@@ -32,10 +32,11 @@ pub fn handle_configure_edge(
         config.bm25_tokenizer.as_deref(),
         config.bm25_lowercase,
         config.bm25_ascii_folding,
-        None,
-        None,
+        config.bm25_stopwords.clone(),
+        config.bm25_stemmer.as_deref(),
         config.bm25_min_token_len,
         config.bm25_max_token_len,
+        config.bm25_stopwords_languages.clone(),
     )?;
     let path = crate::config::EdgeConfig::write_object(&merged)?;
     println!("Saved edge configuration to {}", path.display());

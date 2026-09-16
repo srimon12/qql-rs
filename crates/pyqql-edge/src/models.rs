@@ -58,7 +58,7 @@ pub fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, wal_segment_mb=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None))]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, wal_segment_mb=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords=None, bm25_stemmer=None, bm25_stopwords_languages=None))]
 pub fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
@@ -79,6 +79,9 @@ pub fn local_executor(
     bm25_ascii_folding: Option<bool>,
     bm25_min_token_len: Option<usize>,
     bm25_max_token_len: Option<usize>,
+    bm25_stopwords: Option<Vec<String>>,
+    bm25_stemmer: Option<String>,
+    bm25_stopwords_languages: Option<Vec<String>>,
 ) -> PyResult<PyClient> {
     let wal_segment_capacity = wal_segment_capacity(wal_segment_mb).map_err(qql_py_value_error)?;
     validate_bm25_text(
@@ -89,10 +92,11 @@ pub fn local_executor(
         bm25_tokenizer.as_deref(),
         bm25_lowercase,
         bm25_ascii_folding,
-        None,
-        None,
+        bm25_stopwords.clone(),
+        bm25_stemmer.as_deref(),
         bm25_min_token_len,
         bm25_max_token_len,
+        bm25_stopwords_languages.clone(),
     )?;
     let exec = qql_edge::local_executor_with_options(
         data_dir,
@@ -115,6 +119,9 @@ pub fn local_executor(
             bm25_ascii_folding,
             bm25_min_token_len,
             bm25_max_token_len,
+            bm25_stopwords,
+            bm25_stemmer,
+            bm25_stopwords_languages,
         },
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -144,6 +151,7 @@ fn validate_bm25_text(
     stemmer: Option<&str>,
     min_token_len: Option<usize>,
     max_token_len: Option<usize>,
+    stopwords_languages: Option<Vec<String>>,
 ) -> PyResult<()> {
     qql::embedder::Bm25TextConfig::resolve(
         k1,
@@ -157,6 +165,7 @@ fn validate_bm25_text(
         stemmer,
         min_token_len,
         max_token_len,
+        stopwords_languages,
     )
     .map(|_| ())
     .map_err(qql_py_value_error)
@@ -167,7 +176,7 @@ fn validate_bm25_text(
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, on_error="stop"))]
+#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords=None, bm25_stemmer=None, bm25_stopwords_languages=None, on_error="stop"))]
 pub fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
@@ -190,6 +199,9 @@ pub fn execute<'py>(
     bm25_ascii_folding: Option<bool>,
     bm25_min_token_len: Option<usize>,
     bm25_max_token_len: Option<usize>,
+    bm25_stopwords: Option<Vec<String>>,
+    bm25_stemmer: Option<String>,
+    bm25_stopwords_languages: Option<Vec<String>>,
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = local_executor(
@@ -212,6 +224,9 @@ pub fn execute<'py>(
         bm25_ascii_folding,
         bm25_min_token_len,
         bm25_max_token_len,
+        bm25_stopwords,
+        bm25_stemmer,
+        bm25_stopwords_languages,
     )?;
     let res = client.execute(py, query, params, on_error);
     let _ = client.close();
@@ -222,7 +237,7 @@ pub fn execute<'py>(
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, on_error="stop"))]
+#[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords=None, bm25_stemmer=None, bm25_stopwords_languages=None, on_error="stop"))]
 pub fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
@@ -245,6 +260,9 @@ pub fn execute_async<'py>(
     bm25_ascii_folding: Option<bool>,
     bm25_min_token_len: Option<usize>,
     bm25_max_token_len: Option<usize>,
+    bm25_stopwords: Option<Vec<String>>,
+    bm25_stemmer: Option<String>,
+    bm25_stopwords_languages: Option<Vec<String>>,
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = local_executor(
@@ -267,6 +285,9 @@ pub fn execute_async<'py>(
         bm25_ascii_folding,
         bm25_min_token_len,
         bm25_max_token_len,
+        bm25_stopwords,
+        bm25_stemmer,
+        bm25_stopwords_languages,
     )?;
     let input = pyqql_common::prepare_input(&query, params)?;
     let on_error = pyqql_common::parse_on_error(on_error)?;
@@ -287,7 +308,7 @@ pub fn execute_async<'py>(
 #[cfg(feature = "http-embedding")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (data_dir, url, embed_key, embed_model, embed_dim, on_disk_payload=true, *, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_stopwords=None, bm25_stemmer=None, bm25_min_token_len=None, bm25_max_token_len=None))]
+#[pyo3(signature = (data_dir, url, embed_key, embed_model, embed_dim, on_disk_payload=true, *, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_stopwords=None, bm25_stemmer=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords_languages=None))]
 pub fn http_executor(
     data_dir: &str,
     url: &str,
@@ -306,6 +327,7 @@ pub fn http_executor(
     bm25_stemmer: Option<String>,
     bm25_min_token_len: Option<usize>,
     bm25_max_token_len: Option<usize>,
+    bm25_stopwords_languages: Option<Vec<String>>,
 ) -> PyResult<PyClient> {
     validate_bm25_text(
         bm25_k1,
@@ -319,6 +341,7 @@ pub fn http_executor(
         bm25_stemmer.as_deref(),
         bm25_min_token_len,
         bm25_max_token_len,
+        bm25_stopwords_languages.clone(),
     )?;
     let exec = qql_edge::http_executor_with_options_and_wal(
         data_dir,

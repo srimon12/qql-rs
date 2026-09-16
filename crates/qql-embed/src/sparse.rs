@@ -153,11 +153,13 @@ pub fn token_id(token: &str) -> u32 {
     (Murmur3::hash(0, token.as_bytes()) as i32).unsigned_abs()
 }
 
-/// Tokenize and iterate over processed tokens without intermediate heap
-/// allocations (default English pipeline: word tokenizer, lowercase, English
-/// stopwords, English stemming).
+/// Tokenize and iterate over processed tokens (default English pipeline: word
+/// tokenizer, lowercase, English stopwords, English stemming).
 ///
-/// For other languages and options see [`crate::bm25_text::Bm25Pipeline`].
+/// Compatibility shim over [`crate::bm25_text::Bm25Pipeline`]: allocates one
+/// `Vec` per call (the old stack-buffered zero-alloc form is gone — hot
+/// paths should use the pipeline directly). For other languages and options
+/// see [`crate::bm25_text::Bm25Pipeline`].
 #[inline]
 pub fn for_each_token<F>(text: &str, mut f: F)
 where
@@ -217,7 +219,8 @@ pub fn embed_document_with_params(text: &str, params: &Bm25Params) -> SparseVect
 /// Embed document text with explicit BM25 parameters.
 ///
 /// `avgdl <= 0` or non-finite falls back to [`DEFAULT_AVGDL`] (it is a
-/// divisor). `k1` and `b` are used as given — prefer
+/// divisor). `k1` and `b` are used as given — including non-finite values,
+/// which propagate as `NaN` weights — so prefer
 /// [`embed_document_with_params`] for fail-closed validation. Frequencies are
 /// counted per token ID: on the rare murmur3 collision two terms merge into
 /// one dimension with summed counts, which keeps output deterministic across

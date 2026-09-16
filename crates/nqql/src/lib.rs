@@ -253,6 +253,36 @@ pub fn bind(
     }
 }
 
+/// Read an optional embedder value by camelCase/snake_case keys. Missing or
+/// `null` keeps the default (`None`); a present-but-wrong-typed value fails
+/// closed with `QQL-VALIDATION-CONFIG` instead of silently keeping it.
+fn bm25_opt<T>(
+    emb: &serde_json::Value,
+    camel: &str,
+    snake: &str,
+    expected: &str,
+    convert: impl Fn(&serde_json::Value) -> Option<T>,
+) -> napi::Result<Option<T>> {
+    let key = if emb.get(camel).is_some() {
+        camel
+    } else {
+        snake
+    };
+    let Some(value) = emb.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    convert(value).map(Some).ok_or_else(|| {
+        common::to_napi_err(qql::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            format!("embedder.{key} must be {expected}"),
+            None,
+        ))
+    })
+}
+
 fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {
     let opts = options.unwrap_or_else(|| serde_json::json!({}));
     let url_str = opts
@@ -352,63 +382,77 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             .and_then(|v| v.as_str())
             .map(String::from);
         // Client-side BM25 document parameters for the local sparse path.
-        // Raw `serde_json::Number` access: invalid types are left to the
-        // native HttpEmbedderOptions validator (`QQL-VALIDATION-CONFIG`).
-        config.bm25_k1 = emb
-            .get("bm25K1")
-            .or_else(|| emb.get("bm25_k1"))
-            .and_then(|v| v.as_f64());
-        config.bm25_b = emb
-            .get("bm25B")
-            .or_else(|| emb.get("bm25_b"))
-            .and_then(|v| v.as_f64());
-        config.bm25_avg_len = emb
-            .get("bm25AvgLen")
-            .or_else(|| emb.get("bm25_avg_len"))
-            .and_then(|v| v.as_f64());
-        config.bm25_language = emb
-            .get("bm25Language")
-            .or_else(|| emb.get("bm25_language"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        config.bm25_tokenizer = emb
-            .get("bm25Tokenizer")
-            .or_else(|| emb.get("bm25_tokenizer"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        config.bm25_lowercase = emb
-            .get("bm25Lowercase")
-            .or_else(|| emb.get("bm25_lowercase"))
-            .and_then(|v| v.as_bool());
-        config.bm25_ascii_folding = emb
-            .get("bm25AsciiFolding")
-            .or_else(|| emb.get("bm25_ascii_folding"))
-            .and_then(|v| v.as_bool());
-        config.bm25_stopwords = emb
-            .get("bm25Stopwords")
-            .or_else(|| emb.get("bm25_stopwords"))
-            .and_then(|v| v.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str().map(String::from))
-                    .collect()
-            });
-        config.bm25_stemmer = emb
-            .get("bm25Stemmer")
-            .or_else(|| emb.get("bm25_stemmer"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        config.bm25_min_token_len = emb
-            .get("bm25MinTokenLen")
-            .or_else(|| emb.get("bm25_min_token_len"))
-            .and_then(|v| v.as_u64())
-            .and_then(|v| usize::try_from(v).ok());
-        config.bm25_max_token_len = emb
-            .get("bm25MaxTokenLen")
-            .or_else(|| emb.get("bm25_max_token_len"))
-            .and_then(|v| v.as_u64())
-            .and_then(|v| usize::try_from(v).ok());
+        // Present-but-wrong-typed values fail closed here with
+        // `QQL-VALIDATION-CONFIG`; only missing/`null` keep defaults (a
+        // silent `None` would never reach the native validator).
+        config.bm25_k1 = bm25_opt(emb, "bm25K1", "bm25_k1", "a number", |v| v.as_f64())?;
+        config.bm25_b = bm25_opt(emb, "bm25B", "bm25_b", "a number", |v| v.as_f64())?;
+        config.bm25_avg_len = bm25_opt(emb, "bm25AvgLen", "bm25_avg_len", "a number", |v| {
+            v.as_f64()
+        })?;
+        config.bm25_language = bm25_opt(emb, "bm25Language", "bm25_language", "a string", |v| {
+            v.as_str().map(String::from)
+        })?;
+        config.bm25_tokenizer =
+            bm25_opt(emb, "bm25Tokenizer", "bm25_tokenizer", "a string", |v| {
+                v.as_str().map(String::from)
+            })?;
+        config.bm25_lowercase =
+            bm25_opt(emb, "bm25Lowercase", "bm25_lowercase", "a boolean", |v| {
+                v.as_bool()
+            })?;
+        config.bm25_ascii_folding = bm25_opt(
+            emb,
+            "bm25AsciiFolding",
+            "bm25_ascii_folding",
+            "a boolean",
+            |v| v.as_bool(),
+        )?;
+        config.bm25_stopwords = bm25_opt(
+            emb,
+            "bm25Stopwords",
+            "bm25_stopwords",
+            "an array of strings",
+            |v| {
+                v.as_array().and_then(|items| {
+                    items
+                        .iter()
+                        .map(|item| item.as_str().map(String::from))
+                        .collect::<Option<Vec<_>>>()
+                })
+            },
+        )?;
+        config.bm25_stopwords_languages = bm25_opt(
+            emb,
+            "bm25StopwordsLanguages",
+            "bm25_stopwords_languages",
+            "an array of strings",
+            |v| {
+                v.as_array().and_then(|items| {
+                    items
+                        .iter()
+                        .map(|item| item.as_str().map(String::from))
+                        .collect::<Option<Vec<_>>>()
+                })
+            },
+        )?;
+        config.bm25_stemmer = bm25_opt(emb, "bm25Stemmer", "bm25_stemmer", "a string", |v| {
+            v.as_str().map(String::from)
+        })?;
+        config.bm25_min_token_len = bm25_opt(
+            emb,
+            "bm25MinTokenLen",
+            "bm25_min_token_len",
+            "a non-negative integer",
+            |v| v.as_u64().and_then(|n| usize::try_from(n).ok()),
+        )?;
+        config.bm25_max_token_len = bm25_opt(
+            emb,
+            "bm25MaxTokenLen",
+            "bm25_max_token_len",
+            "a non-negative integer",
+            |v| v.as_u64().and_then(|n| usize::try_from(n).ok()),
+        )?;
     }
 
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
@@ -471,6 +515,7 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     bm25_lowercase: config.bm25_lowercase,
                     bm25_ascii_folding: config.bm25_ascii_folding,
                     bm25_stopwords: config.bm25_stopwords.clone(),
+                    bm25_stopwords_languages: config.bm25_stopwords_languages.clone(),
                     bm25_stemmer: config.bm25_stemmer.clone(),
                     bm25_min_token_len: config.bm25_min_token_len,
                     bm25_max_token_len: config.bm25_max_token_len,

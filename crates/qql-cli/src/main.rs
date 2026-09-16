@@ -406,6 +406,9 @@ enum ConfigCommand {
         /// Drop over-long tokens on the document path (chars).
         #[arg(long)]
         bm25_max_token_len: Option<usize>,
+        /// Stemmer override (language name, or "none" to disable).
+        #[arg(long)]
+        bm25_stemmer: Option<String>,
         /// Offline multivector model for fastembed (e.g. bge-m3).
         #[arg(long)]
         multi_model: Option<String>,
@@ -962,6 +965,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bm25_ascii_folding,
                 bm25_min_token_len,
                 bm25_max_token_len,
+                bm25_stemmer,
                 multi_model,
                 image_model,
                 reranker_model,
@@ -1002,6 +1006,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bm25_ascii_folding,
                 bm25_min_token_len,
                 bm25_max_token_len,
+                bm25_stemmer,
                 multi_model,
                 image_model,
                 reranker_model,

@@ -52,6 +52,7 @@ const client = new Client({
         bm25Tokenizer: "whitespace", // word (default) | whitespace | prefix
         bm25AsciiFolding: true,   // ignore accents (default false)
         bm25Stemmer: "none",      // disable stemming (default: language stemmer)
+        bm25StopwordsLanguages: ["fr", "en"], // extra stopword lists
     },
 });
 

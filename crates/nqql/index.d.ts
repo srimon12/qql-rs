@@ -190,6 +190,9 @@ export interface HttpEmbedderOptions {
   /** Custom stopwords replacing the language default ([] disables) */
   bm25Stopwords?: string[];
   bm25_stopwords?: string[];
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
+  bm25_stopwords_languages?: string[];
   /** Stemmer override ("none" disables; a language name overrides) */
   bm25Stemmer?: string;
   bm25_stemmer?: string;

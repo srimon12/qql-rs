@@ -136,6 +136,16 @@ pub struct LocalExecutorOptions {
     /// maximum.
     #[cfg(feature = "fastembed-local")]
     pub bm25_max_token_len: Option<usize>,
+    /// Custom stopwords **replacing** the language default (`None` keeps it;
+    /// `Some(vec![])` disables filtering).
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Stemmer override (`None` = language default; `Some("none")` disables).
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_stemmer: Option<String>,
+    /// Additional language stopword lists merged with `bm25_stopwords`.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_stopwords_languages: Option<Vec<String>>,
 }
 
 /// Convert a MiB WAL segment capacity into the byte count
@@ -218,6 +228,9 @@ pub fn local_executor_with_options(
         bm25_ascii_folding: opts.bm25_ascii_folding,
         bm25_min_token_len: opts.bm25_min_token_len,
         bm25_max_token_len: opts.bm25_max_token_len,
+        bm25_stopwords: opts.bm25_stopwords,
+        bm25_stemmer: opts.bm25_stemmer,
+        bm25_stopwords_languages: opts.bm25_stopwords_languages,
     })?;
 
     // Pin collection vector size to the actual model dimension. Without this,

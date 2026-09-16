@@ -66,6 +66,7 @@ test("client options embedder forwards dense fields", () => {
     bm25Stemmer: undefined,
     bm25MinTokenLen: undefined,
     bm25MaxTokenLen: undefined,
+    bm25StopwordsLanguages: undefined,
   });
 });
 
@@ -86,13 +87,14 @@ test("client options embedder forwards BM25 document params (camel + snake)", ()
   assert.strictEqual(camel.embedder.bm25MaxTokenLen, 9);
 
   const snake = normalizeClientOptions({
-    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25_k1: 1.5, bm25_b: 0.25, bm25_avg_len: 16, bm25_language: "french", bm25_lowercase: true },
+    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25_k1: 1.5, bm25_b: 0.25, bm25_avg_len: 16, bm25_language: "french", bm25_lowercase: true, bm25_stopwords_languages: ["fr", "en"] },
   });
   assert.strictEqual(snake.embedder.bm25K1, 1.5);
   assert.strictEqual(snake.embedder.bm25B, 0.25);
   assert.strictEqual(snake.embedder.bm25AvgLen, 16);
   assert.strictEqual(snake.embedder.bm25Language, "french");
   assert.strictEqual(snake.embedder.bm25Lowercase, true);
+  assert.deepStrictEqual(snake.embedder.bm25StopwordsLanguages, ["fr", "en"]);
 
   // Out-of-range values survive normalization; the native layer fails closed.
   const bad = normalizeClientOptions({

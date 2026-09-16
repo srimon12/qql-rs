@@ -236,13 +236,15 @@ let config = Bm25TextConfig::resolve(
     None,             // stopwords: None = language default, Some(list) replaces
     None,             // stemmer: None = default, Some("none") disables
     None, None,       // min/max token length (chars)
+    None,             // extra stopwords languages merged with stopwords
 )?;
 let pipeline = config.pipeline();
 let d = pipeline.embed_document("La Máquina del Tiempo")?;
 ```
 
 Thirty languages carry Qdrant's stopword lists; seventeen add a Snowball
-stemmer (the rest pass tokens through, exactly like Qdrant, whose stemmer
+stemmer (Armenian and Tamil are explicit-stemmer-only, like Qdrant — no
+`language` variant, no stopword lists); the rest pass tokens through, exactly like Qdrant, whose stemmer
 defaults resolve per language the same way). ASCII folding uses Qdrant's
 Lucene-derived mapping. `multilingual` parses but fails closed at embed
 time — script-aware segmentation (`charabia`/`vaporetto`) is intentionally

@@ -98,7 +98,7 @@ wire-compatible BM25. Tune the **document** side before upserting:
 
 ```js
 client.setBm25Params(2.0, 0.5, 8.0); // k1, b, avg_len — throws on invalid values
-client.setBm25Text('es', 'whitespace', null, true, null, null, null, null); // language, tokenizer, …
+client.setBm25Text('es', 'whitespace', null, true, null, null, null, null, null); // language, tokenizer, …
 ```
 
 Defaults are Qdrant's `1.2 / 0.75 / 256`. Client-side, write-path only: query

@@ -7,8 +7,6 @@
 //! measure them with the same pipeline that will embed the writes, and feed
 //! the mean back into `bm25_avg_len` (config or embedder) before ingesting.
 
-use std::collections::HashMap;
-
 use qql_core::error::QqlError;
 use qql_embed::{AvgLenEstimate, estimate_avg_len};
 
@@ -18,9 +16,9 @@ impl Executor {
     /// Estimate a corpus-true `avg_len` for `field` from up to `sample`
     /// points of `collection`.
     ///
-    /// Scrolls the collection, extracts the string(s) at `field` (dotted
-    /// path; arrays contribute each string element), and returns the mean
-    /// post-pipeline token count measured with this executor's BM25 pipeline
+    /// Scrolls the collection, extracts the string at `field` (a top-level
+    /// payload key matched ASCII-case-insensitively, exactly like the
+    /// writer's field lookup), and returns the mean post-pipeline token count measured with this executor's BM25 pipeline
     /// (embedder's [`qql_embed::Embedder::bm25_text_config`], else the runtime
     /// [`crate::config::QqlConfig`], else Qdrant defaults) — exactly the
     /// `doc_len` the TF formula consumes, so the estimate is self-consistent
@@ -32,6 +30,11 @@ impl Executor {
     /// `avg_len = 0` (which validation rejects). Feed
     /// `estimate.mean` back into `bm25_avg_len` and re-ingest to apply;
     /// vectors written before the change keep their old weights.
+    ///
+    /// Pipelines the core cannot execute (notably `multilingual`, which
+    /// needs a segmentation stack the lean core does not ship) fail here
+    /// with `QQL-VALIDATION-CONFIG` — including on edge backends whose
+    /// engine would embed them fine.
     pub async fn estimate_bm25_avg_len(
         &self,
         collection: &str,
@@ -79,57 +82,21 @@ impl Executor {
         };
         let mut texts = Vec::new();
         for hit in hits {
-            if let Some(payload) = hit.payload.as_ref() {
-                collect_field_texts(payload, field, &mut texts);
+            // Same field rule as the writer (`collect_text_targets`): a
+            // top-level key matched ASCII-case-insensitively, holding a
+            // non-empty string. Arrays, nested objects, dotted paths, and
+            // empty strings are never embedded, so they must not dilute the
+            // mean either — otherwise the estimate would describe documents
+            // the formula never sees.
+            if let Some(payload) = hit.payload.as_ref()
+                && let Some((_, serde_json::Value::String(text))) = payload
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(field))
+                && !text.is_empty()
+            {
+                texts.push(text.clone());
             }
         }
         estimate_avg_len(texts.iter().map(String::as_str), &pipeline)
-    }
-}
-
-/// Collect the string(s) at a dotted payload path. Objects traverse by
-/// segment; arrays contribute each string element (one document per
-/// element); anything else is skipped.
-fn collect_field_texts(
-    payload: &HashMap<String, serde_json::Value>,
-    field: &str,
-    out: &mut Vec<String>,
-) {
-    use serde_json::Value;
-    let segments: Vec<&str> = field.split('.').collect();
-    if segments.iter().any(|segment| segment.is_empty()) {
-        return;
-    }
-    let mut current: Option<&Value> = None;
-    for (i, segment) in segments.iter().enumerate() {
-        current = if i == 0 {
-            payload.get(*segment)
-        } else {
-            current.and_then(|value| value.get(*segment))
-        };
-        let Some(value) = current else {
-            return;
-        };
-        if i + 1 == segments.len() {
-            push_texts(value, out);
-            return;
-        }
-        if !value.is_object() {
-            return;
-        }
-    }
-}
-
-fn push_texts(value: &serde_json::Value, out: &mut Vec<String>) {
-    match value {
-        serde_json::Value::String(text) => out.push(text.clone()),
-        serde_json::Value::Array(items) => {
-            for item in items {
-                if let serde_json::Value::String(text) = item {
-                    out.push(text.clone());
-                }
-            }
-        }
-        _ => {}
     }
 }

@@ -112,6 +112,9 @@ pub struct QqlConfig {
     /// `Some(vec![])` disables filtering).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bm25_stopwords: Option<Vec<String>>,
+    /// Additional language stopword lists merged with `bm25_stopwords`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_stopwords_languages: Option<Vec<String>>,
     /// Stemmer override (`None` = language default; `Some("none")` disables).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bm25_stemmer: Option<String>,
@@ -146,6 +149,7 @@ impl QqlConfig {
             self.bm25_stemmer.as_deref(),
             self.bm25_min_token_len,
             self.bm25_max_token_len,
+            self.bm25_stopwords_languages.clone(),
         )
     }
 

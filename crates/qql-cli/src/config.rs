@@ -46,6 +46,13 @@ pub struct EdgeConfig {
     pub bm25_min_token_len: Option<usize>,
     /// Drop over-long tokens on the document path (chars).
     pub bm25_max_token_len: Option<usize>,
+    /// Custom stopwords replacing the language default (config file only;
+    /// lists don't fit CLI flags; `[]` disables filtering).
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Additional language stopword lists (config file only).
+    pub bm25_stopwords_languages: Option<Vec<String>>,
+    /// Stemmer override (`None` = language default; `"none"` disables).
+    pub bm25_stemmer: Option<String>,
     pub embed_url: Option<String>,
     pub embed_key: String,
     pub embed_model: String,
@@ -86,6 +93,9 @@ impl Default for EdgeConfig {
             bm25_ascii_folding: None,
             bm25_min_token_len: None,
             bm25_max_token_len: None,
+            bm25_stopwords: None,
+            bm25_stemmer: None,
+            bm25_stopwords_languages: None,
             embed_url: None,
             embed_key: String::new(),
             embed_model: "nomic-embed-text".to_string(),
@@ -150,6 +160,8 @@ pub struct EdgeConfigPatch {
     pub bm25_min_token_len: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bm25_max_token_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_stemmer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embed_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -362,11 +374,17 @@ impl EdgeConfig {
         if let Some(value) = env_bool("QQL_EDGE_BM25_ASCII_FOLDING") {
             self.bm25_ascii_folding = Some(value);
         }
+        // Note: unlike env_f64 (garbage → NaN → validator rejects), unparseable
+        // bool/usize env values read as unset (keep default). Strings that must
+        // fail closed (language/tokenizer/stemmer) go through the validator.
         if let Some(value) = env_usize("QQL_EDGE_BM25_MIN_TOKEN_LEN") {
             self.bm25_min_token_len = Some(value);
         }
         if let Some(value) = env_usize("QQL_EDGE_BM25_MAX_TOKEN_LEN") {
             self.bm25_max_token_len = Some(value);
+        }
+        if let Some(value) = env_string("QQL_EDGE_BM25_STEMMER") {
+            self.bm25_stemmer = Some(value);
         }
         if let Some(value) = env_bool("QQL_EDGE_ON_DISK") {
             self.on_disk_payload = value;

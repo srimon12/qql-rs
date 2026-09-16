@@ -76,6 +76,10 @@ pub struct HttpEmbedderOptions {
     /// Custom stopwords **replacing** the language default (`None` keeps it;
     /// `Some(vec![])` disables filtering). Compared post-normalization.
     pub bm25_stopwords: Option<Vec<String>>,
+    /// Additional language stopword lists merged with `bm25_stopwords`
+    /// (`None` = none extra; an explicit selection replaces the default, so
+    /// include the processing language to keep its words).
+    pub bm25_stopwords_languages: Option<Vec<String>>,
     /// Stemmer override (`None` = language default; `Some("none")` disables;
     /// `Some("<language>")` overrides with that language's Snowball stemmer).
     pub bm25_stemmer: Option<String>,
@@ -108,6 +112,7 @@ impl HttpEmbedderOptions {
             self.bm25_stemmer.as_deref(),
             self.bm25_min_token_len,
             self.bm25_max_token_len,
+            self.bm25_stopwords_languages.clone(),
         )
     }
 }

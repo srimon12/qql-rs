@@ -121,7 +121,9 @@ impl Language {
     }
 
     /// Parse a language name or Qdrant two-letter alias (`"es"`, `"zh"`,
-    /// `"hi-en"`, …), ASCII-case-insensitively. Anything else fails closed.
+    /// `"hi-en"`, …), ASCII-case-insensitively. The case-folding is a
+    /// deliberate superset of Qdrant's case-sensitive serde (same accepted
+    /// set, friendlier spelling). Anything else fails closed.
     pub fn parse(name: &str) -> Result<Self, QqlError> {
         // `hi-en` is the only alias outside `[a-z]`; compare lowercased.
         let lower = name.to_ascii_lowercase();
@@ -169,11 +171,13 @@ impl Language {
 
     /// Snowball stemmer for this language, if Qdrant defines one.
     ///
-    /// Mirrors Qdrant's `Stemmer::try_default_from_language`: exactly the 18
-    /// Snowball languages stem; the rest (Chinese, Japanese, Hebrew, …) have
-    /// no default stemmer and pass tokens through unstopped-by-stemmer.
-    /// `qdrant-rust-stemmers` is the same crate family Qdrant uses, so the
-    /// stems are identical.
+    /// Mirrors Qdrant's `Stemmer::try_default_from_language`: exactly the 17
+    /// Snowball languages reachable via `language` stem (Armenian and Tamil
+    /// exist in Qdrant's `SnowballLanguage` but have no `Language` variant,
+    /// so they are explicit-stemmer-only — see [`Stemmer`](super::bm25_text::Stemmer)).
+    /// The rest (Chinese, Japanese, Hebrew, …) have no default stemmer and
+    /// pass tokens through unstemmed. `qdrant-rust-stemmers` is the same
+    /// crate family Qdrant uses, so the stems are identical.
     pub fn stem_algorithm(self) -> Option<Algorithm> {
         match self {
             Self::Arabic => Some(Algorithm::Arabic),

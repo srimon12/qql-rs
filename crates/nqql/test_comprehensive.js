@@ -558,6 +558,13 @@ test('HttpEmbedder accepts BM25 fields (camelCase)', () => {
   assert.strictEqual(e.bm25Stemmer, 'none');
   assert.strictEqual(e.bm25MinTokenLen, 2);
   assert.strictEqual(e.bm25MaxTokenLen, 9);
+  const f = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    bm25StopwordsLanguages: ['fr', 'en'],
+  });
+  assert.deepStrictEqual(f.bm25StopwordsLanguages, ['fr', 'en']);
 });
 
 test('HttpEmbedder accepts BM25 fields (snake_case aliases)', () => {

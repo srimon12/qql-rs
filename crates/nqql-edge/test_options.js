@@ -42,6 +42,9 @@ test("localExecutor forwards sparse/multi/image/reranker model slots", () => {
     bm25AsciiFolding: undefined,
     bm25MinTokenLen: undefined,
     bm25MaxTokenLen: undefined,
+    bm25Stopwords: undefined,
+    bm25Stemmer: undefined,
+    bm25StopwordsLanguages: undefined,
   });
 });
 

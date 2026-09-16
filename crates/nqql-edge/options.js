@@ -53,6 +53,9 @@ function normalizeLocalOptions(options) {
     bm25AsciiFolding: options.bm25AsciiFolding,
     bm25MinTokenLen: options.bm25MinTokenLen,
     bm25MaxTokenLen: options.bm25MaxTokenLen,
+    bm25Stopwords: options.bm25Stopwords,
+    bm25Stemmer: options.bm25Stemmer,
+    bm25StopwordsLanguages: options.bm25StopwordsLanguages,
   };
 }
 
@@ -110,6 +113,9 @@ function normalizeStandaloneOptions(options) {
     bm25AsciiFolding: options.bm25AsciiFolding,
     bm25MinTokenLen: options.bm25MinTokenLen,
     bm25MaxTokenLen: options.bm25MaxTokenLen,
+    bm25Stopwords: options.bm25Stopwords,
+    bm25Stemmer: options.bm25Stemmer,
+    bm25StopwordsLanguages: options.bm25StopwordsLanguages,
     // Query parameters for prepared statements: object (:name) or array (?).
     // Must survive normalization or one-shot execute()/executeStmt() silently
     // drop bindings. Type validity is asserted above.

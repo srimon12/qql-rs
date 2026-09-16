@@ -83,7 +83,7 @@ Client(
 - `url`: Qdrant REST (or gRPC) endpoint
 - `api_key`: Optional API key for authenticated Qdrant instances (sent as `api-key` header)
 - `use_grpc`: Set `True` to use gRPC transport (requires `--features grpc` build)
-- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys. Sparse document encoding is always local (HTTP serves dense/multi/image/rerank only), so the dict/class also accepts `bm25_k1`, `bm25_b`, `bm25_avg_len` plus text processing (`bm25_language`, `bm25_tokenizer`, `bm25_lowercase`, `bm25_ascii_folding`, `bm25_stopwords`, `bm25_stemmer`, `bm25_min_token_len`, `bm25_max_token_len`) for the local BM25 encoder (write-path only; defaults 1.2 / 0.75 / 256, English, word tokenizer; invalid values raise `QQL-VALIDATION-CONFIG`).
+- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys. Sparse document encoding is always local (HTTP serves dense/multi/image/rerank only), so the dict/class also accepts `bm25_k1`, `bm25_b`, `bm25_avg_len` plus text processing (`bm25_language`, `bm25_tokenizer`, `bm25_lowercase`, `bm25_ascii_folding`, `bm25_stopwords`, `bm25_stemmer`, `bm25_stopwords_languages`, `bm25_min_token_len`, `bm25_max_token_len`) for the local BM25 encoder (write-path only; defaults 1.2 / 0.75 / 256, English, word tokenizer; invalid values raise `QQL-VALIDATION-CONFIG`).
 - `route_affinity`: Optional Qdrant 1.19 read-affinity key, pinning reads to a
   stable replica. Sent as `X-Qdrant-Route-Affinity` (REST) / gRPC metadata
   `x-qdrant-route-affinity`. Empty string is treated as unset. Readable via
@@ -117,6 +117,7 @@ client = Client("http://localhost:6333", embedder={
     "bm25_tokenizer": "whitespace",  # word (default) | whitespace | prefix
     "bm25_ascii_folding": True, # ignore accents (default False)
     "bm25_stemmer": "none",     # disable stemming (default: language stemmer)
+    "bm25_stopwords_languages": ["fr"],  # extra stopword lists (replaces default set)
 })
 
 # With read affinity (Qdrant 1.19+)
