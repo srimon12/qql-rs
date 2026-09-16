@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Dead dispatch paths**: Node JSON `execute_dispatch` / `explain_analyze_dispatch` twins (all call sites use the typed path); plan `Route::body_ref` (no callers); core `validate_no_unbound_formula` (superseded by the census).
+- **Duplicated walkers**: three param-validation traversals become one census; four embed batch skeletons become one generic batcher; four HTTP send stacks become one sender with thin wrappers.
+
+### Changed
+- **Single error mapper**: `RestProjectionError::to_qql_error` owns every projection arm; REST and WASM share codes and messages, and WASM errors carry `.code` through `qql_err_to_js`.
+- **Fail-closed drift guards**: embed apply walks consume the collect job list through a mismatch-erroring cursor; edge unsupported catalog test covers every variant.
+- **Strict transport parsing**: alias actions serialize from a real type; `collection_exists` goes through the typed envelope parser.
+
 ### Fixed
 - **Score precision contract**: `SearchHit.score` is now `f64`, rounded once at ingestion via `score_f64` — the custom `serialize_f32` widened through `pythonize` to `0.949999988079071` in `results` / DBAPI rows while `hits()` said `0.95`. Custom serializer and pyqql twin deleted; regression test pins it. Vectors stay `Vec<f32>` passthrough by deliberate asymmetry (scalars get compared, vectors don't).
 - **Range bounds typed**: `RangeParams` uses `PlanRangeBound` (`Int` / `Float` / `DateTime` / `Text`); bool / null / array / object RHS to range operators is a parse error (fail-closed).
