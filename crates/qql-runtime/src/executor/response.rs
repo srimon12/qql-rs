@@ -242,6 +242,12 @@ impl std::fmt::Write for ScoreBuf {
 /// and then shortest-expands through [`score_f64`]; fusing both halves here
 /// keeps that double conversion at exactly one call site instead of inline
 /// at every `parse_hit`.
+///
+/// REST-only: the sole caller is `rest_response::parse_hit`, so this is
+/// compiled out of no-`rest` builds (e.g. the `pyqql-common`/`nqql-common`
+/// dependency with default features off) instead of tripping `dead_code`
+/// under `-D warnings`.
+#[cfg(feature = "rest")]
 pub fn score_from_wire(v: f64) -> f64 {
     score_f64(v as f32)
 }
@@ -593,6 +599,7 @@ mod tests {
 
     /// The wire decimal normalizes once: the exact f32 expansion
     /// `0.949999988079071` narrows back to the same stored `0.95`.
+    #[cfg(feature = "rest")]
     #[test]
     fn score_from_wire_narrows_once() {
         assert_eq!(super::score_from_wire(0.95), 0.95f64);
