@@ -36,6 +36,7 @@ pub(crate) mod render;
 pub(crate) mod scan;
 pub(crate) mod text;
 pub(crate) mod validate;
+pub(crate) mod validate_collect;
 pub(crate) mod value;
 
 #[cfg(test)]

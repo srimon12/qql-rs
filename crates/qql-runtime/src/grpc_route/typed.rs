@@ -19,7 +19,7 @@ use qql_plan::{
 };
 
 use crate::executor::response::{
-    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit,
+    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_f64,
 };
 use crate::executor::telemetry::{
     HardwareUsage, InferenceUsage, ModelUsage, ServerTelemetry, ServerUsage,
@@ -127,11 +127,12 @@ fn vector_to_typed(
 }
 
 /// Proto `ScoredPoint` → [`SearchHit`]. `version`, `shard_key` and
-/// `order_value` are absent from the hit IR.
+/// `order_value` are absent from the hit IR. The proto `float` score rounds
+/// once through [`score_f64`], matching the REST ingestion path.
 pub(crate) fn scored_point_to_hit(mut p: qdrant::ScoredPoint) -> Result<SearchHit, QqlError> {
     Ok(SearchHit {
         id: point_id_to_plan(p.id.take())?,
-        score: p.score,
+        score: score_f64(p.score),
         payload: payload_to_typed(p.payload),
         collection: None,
         vector: vector_to_typed(p.vectors.take())?,

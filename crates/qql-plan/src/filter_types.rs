@@ -185,20 +185,75 @@ pub enum MatchValue {
 }
 
 /// OpenAPI `Range`: numeric bounds for a field (`gt`/`gte`/`lt`/`lte`).
+///
+/// Each bound is a typed [`PlanRangeBound`]: integers serialize as JSON
+/// integers (never `5.0`), floats as JSON numbers, and strings (datetimes
+/// and opaque text alike) as JSON strings — matching the `Range` /
+/// `DatetimeRange` halves of the OpenAPI `RangeInterface` union.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RangeParams {
     /// Strictly greater than.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gt: Option<serde_json::Value>,
+    pub gt: Option<PlanRangeBound>,
     /// Greater than or equal.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gte: Option<serde_json::Value>,
+    pub gte: Option<PlanRangeBound>,
     /// Strictly less than.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lt: Option<serde_json::Value>,
+    pub lt: Option<PlanRangeBound>,
     /// Less than or equal.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lte: Option<serde_json::Value>,
+    pub lte: Option<PlanRangeBound>,
+}
+
+/// A single range bound with its wire type fixed at lowering.
+///
+/// Replaces untyped `serde_json::Value` bounds: the JSON shape is decided
+/// here (int stays int, datetime stays string) instead of by whatever the
+/// source literal happened to be. Strings are kept opaque — never parsed
+/// into timestamps — and classified with the same
+/// `qql_core::ast::looks_like_iso_datetime` check the formula parser uses
+/// for `DATETIME('…')` versus variable.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum PlanRangeBound {
+    /// Integer bound; serializes as a JSON integer.
+    Int(i64),
+    /// Float bound; serializes as a JSON number (`null` when non-finite,
+    /// mirroring `value_to_json`, since JSON has no inf/NaN).
+    Float(f64),
+    /// ISO-8601-looking string; serializes as a JSON string and lowers to
+    /// the edge `DateTime` range interface (the gRPC `Range` wire type is
+    /// double-only, so strings stay unrepresentable there, as before).
+    DateTime(String),
+    /// Any other string, kept opaque; serializes as a JSON string.
+    Text(String),
+}
+
+impl Serialize for PlanRangeBound {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Int(n) => serializer.serialize_i64(*n),
+            Self::Float(f) => match serde_json::Number::from_f64(*f) {
+                Some(n) => n.serialize(serializer),
+                None => serializer.serialize_unit(),
+            },
+            Self::DateTime(s) | Self::Text(s) => serializer.serialize_str(s),
+        }
+    }
+}
+
+impl PlanRangeBound {
+    /// Numeric value for double-based wire paths (edge `Float` ranges, gRPC
+    /// `Range`); `None` for string bounds. Shaped like
+    /// `serde_json::Value::as_f64` so those call sites keep working unchanged.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Int(n) => Some(*n as f64),
+            Self::Float(f) => Some(*f),
+            Self::DateTime(_) | Self::Text(_) => None,
+        }
+    }
 }
 
 /// Qdrant `geo_bounding_box` condition: rectangle by opposite corners.

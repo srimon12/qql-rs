@@ -196,7 +196,7 @@ async fn test_grouped_offset_applied_exactly_once() {
     // so the backend never applies it. Simulate a server returning `limit`
     // groups and assert the result is exactly `user_limit` groups starting at
     // the offset — a double application would drop or duplicate groups.
-    let group = |id: &str, point: u64, score: f32| GroupedSearchResult {
+    let group = |id: &str, point: u64, score: f64| GroupedSearchResult {
         group_id: PlanGroupId::Keyword(id.into()),
         hits: vec![SearchHit {
             id: PlanPointId::Number(point),

@@ -1,5 +1,7 @@
 use crate::types::*;
-use qql_core::ast::{ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value};
+use qql_core::ast::{
+    ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value, looks_like_iso_datetime,
+};
 
 /// Lower a typed AST filter into the transport-neutral `FilterExpression` IR.
 pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
@@ -223,13 +225,12 @@ fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> FilterClause {
         // Qdrant `match` rejects floats at runtime (MatchInterface has no
         // float variant); exact float equality is `range` with gte == lte.
         if let Value::Float(_) = value {
-            let v = value_to_json(value);
             return field_condition(field, |fc| {
                 fc.range = Some(RangeParams {
                     gt: None,
-                    gte: Some(v.clone()),
+                    gte: Some(range_bound(value)),
                     lt: None,
-                    lte: Some(v),
+                    lte: Some(range_bound(value)),
                 })
             });
         }
@@ -246,9 +247,9 @@ fn lower_between(field: &str, low: &Value, high: &Value) -> FilterClause {
     field_condition(field, |fc| {
         fc.range = Some(RangeParams {
             gt: None,
-            gte: Some(value_to_json(low)),
+            gte: Some(range_bound(low)),
             lt: None,
-            lte: Some(value_to_json(high)),
+            lte: Some(range_bound(high)),
         })
     })
 }
@@ -259,31 +260,31 @@ fn lower_match_any(field: &str, values: &[Value]) -> FilterClause {
 }
 
 fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
-    let v = value_to_json(value);
+    let bound = range_bound(value);
     match op {
         ComparisonOp::Gt => RangeParams {
-            gt: Some(v),
+            gt: Some(bound),
             gte: None,
             lt: None,
             lte: None,
         },
         ComparisonOp::Gte => RangeParams {
             gt: None,
-            gte: Some(v),
+            gte: Some(bound),
             lt: None,
             lte: None,
         },
         ComparisonOp::Lt => RangeParams {
             gt: None,
             gte: None,
-            lt: Some(v),
+            lt: Some(bound),
             lte: None,
         },
         ComparisonOp::Lte => RangeParams {
             gt: None,
             gte: None,
             lt: None,
-            lte: Some(v),
+            lte: Some(bound),
         },
         // `lower_compare` diverts `Eq` before this point, so this arm is a
         // drift guard, not a live path. Lower equality as an exact range
@@ -292,10 +293,57 @@ fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
         // infallible pipeline stays total, so no future caller can panic here.
         ComparisonOp::Eq => RangeParams {
             gt: None,
-            gte: Some(v.clone()),
+            gte: Some(bound.clone()),
             lt: None,
-            lte: Some(v),
+            lte: Some(bound),
         },
+    }
+}
+
+/// Convert a filter `Value` into a typed range bound.
+///
+/// Total: the parser rejects bool/null/array/object literals as inequality
+/// bounds, and both `plan()` (`ensure_no_unbound_params`) and
+/// `plan_template()` (`validate_no_unbound_scalar_params`) reject unbound
+/// placeholders before lowering — but a *bound* placeholder can still carry
+/// any JSON value (`bind_value` substitutes blindly; only null is refused at
+/// bind time). Those degrade to opaque text so every backend still fails
+/// closed on the mistyped bound instead of crashing or matching wrong rows.
+fn range_bound(value: &Value) -> PlanRangeBound {
+    match value {
+        Value::Int(n) => PlanRangeBound::Int(*n),
+        // The parser only produces `UInt` for literals overflowing `i64`;
+        // small programmatic values keep their integer wire shape, huge ones
+        // ride a double like the f64-based edge/gRPC paths already do.
+        Value::UInt(n) => i64::try_from(*n)
+            .map(PlanRangeBound::Int)
+            .unwrap_or(PlanRangeBound::Float(*n as f64)),
+        Value::Float(f) => PlanRangeBound::Float(*f),
+        // Same split the formula parser uses for `DATETIME('…')` versus a
+        // variable (`parse_formula_string`): ISO-looking strings are datetime
+        // bounds, everything else opaque text. The original text is preserved
+        // either way — never parsed into a timestamp.
+        Value::Str(s) => {
+            if looks_like_iso_datetime(s) {
+                PlanRangeBound::DateTime(s.clone())
+            } else {
+                PlanRangeBound::Text(s.clone())
+            }
+        }
+        // Unreachable through the supported entry points (see above);
+        // mirrors the `value_to_json` invariant panic for unbound placeholders.
+        Value::Param(name, _) => {
+            panic!("invariant violation: unbound parameter :{name} reached range lowering");
+        }
+        Value::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached range lowering"
+            );
+        }
+        // Parser-rejected literals, reachable only bound to a placeholder:
+        // degrade to opaque text (no datetime parses from these renderings)
+        // so the REST backend 400s and the edge/gRPC converters fail closed.
+        other => PlanRangeBound::Text(value_to_json(other).to_string()),
     }
 }
 

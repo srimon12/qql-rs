@@ -37,9 +37,10 @@ impl<'a> AstLowerer<'a> {
         let expression_span = self.peek()?.span;
         let mut expression = self.parse_query_expression()?;
 
-        let collection = if self.peek()?.kind == TokenKind::From {
+        let (collection, collection_span) = if self.peek()?.kind == TokenKind::From {
             self.advance()?;
-            QueryCollection::Explicit(self.parse_identifier()?)
+            let (name, span) = self.parse_identifier_with_span()?;
+            (QueryCollection::Explicit(name), Some(span))
         } else if top_level {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-FROM",
@@ -47,7 +48,7 @@ impl<'a> AstLowerer<'a> {
                 Some(self.peek()?.span),
             ));
         } else {
-            QueryCollection::Inherited
+            (QueryCollection::Inherited, None)
         };
 
         // USING HYBRID [DENSE n] [SPARSE n] [FUSION …]  — expands to QueryExpr::Hybrid
@@ -135,6 +136,7 @@ impl<'a> AstLowerer<'a> {
         let group = if self.peek()?.kind == TokenKind::Group {
             self.advance()?;
             self.expect(TokenKind::By)?;
+            let field_span = self.peek()?.span;
             let field = self.parse_field_path()?;
             let size = if self.peek_word("SIZE")? {
                 self.advance()?;
@@ -174,6 +176,7 @@ impl<'a> AstLowerer<'a> {
             };
             Some(GroupSpec {
                 field,
+                field_span: Some(field_span),
                 size,
                 lookup,
             })
@@ -246,6 +249,7 @@ impl<'a> AstLowerer<'a> {
         Ok(QueryStmt {
             ctes,
             collection,
+            collection_span,
             expression,
             filter,
             params,

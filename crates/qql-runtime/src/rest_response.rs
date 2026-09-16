@@ -23,7 +23,7 @@ use qql_plan::{
 
 use crate::backend::CollectionInfo;
 use crate::executor::response::{
-    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit,
+    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_f64,
 };
 use crate::executor::telemetry::ServerTelemetry;
 
@@ -304,10 +304,12 @@ fn parse_hit(value: Value) -> Result<SearchHit, QqlError> {
     )?;
     let score = match record.remove("score") {
         None | Some(Value::Null) => 0.0,
-        Some(Value::Number(number)) => number
-            .as_f64()
-            .ok_or_else(|| envelope_err("point score is not a finite number"))?
-            as f32,
+        Some(Value::Number(number)) => score_f64(
+            number
+                .as_f64()
+                .ok_or_else(|| envelope_err("point score is not a finite number"))?
+                as f32,
+        ),
         Some(other) => {
             return Err(envelope_err(format!(
                 "point score must be a number, got {other}"
@@ -555,7 +557,7 @@ mod tests {
         let hits = response.data.hits().expect("hits");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, PlanPointId::Number(7));
-        assert!((hits[0].score - 0.75).abs() < f32::EPSILON);
+        assert_eq!(hits[0].score, 0.75);
         assert_eq!(
             hits[0].vector,
             Some(PlanVectorStruct::Single(qql_plan::PlanVectorValue::Dense(
@@ -563,6 +565,22 @@ mod tests {
             )))
         );
         assert_eq!(response.telemetry.unwrap().time_s, Some(0.125));
+    }
+
+    #[test]
+    fn parse_hit_rounds_score_once_to_shortest_f64() {
+        // `0.95` arrives as a JSON decimal; ingestion stores the shortest
+        // round-trip f64 exactly — no epsilon needed, and the serialized
+        // report emits the same decimal.
+        let response = parse_planned(
+            &planned("SCROLL FROM docs LIMIT 1"),
+            json!({"result": {"points": [{"id": 1, "score": 0.95}]}, "status": "ok"}),
+        )
+        .expect("strict parse");
+        let hits = response.data.hits().expect("hits");
+        assert_eq!(hits[0].score, 0.95f64);
+        let value = serde_json::to_value(&hits[0]).expect("hit serializes");
+        assert_eq!(value["score"], json!(0.95));
     }
 
     #[test]

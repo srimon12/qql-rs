@@ -163,6 +163,11 @@ pub async fn handle_run_file(
     };
     let s = serde_json::to_string_pretty(&resp)?;
     println!("{}", s);
+    // Unix contract: a script with any failed statement exits non-zero, even
+    // in Continue mode (the JSON report above already carries `ok: false`).
+    if fail_count > 0 {
+        return Err(msg.into());
+    }
     Ok(())
 }
 

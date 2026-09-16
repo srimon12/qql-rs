@@ -165,19 +165,38 @@ pub enum OnError {
     Continue,
 }
 
+/// Normalize a backend f32 score to f64 **once, at ingestion**, through its
+/// shortest round-trip decimal (`0.95f32` becomes `0.95f64`, not
+/// `0.949999988079071`).
+///
+/// Every transport parses scores through this helper (REST `parse_hit`, gRPC
+/// `scored_point_to_hit`, edge `from_edge_scored_point_to_hit`, cross-rerank
+/// dispatch), so the stored value already carries the shortest decimal and
+/// plain `Serialize`/`pythonize` emit it identically everywhere — JSON text,
+/// `Value`, and the Python `ScoredPoint.score` getter agree with no custom
+/// serializer. The mapping is monotonic over finite values, so sort order
+/// under `partial_cmp` is unchanged.
+pub fn score_f64(v: f32) -> f64 {
+    v.to_string().parse().unwrap_or(v as f64)
+}
+
 /// Normalized search hit returned inside `ExecResponse` data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
     /// Point ID (integer or string/UUID).
     pub id: PlanPointId,
-    /// Similarity or rerank score (defaults to 0.0 for unscored retrieved points).
-    ///
-    /// Serialized as the shortest f32 round-trip decimal (`0.95`, not
-    /// `0.949999988079071`): Qdrant's own JSON text and the native Python
+    /// Similarity or rerank score, rounded once at ingestion via
+    /// [`score_f64`] so it holds the shortest round-trip decimal (`0.95`,
+    /// not `0.949999988079071`): Qdrant's own JSON text and the native Python
     /// `ScoredPoint.score` getter both use that form, so the JSON report view
-    /// and the typed view agree.
-    #[serde(serialize_with = "serialize_score_f32")]
-    pub score: f32,
+    /// and the typed view agree with plain `Serialize` (no custom
+    /// `serialize_with`).
+    ///
+    /// Deliberate asymmetry with [`PlanVectorStruct`]: scalar scores are
+    /// human-read values worth normalizing, while `vector` stays `Vec<f32>`
+    /// passthrough — exact decimal equality on 128-dim vectors is
+    /// meaningless, and doubling their memory for cosmetics is indefensible.
+    pub score: f64,
     /// Point payload when requested via `WITH PAYLOAD`.
     pub payload: Option<HashMap<String, serde_json::Value>>,
     /// Source collection. Populated by cross-collection operations (e.g.
@@ -188,26 +207,6 @@ pub struct SearchHit {
     /// Vector(s) returned when requested via `WITH VECTOR`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector: Option<PlanVectorStruct>,
-}
-
-/// Serialize an f32 score as an f64 holding its shortest round-trip decimal
-/// (`0.95`, not `0.949999988079071`), matching Qdrant's JSON text and the
-/// Python `ScoredPoint.score` getter, instead of a raw f32→f64 widening.
-///
-/// The f64 matters beyond JSON bytes: `pyqql`'s `results` getter builds
-/// Python floats through `pythonize` over this serde data model, and
-/// `pythonize` widens a serialized f32 to `0.949999988079071`. Emitting f64
-/// keeps the JSON report view and every native view in agreement. Do NOT
-/// "optimize" this back to `serialize_f32` — JSON output is byte-identical
-/// either way, but the native views regress (see `score_emits_f64_shortest`).
-fn serialize_score_f32<S>(score: &f32, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match score.to_string().parse::<f64>() {
-        Ok(value) => serializer.serialize_f64(value),
-        Err(_) => serializer.serialize_f32(*score),
-    }
 }
 
 /// Grouped query result: one group key with its ordered hits.
@@ -468,15 +467,16 @@ impl ExecResponse {
 mod tests {
     use super::*;
 
-    /// The score must serialize as an f64 holding the shortest round-trip
-    /// decimal — not a raw f32. `pyqql`'s `results` getter builds Python
-    /// floats through `pythonize` over this data model, which widens a
-    /// serialized f32 to `0.949999988079071` (regression: stack-05 perf pass).
+    /// Scores are rounded once at ingestion ([`score_f64`]), so the stored
+    /// f64 already holds the shortest decimal — plain `Serialize` emits it
+    /// (`0.95`, not `0.949999988079071`), keeping the JSON report view and
+    /// every native view (`pythonize`, `ScoredPoint.score`) in agreement.
     #[test]
-    fn score_emits_f64_shortest() {
+    fn score_f64_rounds_once_at_ingestion() {
+        assert_eq!(score_f64(0.95f32), 0.95f64);
         let hit = SearchHit {
             id: PlanPointId::Number(1),
-            score: 0.95f32,
+            score: score_f64(0.95f32),
             payload: None,
             collection: None,
             vector: None,

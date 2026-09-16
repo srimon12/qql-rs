@@ -21,6 +21,15 @@ impl Route {
     pub fn body_json(&self) -> Option<serde_json::Value> {
         self.body.clone()
     }
+
+    /// Borrowed JSON body, or None for bodyless routes.
+    ///
+    /// Zero-clone inspector for callers that only read the payload
+    /// (offline `compile`, contract assertions); [`body_json`](Self::body_json)
+    /// stays as the owned accessor where ownership is required.
+    pub fn body_ref(&self) -> Option<&serde_json::Value> {
+        self.body.as_ref()
+    }
 }
 
 /// Why a planned operation cannot become a single Qdrant REST route.
@@ -369,6 +378,53 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
     })
 }
 
+/// Outcome of the shared plan → project core: either a routable [`Route`]
+/// or the reason there is no single Qdrant REST route (client-side-only or
+/// batch-only). A serialization regression never surfaces here — it fails the
+/// whole compilation as `QQL-PLAN-SERIALIZE`.
+enum ProjectOutcome {
+    /// A real Qdrant REST route.
+    Route(Route),
+    /// Client-side only (e.g. CROSS RERANK); carries the statement type name.
+    ClientSide(&'static str),
+    /// `OVERWRITE` payload writes (merge-only `POST /points/payload` cannot
+    /// replace payload; batch-only).
+    BatchOnly,
+}
+
+/// Single fallible plan → project path behind [`try_route`] and
+/// [`compile_statement`]: exactly one `plan()` call and at most one
+/// `to_rest_route()` call, with real `Result` errors throughout (no `.ok()`
+/// swallowing — a serialization regression stays loud instead of degrading
+/// to "no route").
+///
+/// Both entry names are kept: `try_route` serves fallible REST callers while
+/// `compile_statement` serves SDKs needing `stmt_type` without a route, and
+/// each has out-of-file callers, so deleting either would break call sites
+/// outside this module.
+fn plan_and_project(statement: &Stmt) -> Result<(&'static str, ProjectOutcome), QqlError> {
+    let op = plan(statement)?;
+    let stmt_type = op.compile_stmt_type();
+    match to_rest_route(&op) {
+        Ok(route) => Ok((stmt_type, ProjectOutcome::Route(route))),
+        // No single Qdrant route exists, but the statement itself compiled:
+        // surface which flavor so each entry maps it to its own contract.
+        Err(RestProjectionError::ClientSideOnly { stmt_type }) => {
+            Ok((stmt_type, ProjectOutcome::ClientSide(stmt_type)))
+        }
+        Err(RestProjectionError::OverwriteRequiresBatch) => {
+            Ok((stmt_type, ProjectOutcome::BatchOnly))
+        }
+        // A serialization failure is a plan-IR regression, not a missing
+        // route — surface it instead of swallowing it as "client-side".
+        Err(RestProjectionError::SerializeFailed { message }) => Err(QqlError::execution(
+            "QQL-PLAN-SERIALIZE",
+            format!("plan IR REST request body serialization failed: {message}"),
+            None,
+        )),
+    }
+}
+
 /// Plan a statement and project it to a REST route in one call.
 ///
 /// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
@@ -376,28 +432,24 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
 /// `QQL-REST-OVERWRITE-BATCH-ONLY` for `OVERWRITE` payload writes (merge-only
 /// `POST /points/payload` cannot replace payload; use a batch).
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
-    let op = plan(statement)?;
-    to_rest_route(&op).map_err(|err| match err {
-        RestProjectionError::ClientSideOnly { stmt_type } => QqlError::validation(
+    let (_, outcome) = plan_and_project(statement)?;
+    match outcome {
+        ProjectOutcome::Route(route) => Ok(route),
+        ProjectOutcome::ClientSide(stmt_type) => Err(QqlError::validation(
             "QQL-REST-CLIENT-SIDE",
             format!(
                 "{stmt_type} is client-side and has no single Qdrant REST route; \
                  execute via the runtime CROSS RERANK path"
             ),
             None,
-        ),
-        RestProjectionError::OverwriteRequiresBatch => QqlError::validation(
+        )),
+        ProjectOutcome::BatchOnly => Err(QqlError::validation(
             "QQL-REST-OVERWRITE-BATCH-ONLY",
             "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only; \
              run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
             None,
-        ),
-        RestProjectionError::SerializeFailed { message } => QqlError::execution(
-            "QQL-PLAN-SERIALIZE",
-            format!("plan IR REST request body serialization failed: {message}"),
-            None,
-        ),
-    })
+        )),
+    }
 }
 
 /// Offline compile result for host SDKs.
@@ -418,25 +470,10 @@ pub struct CompiledStatement {
 /// REST path/method/payload are present only when a real Qdrant route exists
 /// (`None` for client-side-only and batch-only operations).
 pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core::error::QqlError> {
-    let op = plan(statement)?;
-    let stmt_type = op.compile_stmt_type();
-    let route = match to_rest_route(&op) {
-        Ok(route) => Some(route),
-        // No single Qdrant route exists, but the statement itself compiled:
-        // SDKs surface `stmt_type` with no route.
-        Err(
-            RestProjectionError::ClientSideOnly { .. }
-            | RestProjectionError::OverwriteRequiresBatch,
-        ) => None,
-        // A serialization failure is a plan-IR regression, not a missing
-        // route — surface it instead of swallowing it as "client-side".
-        Err(RestProjectionError::SerializeFailed { message }) => {
-            return Err(QqlError::execution(
-                "QQL-PLAN-SERIALIZE",
-                format!("plan IR REST request body serialization failed: {message}"),
-                None,
-            ));
-        }
+    let (stmt_type, outcome) = plan_and_project(statement)?;
+    let route = match outcome {
+        ProjectOutcome::Route(route) => Some(route),
+        ProjectOutcome::ClientSide(_) | ProjectOutcome::BatchOnly => None,
     };
     Ok(CompiledStatement { stmt_type, route })
 }

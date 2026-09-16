@@ -42,8 +42,8 @@ use qql_plan::types::{
     GeoBoundingBox as PlanGeoBoundingBox, GeoLineString as PlanGeoLineString,
     GeoPoint as PlanGeoPoint, GeoPolygon as PlanGeoPolygon, GeoRadius as PlanGeoRadius,
     MatchValue as PlanMatchValue, NestedCondition as PlanNestedCondition,
-    RangeParams as PlanRangeParams, SliceCondition as PlanSliceCondition,
-    ValuesCountParams as PlanValuesCountParams,
+    PlanRangeBound as PlanBound, RangeParams as PlanRangeParams,
+    SliceCondition as PlanSliceCondition, ValuesCountParams as PlanValuesCountParams,
 };
 use serde_json::Value;
 
@@ -274,10 +274,13 @@ fn lower_any_variants(values: &[Value]) -> Result<AnyVariants, QqlError> {
 }
 
 fn lower_range(range: &PlanRangeParams) -> Result<RangeInterface, QqlError> {
+    // A `DateTime` bound selects the datetime interface, mirroring the old
+    // `Value::is_string` scan (ISO-looking strings already classify as
+    // `DateTime` at lowering; opaque `Text` never does).
     let datetime = [&range.lt, &range.gt, &range.gte, &range.lte]
         .into_iter()
         .flatten()
-        .any(Value::is_string);
+        .any(|bound| matches!(bound, PlanBound::DateTime(_)));
     if datetime {
         Ok(RangeInterface::DateTime(Range {
             lt: lower_datetime(range.lt.as_ref())?,
@@ -295,26 +298,28 @@ fn lower_range(range: &PlanRangeParams) -> Result<RangeInterface, QqlError> {
     }
 }
 
-fn lower_datetime(value: Option<&Value>) -> Result<Option<DateTimeWrapper>, QqlError> {
-    match value {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(text)) => text.parse::<DateTimeWrapper>().map(Some).map_err(|error| {
-            filter_error(format!("invalid datetime range bound '{text}': {error}"))
-        }),
+fn lower_datetime(bound: Option<&PlanBound>) -> Result<Option<DateTimeWrapper>, QqlError> {
+    match bound {
+        None => Ok(None),
+        Some(PlanBound::DateTime(text)) => {
+            text.parse::<DateTimeWrapper>().map(Some).map_err(|error| {
+                filter_error(format!("invalid datetime range bound '{text}': {error}"))
+            })
+        }
         Some(other) => Err(filter_error(format!(
-            "datetime range bounds must be RFC 3339 strings, got {other}"
+            "datetime range bounds must be RFC 3339 strings, got {other:?}"
         ))),
     }
 }
 
-fn lower_float(value: Option<&Value>) -> Result<Option<OrderedFloat<f64>>, QqlError> {
-    match value {
-        None | Some(Value::Null) => Ok(None),
-        Some(number) => number
-            .as_f64()
-            .map(OrderedFloat)
-            .map(Some)
-            .ok_or_else(|| filter_error(format!("range bounds must be numbers, got {number}"))),
+fn lower_float(bound: Option<&PlanBound>) -> Result<Option<OrderedFloat<f64>>, QqlError> {
+    match bound {
+        None => Ok(None),
+        Some(numeric) => {
+            numeric.as_f64().map(OrderedFloat).map(Some).ok_or_else(|| {
+                filter_error(format!("range bounds must be numbers, got {numeric:?}"))
+            })
+        }
     }
 }
 
@@ -421,8 +426,8 @@ mod tests {
         FilterExpression as PlanExpression, GeoPoint as PlanGeoPoint,
         HasVectorCondition as PlanHasVector, IsEmptyCondition as PlanIsEmpty,
         IsNullCondition as PlanIsNull, KeyOnly, MatchValue as PlanMatch,
-        NestedParams as PlanNestedParams, RangeParams as PlanRange, SliceParams as PlanSliceParams,
-        ValuesCountParams as PlanValuesCount,
+        NestedParams as PlanNestedParams, PlanRangeBound as PlanBound, RangeParams as PlanRange,
+        SliceParams as PlanSliceParams, ValuesCountParams as PlanValuesCount,
     };
     use serde_json::json;
 
@@ -514,8 +519,8 @@ mod tests {
                     "price",
                     PlanRange {
                         gt: None,
-                        gte: Some(json!(10)),
-                        lt: Some(json!(100)),
+                        gte: Some(PlanBound::Int(10)),
+                        lt: Some(PlanBound::Int(100)),
                         lte: None,
                     },
                 ),
@@ -523,8 +528,8 @@ mod tests {
                     "created_at",
                     PlanRange {
                         gt: None,
-                        gte: Some(json!("2024-01-01T00:00:00Z")),
-                        lt: Some(json!("2025-01-01T00:00:00Z")),
+                        gte: Some(PlanBound::DateTime("2024-01-01T00:00:00Z".to_string())),
+                        lt: Some(PlanBound::DateTime("2025-01-01T00:00:00Z".to_string())),
                         lte: None,
                     },
                 ),
@@ -671,7 +676,7 @@ mod tests {
                         gt: None,
                         gte: None,
                         lt: None,
-                        lte: Some(json!(9)),
+                        lte: Some(PlanBound::Int(9)),
                     },
                 ),
             ],
@@ -712,7 +717,7 @@ mod tests {
             "created_at",
             PlanRange {
                 gt: None,
-                gte: Some(json!("2024-01-01T00:00:00Z")),
+                gte: Some(PlanBound::DateTime("2024-01-01T00:00:00Z".to_string())),
                 lt: None,
                 lte: None,
             },

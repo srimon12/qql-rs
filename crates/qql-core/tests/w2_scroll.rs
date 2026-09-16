@@ -3,7 +3,7 @@
 //! Items: SCROLL `ORDER BY`, SCROLL payload selectors, `ORDER BY … START
 //! FROM`, group `LOOKUP` selectors, and prefetch `LOOKUP … SHARD` routing.
 
-use qql_core::ast::{OrderDirection, QueryExpr, Stmt};
+use qql_core::ast::{OrderDirection, PrefetchSource, QueryExpr, QueryStmt, Stmt};
 use qql_core::fmt::format_stmt;
 use qql_core::parser::Parser;
 
@@ -11,10 +11,55 @@ fn parse(source: &str) -> Stmt {
     Parser::parse(source).unwrap_or_else(|e| panic!("parse {source}: {e}"))
 }
 
+/// Source locations shift whenever the formatter rewrites preceding text,
+/// so they are not part of round-trip semantics: strip them before compare.
+fn strip_spans(stmt: &mut Stmt) {
+    if let Stmt::Query(q) = stmt {
+        strip_query_spans(q);
+    }
+}
+
+fn strip_query_spans(q: &mut QueryStmt) {
+    q.collection_span = None;
+    if let Some(group) = q.group.as_mut() {
+        group.field_span = None;
+    }
+    for cte in &mut q.ctes {
+        strip_query_spans(&mut cte.query);
+    }
+    // Deliberately exhaustive so a new prefetch-carrying variant fails to
+    // compile here until covered (mirrors `transform`'s recursion).
+    let prefetch = match &mut q.expression {
+        QueryExpr::Nearest { prefetch, .. }
+        | QueryExpr::Recommend { prefetch, .. }
+        | QueryExpr::Context { prefetch, .. }
+        | QueryExpr::Discover { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. }
+        | QueryExpr::RelevanceFeedback { prefetch, .. }
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => Some(prefetch),
+        QueryExpr::Points { .. }
+        | QueryExpr::OrderBy { .. }
+        | QueryExpr::SampleRandom
+        | QueryExpr::Hybrid { .. } => None,
+    };
+    if let Some(prefetches) = prefetch {
+        for stage in prefetches {
+            if let PrefetchSource::Query(nested) = &mut stage.source {
+                strip_query_spans(nested);
+            }
+        }
+    }
+}
+
 fn assert_round_trip(source: &str, expected: &str) {
     let stmt = parse(source);
     assert_eq!(format_stmt(&stmt), expected, "canonical form of {source}");
-    let reparsed = parse(expected);
+    let mut reparsed = parse(expected);
+    let mut stmt = stmt;
+    strip_spans(&mut reparsed);
+    strip_spans(&mut stmt);
     assert_eq!(reparsed, stmt, "AST mismatch for {source}");
 }
 

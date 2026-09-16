@@ -47,6 +47,9 @@ pub mod config;
 /// Remote embedding-server adapter ([`HttpEmbedder`](embedder::HttpEmbedder))
 /// implementing the `qql-embed` [`Embedder`](embedder::Embedder) trait.
 pub mod embedder;
+/// Reqwest `HttpEmbedder` client, split from [`embedder`].
+#[cfg(feature = "rest")]
+mod embedder_http;
 /// The executor: parse → prepare → plan → batch → dispatch.
 pub mod executor;
 /// Tonic channel client and typed protobuf conversions for the gRPC transport.
@@ -66,6 +69,9 @@ pub mod qdrant_grpc;
 /// `QdrantOps` over JSON HTTP.
 #[cfg(feature = "rest")]
 pub mod rest;
+/// REST client construction (`RestQdrant` constructors), split from [`rest`].
+#[cfg(feature = "rest")]
+mod rest_client;
 /// Strict per-operation REST response parsing (OpenAPI shapes only, no
 /// fallbacks). Used exclusively by the REST transport.
 #[cfg(feature = "rest")]

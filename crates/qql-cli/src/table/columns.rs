@@ -81,7 +81,8 @@ pub fn query_cell(hit: &SearchHit, column: &QueryColumn) -> Cell {
     match &column.source {
         QueryColumnSource::Metadata("id") => Cell::text(hit.id.to_string()),
         QueryColumnSource::Metadata("score") => Cell {
-            // Shortest f32 round-trip decimal, matching the serialized report.
+            // Shortest round-trip decimal, matching the serialized report
+            // (scores are rounded once at ingestion via `score_f64`).
             value: hit.score.to_string(),
             alignment: Alignment::Right,
         },

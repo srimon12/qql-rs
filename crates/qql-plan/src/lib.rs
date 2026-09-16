@@ -33,6 +33,8 @@ mod rerank;
 /// Optional REST route projection and the offline `compile_statement` entry point.
 pub mod routing;
 pub mod semantic;
+/// AST → plan and plan → wire conversions for [`semantic`] primitives.
+mod semantic_conv;
 /// Wire and plan-IR request types shared by the REST projection and gRPC conversion.
 pub mod types;
 mod validate;

@@ -26,7 +26,7 @@ pub use prepared::PreparedStatement;
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub use response::{
     AnalyzeReport, BackendResponse, ExecData, ExecResponse, ExecutionReport, FacetHit,
-    GroupedSearchResult, OnError, SearchHit,
+    GroupedSearchResult, OnError, SearchHit, score_f64,
 };
 pub use telemetry::{
     HardwareUsage, InferenceUsage, ModelUsage, PhaseTimings, ServerTelemetry, ServerUsage,
