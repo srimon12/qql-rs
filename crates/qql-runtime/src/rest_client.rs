@@ -210,6 +210,20 @@ impl ChangeAliasesBody {
     }
 }
 
+/// Map a plan [`Method`](qql_plan::types::Method) to its reqwest verb.
+///
+/// One conversion for every sender: `execute_envelope` and the collection
+/// DDL steps share it instead of re-spelling the match.
+pub(crate) fn http_method(method: qql_plan::types::Method) -> reqwest::Method {
+    match method {
+        qql_plan::types::Method::Get => reqwest::Method::GET,
+        qql_plan::types::Method::Post => reqwest::Method::POST,
+        qql_plan::types::Method::Put => reqwest::Method::PUT,
+        qql_plan::types::Method::Patch => reqwest::Method::PATCH,
+        qql_plan::types::Method::Delete => reqwest::Method::DELETE,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

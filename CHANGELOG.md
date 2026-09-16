@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **DDL spans complete**: every DDL error carries the offending value's span; gRPC rejects non-double range bounds with `QQL-GRPC-RANGE-TYPE`; CLI scripts print one JSON shape on both modes with one lint-clean rule.
 - **Score path**: stack-buffer shortest-repr rounding with no heap alloc; cross-rerank sorts stored scores with NaN last.
+- **Envelope path**: one `execute_envelope` serves single ops and `call_body`; `execute_http` deleted; one method conversion shared.
 
 ### Fixed
 - **Score precision contract**: `SearchHit.score` is now `f64`, rounded once at ingestion via `score_f64` — the custom `serialize_f32` widened through `pythonize` to `0.949999988079071` in `results` / DBAPI rows while `hits()` said `0.95`. Custom serializer and pyqql twin deleted; regression test pins it. Vectors stay `Vec<f32>` passthrough by deliberate asymmetry (scalars get compared, vectors don't).

@@ -5,7 +5,6 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use qql_core::error::QqlError;
-use qql_plan::types::Method as PlanMethod;
 use qql_plan::types::ReadConsistencyParam;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
@@ -201,34 +200,13 @@ impl RestQdrant {
         path: &str,
         body: Option<&B>,
     ) -> Result<T, QqlError> {
-        let SendOutcome::Buffered {
-            url,
-            server_request_id,
-            text,
-        } = self.send(method, path, &[], body, false).await?
-        else {
-            unreachable!("buffered send never returns a stream");
-        };
-        let value: Value = serde_json::from_str(&text).map_err(|error| {
-            QqlError::backend(
-                "QQL-BACKEND-JSON",
-                format!(
-                    "failed to parse Qdrant response: {error} (request id: {server_request_id})"
-                ),
-                None,
-            )
-            .with_url(url.clone())
-        })?;
-        validate_success_envelope(&value, path)?;
+        let value = self.execute_envelope(method, path, &[], body).await?;
         serde_json::from_value(value).map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND-JSON",
-                format!(
-                    "failed to decode Qdrant response: {error} (request id: {server_request_id})"
-                ),
+                format!("failed to decode Qdrant response: {error}"),
                 None,
             )
-            .with_url(url.clone())
         })
     }
 
@@ -403,7 +381,19 @@ impl QdrantOps for RestQdrant {
             });
         }
         let route = qql_plan::plan::to_rest_route(op).map_err(|err| err.to_qql_error())?;
-        let envelope = self.execute_http(route).await?;
+        let query: Vec<(&str, &str)> = route
+            .query
+            .iter()
+            .map(|pair| (pair.0.as_str(), pair.1.as_str()))
+            .collect();
+        let envelope = self
+            .execute_envelope(
+                super::rest_client::http_method(route.method),
+                &route.path,
+                &query,
+                route.body.as_ref(),
+            )
+            .await?;
         crate::rest_response::parse_planned(op, envelope)
     }
 
@@ -479,15 +469,8 @@ impl RestQdrant {
                 )
             })?;
         for step in steps {
-            let method = match step.method {
-                PlanMethod::Get => Method::GET,
-                PlanMethod::Post => Method::POST,
-                PlanMethod::Put => Method::PUT,
-                PlanMethod::Patch => Method::PATCH,
-                PlanMethod::Delete => Method::DELETE,
-            };
             self.execute_typed::<_, serde::de::IgnoredAny>(
-                method,
+                super::rest_client::http_method(step.method),
                 &step.path,
                 &[],
                 Some(&step.body),
@@ -497,29 +480,22 @@ impl RestQdrant {
         Ok(())
     }
 
-    /// Low-level HTTP dispatch from a pre-built Route: the [`Self::send`]
-    /// stack, then the raw validated envelope for the per-operation parser.
-    async fn execute_http(&self, route: qql_plan::routing::Route) -> Result<Value, QqlError> {
-        let method = match route.method {
-            PlanMethod::Get => Method::GET,
-            PlanMethod::Post => Method::POST,
-            PlanMethod::Put => Method::PUT,
-            PlanMethod::Patch => Method::PATCH,
-            PlanMethod::Delete => Method::DELETE,
-        };
-        // Borrowed pairs; `send` encodes them exactly as before.
-        let query: Vec<(&str, &str)> = route
-            .query
-            .iter()
-            .map(|pair| (pair.0.as_str(), pair.1.as_str()))
-            .collect();
+    /// Validated full-envelope fetch: [`Self::send`] plus one JSON parse
+    /// plus [`validate_success_envelope`]. The single Value-envelope path;
+    /// [`Self::call_body`] and [`Self::execute_planned`] both ride it, so
+    /// envelope wording lives in exactly one place.
+    async fn execute_envelope<B: serde::Serialize + ?Sized>(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&B>,
+    ) -> Result<Value, QqlError> {
         let SendOutcome::Buffered {
             url,
             server_request_id,
             text,
-        } = self
-            .send(method, &route.path, &query, route.body.as_ref(), false)
-            .await?
+        } = self.send(method, path, query, body, false).await?
         else {
             unreachable!("buffered send never returns a stream");
         };
@@ -533,7 +509,7 @@ impl RestQdrant {
             )
             .with_url(url.clone())
         })?;
-        validate_success_envelope(&value, &route.path)?;
+        validate_success_envelope(&value, path)?;
         Ok(value)
     }
 }
