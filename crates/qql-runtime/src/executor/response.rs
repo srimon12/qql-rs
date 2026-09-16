@@ -171,7 +171,7 @@ pub enum OnError {
 /// `0.949999988079071`).
 ///
 /// Every transport parses scores through this helper (REST `parse_hit` via
-/// [`score_from_wire`], gRPC `scored_point_to_hit`, edge
+/// `score_from_wire`, gRPC `scored_point_to_hit`, edge
 /// `from_edge_scored_point_to_hit`, cross-rerank dispatch), so the stored
 /// value already carries the shortest decimal and plain
 /// `Serialize`/`pythonize` emit it identically everywhere — JSON text,
@@ -179,7 +179,7 @@ pub enum OnError {
 /// serializer. The mapping is monotonic over finite values, so sort order
 /// under `partial_cmp` is unchanged.
 ///
-/// The shortest decimal renders into a stack-resident [`ScoreBuf`] through
+/// The shortest decimal renders into a stack-resident `ScoreBuf` through
 /// the same std float formatter as `to_string`, so the decimal is identical
 /// without the per-hit `String` allocation; parsing it back as f64 yields
 /// the same value the old `v.to_string().parse()` round-trip produced.
