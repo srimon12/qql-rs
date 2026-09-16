@@ -200,6 +200,35 @@ pub(crate) fn parse_collection_names(envelope: Value) -> Result<Vec<String>, Qql
         .collect()
 }
 
+/// Parse `GET /collections/{name}` as an existence probe: any well-formed
+/// collection-info envelope (a `result` object with a string `status`, the
+/// same signal [`parse_collection_info`] reads) means the collection exists.
+/// Fails closed (`QQL-BACKEND-ENVELOPE`) on a missing or mistyped shape
+/// instead of sniffing for `status`/`exists` keys. The 404 → `Ok(false)` arm
+/// stays with the caller, keyed on the transport error message.
+pub(crate) fn parse_collection_exists(envelope: Value) -> Result<bool, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => {
+            return Err(envelope_err(
+                "get collection response is missing a result object with a string status",
+            ));
+        }
+    };
+    let result = match envelope.remove("result") {
+        Some(Value::Object(result)) => result,
+        _ => {
+            return Err(envelope_err(
+                "get collection response is missing a result object with a string status",
+            ));
+        }
+    };
+    match result.get("status").and_then(Value::as_str) {
+        Some(_) => Ok(true),
+        None => Err(envelope_err("collection info is missing a string status")),
+    }
+}
+
 /// Parse `GET /collections/{name}` (`result` → [`CollectionInfo`]).
 pub(crate) fn parse_collection_info(envelope: Value) -> Result<CollectionInfo, QqlError> {
     let result = match envelope {
@@ -736,6 +765,27 @@ mod tests {
         let config = quotas.data.quotas().expect("quota config");
         assert_eq!(config.enabled, Some(true));
         assert_eq!(config.max_resident_memory_percent, Some(80));
+    }
+
+    #[test]
+    fn parses_collection_exists_strictly() {
+        let info = json!({
+            "result": {"status": "green", "segments_count": 2},
+            "status": "ok",
+        });
+        assert!(parse_collection_exists(info).expect("exists"));
+
+        // Missing result, missing status, and non-object envelopes fail
+        // closed instead of reading as absent.
+        for bad in [
+            json!({"result": {}, "status": "ok"}),
+            json!({"result": {"exists": true}, "status": "ok"}),
+            json!({"status": "ok"}),
+            json!("ok"),
+        ] {
+            let err = parse_collection_exists(bad).unwrap_err();
+            assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+        }
     }
 
     #[test]

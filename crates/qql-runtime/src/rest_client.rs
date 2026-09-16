@@ -1,15 +1,19 @@
 //! REST client construction for Qdrant (`RestQdrant`).
 //!
 //! Split from `rest.rs` (size hygiene): the `RestQdrant` struct, its header
-//! pre-parsing, and every constructor. Request execution (`call_*`,
-//! `execute_typed`, `get_stream`), the `QdrantOps` implementation, and the
-//! envelope helpers stay in `rest`. Behavior is unchanged.
+//! pre-parsing, the alias wire body, and every constructor. Request execution
+//! (`send`, `call_*`, `execute_typed`, `get_stream`), the `QdrantOps`
+//! implementation, and the envelope helpers stay in `rest`. Behavior is
+//! unchanged.
 
 use std::time::Duration;
 
 use reqwest::{Client, header::HeaderValue};
+use serde::Serialize;
 
 use qql_core::error::QqlError;
+
+use crate::client::AliasAction;
 
 /// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
 pub const ROUTE_AFFINITY_HEADER: &str = "X-Qdrant-Route-Affinity";
@@ -161,5 +165,75 @@ impl RestQdrant {
     /// Current read-affinity value, if one is set.
     pub fn route_affinity(&self) -> Option<&str> {
         self.route_affinity.as_deref()
+    }
+}
+
+/// REST wire body for `POST /collections/aliases` (`ChangeAliasesOperation`).
+///
+/// The single constructor the transport calls: serializes to
+/// `{"actions": [{"delete_alias": {"alias_name": …}} |
+/// {"create_alias": {"collection_name": …, "alias_name": …}}]}` — byte for
+/// byte what the old inline `json!` built, now as a named type next to the
+/// transport instead of scattered shape assumptions.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ChangeAliasesBody {
+    actions: Vec<ChangeAliasesAction>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+enum ChangeAliasesAction {
+    #[serde(rename = "delete_alias")]
+    DeleteAlias { alias_name: String },
+    #[serde(rename = "create_alias")]
+    CreateAlias {
+        collection_name: String,
+        alias_name: String,
+    },
+}
+
+impl ChangeAliasesBody {
+    pub(crate) fn from_actions(actions: &[AliasAction]) -> Self {
+        Self {
+            actions: actions
+                .iter()
+                .map(|action| match action {
+                    AliasAction::Delete { alias } => ChangeAliasesAction::DeleteAlias {
+                        alias_name: alias.clone(),
+                    },
+                    AliasAction::Create { collection, alias } => ChangeAliasesAction::CreateAlias {
+                        collection_name: collection.clone(),
+                        alias_name: alias.clone(),
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_aliases_body_matches_alias_wire_shape() {
+        let body = ChangeAliasesBody::from_actions(&[
+            AliasAction::Delete {
+                alias: "old".into(),
+            },
+            AliasAction::Create {
+                collection: "docs".into(),
+                alias: "new".into(),
+            },
+        ]);
+        let value = serde_json::to_value(&body).expect("serializes");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "actions": [
+                    {"delete_alias": {"alias_name": "old"}},
+                    {"create_alias": {"collection_name": "docs", "alias_name": "new"}},
+                ],
+            })
+        );
     }
 }
