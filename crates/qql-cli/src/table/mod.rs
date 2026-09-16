@@ -127,7 +127,7 @@ mod tests {
     use qql::executor::{ExecData, ExecResponse, FacetHit, GroupedSearchResult, SearchHit};
     use qql::{PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey};
 
-    fn search_hit(id: PlanPointId, score: f32, payload: serde_json::Value) -> SearchHit {
+    fn search_hit(id: PlanPointId, score: f64, payload: serde_json::Value) -> SearchHit {
         SearchHit {
             id,
             score,

@@ -4,7 +4,7 @@ use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 use qql_plan::{PlannedOperation, plan};
 
-use crate::executor::response::{BackendResponse, ExecData};
+use crate::executor::response::{BackendResponse, ExecData, score_f64};
 use crate::executor::{ExecResponse, Executor, GroupedSearchResult, SearchHit};
 
 /// Trim a grouped result set by the client-side `group_offset` (which has no
@@ -356,7 +356,9 @@ impl Executor {
             .map(|(score, k)| {
                 let i = doc_idx[k];
                 let mut h = hits[i].clone();
-                h.score = score;
+                // Rank stays on the raw f32 pairs above (sort order
+                // unchanged); only the stored hit rounds once via `score_f64`.
+                h.score = score_f64(score);
                 h.collection = Some(candidates[hit_coll[i]].0.clone());
                 h
             })

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use qdrant_edge::{PointId, Record};
 
-use qql::executor::{FacetHit, GroupedSearchResult, SearchHit};
+use qql::executor::{FacetHit, GroupedSearchResult, SearchHit, score_f64};
 use qql_core::error::QqlError;
 use qql_plan::{PlanFacetValue, PlanGroupId, PlanPointId, PlanVectorStruct, PlanVectorValue};
 
@@ -64,11 +64,13 @@ fn from_edge_payload(payload: qdrant_edge::Payload) -> HashMap<String, serde_jso
     payload.0.into_iter().collect()
 }
 
-/// Typed search hit from a scored query point.
+/// Typed search hit from a scored query point. The engine `f32` score rounds
+/// once through [`score_f64`](qql::executor::score_f64), matching the
+/// REST/gRPC ingestion paths.
 pub(crate) fn from_edge_scored_point_to_hit(point: qdrant_edge::ScoredPoint) -> SearchHit {
     SearchHit {
         id: from_edge_plan_id(&point.id),
-        score: point.score,
+        score: score_f64(point.score),
         payload: point.payload.map(from_edge_payload),
         collection: None,
         vector: point.vector.map(edge_vector_to_typed),

@@ -9,7 +9,7 @@ use crate::executor::{ExecData, Executor, FacetHit, OnError, SearchHit};
 use qql_plan::{PlanFacetValue, PlanPointId};
 
 /// Typed hit fixture with string payload values.
-fn hit(id: PlanPointId, score: f32, payload: &[(&str, &str)]) -> SearchHit {
+fn hit(id: PlanPointId, score: f64, payload: &[(&str, &str)]) -> SearchHit {
     SearchHit {
         id,
         score,
