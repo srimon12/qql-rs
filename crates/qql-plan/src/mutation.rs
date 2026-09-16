@@ -14,8 +14,8 @@ use qql_core::error::QqlError;
 /// splice in at execution time. Template planning therefore yields the inline
 /// points only; executors must route point-param templates through the
 /// point-splice path, never dispatch a template plan directly.
-pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
-    UpsertRequest {
+pub fn lower_upsert_request(stmt: &UpsertStmt) -> Result<UpsertRequest, QqlError> {
+    Ok(UpsertRequest {
         points: stmt
             .points
             .iter()
@@ -24,14 +24,18 @@ pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
                 PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
             })
             .collect(),
-        update_filter: stmt.update_filter.as_ref().map(top_level_filter),
+        update_filter: stmt
+            .update_filter
+            .as_ref()
+            .map(top_level_filter)
+            .transpose()?,
         update_mode: stmt.update_mode.map(|mode| match mode {
             qql_core::ast::UpsertUpdateMode::InsertOnly => UpdateMode::InsertOnly,
             qql_core::ast::UpsertUpdateMode::UpdateOnly => UpdateMode::UpdateOnly,
             qql_core::ast::UpsertUpdateMode::Upsert => UpdateMode::Upsert,
         }),
         shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
-    }
+    })
 }
 
 fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
@@ -54,8 +58,8 @@ fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
 }
 
 /// Lower `DELETE` to the `POST /points/delete` body, by IDs or filter.
-pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
-    match &stmt.selector {
+pub fn lower_delete_request(stmt: &DeleteStmt) -> Result<DeleteRequest, QqlError> {
+    Ok(match &stmt.selector {
         PointSelector::Id(id) => DeleteRequest {
             points: Some(vec![point_id_req_typed(id)]),
             filter: None,
@@ -68,10 +72,10 @@ pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
         },
         PointSelector::Filter(filter) => DeleteRequest {
             points: None,
-            filter: Some(top_level_filter(filter)),
+            filter: Some(top_level_filter(filter)?),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
-    }
+    })
 }
 
 /// Lower `UPDATE … SET VECTOR` to the `PUT /points/vectors` request body.
@@ -93,12 +97,14 @@ pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorReque
 }
 
 /// Lower `UPDATE … SET PAYLOAD` to the `POST /points/payload` request body.
-pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRequest {
+pub fn lower_update_payload_request(
+    stmt: &UpdatePayloadStmt,
+) -> Result<UpdatePayloadRequest, QqlError> {
     let mut payload = serde_json::Map::with_capacity(stmt.payload.len());
     for (key, value) in &stmt.payload {
         payload.insert(key.clone(), value_to_json(value));
     }
-    match &stmt.selector {
+    Ok(match &stmt.selector {
         PointSelector::Id(id) => UpdatePayloadRequest {
             points: Some(vec![point_id_req_typed(id)]),
             filter: None,
@@ -115,17 +121,19 @@ pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRe
         },
         PointSelector::Filter(filter) => UpdatePayloadRequest {
             points: None,
-            filter: Some(top_level_filter(filter)),
+            filter: Some(top_level_filter(filter)?),
             payload,
             key: stmt.key.clone(),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
-    }
+    })
 }
 
 /// Lower `CLEAR PAYLOAD` to the `POST /points/payload/clear` request body.
-pub fn lower_clear_payload_request(stmt: &ClearPayloadStmt) -> ClearPayloadRequest {
-    match &stmt.selector {
+pub fn lower_clear_payload_request(
+    stmt: &ClearPayloadStmt,
+) -> Result<ClearPayloadRequest, QqlError> {
+    Ok(match &stmt.selector {
         PointSelector::Id(id) => ClearPayloadRequest {
             points: Some(vec![point_id_req_typed(id)]),
             filter: None,
@@ -138,15 +146,17 @@ pub fn lower_clear_payload_request(stmt: &ClearPayloadStmt) -> ClearPayloadReque
         },
         PointSelector::Filter(filter) => ClearPayloadRequest {
             points: None,
-            filter: Some(top_level_filter(filter)),
+            filter: Some(top_level_filter(filter)?),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
-    }
+    })
 }
 
 /// Lower `DELETE PAYLOAD <keys>` to the `POST /points/payload/delete` body.
-pub fn lower_delete_payload_request(stmt: &DeletePayloadStmt) -> DeletePayloadRequest {
-    match &stmt.selector {
+pub fn lower_delete_payload_request(
+    stmt: &DeletePayloadStmt,
+) -> Result<DeletePayloadRequest, QqlError> {
+    Ok(match &stmt.selector {
         PointSelector::Id(id) => DeletePayloadRequest {
             keys: stmt.keys.clone(),
             points: Some(vec![point_id_req_typed(id)]),
@@ -162,15 +172,17 @@ pub fn lower_delete_payload_request(stmt: &DeletePayloadStmt) -> DeletePayloadRe
         PointSelector::Filter(filter) => DeletePayloadRequest {
             keys: stmt.keys.clone(),
             points: None,
-            filter: Some(top_level_filter(filter)),
+            filter: Some(top_level_filter(filter)?),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
-    }
+    })
 }
 
 /// Lower `DELETE VECTOR <names>` to the `POST /points/vectors/delete` body.
-pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorRequest {
-    match &stmt.selector {
+pub fn lower_delete_vector_request(
+    stmt: &DeleteVectorStmt,
+) -> Result<DeleteVectorRequest, QqlError> {
+    Ok(match &stmt.selector {
         PointSelector::Id(id) => DeleteVectorRequest {
             points: Some(vec![point_id_req_typed(id)]),
             filter: None,
@@ -185,11 +197,11 @@ pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorReque
         },
         PointSelector::Filter(filter) => DeleteVectorRequest {
             points: None,
-            filter: Some(top_level_filter(filter)),
+            filter: Some(top_level_filter(filter)?),
             vector: stmt.vector_names.clone(),
             shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
         },
-    }
+    })
 }
 
 /// Parse a UUID point ID string (dashes optional) into its 128-bit value.
@@ -279,7 +291,7 @@ pub fn lower_scroll_request(
     shard_key: Option<qql_core::ast::ShardKey>,
     with_payload: Option<&qql_core::ast::PayloadSelector>,
     with_vector: Option<&qql_core::ast::VectorSelector>,
-) -> ScrollRequest {
+) -> Result<ScrollRequest, QqlError> {
     let with_payload = match with_payload {
         None => Some(PayloadSelectorReq::All(true)),
         Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),
@@ -303,8 +315,8 @@ pub fn lower_scroll_request(
         }
         None => Some(VectorSelectorReq::All(false)),
     };
-    ScrollRequest {
-        filter: filter.map(top_level_filter),
+    Ok(ScrollRequest {
+        filter: filter.map(top_level_filter).transpose()?,
         offset: after.map(|id| match id {
             qql_core::ast::PointId::Number(n) => PlanPointId::Number(n.saturating_add(1)),
             qql_core::ast::PointId::String(s) => {
@@ -328,7 +340,7 @@ pub fn lower_scroll_request(
             start_from: order.start_from.as_ref().map(value_to_json),
         }),
         shard_key: shard_key.as_ref().map(PlanShardKey::from),
-    }
+    })
 }
 
 /// Lower a planned mutation into a wire `UpdateOperation` for batching.

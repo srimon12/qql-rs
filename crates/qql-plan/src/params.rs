@@ -39,7 +39,7 @@ pub fn lower_search_params(
         Some(idf) => Some(match &idf.corpus {
             None => IdfSearchParams::Global,
             Some(filter) => {
-                let corpus = top_level_filter(filter);
+                let corpus = top_level_filter(filter)?;
                 if filter_expression_is_empty(&corpus) {
                     return Err(QqlError::validation(
                         "QQL-PLAN-IDF",

@@ -5,7 +5,7 @@
 //! structured validation error, never a silent drop.
 
 use qql_core::error::QqlError;
-use qql_plan::types::{FilterClause, FilterCompound, FilterExpression, MatchValue};
+use qql_plan::types::{FilterClause, FilterCompound, FilterExpression, MatchValue, PlanRangeBound};
 
 use crate::qdrant_grpc::qdrant;
 
@@ -79,10 +79,10 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
             }
             if let Some(r) = &fc.range {
                 field.range = Some(qdrant::Range {
-                    gt: r.gt.as_ref().and_then(|v| v.as_f64()),
-                    gte: r.gte.as_ref().and_then(|v| v.as_f64()),
-                    lt: r.lt.as_ref().and_then(|v| v.as_f64()),
-                    lte: r.lte.as_ref().and_then(|v| v.as_f64()),
+                    gt: range_double(r.gt.as_ref())?,
+                    gte: range_double(r.gte.as_ref())?,
+                    lt: range_double(r.lt.as_ref())?,
+                    lte: range_double(r.lte.as_ref())?,
                 });
             }
             if let Some(b) = &fc.geo_bounding_box {
@@ -263,6 +263,27 @@ pub(crate) fn list_integer(value: &serde_json::Value) -> Result<i64, QqlError> {
         ),
         None,
     ))
+}
+
+/// Convert one plan range bound to the gRPC double wire type.
+///
+/// The bundled proto's `Range` carries doubles only: string and datetime
+/// bounds have no wire representation, so they error here instead of
+/// lowering to a silent `None` (an empty range that matches wrong rows).
+fn range_double(bound: Option<&PlanRangeBound>) -> Result<Option<f64>, QqlError> {
+    bound
+        .map(|b| {
+            b.as_f64().ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-GRPC-RANGE-TYPE",
+                    format!(
+                        "range bound {b:?} cannot be represented on the gRPC path: the bundled Qdrant proto stores ranges as doubles; use the REST path for string or datetime bounds"
+                    ),
+                    None,
+                )
+            })
+        })
+        .transpose()
 }
 
 pub(crate) fn to_match(mv: &MatchValue) -> Result<qdrant::Match, QqlError> {

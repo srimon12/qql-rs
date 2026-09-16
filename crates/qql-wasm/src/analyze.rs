@@ -108,17 +108,8 @@ impl Client {
         let planned = qql_plan::plan(&prepared).map_err(qql_err_to_js)?;
         let prepare_plan_ms = now_ms() - prepare_start;
         let dispatch_start = now_ms();
-        let route = qql_plan::to_rest_route(&planned).map_err(|err| match err {
-            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => {
-                JsValue::from_str(&format!("{stmt_type} has no single Qdrant REST route"))
-            }
-            qql_plan::RestProjectionError::SerializeFailed { message } => {
-                JsValue::from_str(&format!("plan IR serialization failed: {message}"))
-            }
-            qql_plan::RestProjectionError::OverwriteRequiresBatch => JsValue::from_str(
-                "OVERWRITE has no single REST route: POST /points/payload is merge-only; use a BATCH block",
-            ),
-        })?;
+        let route =
+            qql_plan::to_rest_route(&planned).map_err(|err| qql_err_to_js(err.to_qql_error()))?;
         let envelope = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;

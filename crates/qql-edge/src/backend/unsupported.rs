@@ -321,6 +321,8 @@ mod tests {
 
     #[test]
     fn catalog_codes_are_stable_and_unique_for_primary_features() {
+        // Exhaustive: adding a variant without extending this list fails
+        // compilation, so new codes always get the uniqueness assertion.
         let features = [
             EdgeUnsupported::GroupLookup,
             EdgeUnsupported::ShardRouting,
@@ -332,9 +334,18 @@ mod tests {
             EdgeUnsupported::AlterSparseVectorDiff,
             EdgeUnsupported::CollectionParams,
             EdgeUnsupported::OptimizerKey,
-            EdgeUnsupported::RecommendAverageVector,
+            EdgeUnsupported::Timeout,
+            EdgeUnsupported::Consistency,
+            EdgeUnsupported::Wait,
+            EdgeUnsupported::CrossRerank,
             EdgeUnsupported::Quota,
+            EdgeUnsupported::RecommendAverageVector,
+            EdgeUnsupported::FormulaNary,
             EdgeUnsupported::PointReferenceQuery,
+            EdgeUnsupported::Route { path_hint: "test" },
+            EdgeUnsupported::Wal,
+            EdgeUnsupported::StrictMode,
+            EdgeUnsupported::Metadata,
         ];
         let mut codes = std::collections::BTreeSet::new();
         for f in features {
@@ -356,11 +367,20 @@ mod tests {
                 "{msg}"
             );
             if f.remote_hint().is_some() {
-                assert!(
-                    msg.to_ascii_lowercase().contains("remote")
-                        || msg.to_ascii_lowercase().contains("best_score"),
-                    "expected remediation in: {msg}"
-                );
+                // CrossRerank remediates through the client-side Executor,
+                // not remote Qdrant, so its message names the Executor.
+                if matches!(f, EdgeUnsupported::CrossRerank) {
+                    assert!(
+                        msg.to_ascii_lowercase().contains("executor"),
+                        "expected executor remediation in: {msg}"
+                    );
+                } else {
+                    assert!(
+                        msg.to_ascii_lowercase().contains("remote")
+                            || msg.to_ascii_lowercase().contains("best_score"),
+                        "expected remediation in: {msg}"
+                    );
+                }
             }
         }
     }

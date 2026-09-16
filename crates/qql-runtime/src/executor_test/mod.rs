@@ -1,6 +1,7 @@
 #![allow(clippy::field_reassign_with_default)]
 
 mod batch;
+#[cfg(feature = "rest")]
 mod bm25;
 mod ddl;
 pub(crate) mod mock;

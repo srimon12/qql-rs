@@ -3,14 +3,13 @@
 //! One implementation of the `execute(query, options)` contract — string
 //! scripts, arrays of strings/Stmts, single Stmts, named/positional/statement-
 //! scoped parameters — so the two Node SDKs cannot diverge. The rule for
-//! parameter dispatch is [`qql_core::params_json::plan_statement_params`].
+//! parameter dispatch is [`qql_core::params_json::plan_value_params`].
 
 use napi::bindgen_prelude::{FromNapiValue, JsObjectValue as _, Object, Unknown};
 use qql_core::ast;
 use qql_core::error::QqlError;
 use qql_core::params_json::{
-    ValueParamPlan, bind_stmt_with_params, bind_stmt_with_values, bind_str_with_params,
-    bind_str_with_values, param_for, param_value_for, plan_statement_params, plan_value_params,
+    ValueParamPlan, bind_stmt_with_values, bind_str_with_values, param_value_for, plan_value_params,
 };
 use qql_core::parser::Parser;
 use std::future::Future;
@@ -136,13 +135,6 @@ pub async fn upsert_many_dispatch(
         .await
 }
 
-/// True when `params` is a non-empty array whose entries are all objects or
-/// arrays — a statement-scoped candidate under the shared batch contract.
-fn scoped_candidate(params: Option<&serde_json::Value>) -> bool {
-    matches!(params, Some(serde_json::Value::Array(arr))
-        if !arr.is_empty() && arr.iter().all(|p| p.is_object() || p.is_array()))
-}
-
 /// Close a one-shot executor after `run` completes, so a failed dispatch
 /// cannot leak the underlying connection (for edge: on-disk shards and the
 /// loaded model). Mirrors the Python wrapper's `try/finally: close()`
@@ -165,158 +157,10 @@ where
     }
 }
 
-/// Analyze a single QQL query string or Stmt: static plan plus measured
-/// execution (per-phase client timings, server time, hardware/inference
-/// usage). Batches fail closed (`QQL-VALIDATION-ANALYZE-BATCH`) instead of
-/// silently analyzing one entry — analyze each entry separately.
-pub async fn explain_analyze_dispatch(
-    executor: &qql::executor::Executor,
-    query: serde_json::Value,
-    options: Option<&serde_json::Value>,
-) -> Result<qql::executor::AnalyzeReport, QqlError> {
-    let on_error = on_error_from(options);
-    // JS `null` means "no params" (mirrors Python `params=None`).
-    let params = options
-        .and_then(|o| o.get("params"))
-        .filter(|p| !p.is_null());
-
-    match &query {
-        serde_json::Value::String(s) => {
-            let bound = match params {
-                Some(p) => bind_str_with_params(s, p, false)?,
-                None => s.clone(),
-            };
-            executor.explain_analyze(&bound, on_error).await
-        }
-        serde_json::Value::Array(_) => Err(QqlError::validation(
-            "QQL-VALIDATION-ANALYZE-BATCH",
-            "explainAnalyze accepts a single statement (string or Stmt), not a batch; analyze each entry separately",
-            None,
-        )),
-        _ => {
-            let mut s: ast::Stmt = serde_json::from_value(query).map_err(|e| {
-                QqlError::validation("QQL-BATCH-INVARIANT", format!("invalid Stmt: {e}"), None)
-            })?;
-            if let Some(p) = params {
-                bind_stmt_with_params(&mut s, p)?;
-            }
-            executor.explain_analyze_node(s, on_error).await
-        }
-    }
-}
-/// Execute a QQL query string, a Stmt, or an array of either against
-/// `executor`, binding `options.params` per the shared batch contract.
-///
-/// Multi-statement strings (semicolons) and arrays are auto-batched. Returns
-/// the transport-neutral `qql::executor::ExecutionReport`; the SDK crates
-/// serialize it for their JS wrapper.
-pub async fn execute_dispatch(
-    executor: &qql::executor::Executor,
-    query: serde_json::Value,
-    options: Option<&serde_json::Value>,
-) -> Result<qql::executor::ExecutionReport, QqlError> {
-    let on_error = on_error_from(options);
-    let stop = matches!(on_error, qql::executor::OnError::Stop);
-    // JS `null` means "no params" (mirrors Python `params=None`).
-    let params = options
-        .and_then(|o| o.get("params"))
-        .filter(|p| !p.is_null());
-
-    match &query {
-        serde_json::Value::String(s) => {
-            // A scoped params array for a string input: parse once to count
-            // the script's statements, then let the shared planner enforce
-            // the exact length contract.
-            if scoped_candidate(params) {
-                let p = params.unwrap_or(&serde_json::Value::Null);
-                let mut stmts = Parser::parse_all(s)?;
-                let plan = plan_statement_params(p, stmts.len())?;
-                if let qql_core::params_json::ParamPlan::Scoped(list) = &plan {
-                    for (i, stmt) in stmts.iter_mut().enumerate() {
-                        bind_stmt_with_params(stmt, &list[i])?;
-                    }
-                    let results = executor.execute_batch_nodes(stmts, stop).await?;
-                    return Ok(qql::executor::ExecutionReport::from_results(results));
-                }
-                // Container arrays always scope or err, so the Shared arm is
-                // unreachable; fall through to whole-string binding for
-                // robustness against future planner changes.
-            }
-            let bound = match params {
-                Some(p) => bind_str_with_params(s, p, false)?,
-                None => s.clone(),
-            };
-            executor.execute(&bound, on_error).await
-        }
-        serde_json::Value::Array(arr) => {
-            if arr.is_empty() {
-                // Fail closed like the executor does for an empty string —
-                // an empty array must not return a silently-empty ok report.
-                return Err(QqlError::validation(
-                    "QQL-VALIDATION-EMPTY-SCRIPT",
-                    "no statements to execute; the query is empty or contains only whitespace",
-                    None,
-                ));
-            }
-            let plan = match params {
-                Some(p) => Some(plan_statement_params(p, arr.len())?),
-                None => None,
-            };
-            if arr[0].is_string() {
-                let mut bound_strs = Vec::with_capacity(arr.len());
-                for (i, v) in arr.iter().enumerate() {
-                    let s = v.as_str().ok_or_else(|| {
-                        QqlError::validation(
-                            "QQL-BATCH-INVARIANT",
-                            "batch items must be strings",
-                            None,
-                        )
-                    })?;
-                    let bound = match &plan {
-                        Some(plan) => bind_str_with_params(s, param_for(plan, i), false)?,
-                        None => s.to_string(),
-                    };
-                    bound_strs.push(bound);
-                }
-                let refs: Vec<&str> = bound_strs.iter().map(String::as_str).collect();
-                executor.execute_batch(&refs, on_error).await
-            } else {
-                let mut stmts = Vec::with_capacity(arr.len());
-                for (i, v) in arr.iter().enumerate() {
-                    let mut s: ast::Stmt = serde_json::from_value(v.clone()).map_err(|e| {
-                        QqlError::validation(
-                            "QQL-BATCH-INVARIANT",
-                            format!("invalid Stmt: {e}"),
-                            None,
-                        )
-                    })?;
-                    if let Some(plan) = &plan {
-                        bind_stmt_with_params(&mut s, param_for(plan, i))?;
-                    }
-                    stmts.push(s);
-                }
-                let results = executor.execute_batch_nodes(stmts, stop).await?;
-                Ok(qql::executor::ExecutionReport::from_results(results))
-            }
-        }
-        _ => {
-            let mut s: ast::Stmt = serde_json::from_value(query).map_err(|e| {
-                QqlError::validation("QQL-BATCH-INVARIANT", format!("invalid Stmt: {e}"), None)
-            })?;
-            if let Some(p) = params {
-                bind_stmt_with_params(&mut s, p)?;
-            }
-            let results = executor.execute_batch_nodes(vec![s], stop).await?;
-            Ok(qql::executor::ExecutionReport::from_results(results))
-        }
-    }
-}
-
 /// True when typed `params` is a non-empty list whose entries are all dicts
 /// or lists — a statement-scoped candidate under the shared batch contract.
 ///
-/// Same rule as [`scoped_candidate`], minus the JSON layer. `F32Array`
-/// counts as a scalar here (a vector value, never a per-statement
+/// `F32Array` counts as a scalar here (a vector value, never a per-statement
 /// container).
 fn scoped_value_candidate(params: Option<&ast::Value>) -> bool {
     matches!(params, Some(ast::Value::List(items))
@@ -326,9 +170,12 @@ fn scoped_value_candidate(params: Option<&ast::Value>) -> bool {
                 .all(|p| matches!(p, ast::Value::Dict(_) | ast::Value::List(_))))
 }
 
-/// Analyze a single QQL query string or Stmt with host-typed `params`.
+/// Analyze a single QQL query string or Stmt with host-typed `params`:
+/// static plan plus measured execution (per-phase client timings, server
+/// time, hardware/inference usage). Batches fail closed
+/// (`QQL-VALIDATION-ANALYZE-BATCH`) instead of silently analyzing one
+/// entry — analyze each entry separately.
 ///
-/// Same contract as [`explain_analyze_dispatch`], minus the JSON layer:
 /// `params` already went through [`jsparams::unknown_opt_to_value`], so
 /// typed arrays bind packed instead of arriving as index-keyed objects.
 pub async fn explain_analyze_dispatch_typed(
@@ -365,11 +212,14 @@ pub async fn explain_analyze_dispatch_typed(
 /// Execute a QQL query string, a Stmt, or an array of either against
 /// `executor`, binding host-typed `params` per the shared batch contract.
 ///
-/// Same contract as [`execute_dispatch`], minus the JSON layer: `params`
-/// already went through [`jsparams::unknown_opt_to_value`], so typed arrays
-/// bind packed instead of arriving as index-keyed objects. Requested
-/// statements keep JSON form — Stmt JSON from `toObject()` is always
-/// JSON-safe; only `params` needed the typed path.
+/// Multi-statement strings (semicolons) and arrays are auto-batched. Returns
+/// the transport-neutral `qql::executor::ExecutionReport`; the SDK crates
+/// serialize it for their JS wrapper.
+///
+/// `params` already went through [`jsparams::unknown_opt_to_value`], so
+/// typed arrays bind packed instead of arriving as index-keyed objects.
+/// Requested statements keep JSON form — Stmt JSON from `toObject()` is
+/// always JSON-safe; only `params` needed the typed path.
 pub async fn execute_dispatch_typed(
     executor: &qql::executor::Executor,
     query: serde_json::Value,

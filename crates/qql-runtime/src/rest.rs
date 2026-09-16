@@ -5,7 +5,6 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use qql_core::error::QqlError;
-use qql_plan::types::Method as PlanMethod;
 use qql_plan::types::ReadConsistencyParam;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
@@ -73,6 +72,19 @@ pub(crate) fn is_collection_missing_message(message: &str) -> bool {
     message.contains("404") || message.contains("Not found")
 }
 
+/// Outcome of [`RestQdrant::send`]: buffered text for JSON routes, the live
+/// response for opaque streams. Error statuses never surface here — `send`
+/// maps them to the classified backend error before returning, so every route
+/// shares one status/error taxonomy (the old `execute_typed` wording).
+enum SendOutcome {
+    Buffered {
+        url: String,
+        server_request_id: String,
+        text: String,
+    },
+    Stream(reqwest::Response),
+}
+
 impl RestQdrant {
     fn apply_headers(
         &self,
@@ -94,20 +106,44 @@ impl RestQdrant {
         req.header(REQUEST_ID_HEADER, request_id)
     }
 
-    async fn call_body<B: serde::Serialize + ?Sized, T: DeserializeOwned>(
+    /// The single HTTP send stack behind every REST route: URL join, query
+    /// pairs, headers (api-key / affinity / request id), one-shot JSON body
+    /// serialization, send, and the shared status/error taxonomy. A set body
+    /// serializes exactly as `reqwest::RequestBuilder::json` would (same
+    /// bytes, same `Content-Type`); a serialization failure is
+    /// `QQL-PLAN-SERIALIZE`, as before. `stream` leaves a 2xx body unread for
+    /// chunk-by-chunk consumers; error bodies are still read so the failure
+    /// carries the classified backend code and detail.
+    async fn send<B: serde::Serialize + ?Sized>(
         &self,
         method: Method,
         path: &str,
+        query: &[(&str, &str)],
         body: Option<&B>,
-    ) -> Result<T, QqlError> {
+        stream: bool,
+    ) -> Result<SendOutcome, QqlError> {
         let mut url_buf = String::with_capacity(self.base_url.len() + path.len());
         url_buf.push_str(&self.base_url);
         url_buf.push_str(path);
         let request_id = next_request_id();
         let mut req = self.client.request(method, &url_buf);
+        if !query.is_empty() {
+            req = req.query(&query);
+        }
         req = self.apply_headers(req, &request_id);
         if let Some(b) = body {
-            req = req.json(b);
+            // Single serialization: `req.json` would do the same work, but
+            // spelling it out keeps the to_vec/from_str pairing visible.
+            let bytes = serde_json::to_vec(b).map_err(|error| {
+                QqlError::execution(
+                    "QQL-PLAN-SERIALIZE",
+                    format!("plan IR REST request body serialization failed: {error}"),
+                    None,
+                )
+            })?;
+            req = req
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(bytes);
         }
         let resp = req.send().await.map_err(|error| {
             QqlError::transport(
@@ -125,6 +161,9 @@ impl RestQdrant {
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned)
             .unwrap_or_else(|| request_id.clone());
+        if stream && status.is_success() {
+            return Ok(SendOutcome::Stream(resp));
+        }
         let text = resp.text().await.map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND-READ",
@@ -146,26 +185,28 @@ impl RestQdrant {
             .with_url(url_buf.clone())
             .with_field("request_id", server_request_id.clone()));
         }
-        let value: Value = serde_json::from_str(&text).map_err(|error| {
-            QqlError::backend(
-                "QQL-BACKEND-JSON",
-                format!(
-                    "failed to parse Qdrant response: {error} (request id: {server_request_id})"
-                ),
-                None,
-            )
-            .with_url(url_buf.clone())
-        })?;
-        validate_success_envelope(&value, path)?;
+        // A streaming 2xx returned above and a streaming error returned
+        // above, so reaching here means `stream` is false.
+        Ok(SendOutcome::Buffered {
+            url: url_buf,
+            server_request_id,
+            text,
+        })
+    }
+
+    async fn call_body<B: serde::Serialize + ?Sized, T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&B>,
+    ) -> Result<T, QqlError> {
+        let value = self.execute_envelope(method, path, &[], body).await?;
         serde_json::from_value(value).map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND-JSON",
-                format!(
-                    "failed to decode Qdrant response: {error} (request id: {server_request_id})"
-                ),
+                format!("failed to decode Qdrant response: {error}"),
                 None,
             )
-            .with_url(url_buf.clone())
         })
     }
 
@@ -183,9 +224,10 @@ impl RestQdrant {
         self.call::<Value>(Method::GET, path, None).await
     }
 
-    /// Typed request/response fast path: a single `to_string` for the body
-    /// and a single `from_str` for the envelope. `to_rest_route` stays for
-    /// debugging and for paths that consume the raw envelope value.
+    /// Typed request/response fast path: a single `to_vec` for the body
+    /// (inside [`Self::send`]) and a single `from_str` for the envelope.
+    /// `to_rest_route` stays for debugging and for paths that consume the
+    /// raw envelope value.
     ///
     /// Error taxonomy matches [`Self::call_body`] verbatim: transport and
     /// JSON-syntax failures keep their messages, and valid JSON with an
@@ -199,66 +241,14 @@ impl RestQdrant {
         query: &[(&str, &str)],
         body: Option<&B>,
     ) -> Result<T, QqlError> {
-        let mut url_buf = String::with_capacity(self.base_url.len() + path.len());
-        url_buf.push_str(&self.base_url);
-        url_buf.push_str(path);
-        let request_id = next_request_id();
-        let mut req = self.client.request(method, &url_buf);
-        if !query.is_empty() {
-            req = req.query(&query);
-        }
-        req = self.apply_headers(req, &request_id);
-        if let Some(b) = body {
-            // Single serialization: `req.json` would do the same work, but
-            // spelling it out keeps the to_string/from_str pairing visible.
-            let text = serde_json::to_string(b).map_err(|error| {
-                QqlError::execution(
-                    "QQL-PLAN-SERIALIZE",
-                    format!("plan IR REST request body serialization failed: {error}"),
-                    None,
-                )
-            })?;
-            req = req
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(text);
-        }
-        let resp = req.send().await.map_err(|error| {
-            QqlError::transport(
-                "QQL-TRANSPORT-REQUEST",
-                format!("HTTP request failed: {error} (request id: {request_id})"),
-                None,
-            )
-            .with_url(url_buf.clone())
-            .with_field("request_id", request_id.clone())
-        })?;
-        let status = resp.status();
-        let server_request_id = resp
-            .headers()
-            .get(REQUEST_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned)
-            .unwrap_or_else(|| request_id.clone());
-        let text = resp.text().await.map_err(|error| {
-            QqlError::backend(
-                "QQL-BACKEND-READ",
-                format!("failed to read response body: {error}"),
-                None,
-            )
-            .with_url(url_buf.clone())
-        })?;
-        if !status.is_success() {
-            let limit = text.floor_char_boundary(4096);
-            let detail = &text[..limit];
-            let code = classify_backend_error_code(status.as_u16(), detail);
-            return Err(QqlError::backend(
-                code,
-                format!("Qdrant returned {status}: {detail} (request id: {server_request_id})"),
-                None,
-            )
-            .with_status(status.as_u16())
-            .with_url(url_buf.clone())
-            .with_field("request_id", server_request_id.clone()));
-        }
+        let SendOutcome::Buffered {
+            url: url_buf,
+            server_request_id,
+            text,
+        } = self.send(method, path, query, body, false).await?
+        else {
+            unreachable!("buffered send never returns a stream");
+        };
         let envelope: Envelope<T> = serde_json::from_str(&text).map_err(|error| {
             if error.is_data()
                 && let Ok(shape) = serde_json::from_str::<Value>(&text)
@@ -287,43 +277,14 @@ impl RestQdrant {
 
     /// Begin a streaming GET for an opaque, non-JSON body (a snapshot archive).
     ///
-    /// Applies the same API-key / affinity / request-id headers and backend
-    /// error classification as [`Self::call_body`], but leaves the body
-    /// unread and unparsed so callers consume it chunk by chunk.
+    /// The [`Self::send`] stack with the body left unread and unparsed, so
+    /// callers consume it chunk by chunk.
     pub(crate) async fn get_stream(&self, path: &str) -> Result<reqwest::Response, QqlError> {
-        let url = format!("{}{}", self.base_url, path);
-        let request_id = next_request_id();
-        let request = self.apply_headers(self.client.get(&url), &request_id);
-        let response = request.send().await.map_err(|error| {
-            QqlError::transport(
-                "QQL-TRANSPORT-REQUEST",
-                format!("HTTP request failed: {error} (request id: {request_id})"),
-                None,
-            )
-            .with_url(url.clone())
-            .with_field("request_id", request_id.clone())
-        })?;
-        let status = response.status();
-        if !status.is_success() {
-            let server_request_id = response
-                .headers()
-                .get(REQUEST_ID_HEADER)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned)
-                .unwrap_or_else(|| request_id.clone());
-            let body = response.text().await.unwrap_or_default();
-            let limit = body.floor_char_boundary(4096);
-            let detail = &body[..limit];
-            let code = classify_backend_error_code(status.as_u16(), detail);
-            return Err(QqlError::backend(
-                code,
-                format!("Qdrant returned {status}: {detail} (request id: {server_request_id})"),
-                None,
-            )
-            .with_status(status.as_u16())
-            .with_url(url)
-            .with_field("request_id", server_request_id));
-        }
+        let SendOutcome::Stream(response) =
+            self.send(Method::GET, path, &[], None::<&()>, true).await?
+        else {
+            unreachable!("streaming send never buffers");
+        };
         Ok(response)
     }
 }
@@ -341,14 +302,7 @@ impl QdrantOps for RestQdrant {
             .call::<Value>(Method::GET, &format!("/collections/{name}"), None)
             .await
         {
-            Ok(value) => {
-                validate_success_envelope(&value, "collection_exists")?;
-                let status_ok = value
-                    .get("result")
-                    .and_then(|r| r.get("status").or_else(|| r.get("exists")))
-                    .is_some();
-                Ok(status_ok)
-            }
+            Ok(value) => crate::rest_response::parse_collection_exists(value),
             Err(e) if is_collection_missing_message(&e.message) => Ok(false),
             Err(e) => Err(e),
         }
@@ -426,24 +380,20 @@ impl QdrantOps for RestQdrant {
                 telemetry: None,
             });
         }
-        let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
-            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
-                "QQL-REST-CLIENT-SIDE",
-                format!("{stmt_type} cannot be executed as a single REST route"),
-                None,
-            ),
-            qql_plan::RestProjectionError::SerializeFailed { message } => QqlError::execution(
-                "QQL-PLAN-SERIALIZE",
-                format!("plan IR REST request body serialization failed: {message}"),
-                None,
-            ),
-            qql_plan::RestProjectionError::OverwriteRequiresBatch => QqlError::validation(
-                "QQL-REST-OVERWRITE-BATCH-ONLY",
-                "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only;                  run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
-                None,
-            ),
-        })?;
-        let envelope = self.execute_http(route).await?;
+        let route = qql_plan::plan::to_rest_route(op).map_err(|err| err.to_qql_error())?;
+        let query: Vec<(&str, &str)> = route
+            .query
+            .iter()
+            .map(|pair| (pair.0.as_str(), pair.1.as_str()))
+            .collect();
+        let envelope = self
+            .execute_envelope(
+                super::rest_client::http_method(route.method),
+                &route.path,
+                &query,
+                route.body.as_ref(),
+            )
+            .await?;
         crate::rest_response::parse_planned(op, envelope)
     }
 
@@ -488,21 +438,7 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
-        let body = serde_json::json!({
-            "actions": actions.iter().map(|a| match a {
-                crate::client::AliasAction::Delete { alias } => {
-                    serde_json::json!({ "delete_alias": { "alias_name": alias } })
-                }
-                crate::client::AliasAction::Create { collection, alias } => {
-                    serde_json::json!({
-                        "create_alias": {
-                            "collection_name": collection,
-                            "alias_name": alias,
-                        }
-                    })
-                }
-            }).collect::<Vec<_>>(),
-        });
+        let body = super::rest_client::ChangeAliasesBody::from_actions(actions);
         self.execute_typed::<_, serde::de::IgnoredAny>(
             Method::POST,
             "/collections/aliases",
@@ -533,15 +469,8 @@ impl RestQdrant {
                 )
             })?;
         for step in steps {
-            let method = match step.method {
-                PlanMethod::Get => Method::GET,
-                PlanMethod::Post => Method::POST,
-                PlanMethod::Put => Method::PUT,
-                PlanMethod::Patch => Method::PATCH,
-                PlanMethod::Delete => Method::DELETE,
-            };
             self.execute_typed::<_, serde::de::IgnoredAny>(
-                method,
+                super::rest_client::http_method(step.method),
                 &step.path,
                 &[],
                 Some(&step.body),
@@ -551,78 +480,36 @@ impl RestQdrant {
         Ok(())
     }
 
-    /// Low-level HTTP dispatch from a pre-built Route.
-    async fn execute_http(&self, route: qql_plan::routing::Route) -> Result<Value, QqlError> {
-        let method = match route.method {
-            PlanMethod::Get => Method::GET,
-            PlanMethod::Post => Method::POST,
-            PlanMethod::Put => Method::PUT,
-            PlanMethod::Patch => Method::PATCH,
-            PlanMethod::Delete => Method::DELETE,
+    /// Validated full-envelope fetch: [`Self::send`] plus one JSON parse
+    /// plus [`validate_success_envelope`]. The single Value-envelope path;
+    /// [`Self::call_body`] and [`Self::execute_planned`] both ride it, so
+    /// envelope wording lives in exactly one place.
+    async fn execute_envelope<B: serde::Serialize + ?Sized>(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&B>,
+    ) -> Result<Value, QqlError> {
+        let SendOutcome::Buffered {
+            url,
+            server_request_id,
+            text,
+        } = self.send(method, path, query, body, false).await?
+        else {
+            unreachable!("buffered send never returns a stream");
         };
-
-        let url = format!("{}{}", self.base_url, route.path);
-        let request_id = next_request_id();
-        let mut builder = match method {
-            Method::GET => self.client.get(&url),
-            Method::POST => self.client.post(&url),
-            Method::PUT => self.client.put(&url),
-            Method::PATCH => self.client.patch(&url),
-            Method::DELETE => self.client.delete(&url),
-            _ => self.client.request(method, &url),
-        };
-        if !route.query.is_empty() {
-            builder = builder.query(&route.query);
-        }
-        builder = self.apply_headers(builder, &request_id);
-        if let Some(ref body) = route.body {
-            builder = builder.json(body);
-        }
-        let resp = builder.send().await.map_err(|e| {
-            QqlError::transport(
-                "QQL-TRANSPORT-REQUEST",
-                format!("REST request failed: {e} (request id: {request_id})"),
-                None,
-            )
-            .with_url(url.clone())
-            .with_field("request_id", request_id.clone())
-        })?;
-        let status = resp.status();
-        let server_request_id = resp
-            .headers()
-            .get(REQUEST_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned)
-            .unwrap_or_else(|| request_id.clone());
-        let text = resp.text().await.map_err(|e| {
-            QqlError::transport(
-                "QQL-TRANSPORT-REQUEST",
-                format!("REST body read failed: {e} (request id: {request_id})"),
-                None,
-            )
-        })?;
-        if !status.is_success() {
-            let code = classify_backend_error_code(status.as_u16(), &text);
-            return Err(QqlError::backend(
-                code,
-                format!("REST {status}: {text} (request id: {server_request_id})"),
-                None,
-            )
-            .with_status(status.as_u16())
-            .with_url(url)
-            .with_field("request_id", server_request_id));
-        }
-        let value: Value = serde_json::from_str(&text).map_err(|e| {
+        let value: Value = serde_json::from_str(&text).map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND-JSON",
                 format!(
-                    "invalid JSON response: {e}; body={text} (request id: {server_request_id})"
+                    "failed to parse Qdrant response: {error} (request id: {server_request_id})"
                 ),
                 None,
             )
-            .with_field("request_id", server_request_id)
+            .with_url(url.clone())
         })?;
-        validate_success_envelope(&value, &route.path)?;
+        validate_success_envelope(&value, path)?;
         Ok(value)
     }
 }

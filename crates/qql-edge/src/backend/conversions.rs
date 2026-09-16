@@ -266,7 +266,7 @@ pub(crate) fn edge_quantization_spec(
             qql_plan::QuantizationConfig::Scalar {
                 scalar: qql_plan::ScalarQuantization {
                     qtype: "int8".into(),
-                    quantile: scalar.quantile.map(f32_to_f64),
+                    quantile: scalar.quantile.map(score_f64),
                     always_ram: scalar.always_ram,
                     memory: scalar.memory.map(|memory| memory_placement!(memory)),
                 },
@@ -347,13 +347,6 @@ fn engine_enum_keyword<T: serde::Serialize>(value: &T) -> Option<String> {
     serde_json::to_value(value)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
-}
-
-/// Widen an `f32` through its shortest decimal form so JSON keeps `0.99`
-/// instead of the exact binary expansion `0.9899999499320984`. The engine
-/// stores quantiles as `f32`; the REST path carries `f64`.
-fn f32_to_f64(value: f32) -> f64 {
-    value.to_string().parse().unwrap_or(f64::from(value))
 }
 
 #[cfg(test)]

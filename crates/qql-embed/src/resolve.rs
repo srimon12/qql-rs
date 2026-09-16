@@ -1,17 +1,13 @@
 use qql_core::ast::{
-    EmbedKind, EmbeddingSpec, PointEntry, PointVectors, Stmt, UpsertStmt, VectorKind, VectorTarget,
-    VectorValue,
+    EmbedKind, EmbeddingSpec, PointEntry, PointVectors, Stmt, UpsertStmt, VectorValue,
 };
 use qql_core::error::QqlError;
 
 use crate::embedder::Embedder;
 
+pub(crate) use super::resolve_query::ensure_batch_len;
 use super::resolve_query::resolve_query_embeddings;
-
-/// Default named dense vector for auto-embedding.
-pub const DENSE_VECTOR_NAME: &str = "dense";
-/// Default named sparse vector for auto-embedding.
-pub const SPARSE_VECTOR_NAME: &str = "sparse";
+pub use super::resolve_query::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 
 /// Resolve text → vectors on a statement before routing/execution.
 ///
@@ -170,46 +166,6 @@ async fn resolve_upsert_embeddings(
         }
     }
 
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EmbedTarget {
-    pub(crate) kind: VectorKind,
-    pub(crate) multi: bool,
-}
-
-/// Resolve embed target for a `USING` clause.
-///
-/// - No `USING` → single dense.
-/// - `USING name AS …` / schema-filled kind → that kind; `multi` from AS MULTI or schema.
-/// - `USING name` with `kind: None` → error.
-pub(crate) fn require_embed_target(target: &Option<VectorTarget>) -> Result<EmbedTarget, QqlError> {
-    match target {
-        None => Ok(EmbedTarget {
-            kind: VectorKind::Dense,
-            multi: false,
-        }),
-        Some(t) => match t.kind {
-            Some(kind) => Ok(EmbedTarget {
-                kind,
-                multi: t.multi,
-            }),
-            None => Err(crate::topology::unknown_using_kind_error(&t.name)),
-        },
-    }
-}
-
-pub(crate) fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
-    if got != expected {
-        return Err(QqlError::execution(
-            "QQL-EMBEDDING",
-            format!(
-                "embed_dense_batch returned {got} vectors for {expected} texts (model={model})"
-            ),
-            None,
-        ));
-    }
     Ok(())
 }
 

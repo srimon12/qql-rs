@@ -179,6 +179,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
+| `QQL-PLAN-RANGE-TYPE` | A range bound resolved to a non-scalar value; expected a number, string, or datetime |
 | `QQL-PLAN-RECOMMEND-AVERAGE` | `average_vector` examples must share one vector shape |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
@@ -199,6 +200,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
 | `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service (upstream serves quota usage on the internal cluster port only, with no setter RPC); use REST (`SHOW QUOTAS` / `SET QUOTA`) |
+| `QQL-GRPC-RANGE-TYPE` | A string or datetime range bound has no `double` field in the bundled Qdrant proto; use the REST path for non-numeric bounds |
 | `QQL-GRPC-NO-RESULT` | A `collection_info` gRPC response is missing its `result` field |
 | `QQL-GRPC-RRF-K` | An `rrf_k` value exceeds the bundled Qdrant proto `uint32` range |
 | `QQL-GRPC-RRF-WEIGHT` | An `rrf_weights` value is not exactly representable as gRPC `f32` |
@@ -490,6 +492,7 @@ QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
 QQL-GRPC-NO-RESULT
 QQL-GRPC-QUOTA
+QQL-GRPC-RANGE-TYPE
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
 QQL-GRPC-SCROLL-LIMIT
@@ -569,6 +572,7 @@ QQL-PLAN-INDEX-TYPE
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-QUOTA
+QQL-PLAN-RANGE-TYPE
 QQL-PLAN-RECOMMEND-AVERAGE
 QQL-PLAN-RERANK-PREFETCH
 QQL-PLAN-RERANK-USING

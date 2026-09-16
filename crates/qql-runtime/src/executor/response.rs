@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
@@ -169,15 +170,86 @@ pub enum OnError {
 /// shortest round-trip decimal (`0.95f32` becomes `0.95f64`, not
 /// `0.949999988079071`).
 ///
-/// Every transport parses scores through this helper (REST `parse_hit`, gRPC
-/// `scored_point_to_hit`, edge `from_edge_scored_point_to_hit`, cross-rerank
-/// dispatch), so the stored value already carries the shortest decimal and
-/// plain `Serialize`/`pythonize` emit it identically everywhere — JSON text,
+/// Every transport parses scores through this helper (REST `parse_hit` via
+/// `score_from_wire`, gRPC `scored_point_to_hit`, edge
+/// `from_edge_scored_point_to_hit`, cross-rerank dispatch), so the stored
+/// value already carries the shortest decimal and plain
+/// `Serialize`/`pythonize` emit it identically everywhere — JSON text,
 /// `Value`, and the Python `ScoredPoint.score` getter agree with no custom
 /// serializer. The mapping is monotonic over finite values, so sort order
 /// under `partial_cmp` is unchanged.
+///
+/// The shortest decimal renders into a stack-resident `ScoreBuf` through
+/// the same std float formatter as `to_string`, so the decimal is identical
+/// without the per-hit `String` allocation; parsing it back as f64 yields
+/// the same value the old `v.to_string().parse()` round-trip produced.
+///
+/// (`ryu::Buffer` was measured first and rejected: on exact ties such as
+/// `0.494140625f32` it rounds to even — `"0.49414062"` — while std rounds
+/// away — `"0.49414063"`. Same-renderer output is identical by construction.)
 pub fn score_f64(v: f32) -> f64 {
-    v.to_string().parse().unwrap_or(v as f64)
+    let mut buf = ScoreBuf::new();
+    // Infallible in practice: the longest f32 `Display` (47 chars, plus a
+    // sign) fits the buffer with room to spare. A failed write falls back
+    // to the plain widening rather than risk a truncated decimal.
+    if write!(buf, "{v}").is_err() {
+        return v as f64;
+    }
+    buf.as_str().parse().unwrap_or(v as f64)
+}
+
+/// Stack-resident decimal scratch for [`score_f64`]: `write!` renders the
+/// f32 through std's `Display` into inline bytes — no allocator in the path.
+/// 64 bytes covers the longest f32 `Display` (47 chars: subnormal plain
+/// notation like `0.000…001`, plus a sign).
+struct ScoreBuf {
+    buf: [u8; 64],
+    len: usize,
+}
+
+impl ScoreBuf {
+    fn new() -> Self {
+        Self {
+            buf: [0; 64],
+            len: 0,
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        // `Display` for f32 emits ASCII only, so the collected bytes are
+        // always valid UTF-8; fall back to empty (which fails `parse` and
+        // takes the `unwrap_or` plain widening) rather than panicking.
+        std::str::from_utf8(&self.buf[..self.len]).unwrap_or("")
+    }
+}
+
+impl std::fmt::Write for ScoreBuf {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let bytes = s.as_bytes();
+        let end = self.len + bytes.len();
+        if end > self.buf.len() {
+            return Err(std::fmt::Error);
+        }
+        self.buf[self.len..end].copy_from_slice(bytes);
+        self.len = end;
+        Ok(())
+    }
+}
+
+/// Normalize a JSON-decoded wire score to the stored f64 in one step.
+///
+/// REST decodes every JSON number as f64, so the wire decimal narrows to f32
+/// and then shortest-expands through [`score_f64`]; fusing both halves here
+/// keeps that double conversion at exactly one call site instead of inline
+/// at every `parse_hit`.
+///
+/// REST-only: the sole caller is `rest_response::parse_hit`, so this is
+/// compiled out of no-`rest` builds (e.g. the `pyqql-common`/`nqql-common`
+/// dependency with default features off) instead of tripping `dead_code`
+/// under `-D warnings`.
+#[cfg(feature = "rest")]
+pub fn score_from_wire(v: f64) -> f64 {
+    score_f64(v as f32)
 }
 
 /// Normalized search hit returned inside `ExecResponse` data.
@@ -483,5 +555,54 @@ mod tests {
         };
         let value = serde_json::to_value(&hit).expect("hit serializes");
         assert_eq!(value["score"], serde_json::json!(0.95));
+    }
+
+    /// The stack-buffer shortest repr must stay byte-identical to the old
+    /// heap round-trip: pin a table of tricky values (short decimals,
+    /// exponent boundaries, subnormals, extremes, non-finite) against
+    /// `to_string().parse()`. NaN compares unequal to itself, so it asserts
+    /// NaN-ness on both sides.
+    #[test]
+    fn score_f64_matches_heap_round_trip() {
+        for v in [
+            0.95f32,
+            0.75,
+            0.1,
+            0.99,
+            1.0,
+            -1.0,
+            0.0,
+            -0.0,
+            1e-5,
+            1e-4,
+            1e21,
+            12345.67,
+            0.30000004,
+            f32::MIN_POSITIVE,
+            f32::EPSILON,
+            3.4028235e38,
+            1.1754944e-38,
+            1e-45,
+            2.5e-7,
+            std::f32::consts::PI,
+            100.0,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            let expected: f64 = v.to_string().parse().unwrap_or(v as f64);
+            assert_eq!(score_f64(v), expected, "score_f64({v}) diverged");
+        }
+        assert!(score_f64(f32::NAN).is_nan());
+        let expected: f64 = f32::NAN.to_string().parse().unwrap_or(f32::NAN as f64);
+        assert!(expected.is_nan());
+    }
+
+    /// The wire decimal normalizes once: the exact f32 expansion
+    /// `0.949999988079071` narrows back to the same stored `0.95`.
+    #[cfg(feature = "rest")]
+    #[test]
+    fn score_from_wire_narrows_once() {
+        assert_eq!(super::score_from_wire(0.95), 0.95f64);
+        assert_eq!(super::score_from_wire(0.949999988079071), 0.95f64);
     }
 }

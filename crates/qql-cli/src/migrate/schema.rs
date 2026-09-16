@@ -185,7 +185,7 @@ pub fn parse_where_filter(
             let filter = scroll
                 .filter
                 .ok_or("WHERE clause produced no filter expression")?;
-            Ok(top_level_filter(&filter))
+            Ok(top_level_filter(&filter)?)
         }
         _ => Err("internal error: expected SCROLL while parsing WHERE".into()),
     }
