@@ -5,7 +5,7 @@
 //! without reverse-engineering JSON shapes.
 //!
 //! Conversions (`Display` / `From` / `Serialize` / `Deserialize`) live in
-//! [`crate::semantic_conv`]; this module keeps the type definitions.
+//! the sibling `semantic_conv` module; this module keeps the type definitions.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
