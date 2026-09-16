@@ -148,6 +148,17 @@ jobs:
       - name: qql (default = rest + grpc)
         run: cargo check --locked -p qql --all-features
 
+      # Test-gated code (e.g. executor_test modules importing rest-only
+      # HttpEmbedder) must also compile per combo — check alone misses it.
+      - name: qql tests (no transports)
+        run: cargo test --locked -p qql --no-default-features
+
+      - name: qql tests (rest only)
+        run: cargo test --locked -p qql --no-default-features --features rest
+
+      - name: qql tests (grpc only)
+        run: cargo test --locked -p qql --no-default-features --features grpc
+
       - name: qql-cli (rest only)
         run: cargo check --locked -p qql-cli --no-default-features --features rest
 
