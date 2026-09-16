@@ -29,6 +29,14 @@ const { presets, categories } = Astro.props;
       <button class="app-icon-btn" type="button" data-close-dialog aria-label="Close examples">×</button>
     </header>
 
+    <div class="border-b border-[var(--sl-color-gray-5)] px-5 py-4" data-live-section>
+      <p class="mono-label m-0">Live collections</p>
+      <p class="m-0 mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]" data-live-hint>
+        Reading collections from your Qdrant…
+      </p>
+      <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2" data-live-presets aria-label="Live collection presets"></div>
+    </div>
+
     <div class="grid gap-3 border-b border-[var(--sl-color-gray-5)] px-5 py-4">
       <label>
         <span class="sr-only">Search examples</span>

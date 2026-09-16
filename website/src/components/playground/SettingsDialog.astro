@@ -30,7 +30,7 @@
         <legend class="px-1 text-xs font-medium text-[var(--sl-color-gray-2)]">HTTP embedder</legend>
         <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Endpoint</span>
-          <input class="app-input" name="embedUrl" type="url" placeholder="http://localhost:11434/v1/embeddings" />
+          <input class="app-input" name="embedUrl" type="url" placeholder="http://localhost:1234/v1/embeddings" />
         </label>
         <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Model</span>
@@ -50,7 +50,10 @@
     </div>
 
     <footer class="flex flex-col items-stretch justify-between gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-3 sm:flex-row sm:items-center">
-      <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
+      <div class="grid min-w-0 gap-1">
+        <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
+        <span class="max-w-md font-mono text-[0.6875rem] leading-5 text-[var(--sl-color-gray-3)]" data-embed-probe role="status"></span>
+      </div>
       <div class="flex shrink-0 justify-end gap-2">
         <button class="app-action app-action--lg" type="button" data-test-connection>Test connection</button>
         <button class="app-action app-action--lg app-action--primary" type="submit">Save connection</button>

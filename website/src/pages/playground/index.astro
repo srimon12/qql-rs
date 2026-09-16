@@ -74,9 +74,9 @@ const presets = readdirSync(validRoot)
 const categories = [
 	...new Set(presets.map((preset) => preset.category)),
 ].sort();
-// Small canned landing query with explicit vectors: it analyzes offline with
-// zero config, needs no embedder, and needs no localhost Qdrant.
-const verifiedQqlDefault = String.raw`QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;`;
+// First Run targets a real live collection (explicit USING, no guessing):
+// the browser/HTTP embedder resolves the TEXT query, Qdrant must be up.
+const verifiedQqlDefault = String.raw`QUERY 'cozy apartment near Mitte' FROM geosmart_berlin_stays USING dense AS DENSE LIMIT 5;`;
 const landingQuery = verifiedQqlDefault;
 const landingLabel = "Quick demo";
 const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
@@ -187,7 +187,7 @@ const pageDescription =
           title="Edit the Qdrant URL and embeddings"
         >
           <span class="app-chip__label">Connection</span>
-          <span class="max-w-40 truncate" data-connection-value>localhost:6333 · MiniLM</span>
+          <span class="min-w-0" data-connection-value>localhost:6333 · MiniLM</span>
         </button>
         <span class="hidden min-w-0 items-center gap-1.5 md:flex lg:shrink-0">
           <span
@@ -199,9 +199,13 @@ const pageDescription =
             <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-wasm>Loading WASM</strong>
           </span>
         </span>
-        <span class="hidden min-w-0 truncate lg:inline">
+        <span class="hidden min-w-0 lg:inline">
           <span class="hidden xl:inline">embeddings </span>
           <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-embed>MiniLM (browser)</strong>
+          <strong
+            class="ml-1 rounded-full border border-[var(--sl-color-gray-5)] px-1.5 py-px font-medium"
+            data-embed-dim-chip
+            hidden></strong>
         </span>
         <span class="hidden min-w-0 truncate xl:inline">
           example <strong class="font-medium text-[var(--sl-color-gray-1)]" data-active-fixture>{landingLabel}</strong>

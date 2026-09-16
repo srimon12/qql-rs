@@ -70,7 +70,7 @@
       </div>
     </section>
 
-    {["wire", "ast", "tokens", "explain", "response", "metrics"].map((id) => (
+    {["wire", "ast", "tokens", "explain", "metrics"].map((id) => (
       <section
         role="tabpanel"
         id={`panel-${id}`}
@@ -79,8 +79,19 @@
         data-inspector-panel={id}
         hidden
       >
-        <pre class="m-0 min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output={id}>{id === "response" ? "The Result tab needs a reachable Qdrant. Everything else runs offline." : `No ${id} output yet.`}</pre>
+        <pre class="pg-hl m-0 min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output={id}>{`No ${id} output yet.`}</pre>
       </section>
     ))}
+    <section
+      role="tabpanel"
+      id="panel-response"
+      aria-labelledby="tab-response"
+      class="absolute inset-0 overflow-auto"
+      data-inspector-panel="response"
+      hidden
+    >
+      <div class="grid min-h-full content-start gap-3 p-4" data-response-rich></div>
+      <pre class="pg-hl m-0 hidden min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output="response">The Result tab needs a reachable Qdrant. Everything else runs offline.</pre>
+    </section>
   </div>
 </section>
