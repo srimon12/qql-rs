@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Score precision contract**: `SearchHit.score` is now `f64`, rounded once at ingestion via `score_f64` — the custom `serialize_f32` widened through `pythonize` to `0.949999988079071` in `results` / DBAPI rows while `hits()` said `0.95`. Custom serializer and pyqql twin deleted; regression test pins it. Vectors stay `Vec<f32>` passthrough by deliberate asymmetry (scalars get compared, vectors don't).
+- **Range bounds typed**: `RangeParams` uses `PlanRangeBound` (`Int` / `Float` / `DateTime` / `Text`); bool / null / array / object RHS to range operators is a parse error (fail-closed).
+- **CLI exit contract**: `qql run` exits non-zero when any script statement fails, Continue mode included.
 - **P0 correctness fail-closed**: curl-converter unsupported flags / OpenAPI variants return `ConvertError` instead of panicking; `SCROLL AFTER` max / UUID-max rejected; `compile_statement` surfaces `SerializeFailed`; `CROSS RERANK` on non-`Hits` envelopes errors; `usize` overflow guarded; `MATCH EXCEPT` contract case added.
 - **DDL / edge fail-closed**: `SHARD` placeholder binding for DDL (`CreateShardKey` / `DropShardKey` / `CreateCollection` shard keys); edge rejects `timeout` / `consistency` / `wait` with typed codes (`QQL-EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); quota span threading; `qql-wasm` workspace deps with dead non-`wasm32` stubs dropped.
 
@@ -19,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Perf**: batched sparse / multi / image embeddings (single-walk query jobs, per-model batching); typed REST single-serialize/deserialize; owned response parses; typed gRPC responses; `Arc` schema cache + single metadata probe; prepared borrow-probe; batch retry by reference; upsert single-pass schema + topology guard; scroll validator wiring; `ddl_rest` steps.
+- **Design consistency**: single `plan_and_project` planner core (`try_route` / `compile_statement` thin mappers); `Route::body_ref` zero-clone accessor; full `Span` threading into plan validation (`collection_span` / `field_span` stored on AST, serde-skipped); `QQL-CONFIG` grandfathered, mock-only `QQL-EXECUTION` stays out of contract; top offender file splits (`semantic`, `resolve`, `config_parsers`, `validate`, `rest`, `embedder`, `lint`); prepared-template reuse proven by test instead of removed.
 - **Docs & CI**: `AGENTS.md` truth pass; skill references; `error-codes.mdoc` new codes (`BACKEND-READ`, `TRANSPORT-BUILD` / `REQUEST`, `CLI-IO`, `PARSE-DELIMITER`, `PLAN-SCROLL-AFTER`, `EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); editor WASM bundle rebuilt; script-params test moved to the scoped-binding contract.
 
 ## [0.4.0] - 2026-09-12

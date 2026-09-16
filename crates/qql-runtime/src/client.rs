@@ -40,8 +40,10 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 //   (sanctioned: the CLI's `qql config edge` surface in
 //   `qql-cli/src/config.rs`) — never constructed elsewhere.
 // - `QQL-CLI-*`, `QQL-PARSE-DELIMITER` (script splitting) → `qql-cli`.
-// - `QQL-CONFIG` (runtime `config.rs`) and the bare execution code used by
-//   test mocks predate this registry and are next in line for suffixing.
+// - `QQL-CONFIG` (runtime `config.rs`, load and save paths) is grandfathered:
+//   renaming a stable user-facing code buys nothing. The bare execution code
+//   exists only in test doubles (outside the `check-error-codes.sh` scan
+//   roots) and stays out of the contract.
 
 #[cfg(any(feature = "rest", feature = "grpc"))]
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
