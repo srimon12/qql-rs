@@ -487,10 +487,13 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                     return Err(QqlError::validation(
                         "QQL-PLAN-COLLECTION",
                         "query collection name must not be empty",
-                        None,
+                        query.collection_span,
                     ));
                 }
                 QueryCollection::Inherited => {
+                    // No collection token exists to point at (the parser
+                    // rejects this shape earlier with its own span), so no
+                    // span is better than a wrong one.
                     return Err(QqlError::validation(
                         "QQL-PLAN-COLLECTION",
                         "top-level query requires an explicit collection (FROM ...)",
@@ -919,6 +922,7 @@ mod tests {
         Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Recommend {
                 positive,
                 negative,
@@ -1019,6 +1023,7 @@ mod tests {
         let stmt = Stmt::Query(Box::new(QueryStmt {
             ctes: vec![],
             collection: QueryCollection::Inherited,
+            collection_span: None,
             expression: QueryExpr::SampleRandom,
             filter: None,
             params: None,
@@ -1034,6 +1039,10 @@ mod tests {
         }));
         let err = plan(&stmt).unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+        // No collection token exists to point at: the span stays None rather
+        // than misattributing to an unrelated token.
+        assert_eq!(err.span, None);
     }
 
     #[test]
@@ -1071,6 +1080,7 @@ mod tests {
         let stmt_empty_using = Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Rerank {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
@@ -1084,6 +1094,7 @@ mod tests {
                     source: qql_core::ast::PrefetchSource::Query(Box::new(QueryStmt {
                         ctes: Vec::new(),
                         collection: QueryCollection::Inherited,
+                        collection_span: None,
                         expression: QueryExpr::SampleRandom,
                         filter: None,
                         params: None,
@@ -1122,6 +1133,7 @@ mod tests {
         let stmt_empty_prefetch = Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Rerank {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
@@ -1289,6 +1301,9 @@ mod tests {
         };
         let err = crate::query::lower_query_groups_request(query).unwrap_err();
         assert_eq!(err.code, "QQL-PLAN-GROUP");
+        // No GROUP BY clause exists to point at: the span stays None rather
+        // than misattributing to an unrelated token.
+        assert_eq!(err.span, None);
     }
 
     #[test]
@@ -1360,6 +1375,30 @@ mod tests {
         let err = plan(&stmt).unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
         assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+    }
+
+    #[test]
+    fn empty_collection_name_carries_source_span() {
+        // Span threading: `FROM ''` parses (quoted empty identifier) and the
+        // plan-time empty-collection rejection points at the name token.
+        let source = "QUERY TEXT 'x' FROM '' LIMIT 1;";
+        let stmt = Parser::parse(source).expect("empty collection must parse");
+        let err = plan(&stmt).expect_err("empty collection must not plan");
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+        let start = source.find("''").expect("fixture contains ''");
+        assert_eq!(err.span, Some(qql_core::error::Span::new(start, start + 2)));
+    }
+
+    #[test]
+    fn empty_group_field_carries_source_span() {
+        // Span threading: `GROUP BY ''` parses and the plan-time empty-group
+        // rejection points at the field token.
+        let source = "QUERY TEXT 'x' FROM docs GROUP BY '' LIMIT 1;";
+        let stmt = Parser::parse(source).expect("empty group field must parse");
+        let err = plan(&stmt).expect_err("empty group field must not plan");
+        assert_eq!(err.code, "QQL-PLAN-GROUP");
+        let start = source.find("''").expect("fixture contains ''");
+        assert_eq!(err.span, Some(qql_core::error::Span::new(start, start + 2)));
     }
 
     #[test]

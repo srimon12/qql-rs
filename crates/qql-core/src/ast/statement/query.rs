@@ -435,6 +435,12 @@ pub struct QueryOutput {
 pub struct GroupSpec {
     /// Payload field used as the group key.
     pub field: String,
+    /// Source span of the group-key field token (`GROUP BY <here>`).
+    ///
+    /// Skipped by serde so AST snapshots stay span-free; the planner threads
+    /// it into `QQL-PLAN-GROUP` instead of returning `None`.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub field_span: Option<crate::error::Span>,
     /// Maximum hits per group.
     pub size: Option<u64>,
     /// Optional collection used to resolve group values.
@@ -506,6 +512,14 @@ pub struct QueryStmt {
     pub ctes: Vec<Cte>,
     /// Target collection (explicit or inherited).
     pub collection: QueryCollection,
+    /// Source span of the `FROM <collection>` name token, when explicit.
+    ///
+    /// `None` for inherited collections (no token exists) and for
+    /// programmatically built statements. Skipped by serde so AST snapshots
+    /// stay span-free; the planner threads it into `QQL-PLAN-COLLECTION`
+    /// instead of returning `None`.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub collection_span: Option<crate::error::Span>,
     /// Retrieval strategy body.
     pub expression: QueryExpr,
     /// `WHERE` filter.

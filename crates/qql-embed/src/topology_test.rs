@@ -106,6 +106,7 @@ fn merge_dense_sparse_inputs_rejected() {
     let mut query = QueryStmt {
         ctes: Vec::new(),
         collection: QueryCollection::Inherited,
+        collection_span: None,
         expression: QueryExpr::Recommend {
             positive: vec![QueryInput::Vector(VectorValue::Dense(vec![1.0]))],
             negative: vec![QueryInput::Vector(VectorValue::Sparse {
@@ -168,6 +169,7 @@ fn rerank_without_dense_topology_errors() {
     let mut query = QueryStmt {
         ctes: Vec::new(),
         collection: QueryCollection::Inherited,
+        collection_span: None,
         expression: QueryExpr::Rerank {
             input: QueryInput::Text {
                 text: "r".to_string(),

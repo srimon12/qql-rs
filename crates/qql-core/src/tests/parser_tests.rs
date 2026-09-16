@@ -1070,7 +1070,17 @@ fn stmt_serde_round_trips_through_json() {
         "COUNT FROM docs WHERE active = true WITH (exact = true);",
     ];
     for source in sources {
-        let stmt = Parser::parse(source).unwrap_or_else(|e| panic!("{source} should parse: {e}"));
+        let mut stmt =
+            Parser::parse(source).unwrap_or_else(|e| panic!("{source} should parse: {e}"));
+        // Spans are `serde(skip)` by design (snapshots stay span-free), so
+        // normalize them before comparing — the round trip pins the
+        // serialized shape, not source locations.
+        if let Stmt::Query(q) = &mut stmt {
+            q.collection_span = None;
+            if let Some(group) = q.group.as_mut() {
+                group.field_span = None;
+            }
+        }
         let json = serde_json::to_string(&stmt)
             .unwrap_or_else(|e| panic!("{source} should serialize: {e}"));
         let back: Stmt = serde_json::from_str(&json)
@@ -1097,12 +1107,25 @@ fn stmt_serde_round_trips_through_json() {
 
 #[test]
 fn implicit_array_vector_literal_parses() {
-    let stmt1 = Parser::parse("QUERY [0.1, 0.2, 0.3] FROM docs;").unwrap();
-    let stmt2 = Parser::parse("QUERY VECTOR [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    // The `VECTOR` keyword shifts token offsets, so the stored `FROM` spans
+    // differ by construction; normalize them — the test pins that both
+    // spellings lower to the same statement.
+    let mut stmt1 = Parser::parse("QUERY [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    let mut stmt2 = Parser::parse("QUERY VECTOR [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    for stmt in [&mut stmt1, &mut stmt2] {
+        if let Stmt::Query(q) = stmt {
+            q.collection_span = None;
+        }
+    }
     assert_eq!(stmt1, stmt2);
 
-    let stmt3 = Parser::parse("QUERY [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
-    let stmt4 = Parser::parse("QUERY VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    let mut stmt3 = Parser::parse("QUERY [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    let mut stmt4 = Parser::parse("QUERY VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    for stmt in [&mut stmt3, &mut stmt4] {
+        if let Stmt::Query(q) = stmt {
+            q.collection_span = None;
+        }
+    }
     assert_eq!(stmt3, stmt4);
 }
 

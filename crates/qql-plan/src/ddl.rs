@@ -137,9 +137,13 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
             "tokenizer" => {
                 let raw = index_str(key, value)?;
                 options.tokenizer = Some(TextTokenizer::parse(raw).ok_or_else(|| {
-                    index_option_error(format!(
-                        "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
-                    ))
+                    QqlError::validation(
+                        "QQL-PLAN-INDEX-OPTION",
+                        format!(
+                            "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
+                        ),
+                        value.param_span(),
+                    )
                 })?);
             }
             "stemmer" => options.stemmer = Some(StemmingAlgorithm::parse(index_str(key, value)?)),
@@ -149,9 +153,13 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
             "memory" => {
                 let raw = index_str(key, value)?;
                 options.memory = Some(MemoryPlacement::parse(raw).ok_or_else(|| {
-                    index_option_error(format!(
-                        "unsupported memory placement '{raw}'. Expected: cold, cached, pinned"
-                    ))
+                    QqlError::validation(
+                        "QQL-PLAN-INDEX-OPTION",
+                        format!(
+                            "unsupported memory placement '{raw}'. Expected: cold, cached, pinned"
+                        ),
+                        value.param_span(),
+                    )
                 })?);
             }
             other => {
@@ -176,23 +184,33 @@ fn index_option_error(message: impl Into<alloc::borrow::Cow<'static, str>>) -> Q
 fn index_bool(key: &str, value: &Value) -> Result<bool, QqlError> {
     match value {
         Value::Bool(value) => Ok(*value),
-        _ => Err(index_option_error(format!("{key} must be true or false"))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be true or false"),
+            value.param_span(),
+        )),
     }
 }
 
 fn index_u64(key: &str, value: &Value) -> Result<u64, QqlError> {
     match value {
         Value::Int(value) if *value >= 0 => Ok(*value as u64),
-        _ => Err(index_option_error(format!(
-            "{key} must be a non-negative integer"
-        ))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be a non-negative integer"),
+            value.param_span(),
+        )),
     }
 }
 
 fn index_str<'a>(key: &str, value: &'a Value) -> Result<&'a str, QqlError> {
     match value {
         Value::Str(value) => Ok(value),
-        _ => Err(index_option_error(format!("{key} must be a string"))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be a string"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -202,14 +220,18 @@ fn index_str_list(key: &str, value: &Value) -> Result<Vec<String>, QqlError> {
             .iter()
             .map(|item| match item {
                 Value::Str(item) => Ok(item.clone()),
-                _ => Err(index_option_error(format!(
-                    "{key} must be a list of strings"
-                ))),
+                _ => Err(QqlError::validation(
+                    "QQL-PLAN-INDEX-OPTION",
+                    format!("{key} must be a list of strings"),
+                    item.param_span(),
+                )),
             })
             .collect(),
-        _ => Err(index_option_error(format!(
-            "{key} must be a list of strings"
-        ))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be a list of strings"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -233,8 +255,10 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
                     let items = match entry_value {
                         Value::List(items) => items,
                         _ => {
-                            return Err(index_option_error(
+                            return Err(QqlError::validation(
+                                "QQL-PLAN-INDEX-OPTION",
                                 "stopwords languages must be a list of strings",
+                                entry_value.param_span(),
                             ));
                         }
                     };
@@ -244,8 +268,10 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
                                 languages.push(check_stopword_language(language)?);
                             }
                             _ => {
-                                return Err(index_option_error(
+                                return Err(QqlError::validation(
+                                    "QQL-PLAN-INDEX-OPTION",
                                     "stopwords languages must be a list of strings",
+                                    item.param_span(),
                                 ));
                             }
                         }
@@ -257,16 +283,20 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
                                 match item {
                                     Value::Str(word) => custom.push(word.clone()),
                                     _ => {
-                                        return Err(index_option_error(
+                                        return Err(QqlError::validation(
+                                            "QQL-PLAN-INDEX-OPTION",
                                             "stopwords custom must be a list of strings",
+                                            item.param_span(),
                                         ));
                                     }
                                 }
                             }
                         }
                         _ => {
-                            return Err(index_option_error(
+                            return Err(QqlError::validation(
+                                "QQL-PLAN-INDEX-OPTION",
                                 "stopwords custom must be a list of strings",
+                                entry_value.param_span(),
                             ));
                         }
                     }
@@ -278,9 +308,13 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
             }
             Ok(StopwordsSet { languages, custom })
         }
-        _ => Err(index_option_error(format!(
-            "{key} must be a list of strings, a language name, or {{languages: […], custom: […]}}"
-        ))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!(
+                "{key} must be a list of strings, a language name, or {{languages: […], custom: […]}}"
+            ),
+            value.param_span(),
+        )),
     }
 }
 
@@ -569,9 +603,11 @@ fn config_pair_u64(pairs: &[(String, Value)], key: &str) -> Result<Option<u64>, 
         None => Ok(None),
         Some(Value::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
         Some(Value::Float(n)) if *n >= 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
-        Some(_) => Err(collection_config_error(format!(
-            "{key} must be a non-negative integer"
-        ))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be a non-negative integer"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -581,9 +617,11 @@ fn config_pair_positive_u64(pairs: &[(String, Value)], key: &str) -> Result<Opti
         None => Ok(None),
         Some(Value::Int(n)) if *n > 0 => Ok(Some(*n as u64)),
         Some(Value::Float(n)) if *n > 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
-        Some(_) => Err(collection_config_error(format!(
-            "{key} must be a positive integer"
-        ))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be a positive integer"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -592,9 +630,11 @@ fn config_pair_bool(pairs: &[(String, Value)], key: &str) -> Result<Option<bool>
     match config_pair(pairs, key) {
         None => Ok(None),
         Some(Value::Bool(b)) => Ok(Some(*b)),
-        Some(_) => Err(collection_config_error(format!(
-            "{key} must be true or false"
-        ))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be true or false"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -604,7 +644,11 @@ fn config_pair_f64(pairs: &[(String, Value)], key: &str) -> Result<Option<f64>, 
         None => Ok(None),
         Some(Value::Int(n)) => Ok(Some(*n as f64)),
         Some(Value::Float(n)) if n.is_finite() => Ok(Some(*n)),
-        Some(_) => Err(collection_config_error(format!("{key} must be a number"))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be a number"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -678,8 +722,10 @@ fn lower_strict_mode_config(pairs: &[(String, Value)]) -> Result<StrictModeConfi
                 config.max_resident_memory_percent = Some(*n as u64);
             }
             _ => {
-                return Err(collection_config_error(
+                return Err(QqlError::validation(
+                    "QQL-PLAN-COLLECTION-CONFIG",
                     "max_resident_memory_percent must be an integer in [1, 100]",
+                    value.param_span(),
                 ));
             }
         }
@@ -690,16 +736,20 @@ fn lower_strict_mode_config(pairs: &[(String, Value)]) -> Result<StrictModeConfi
 /// Lower a `multivector_config` strict-mode value (`{name: {max_vectors}}`).
 fn lower_strict_multivector_config(value: &Value) -> Result<StrictModeMultivectorConfig, QqlError> {
     let Value::Dict(entries) = value else {
-        return Err(collection_config_error(
+        return Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
             "multivector_config must be an object",
+            value.param_span(),
         ));
     };
     let mut vectors = BTreeMap::new();
     for (name, caps) in entries {
         let Value::Dict(fields) = caps else {
-            return Err(collection_config_error(format!(
-                "multivector_config '{name}' must be an object"
-            )));
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION-CONFIG",
+                format!("multivector_config '{name}' must be an object"),
+                caps.param_span(),
+            ));
         };
         let mut entry = StrictModeMultivector::default();
         for (key, val) in fields {
@@ -711,8 +761,10 @@ fn lower_strict_multivector_config(value: &Value) -> Result<StrictModeMultivecto
             match val {
                 Value::Int(n) if *n >= 1 => entry.max_vectors = Some(*n as u64),
                 _ => {
-                    return Err(collection_config_error(
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION-CONFIG",
                         "max_vectors must be a positive integer",
+                        val.param_span(),
                     ));
                 }
             }
@@ -725,14 +777,20 @@ fn lower_strict_multivector_config(value: &Value) -> Result<StrictModeMultivecto
 /// Lower a `sparse_config` strict-mode value (`{name: {max_length}}`).
 fn lower_strict_sparse_config(value: &Value) -> Result<StrictModeSparseConfig, QqlError> {
     let Value::Dict(entries) = value else {
-        return Err(collection_config_error("sparse_config must be an object"));
+        return Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            "sparse_config must be an object",
+            value.param_span(),
+        ));
     };
     let mut vectors = BTreeMap::new();
     for (name, caps) in entries {
         let Value::Dict(fields) = caps else {
-            return Err(collection_config_error(format!(
-                "sparse_config '{name}' must be an object"
-            )));
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION-CONFIG",
+                format!("sparse_config '{name}' must be an object"),
+                caps.param_span(),
+            ));
         };
         let mut entry = StrictModeSparse::default();
         for (key, val) in fields {
@@ -744,8 +802,10 @@ fn lower_strict_sparse_config(value: &Value) -> Result<StrictModeSparseConfig, Q
             match val {
                 Value::Int(n) if *n >= 1 => entry.max_length = Some(*n as u64),
                 _ => {
-                    return Err(collection_config_error(
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION-CONFIG",
                         "max_length must be a positive integer",
+                        val.param_span(),
                     ));
                 }
             }
@@ -1190,6 +1250,38 @@ mod tests {
         };
         let err = lower_create_index(&ci).unwrap_err();
         assert_eq!(err.code, "QQL-PLAN-INDEX-TYPE");
+    }
+
+    #[test]
+    fn index_option_placeholder_mistype_carries_span() {
+        // Value-span threading (same pattern as QQL-PLAN-QUOTA): a mistyped
+        // placeholder points at the placeholder; literal mistypes stay
+        // span-less because scalar literals store no span.
+        let span = qql_core::error::Span::new(10, 15);
+        let located = qql_core::ast::CreateIndexStmt {
+            collection: "docs".into(),
+            field: "body".into(),
+            field_type: "keyword".into(),
+            options: alloc::vec![(
+                "is_tenant".to_string(),
+                qql_core::ast::Value::param_with_span("flag", span),
+            )],
+            wait: None,
+        };
+        let err = lower_create_index(&located).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-INDEX-OPTION");
+        assert_eq!(err.span, Some(span));
+
+        let literal = qql_core::ast::CreateIndexStmt {
+            collection: "docs".into(),
+            field: "body".into(),
+            field_type: "keyword".into(),
+            options: alloc::vec![("is_tenant".to_string(), qql_core::ast::Value::Int(1),)],
+            wait: None,
+        };
+        let err = lower_create_index(&literal).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-INDEX-OPTION");
+        assert_eq!(err.span, None);
     }
 
     #[test]

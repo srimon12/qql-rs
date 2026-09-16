@@ -157,6 +157,30 @@ fn apply_query_shard(query: &mut QueryStmt, key: Option<&ShardKey>) {
 }
 
 /// Injects a typed field comparison into a statement (CTEs and prefetches included), fail-closed.
+///
+/// `QUERY` merges the comparison into the top-level filter, every CTE, and
+/// every prefetch stage; `SCROLL` / `COUNT` / `FACET` merge into their filter;
+/// selector statements (`DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`,
+/// `DELETE VECTOR`, `UPDATE PAYLOAD`) fold the filter into their point
+/// selector. `BATCH` recurses into every member.
+///
+/// `UPSERT` has no filter to merge into, so the field is stamped onto each
+/// point's payload instead, last-writer-wins: a pre-existing conflicting value
+/// is overwritten, never merged. Overwriting (rather than skipping on
+/// conflict) is what makes tenant stamping sound — a caller-supplied payload
+/// value must not survive the injected policy value. Only `Eq` on a non-`id`
+/// payload field is stampable; anything else fails closed, as does an unbound
+/// whole-point placeholder (`:name` / `?`), which has no payload yet —
+/// silently skipping it would drop a security filter, so callers must bind
+/// point parameters before injection.
+///
+/// `UPDATE VECTOR` is an explicit deny, not an oversight: point-vector
+/// replacement addresses points by ID list and carries no selector, so there
+/// is nothing to merge a tenant filter into. Filter by IDs before building
+/// the statement instead. DDL, `SHOW`, quota, and any other statement type
+/// without a filter or payload surface fail closed with
+/// `QQL-VALIDATION-FILTER-INJECT` rather than silently no-oping, so a policy
+/// bypass can never hide behind an unsupported statement kind.
 pub fn inject_filter(
     statement: &mut Stmt,
     field: &str,
@@ -179,10 +203,7 @@ pub fn inject_filter(
         Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
-        // Explicit deny (not an oversight): point-vector replacement addresses
-        // points by ID list and carries no selector, so there is nothing to
-        // merge a tenant filter into. Filter by IDs before building the
-        // statement instead.
+        // Explicit deny (see rustdoc): no selector exists to merge into.
         Stmt::UpdateVector(_) => {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-FILTER-INJECT",
@@ -199,8 +220,7 @@ pub fn inject_filter(
         }
         Stmt::Upsert(upsert) => {
             for point in &mut upsert.points {
-                // A whole-point placeholder has no payload yet — silently
-                // skipping it would drop a security filter. Bind first.
+                // A whole-point placeholder has no payload yet (see rustdoc).
                 let inline = match point {
                     crate::ast::PointEntry::Inline(inline) => inline,
                     crate::ast::PointEntry::Param(name, _) => {
@@ -228,9 +248,7 @@ pub fn inject_filter(
                     .iter_mut()
                     .find(|(key, _)| key.eq_ignore_ascii_case(field))
                 {
-                    // Last-writer-wins: re-stamp the field with the injected
-                    // value. A pre-existing conflicting value is overwritten,
-                    // never merged — required for tenant stamping.
+                    // Last-writer-wins (see rustdoc): overwrite, never merge.
                     *current = value.clone();
                 } else {
                     inline.payload.push((field.to_string(), value.clone()));

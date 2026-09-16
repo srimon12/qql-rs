@@ -59,6 +59,7 @@ fn prefetch(value: &Value, path: &str) -> Result<Prefetch, ConvertError> {
     let stmt = QueryStmt {
         ctes: Vec::new(),
         collection: QueryCollection::Inherited,
+        collection_span: None,
         expression: core.expression,
         filter: core.filter,
         params: core.params,

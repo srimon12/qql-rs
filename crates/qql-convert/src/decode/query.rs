@@ -110,6 +110,7 @@ pub(crate) fn query_groups_request(
     };
     stmt.group = Some(GroupSpec {
         field: group_by,
+        field_span: None,
         size,
         lookup,
     });
@@ -174,6 +175,7 @@ fn base_query(obj: &json::Obj, path: &str, ctx: DecodeCtx<'_>) -> Result<QuerySt
     Ok(QueryStmt {
         ctes: Vec::<Cte>::new(),
         collection: QueryCollection::Explicit(ctx.collection.to_string()),
+        collection_span: None,
         expression: core.expression,
         filter: core.filter,
         params: core.params,
