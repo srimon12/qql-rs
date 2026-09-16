@@ -424,6 +424,62 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(dx.normalizeUpsertRows('nope'), 'nope');
 }
 
+// 12. u64 exactness at the JS boundary (WASM parity: safe ints stay
+// Number, snowflake u64 crosses as BigInt, BigInt binds back exactly,
+// unsafe Numbers fail closed naming BigInt — never silent rounding).
+{
+  const SNOWFLAKE = 1479834607549681654n;
+  const DIGITS = '1479834607549681654';
+
+  // count() tolerates a BigInt count (u64 crosses as BigInt) and Numbers.
+  const bigCount = new sdk.ExecutionReport({
+    ok: true,
+    succeeded: 1,
+    failed: 0,
+    results: [{ ok: true, operation: 'COUNT', message: 'Count: 8317', data: { count: 8317n } }],
+  });
+  assert.strictEqual(bigCount.count(), 8317);
+  const numCount = new sdk.ExecutionReport({
+    ok: true,
+    succeeded: 1,
+    failed: 0,
+    results: [{ ok: true, operation: 'COUNT', message: 'Count: 7', data: { count: 7 } }],
+  });
+  assert.strictEqual(numCount.count(), 7);
+
+  // BigInt cursor binds exactly (scroll cursors round-trip snowflake IDs).
+  const cursorStmt = sdk.parse('SCROLL FROM docs AFTER :cursor LIMIT 3')[0];
+  const boundCursor = cursorStmt.bind({ cursor: SNOWFLAKE });
+  assert.ok(boundCursor.toString().includes(DIGITS));
+
+  // Unsafe integer Numbers fail closed naming BigInt — never silently rounded.
+  assert.throws(() => cursorStmt.bind({ cursor: Number(SNOWFLAKE) }), /BigInt/);
+  assert.throws(
+    () => sdk.bind('SCROLL FROM docs AFTER :cursor LIMIT 3', { cursor: Number(SNOWFLAKE) }),
+    /BigInt/,
+  );
+
+  // Safe integers still bind as before (back-compat).
+  assert.ok(cursorStmt.bind({ cursor: 42 }).toString().includes('AFTER 42'));
+
+  // Stmt.toObject keeps the snowflake exact: a BigInt, never a rounded Number.
+  const obj = sdk.parse(`QUERY POINTS (${DIGITS}) FROM docs`)[0].toObject();
+  const seen = JSON.stringify(obj, (_, v) => (typeof v === 'bigint' ? `BIG:${v}` : v));
+  assert.ok(seen.includes(`BIG:${DIGITS}`), `snowflake must cross as BigInt: ${seen.slice(0, 200)}`);
+
+  // Small IDs stay plain Numbers in toObject.
+  const smallSeen = JSON.stringify(
+    sdk.parse('QUERY POINTS (3176) FROM docs')[0].toObject(),
+    (_, v) => (typeof v === 'bigint' ? `BIG:${v}` : v),
+  );
+  assert.ok(smallSeen.includes('3176') && !smallSeen.includes('BIG:'));
+
+  // Numeric shard keys read back as BigInt (exact on both sides of u64).
+  const sharded = sdk.parse('SCROLL FROM docs LIMIT 1')[0];
+  sharded.shardKey = SNOWFLAKE;
+  assert.strictEqual(sharded.shardKey, SNOWFLAKE);
+}
+
 // 11. Typed-array execute params survive the napi boundary (P0-1).
 // Server SDK only (`LABEL === 'nqql'`): binding runs before any I/O, so a
 // dead port proves the params bound — a transport error means the

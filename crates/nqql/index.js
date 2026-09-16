@@ -229,11 +229,14 @@ function compileQuery(query, params) {
 
 async function execute(query, options) {
   try {
+    // Native returns the report as a live JS object (safe ints as Number,
+    // snowflake u64 as BigInt) — never a JSON string, which would round
+    // through JSON.parse.
     const raw = await nativeBinding.execute(
       normalizeQuery(query),
       normalizeClientOptions(validateOptions(options)),
     );
-    return new ExecutionReport(JSON.parse(raw));
+    return new ExecutionReport(raw);
   } catch (error) {
     throw buildError(error);
   }
@@ -247,11 +250,9 @@ async function executeHits(query, options) {
 async function executeStmt(stmt, options) {
   try {
     return new ExecutionReport(
-      JSON.parse(
-        await nativeBinding.executeStmt(
-          stmt,
-          normalizeClientOptions(validateOptions(options)),
-        ),
+      await nativeBinding.executeStmt(
+        stmt,
+        normalizeClientOptions(validateOptions(options)),
       ),
     );
   } catch (error) {
@@ -277,7 +278,7 @@ class Client {
         normalizeQuery(query),
         validateOptions(options) || undefined,
       );
-      return new ExecutionReport(JSON.parse(raw));
+      return new ExecutionReport(raw);
     } catch (error) {
       throw buildError(error);
     }
@@ -310,7 +311,7 @@ class Client {
         normalized,
         validateOptions(options) || undefined,
       );
-      return new ExecutionReport(JSON.parse(raw));
+      return new ExecutionReport(raw);
     } catch (error) {
       throw buildError(error);
     }
@@ -332,11 +333,10 @@ class Client {
    */
   async explainAnalyze(query, options) {
     try {
-      const raw = await this._inner.explainAnalyze(
+      return await this._inner.explainAnalyze(
         normalizeQuery(query),
         validateOptions(options) || undefined,
       );
-      return JSON.parse(raw);
     } catch (error) {
       throw buildError(error);
     }

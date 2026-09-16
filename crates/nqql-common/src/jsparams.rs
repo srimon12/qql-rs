@@ -12,6 +12,11 @@
 //!   closed with a clear message instead of silent garbage: wrap binary data
 //!   in a `Float32Array`/`Float64Array` view first (zero-copy, no movement).
 //!
+//! - `BigInt` binds exactly (`Int` when it fits `i64`, else `UInt` up to
+//!   `u64::MAX`) so snowflake point IDs and scroll cursors round-trip;
+//!   integer-valued `number`s beyond the exact-integer range fail closed
+//!   naming `BigInt` instead of binding an already-rounded f64.
+//!
 //! Nested `undefined` inside arrays becomes `Null` and object keys holding
 //! `undefined` are dropped — JSON `stringify` semantics, matching what the
 //! serde layer did for the shapes it accepted.
@@ -33,6 +38,36 @@ fn napi_err(e: napi::Error) -> QqlError {
     invalid_params(format!("invalid parameter value: {e}"))
 }
 
+/// Convert `BigInt` words to a typed [`ast::Value`] without rounding.
+///
+/// `Int` when the magnitude fits `i64` (including `i64::MIN`), else `UInt`
+/// up to `u64::MAX`; anything larger fails closed (`None`) so snowflake
+/// point IDs and scroll cursors round-trip exactly. Pure over the words, so
+/// it is unit-testable without a JS runtime.
+pub fn bigint_words_to_value(sign_bit: bool, words: &[u64]) -> Option<ast::Value> {
+    match (sign_bit, words) {
+        (false, []) => Some(ast::Value::Int(0)),
+        (false, [w]) => Some(if *w <= i64::MAX as u64 {
+            ast::Value::Int(*w as i64)
+        } else {
+            ast::Value::UInt(*w)
+        }),
+        // `-0n` is zero.
+        (true, []) => Some(ast::Value::Int(0)),
+        (true, [w]) => {
+            if *w <= i64::MAX as u64 {
+                Some(ast::Value::Int(-(*w as i64)))
+            } else if *w == i64::MIN.unsigned_abs() {
+                Some(ast::Value::Int(i64::MIN))
+            } else {
+                None
+            }
+        }
+        // Two or more words exceed `u64::MAX` in magnitude.
+        _ => None,
+    }
+}
+
 /// Convert any JS value to a typed [`ast::Value`].
 pub fn unknown_to_value(v: Unknown) -> Result<ast::Value, QqlError> {
     // Scalars dispatch on type first so they never pay for typed-array
@@ -50,12 +85,29 @@ pub fn unknown_to_value(v: Unknown) -> Result<ast::Value, QqlError> {
                 return Err(invalid_params("cannot bind non-finite float value"));
             }
             // Preserve integer-ness exactly like the serde layer did: values
-            // with no fractional part inside i64 range bind as Int.
+            // with no fractional part inside i64 range bind as Int — but only
+            // inside the exact-integer range. A larger integer-valued Number
+            // is already rounded by the time it arrives as f64, so it fails
+            // closed naming BigInt instead of mistargeting a point.
             if n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
+                if n.abs() > MAX_SAFE_INTEGER_F64 {
+                    return Err(invalid_params(
+                        "integer parameter exceeds the exact-integer range (2^53 - 1); pass a BigInt instead",
+                    ));
+                }
                 Ok(ast::Value::Int(n as i64))
             } else {
                 Ok(ast::Value::Float(n))
             }
+        }
+        ValueType::BigInt => {
+            // Exact integers of any size (scroll cursors carry snowflake u64
+            // point IDs back through params); the words are checked, never
+            // rounded — same convention as `unknown_opt_to_shard_key`.
+            use napi::bindgen_prelude::BigInt;
+            let big = BigInt::from_unknown(v).map_err(napi_err)?;
+            bigint_words_to_value(big.sign_bit, &big.words)
+                .ok_or_else(|| invalid_params("BigInt parameter does not fit in u64"))
         }
         ValueType::String => {
             let s = String::from_unknown(v).map_err(napi_err)?;
@@ -218,5 +270,57 @@ pub fn unknown_opt_to_shard_key(v: Unknown) -> Result<Option<ast::ShardKey>, Qql
             }
         }
         _ => Err(bad_type()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bigint_words_bind_exactly() {
+        // Zero, both spellings (`0n` arrives with or without words).
+        assert_eq!(bigint_words_to_value(false, &[]), Some(ast::Value::Int(0)));
+        assert_eq!(bigint_words_to_value(false, &[0]), Some(ast::Value::Int(0)));
+        assert_eq!(bigint_words_to_value(true, &[]), Some(ast::Value::Int(0)));
+        // Small magnitudes keep their sign as `Int`.
+        assert_eq!(
+            bigint_words_to_value(false, &[42]),
+            Some(ast::Value::Int(42))
+        );
+        assert_eq!(
+            bigint_words_to_value(true, &[42]),
+            Some(ast::Value::Int(-42))
+        );
+        // Real geosmart snowflake: fits `i64`, so `Int` — exact either way.
+        assert_eq!(
+            bigint_words_to_value(false, &[1479834607549681654]),
+            Some(ast::Value::Int(1479834607549681654))
+        );
+        // Above `i64::MAX` becomes `UInt` — exact.
+        assert_eq!(
+            bigint_words_to_value(false, &[i64::MAX as u64 + 1]),
+            Some(ast::Value::UInt(i64::MAX as u64 + 1))
+        );
+        assert_eq!(
+            bigint_words_to_value(false, &[u64::MAX]),
+            Some(ast::Value::UInt(u64::MAX))
+        );
+        // `i64` edges keep `Int`, including `i64::MIN`.
+        assert_eq!(
+            bigint_words_to_value(false, &[i64::MAX as u64]),
+            Some(ast::Value::Int(i64::MAX))
+        );
+        assert_eq!(
+            bigint_words_to_value(true, &[i64::MIN.unsigned_abs()]),
+            Some(ast::Value::Int(i64::MIN))
+        );
+        // Negative beyond `i64::MIN` and multi-word magnitudes fail closed.
+        assert_eq!(
+            bigint_words_to_value(true, &[i64::MIN.unsigned_abs() + 1]),
+            None
+        );
+        assert_eq!(bigint_words_to_value(false, &[1, 1]), None);
+        assert_eq!(bigint_words_to_value(true, &[1, 1]), None);
     }
 }
