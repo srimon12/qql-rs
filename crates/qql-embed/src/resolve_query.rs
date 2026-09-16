@@ -1,10 +1,10 @@
 //! Query-side embedding resolution (`AstLowerer`-free AST rewrite).
 //!
 //! Split from `resolve.rs` (size hygiene): the `QUERY` collect → batch →
-//! apply pipeline (`resolve_query_embeddings`, the `QueryJobs` walkers, the
-//! per-modality batchers, and the apply pass) plus its tests. The statement
-//! dispatcher, the shared target/length helpers, and the upsert half stay in
-//! `resolve`. Behavior is unchanged.
+//! apply pipeline, the shared embed-target names and batch helpers, plus its
+//! tests. The statement dispatcher and the upsert half stay in `resolve`,
+//! which imports the shared names from here, so the dependency runs one way
+//! (`resolve` → `resolve_query`).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -15,122 +15,129 @@ use qql_core::ast::{
 };
 use qql_core::error::QqlError;
 
-use super::resolve::{
-    DENSE_VECTOR_NAME, EmbedTarget, SPARSE_VECTOR_NAME, ensure_batch_len, require_embed_target,
-};
 use crate::embedder::Embedder;
 use crate::sparse::SparseVector;
 
-#[cfg(not(target_arch = "wasm32"))]
-type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-#[cfg(target_arch = "wasm32")]
-type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+/// Default named dense vector for auto-embedding.
+pub const DENSE_VECTOR_NAME: &str = "dense";
+/// Default named sparse vector for auto-embedding.
+pub const SPARSE_VECTOR_NAME: &str = "sparse";
 
-/// Dense vector iterator passed through recursive apply.
-#[cfg(not(target_arch = "wasm32"))]
-type DenseIter<'a> = &'a mut (dyn Iterator<Item = Vec<f32>> + Send);
-#[cfg(target_arch = "wasm32")]
-type DenseIter<'a> = &'a mut dyn Iterator<Item = Vec<f32>>;
+#[derive(Debug, Clone, Copy)]
+struct EmbedTarget {
+    kind: VectorKind,
+    multi: bool,
+}
 
-/// Query-side sparse vector iterator passed through recursive apply.
-#[cfg(not(target_arch = "wasm32"))]
-type SparseIter<'a> = &'a mut (dyn Iterator<Item = SparseVector> + Send);
-#[cfg(target_arch = "wasm32")]
-type SparseIter<'a> = &'a mut dyn Iterator<Item = SparseVector>;
+/// Resolve embed target for a `USING` clause.
+///
+/// - No `USING` → single dense.
+/// - `USING name AS …` / schema-filled kind → that kind; `multi` from AS MULTI or schema.
+/// - `USING name` with `kind: None` → error.
+fn require_embed_target(target: &Option<VectorTarget>) -> Result<EmbedTarget, QqlError> {
+    match target {
+        None => Ok(EmbedTarget {
+            kind: VectorKind::Dense,
+            multi: false,
+        }),
+        Some(t) => match t.kind {
+            Some(kind) => Ok(EmbedTarget {
+                kind,
+                multi: t.multi,
+            }),
+            None => Err(crate::topology::unknown_using_kind_error(&t.name)),
+        },
+    }
+}
 
-/// Multivector bag iterator passed through recursive apply.
-#[cfg(not(target_arch = "wasm32"))]
-type MultiIter<'a> = &'a mut (dyn Iterator<Item = Vec<Vec<f32>>> + Send);
-#[cfg(target_arch = "wasm32")]
-type MultiIter<'a> = &'a mut dyn Iterator<Item = Vec<Vec<f32>>>;
-
-/// Image dense-vector iterator passed through recursive apply.
-#[cfg(not(target_arch = "wasm32"))]
-type ImageIter<'a> = &'a mut (dyn Iterator<Item = Vec<f32>> + Send);
-#[cfg(target_arch = "wasm32")]
-type ImageIter<'a> = &'a mut dyn Iterator<Item = Vec<f32>>;
-
-pub(crate) async fn resolve_query_embeddings(
-    query: &mut QueryStmt,
-    embedder: &dyn Embedder,
-) -> Result<(), QqlError> {
-    let mut jobs = QueryJobs::default();
-    collect_query_jobs(query, &mut jobs)?;
-
-    let dense_vecs = batch_dense_by_model(embedder, &jobs.dense).await?;
-    let sparse_vecs = batch_sparse_by_model(embedder, &jobs.sparse).await?;
-    let multi_vecs = batch_multi_by_model(embedder, &jobs.multi).await?;
-    let image_vecs = batch_image_by_model(embedder, &jobs.image).await?;
-
-    let mut dense_iter = dense_vecs.into_iter();
-    let mut sparse_iter = sparse_vecs.into_iter();
-    let mut multi_iter = multi_vecs.into_iter();
-    let mut image_iter = image_vecs.into_iter();
-    apply_query_embeddings(
-        query,
-        &mut dense_iter,
-        &mut sparse_iter,
-        &mut multi_iter,
-        &mut image_iter,
-    )
-    .await?;
-
-    if dense_iter.next().is_some() {
+pub(crate) fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
+    if got != expected {
         return Err(QqlError::execution(
             "QQL-EMBEDDING",
-            "internal error: unused dense embeddings after apply",
-            None,
-        ));
-    }
-    if sparse_iter.next().is_some() {
-        return Err(QqlError::execution(
-            "QQL-EMBEDDING-SPARSE",
-            "internal error: unused sparse embeddings after apply",
-            None,
-        ));
-    }
-    if multi_iter.next().is_some() {
-        return Err(QqlError::execution(
-            "QQL-EMBEDDING-MULTI",
-            "internal error: unused multi embeddings after apply",
-            None,
-        ));
-    }
-    if image_iter.next().is_some() {
-        return Err(QqlError::execution(
-            "QQL-EMBEDDING-IMAGE",
-            "internal error: unused image embeddings after apply",
+            format!(
+                "embed_dense_batch returned {got} vectors for {expected} texts (model={model})"
+            ),
             None,
         ));
     }
     Ok(())
 }
 
-// ── Collect embed jobs (model, text) in walk order ────────────────────
-//
-// One AST walk fills every modality at once. Apply consumes each modality
-// iterator in this same walk order, so collect and apply must visit inputs
-// in identical sequence (CTEs, then expression; prefetch members in order;
-// positive before negative; Hybrid dense leg before its sparse leg).
+#[cfg(not(target_arch = "wasm32"))]
+type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// Batched query jobs in walk order, split by modality so each modality
-/// batches 1 RPC per model.
-#[derive(Debug, Default)]
-struct QueryJobs {
-    dense: Vec<(String, String)>,
-    sparse: Vec<(String, String)>,
-    multi: Vec<(String, String)>,
-    image: Vec<(String, String)>,
+pub(crate) async fn resolve_query_embeddings(
+    query: &mut QueryStmt,
+    embedder: &dyn Embedder,
+) -> Result<(), QqlError> {
+    let mut jobs = Vec::new();
+    collect_query_jobs(query, &mut jobs)?;
+
+    let outputs = batch_query_jobs(embedder, &jobs).await?;
+
+    let mut cursor = ApplyCursor::new(&jobs, outputs);
+    apply_query_embeddings(query, &mut cursor).await?;
+    cursor.finish()
 }
 
-fn collect_query_jobs(query: &QueryStmt, jobs: &mut QueryJobs) -> Result<(), QqlError> {
+// ── Ordered embed jobs: collect produces one list, apply consumes it ────
+//
+// One AST walk fills a single job list in walk order (CTEs, then expression;
+// prefetch members in order; positive before negative; Hybrid dense leg
+// before its sparse leg). Batching groups positions by (modality, model) for
+// one RPC per group and scatters results back into job order. Apply walks the
+// same order and checks every step against the job list, so a future drift
+// between the two walks fails closed instead of silently mis-binding vectors.
+
+/// One query-side embedding job in walk order.
+#[derive(Debug)]
+struct QueryJob {
+    modality: JobModality,
+    model: String,
+    text: String,
+}
+
+/// Embedding modality: selects the batch RPC and the apply rewrite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JobModality {
+    Dense,
+    Sparse,
+    Multi,
+    Image,
+}
+
+/// One batched result, aligned 1:1 with [`QueryJob`] by index.
+#[derive(Debug)]
+enum JobOutput {
+    Dense(Vec<f32>),
+    Sparse(SparseVector),
+    Multi(Vec<Vec<f32>>),
+    Image(Vec<f32>),
+}
+
+/// Error code + leg noun per modality, matching the legacy messages.
+fn modality_code(modality: JobModality) -> (&'static str, &'static str) {
+    match modality {
+        JobModality::Dense => ("QQL-EMBEDDING", "dense"),
+        JobModality::Sparse => ("QQL-EMBEDDING-SPARSE", "sparse"),
+        JobModality::Multi => ("QQL-EMBEDDING-MULTI", "multi"),
+        JobModality::Image => ("QQL-EMBEDDING-IMAGE", "image"),
+    }
+}
+
+fn collect_query_jobs(query: &QueryStmt, jobs: &mut Vec<QueryJob>) -> Result<(), QqlError> {
     for cte in &query.ctes {
         collect_expr_jobs(&cte.query.expression, jobs)?;
     }
     collect_expr_jobs(&query.expression, jobs)
 }
 
-fn collect_prefetches_jobs(prefetches: &[Prefetch], jobs: &mut QueryJobs) -> Result<(), QqlError> {
+fn collect_prefetches_jobs(
+    prefetches: &[Prefetch],
+    jobs: &mut Vec<QueryJob>,
+) -> Result<(), QqlError> {
     for pref in prefetches {
         if let PrefetchSource::Query(sub) = &pref.source {
             collect_query_jobs(sub, jobs)?;
@@ -139,7 +146,7 @@ fn collect_prefetches_jobs(prefetches: &[Prefetch], jobs: &mut QueryJobs) -> Res
     Ok(())
 }
 
-fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut QueryJobs) -> Result<(), QqlError> {
+fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), QqlError> {
     match expr {
         QueryExpr::Nearest {
             input,
@@ -212,8 +219,16 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut QueryJobs) -> Result<(), QqlEr
             // The sparse leg shares `Hybrid.model` with the dense leg (there
             // is no dedicated sparse-model field); apply consumes dense first.
             let m = model.as_deref().unwrap_or("default").to_string();
-            jobs.dense.push((m.clone(), text.clone()));
-            jobs.sparse.push((m, text.clone()));
+            jobs.push(QueryJob {
+                modality: JobModality::Dense,
+                model: m.clone(),
+                text: text.clone(),
+            });
+            jobs.push(QueryJob {
+                modality: JobModality::Sparse,
+                model: m,
+                text: text.clone(),
+            });
         }
         QueryExpr::CrossRerank { prefetch, .. } => {
             // Query string is scored by the pair model, not embedded.
@@ -253,23 +268,32 @@ fn collect_input_jobs(
     input: &QueryInput,
     target: EmbedTarget,
     default_model: &str,
-    jobs: &mut QueryJobs,
+    jobs: &mut Vec<QueryJob>,
 ) -> Result<(), QqlError> {
     match input {
         QueryInput::Text { text, model, .. } => {
             let m = model.as_deref().unwrap_or(default_model).to_string();
-            if target.kind == VectorKind::Sparse {
-                jobs.sparse.push((m, text.clone()));
+            let modality = if target.kind == VectorKind::Sparse {
+                JobModality::Sparse
             } else if target.multi {
-                jobs.multi.push((m, text.clone()));
+                JobModality::Multi
             } else {
-                jobs.dense.push((m, text.clone()));
-            }
+                JobModality::Dense
+            };
+            jobs.push(QueryJob {
+                modality,
+                model: m,
+                text: text.clone(),
+            });
         }
         QueryInput::Image { source, model, .. } => {
             check_image_target(target)?;
             let m = model.as_deref().unwrap_or(default_model).to_string();
-            jobs.image.push((m, source.clone()));
+            jobs.push(QueryJob {
+                modality: JobModality::Image,
+                model: m,
+                text: source.clone(),
+            });
         }
         _ => {}
     }
@@ -320,163 +344,371 @@ fn drain_batch_out<T>(
         .collect()
 }
 
-/// Group jobs by model, call `embed_dense_batch` once per model, restore walk order.
-async fn batch_dense_by_model(
+/// One modality's batch RPC behind the generic [`batch_by_model`] skeleton.
+///
+/// A plain `Fn` parameter cannot name the lifetime tying the boxed future to
+/// its inputs, so the call is a trait method with an explicit method
+/// lifetime instead of a closure.
+trait BatchCall<T> {
+    fn call<'x>(
+        &self,
+        embedder: &'x dyn Embedder,
+        texts: &'x [String],
+        model: &'x str,
+    ) -> BoxFut<'x, Result<Vec<T>, QqlError>>;
+}
+
+struct DenseBatchCall;
+struct SparseBatchCall;
+struct MultiBatchCall;
+struct ImageBatchCall;
+
+impl BatchCall<Vec<f32>> for DenseBatchCall {
+    fn call<'x>(
+        &self,
+        embedder: &'x dyn Embedder,
+        texts: &'x [String],
+        model: &'x str,
+    ) -> BoxFut<'x, Result<Vec<Vec<f32>>, QqlError>> {
+        Box::pin(embedder.embed_dense_batch(texts, model))
+    }
+}
+
+impl BatchCall<SparseVector> for SparseBatchCall {
+    fn call<'x>(
+        &self,
+        embedder: &'x dyn Embedder,
+        texts: &'x [String],
+        model: &'x str,
+    ) -> BoxFut<'x, Result<Vec<SparseVector>, QqlError>> {
+        Box::pin(embedder.embed_sparse_query_batch(texts, model))
+    }
+}
+
+impl BatchCall<Vec<Vec<f32>>> for MultiBatchCall {
+    fn call<'x>(
+        &self,
+        embedder: &'x dyn Embedder,
+        texts: &'x [String],
+        model: &'x str,
+    ) -> BoxFut<'x, Result<Vec<Vec<Vec<f32>>>, QqlError>> {
+        Box::pin(embedder.embed_multi_batch(texts, model))
+    }
+}
+
+impl BatchCall<Vec<f32>> for ImageBatchCall {
+    fn call<'x>(
+        &self,
+        embedder: &'x dyn Embedder,
+        texts: &'x [String],
+        model: &'x str,
+    ) -> BoxFut<'x, Result<Vec<Vec<f32>>, QqlError>> {
+        Box::pin(embedder.embed_image_batch(texts, model))
+    }
+}
+
+/// Group jobs by model, run one batch RPC per model, restore walk order.
+///
+/// The single generic skeleton behind every modality batch: `call` is the
+/// modality RPC, `check_len` reproduces that modality's cardinality error,
+/// and (`code`, `kind`) feed the shared missing-slot drain.
+async fn batch_by_model<T>(
     embedder: &dyn Embedder,
     jobs: &[(String, String)],
-) -> Result<Vec<Vec<f32>>, QqlError> {
+    code: &'static str,
+    kind: &'static str,
+    check_len: impl Fn(usize, usize, &str) -> Result<(), QqlError>,
+    call: impl BatchCall<T>,
+) -> Result<Vec<T>, QqlError> {
     if jobs.is_empty() {
         return Ok(Vec::new());
     }
 
-    let mut out: Vec<Option<Vec<f32>>> = vec![None; jobs.len()];
+    let mut out: Vec<Option<T>> = Vec::new();
+    out.resize_with(jobs.len(), || None);
     for group in group_positions_by_model(jobs) {
         let model = jobs[group[0]].0.as_str();
         let texts: Vec<String> = group.iter().map(|&i| jobs[i].1.clone()).collect();
-        let vecs = embedder.embed_dense_batch(&texts, model).await?;
-        ensure_batch_len(vecs.len(), group.len(), model)?;
+        let vecs = call.call(embedder, &texts, model).await?;
+        check_len(vecs.len(), group.len(), model)?;
         for (pos, vec) in group.into_iter().zip(vecs) {
             out[pos] = Some(vec);
         }
     }
 
-    drain_batch_out(out, "QQL-EMBEDDING", "dense")
+    drain_batch_out(out, code, kind)
 }
 
-/// Group jobs by model, call `embed_sparse_query_batch` once per model,
-/// restore walk order. Backends overriding only the batch entry point serve
-/// every sparse leg (including Hybrid) through this single call site.
-async fn batch_sparse_by_model(
-    embedder: &dyn Embedder,
-    jobs: &[(String, String)],
-) -> Result<Vec<SparseVector>, QqlError> {
-    if jobs.is_empty() {
-        return Ok(Vec::new());
+fn sparse_len_error(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
+    if got != expected {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-SPARSE",
+            format!(
+                "embed_sparse_query_batch returned {got} vectors for {expected} texts (model={model})"
+            ),
+            None,
+        ));
     }
-
-    let mut out: Vec<Option<SparseVector>> = vec![None; jobs.len()];
-    for group in group_positions_by_model(jobs) {
-        let model = jobs[group[0]].0.as_str();
-        let texts: Vec<String> = group.iter().map(|&i| jobs[i].1.clone()).collect();
-        let vecs = embedder.embed_sparse_query_batch(&texts, model).await?;
-        if vecs.len() != group.len() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-SPARSE",
-                format!(
-                    "embed_sparse_query_batch returned {} vectors for {} texts (model={model})",
-                    vecs.len(),
-                    group.len()
-                ),
-                None,
-            ));
-        }
-        for (pos, vec) in group.into_iter().zip(vecs) {
-            out[pos] = Some(vec);
-        }
-    }
-
-    drain_batch_out(out, "QQL-EMBEDDING-SPARSE", "sparse")
+    Ok(())
 }
 
-/// Group jobs by model, call `embed_multi_batch` once per model, restore walk order.
-async fn batch_multi_by_model(
-    embedder: &dyn Embedder,
-    jobs: &[(String, String)],
-) -> Result<Vec<Vec<Vec<f32>>>, QqlError> {
-    if jobs.is_empty() {
-        return Ok(Vec::new());
+fn multi_len_error(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
+    if got != expected {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-MULTI",
+            format!("embed_multi_batch returned {got} bags for {expected} texts (model={model})"),
+            None,
+        ));
     }
-
-    let mut out: Vec<Option<Vec<Vec<f32>>>> = vec![None; jobs.len()];
-    for group in group_positions_by_model(jobs) {
-        let model = jobs[group[0]].0.as_str();
-        let texts: Vec<String> = group.iter().map(|&i| jobs[i].1.clone()).collect();
-        let bags = embedder.embed_multi_batch(&texts, model).await?;
-        if bags.len() != group.len() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-MULTI",
-                format!(
-                    "embed_multi_batch returned {} bags for {} texts (model={model})",
-                    bags.len(),
-                    group.len()
-                ),
-                None,
-            ));
-        }
-        for (pos, rows) in group.into_iter().zip(bags) {
-            out[pos] = Some(rows);
-        }
-    }
-
-    drain_batch_out(out, "QQL-EMBEDDING-MULTI", "multi")
+    Ok(())
 }
 
-/// Group jobs by model, call `embed_image_batch` once per model, restore walk order.
-async fn batch_image_by_model(
+fn image_len_error(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
+    if got != expected {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-IMAGE",
+            format!(
+                "embed_image_batch returned {got} vectors for {expected} sources (model={model})"
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+/// Batch every collected job: one RPC per (modality, model), results aligned
+/// 1:1 with `jobs` by index for the cursor-driven apply pass.
+async fn batch_query_jobs(
     embedder: &dyn Embedder,
-    jobs: &[(String, String)],
-) -> Result<Vec<Vec<f32>>, QqlError> {
-    if jobs.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut out: Vec<Option<Vec<f32>>> = vec![None; jobs.len()];
-    for group in group_positions_by_model(jobs) {
-        let model = jobs[group[0]].0.as_str();
-        let sources: Vec<String> = group.iter().map(|&i| jobs[i].1.clone()).collect();
-        let vecs = embedder.embed_image_batch(&sources, model).await?;
-        if vecs.len() != group.len() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-IMAGE",
-                format!(
-                    "embed_image_batch returned {} vectors for {} sources (model={model})",
-                    vecs.len(),
-                    group.len()
-                ),
-                None,
-            ));
+    jobs: &[QueryJob],
+) -> Result<Vec<JobOutput>, QqlError> {
+    let mut out: Vec<Option<JobOutput>> = Vec::new();
+    out.resize_with(jobs.len(), || None);
+    for modality in [
+        JobModality::Dense,
+        JobModality::Sparse,
+        JobModality::Multi,
+        JobModality::Image,
+    ] {
+        let positions: Vec<usize> = jobs
+            .iter()
+            .enumerate()
+            .filter(|(_, job)| job.modality == modality)
+            .map(|(i, _)| i)
+            .collect();
+        if positions.is_empty() {
+            continue;
         }
-        for (pos, vec) in group.into_iter().zip(vecs) {
-            out[pos] = Some(vec);
+        let sub: Vec<(String, String)> = positions
+            .iter()
+            .map(|&i| (jobs[i].model.clone(), jobs[i].text.clone()))
+            .collect();
+        match modality {
+            JobModality::Dense => {
+                let vecs = batch_by_model(
+                    embedder,
+                    &sub,
+                    "QQL-EMBEDDING",
+                    "dense",
+                    ensure_batch_len,
+                    DenseBatchCall,
+                )
+                .await?;
+                for (pos, vec) in positions.into_iter().zip(vecs) {
+                    out[pos] = Some(JobOutput::Dense(vec));
+                }
+            }
+            // Backends overriding only the batch entry point serve every
+            // sparse leg (including Hybrid) through this single call site.
+            JobModality::Sparse => {
+                let vecs = batch_by_model(
+                    embedder,
+                    &sub,
+                    "QQL-EMBEDDING-SPARSE",
+                    "sparse",
+                    sparse_len_error,
+                    SparseBatchCall,
+                )
+                .await?;
+                for (pos, vec) in positions.into_iter().zip(vecs) {
+                    out[pos] = Some(JobOutput::Sparse(vec));
+                }
+            }
+            JobModality::Multi => {
+                let bags = batch_by_model(
+                    embedder,
+                    &sub,
+                    "QQL-EMBEDDING-MULTI",
+                    "multi",
+                    multi_len_error,
+                    MultiBatchCall,
+                )
+                .await?;
+                for (pos, rows) in positions.into_iter().zip(bags) {
+                    out[pos] = Some(JobOutput::Multi(rows));
+                }
+            }
+            JobModality::Image => {
+                let vecs = batch_by_model(
+                    embedder,
+                    &sub,
+                    "QQL-EMBEDDING-IMAGE",
+                    "image",
+                    image_len_error,
+                    ImageBatchCall,
+                )
+                .await?;
+                for (pos, vec) in positions.into_iter().zip(vecs) {
+                    out[pos] = Some(JobOutput::Image(vec));
+                }
+            }
         }
     }
-
-    drain_batch_out(out, "QQL-EMBEDDING-IMAGE", "image")
+    out.into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            slot.ok_or_else(|| {
+                QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!("internal error: missing query embedding at job index {i}"),
+                    None,
+                )
+            })
+        })
+        .collect()
 }
 
 // ── Apply batched vectors (in collect order) ──────────────────────────
 //
-// Pure AST rewrite: every embedding comes from the per-modality iterators
-// filled by the batched calls above, so the query path performs no
-// per-input embedder RPCs here.
+// Pure AST rewrite: every embedding comes from the job-aligned outputs above,
+// so the query path performs no per-input embedder RPCs here.
+
+/// Cursor consuming [`QueryJob`]s and their aligned outputs in walk order.
+///
+/// Each step checks the job list, so collect/apply drift fails closed instead
+/// of silently mis-binding vectors.
+struct ApplyCursor<'j> {
+    jobs: &'j [QueryJob],
+    values: std::vec::IntoIter<JobOutput>,
+    pos: usize,
+}
+
+impl<'j> ApplyCursor<'j> {
+    fn new(jobs: &'j [QueryJob], outputs: Vec<JobOutput>) -> Self {
+        debug_assert_eq!(jobs.len(), outputs.len());
+        Self {
+            jobs,
+            values: outputs.into_iter(),
+            pos: 0,
+        }
+    }
+
+    /// Take the next output, verifying the job list expects `modality` here.
+    /// `place` extends the run-out message (`""`, or `" for HYBRID"`).
+    fn take(&mut self, modality: JobModality, place: &'static str) -> Result<JobOutput, QqlError> {
+        let (code, noun) = modality_code(modality);
+        let job = self.jobs.get(self.pos).ok_or_else(|| {
+            QqlError::execution(
+                code,
+                format!("internal error: ran out of {noun} embeddings{place}"),
+                None,
+            )
+        })?;
+        if job.modality != modality {
+            return Err(QqlError::execution(
+                code,
+                format!(
+                    "internal error: embedding job mismatch at index {} (collect walked {} leg, apply walked {noun} leg)",
+                    self.pos,
+                    modality_code(job.modality).1,
+                ),
+                None,
+            ));
+        }
+        self.pos += 1;
+        self.values.next().ok_or_else(|| {
+            QqlError::execution(
+                code,
+                format!("internal error: ran out of {noun} embeddings{place}"),
+                None,
+            )
+        })
+    }
+
+    fn next_dense(&mut self, place: &'static str) -> Result<Vec<f32>, QqlError> {
+        match self.take(JobModality::Dense, place)? {
+            JobOutput::Dense(vec) => Ok(vec),
+            _ => Err(output_mismatch(JobModality::Dense)),
+        }
+    }
+
+    fn next_sparse(&mut self, place: &'static str) -> Result<SparseVector, QqlError> {
+        match self.take(JobModality::Sparse, place)? {
+            JobOutput::Sparse(vec) => Ok(vec),
+            _ => Err(output_mismatch(JobModality::Sparse)),
+        }
+    }
+
+    fn next_multi(&mut self, place: &'static str) -> Result<Vec<Vec<f32>>, QqlError> {
+        match self.take(JobModality::Multi, place)? {
+            JobOutput::Multi(rows) => Ok(rows),
+            _ => Err(output_mismatch(JobModality::Multi)),
+        }
+    }
+
+    fn next_image(&mut self) -> Result<Vec<f32>, QqlError> {
+        match self.take(JobModality::Image, "")? {
+            JobOutput::Image(vec) => Ok(vec),
+            _ => Err(output_mismatch(JobModality::Image)),
+        }
+    }
+
+    /// Fail closed on unconsumed jobs (collect/apply drift).
+    fn finish(self) -> Result<(), QqlError> {
+        match self.jobs.get(self.pos) {
+            None => Ok(()),
+            Some(job) => {
+                let (code, noun) = modality_code(job.modality);
+                Err(QqlError::execution(
+                    code,
+                    format!("internal error: unused {noun} embeddings after apply"),
+                    None,
+                ))
+            }
+        }
+    }
+}
+
+fn output_mismatch(modality: JobModality) -> QqlError {
+    let (code, noun) = modality_code(modality);
+    QqlError::execution(
+        code,
+        format!("internal error: {noun} job produced a non-{noun} output"),
+        None,
+    )
+}
 
 fn apply_query_embeddings<'a>(
     query: &'a mut QueryStmt,
-    dense: DenseIter<'a>,
-    sparse: SparseIter<'a>,
-    multi: MultiIter<'a>,
-    image: ImageIter<'a>,
+    cursor: &'a mut ApplyCursor<'_>,
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
         for cte in &mut query.ctes {
-            apply_expr_embeddings(&mut cte.query.expression, dense, sparse, multi, image).await?;
+            apply_expr_embeddings(&mut cte.query.expression, cursor).await?;
         }
-        apply_expr_embeddings(&mut query.expression, dense, sparse, multi, image).await?;
+        apply_expr_embeddings(&mut query.expression, cursor).await?;
         Ok(())
     })
 }
 
 fn apply_prefetches_embeddings<'a>(
     prefetches: &'a mut [Prefetch],
-    dense: DenseIter<'a>,
-    sparse: SparseIter<'a>,
-    multi: MultiIter<'a>,
-    image: ImageIter<'a>,
+    cursor: &'a mut ApplyCursor<'_>,
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
         for pref in prefetches {
             if let PrefetchSource::Query(sub) = &mut pref.source {
-                apply_query_embeddings(sub, dense, sparse, multi, image).await?;
+                apply_query_embeddings(sub, cursor).await?;
             }
         }
         Ok(())
@@ -485,10 +717,7 @@ fn apply_prefetches_embeddings<'a>(
 
 fn apply_expr_embeddings<'a>(
     expr: &'a mut QueryExpr,
-    dense: DenseIter<'a>,
-    sparse: SparseIter<'a>,
-    multi: MultiIter<'a>,
-    image: ImageIter<'a>,
+    cursor: &'a mut ApplyCursor<'_>,
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
         match expr {
@@ -498,15 +727,8 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(
-                    input,
-                    require_embed_target(using)?,
-                    dense,
-                    sparse,
-                    multi,
-                    image,
-                )?;
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_input(input, require_embed_target(using)?, cursor)?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::Recommend {
                 positive,
@@ -517,9 +739,9 @@ fn apply_expr_embeddings<'a>(
             } => {
                 let target = require_embed_target(using)?;
                 for input in positive.iter_mut().chain(negative.iter_mut()) {
-                    apply_input(input, target, dense, sparse, multi, image)?;
+                    apply_input(input, target, cursor)?;
                 }
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::Context {
                 pairs,
@@ -529,10 +751,10 @@ fn apply_expr_embeddings<'a>(
             } => {
                 let target = require_embed_target(using)?;
                 for pair in pairs {
-                    apply_input(&mut pair.positive, target, dense, sparse, multi, image)?;
-                    apply_input(&mut pair.negative, target, dense, sparse, multi, image)?;
+                    apply_input(&mut pair.positive, target, cursor)?;
+                    apply_input(&mut pair.negative, target, cursor)?;
                 }
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::Discover {
                 target,
@@ -542,15 +764,15 @@ fn apply_expr_embeddings<'a>(
                 ..
             } => {
                 let emb = require_embed_target(using)?;
-                apply_input(target, emb, dense, sparse, multi, image)?;
+                apply_input(target, emb, cursor)?;
                 for pair in context {
-                    apply_input(&mut pair.positive, emb, dense, sparse, multi, image)?;
-                    apply_input(&mut pair.negative, emb, dense, sparse, multi, image)?;
+                    apply_input(&mut pair.positive, emb, cursor)?;
+                    apply_input(&mut pair.negative, emb, cursor)?;
                 }
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::RelevanceFeedback {
                 target,
@@ -560,11 +782,11 @@ fn apply_expr_embeddings<'a>(
                 ..
             } => {
                 let emb = require_embed_target(using)?;
-                apply_input(target, emb, dense, sparse, multi, image)?;
+                apply_input(target, emb, cursor)?;
                 for fb in feedback {
-                    apply_input(&mut fb.example, emb, dense, sparse, multi, image)?;
+                    apply_input(&mut fb.example, emb, cursor)?;
                 }
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::Hybrid {
                 dense_vector,
@@ -572,22 +794,10 @@ fn apply_expr_embeddings<'a>(
                 fusion,
                 ..
             } => {
-                let d_vec = dense.next().ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-EMBEDDING",
-                        "internal error: ran out of dense embeddings for HYBRID",
-                        None,
-                    )
-                })?;
+                let d_vec = cursor.next_dense(" for HYBRID")?;
                 // The sparse leg shares `Hybrid.model` with the batched dense
                 // leg above (there is no dedicated sparse-model field).
-                let s_vec = sparse.next().ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-EMBEDDING-SPARSE",
-                        "internal error: ran out of sparse embeddings for HYBRID",
-                        None,
-                    )
-                })?;
+                let s_vec = cursor.next_sparse(" for HYBRID")?;
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -664,11 +874,11 @@ fn apply_expr_embeddings<'a>(
                 ..
             } => {
                 let emb = require_embed_target(using)?;
-                apply_input(input, emb, dense, sparse, multi, image)?;
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_input(input, emb, cursor)?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             QueryExpr::CrossRerank { prefetch, .. } => {
-                apply_prefetches_embeddings(prefetch, dense, sparse, multi, image).await?;
+                apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             _ => {}
         }
@@ -700,21 +910,12 @@ fn check_image_target(target: EmbedTarget) -> Result<(), QqlError> {
 fn apply_input(
     input: &mut QueryInput,
     target: EmbedTarget,
-    dense: DenseIter<'_>,
-    sparse: SparseIter<'_>,
-    multi: MultiIter<'_>,
-    image: ImageIter<'_>,
+    cursor: &mut ApplyCursor<'_>,
 ) -> Result<(), QqlError> {
     match input {
         QueryInput::Image { .. } => {
             check_image_target(target)?;
-            let vec = image.next().ok_or_else(|| {
-                QqlError::execution(
-                    "QQL-EMBEDDING-IMAGE",
-                    "internal error: ran out of image embeddings",
-                    None,
-                )
-            })?;
+            let vec = cursor.next_image()?;
             if vec.is_empty() {
                 return Err(QqlError::execution(
                     "QQL-EMBEDDING-IMAGE",
@@ -727,13 +928,7 @@ fn apply_input(
         }
         QueryInput::Text { .. } => {
             if target.kind == VectorKind::Sparse {
-                let s_vec = sparse.next().ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-EMBEDDING-SPARSE",
-                        "internal error: ran out of sparse embeddings",
-                        None,
-                    )
-                })?;
+                let s_vec = cursor.next_sparse("")?;
                 *input = QueryInput::Vector(VectorValue::Sparse {
                     indices: s_vec.indices,
                     values: s_vec.values,
@@ -741,13 +936,7 @@ fn apply_input(
                 return Ok(());
             }
             if target.multi {
-                let rows = multi.next().ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-EMBEDDING-MULTI",
-                        "internal error: ran out of multi embeddings",
-                        None,
-                    )
-                })?;
+                let rows = cursor.next_multi("")?;
                 if rows.is_empty() {
                     return Err(QqlError::execution(
                         "QQL-EMBEDDING-MULTI",
@@ -758,13 +947,7 @@ fn apply_input(
                 *input = QueryInput::Vector(VectorValue::MultiDense(rows));
                 return Ok(());
             }
-            let vec = dense.next().ok_or_else(|| {
-                QqlError::execution(
-                    "QQL-EMBEDDING",
-                    "internal error: ran out of dense embeddings",
-                    None,
-                )
-            })?;
+            let vec = cursor.next_dense("")?;
             if vec.is_empty() {
                 return Err(QqlError::execution(
                     "QQL-EMBEDDING",

@@ -300,6 +300,54 @@ impl HttpEmbedder {
             .unwrap_or(self.api_key.as_str())
     }
 
+    /// Scatter an indexed embedding response into input order.
+    ///
+    /// Shared skeleton behind the dense / multi / image batch validators:
+    /// cardinality check, index-range + duplicate guards, per-item payload
+    /// extraction (`extract` carries the modality's shape and dimension
+    /// rules), then the missing-slot drain.
+    fn scatter_batch_response<T>(
+        data: Vec<EmbedData>,
+        expected: usize,
+        code: &'static str,
+        count_msg: impl FnOnce(usize, usize) -> String,
+        slot_prefix: &'static str,
+        missing_msg: impl Fn(usize) -> String,
+        mut extract: impl FnMut(usize, EmbeddingPayload) -> Result<T, QqlError>,
+    ) -> Result<Vec<T>, QqlError> {
+        if data.len() != expected {
+            return Err(QqlError::execution(
+                code,
+                count_msg(data.len(), expected),
+                None,
+            ));
+        }
+        let mut slots: Vec<Option<T>> = Vec::new();
+        slots.resize_with(expected, || None);
+        for item in data {
+            if item.index >= expected {
+                return Err(QqlError::execution(
+                    code,
+                    format!("{slot_prefix} response index {} out of range", item.index),
+                    None,
+                ));
+            }
+            if slots[item.index].is_some() {
+                return Err(QqlError::execution(
+                    code,
+                    format!("{slot_prefix} response duplicated index {}", item.index),
+                    None,
+                ));
+            }
+            slots[item.index] = Some(extract(item.index, item.embedding)?);
+        }
+        slots
+            .into_iter()
+            .enumerate()
+            .map(|(i, slot)| slot.ok_or_else(|| QqlError::execution(code, missing_msg(i), None)))
+            .collect()
+    }
+
     /// Embed a dense batch in one request, validating count, index coverage,
     /// and per-vector dimension against the configured `dimension`.
     pub async fn embed_batch_with_model(
@@ -322,76 +370,42 @@ impl HttpEmbedder {
             .do_request(&self.endpoint, &self.api_key, &body)
             .await?;
 
-        if decoded.data.len() != inputs.len() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING",
-                format!(
-                    "embedding response returned {} vector(s) for {} input(s)",
-                    decoded.data.len(),
-                    inputs.len()
-                ),
-                None,
-            ));
-        }
-
-        let mut vectors: Vec<Option<Vec<f32>>> = vec![None; inputs.len()];
-        for item in decoded.data {
-            if item.index >= inputs.len() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    format!("embedding response index {} out of range", item.index),
-                    None,
-                ));
-            }
-            if vectors[item.index].is_some() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    format!("embedding response duplicated index {}", item.index),
-                    None,
-                ));
-            }
-            let dense = match item.embedding {
-                EmbeddingPayload::Dense(v) => v,
-                EmbeddingPayload::Multi(_) => {
+        let dimension = self.dimension;
+        Self::scatter_batch_response(
+            decoded.data,
+            inputs.len(),
+            "QQL-EMBEDDING",
+            |got, expected| {
+                format!("embedding response returned {got} vector(s) for {expected} input(s)")
+            },
+            "embedding",
+            |i| format!("missing embedding vector at index {i}"),
+            |index, payload| {
+                let dense = match payload {
+                    EmbeddingPayload::Dense(v) => v,
+                    EmbeddingPayload::Multi(_) => {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING",
+                            format!(
+                                "embedding response index {index} returned multivector; expected dense"
+                            ),
+                            None,
+                        ));
+                    }
+                };
+                if dense.len() != dimension {
                     return Err(QqlError::execution(
                         "QQL-EMBEDDING",
                         format!(
-                            "embedding response index {} returned multivector; expected dense",
-                            item.index
+                            "embedding dimension mismatch for index {index}: got {} want {dimension}",
+                            dense.len(),
                         ),
                         None,
                     ));
                 }
-            };
-            if dense.len() != self.dimension {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    format!(
-                        "embedding dimension mismatch for index {}: got {} want {}",
-                        item.index,
-                        dense.len(),
-                        self.dimension
-                    ),
-                    None,
-                ));
-            }
-            vectors[item.index] = Some(dense);
-        }
-
-        let mut result = Vec::with_capacity(vectors.len());
-        for (i, v) in vectors.into_iter().enumerate() {
-            if let Some(vec) = v {
-                result.push(vec);
-            } else {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    format!("missing embedding vector at index {}", i),
-                    None,
-                ));
-            }
-        }
-
-        Ok(result)
+                Ok(dense)
+            },
+        )
     }
 
     /// Embed a dense batch with the configured default model.
@@ -421,90 +435,58 @@ impl HttpEmbedder {
             .do_request(self.multi_url(), self.multi_key(), &body)
             .await?;
 
-        if decoded.data.len() != inputs.len() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-MULTI",
+        let multi_dimension = self.multi_dimension;
+        Self::scatter_batch_response(
+            decoded.data,
+            inputs.len(),
+            "QQL-EMBEDDING-MULTI",
+            |got, expected| {
                 format!(
-                    "multi embedding response returned {} result(s) for {} input(s) (model={model_name})",
-                    decoded.data.len(),
-                    inputs.len()
-                ),
-                None,
-            ));
-        }
-
-        let mut vectors: Vec<Option<Vec<Vec<f32>>>> = vec![None; inputs.len()];
-        for item in decoded.data {
-            if item.index >= inputs.len() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-MULTI",
-                    format!("multi embedding response index {} out of range", item.index),
-                    None,
-                ));
-            }
-            if vectors[item.index].is_some() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-MULTI",
-                    format!("multi embedding response duplicated index {}", item.index),
-                    None,
-                ));
-            }
-            let multi = match item.embedding {
-                EmbeddingPayload::Multi(rows) => rows,
-                EmbeddingPayload::Dense(flat) => {
-                    return Err(QqlError::execution(
-                        "QQL-EMBEDDING-MULTI",
-                        format!(
-                            "multi embedding endpoint returned a flat dense vector (len={}) for index {}; \
-                             expected nested array [[f32,…],…] (token-level multivector). \
-                             Point MODEL at a ColBERT multi service or set multi_embedding_endpoint.",
-                            flat.len(),
-                            item.index
-                        ),
-                        None,
-                    ));
-                }
-            };
-            if multi.is_empty() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-MULTI",
-                    format!("multi embedding returned empty bag at index {}", item.index),
-                    None,
-                ));
-            }
-            if self.multi_dimension > 0 {
-                for (row_i, row) in multi.iter().enumerate() {
-                    if row.len() != self.multi_dimension {
+                    "multi embedding response returned {got} result(s) for {expected} input(s) (model={model_name})"
+                )
+            },
+            "multi embedding",
+            |i| format!("missing multi embedding at index {i}"),
+            |index, payload| {
+                let multi = match payload {
+                    EmbeddingPayload::Multi(rows) => rows,
+                    EmbeddingPayload::Dense(flat) => {
                         return Err(QqlError::execution(
                             "QQL-EMBEDDING-MULTI",
                             format!(
-                                "multi embedding dimension mismatch at index {} row {}: got {} want {}",
-                                item.index,
-                                row_i,
-                                row.len(),
-                                self.multi_dimension
+                                "multi embedding endpoint returned a flat dense vector (len={}) for index {index}; \
+                                 expected nested array [[f32,…],…] (token-level multivector). \
+                                 Point MODEL at a ColBERT multi service or set multi_embedding_endpoint.",
+                                flat.len(),
                             ),
                             None,
                         ));
                     }
+                };
+                if multi.is_empty() {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MULTI",
+                        format!("multi embedding returned empty bag at index {index}"),
+                        None,
+                    ));
                 }
-            }
-            vectors[item.index] = Some(multi);
-        }
-
-        let mut result = Vec::with_capacity(vectors.len());
-        for (i, v) in vectors.into_iter().enumerate() {
-            if let Some(vec) = v {
-                result.push(vec);
-            } else {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-MULTI",
-                    format!("missing multi embedding at index {}", i),
-                    None,
-                ));
-            }
-        }
-        Ok(result)
+                if multi_dimension > 0 {
+                    for (row_i, row) in multi.iter().enumerate() {
+                        if row.len() != multi_dimension {
+                            return Err(QqlError::execution(
+                                "QQL-EMBEDDING-MULTI",
+                                format!(
+                                    "multi embedding dimension mismatch at index {index} row {row_i}: got {} want {multi_dimension}",
+                                    row.len(),
+                                ),
+                                None,
+                            ));
+                        }
+                    }
+                }
+                Ok(multi)
+            },
+        )
     }
 
     fn resolve_image_model<'a>(&'a self, model: &'a str) -> &'a str {
@@ -561,69 +543,44 @@ impl HttpEmbedder {
             .do_request(self.image_url(), self.image_key(), &body)
             .await?;
 
-        if decoded.data.len() != sources.len() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-IMAGE",
-                format!(
-                    "image embedding response returned {} vector(s) for {} source(s)",
-                    decoded.data.len(),
-                    sources.len()
-                ),
-                None,
-            ));
-        }
-
         let want_dim = self.image_dim();
-        let mut vectors: Vec<Option<Vec<f32>>> = vec![None; sources.len()];
-        for item in decoded.data {
-            if item.index >= sources.len() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-IMAGE",
-                    format!("image embedding response index {} out of range", item.index),
-                    None,
-                ));
-            }
-            let dense = match item.embedding {
-                EmbeddingPayload::Dense(v) => v,
-                EmbeddingPayload::Multi(_) => {
+        Self::scatter_batch_response(
+            decoded.data,
+            sources.len(),
+            "QQL-EMBEDDING-IMAGE",
+            |got, expected| {
+                format!(
+                    "image embedding response returned {got} vector(s) for {expected} source(s)"
+                )
+            },
+            "image embedding",
+            |i| format!("missing image embedding at index {i}"),
+            |index, payload| {
+                let dense = match payload {
+                    EmbeddingPayload::Dense(v) => v,
+                    EmbeddingPayload::Multi(_) => {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING-IMAGE",
+                            format!(
+                                "image embedding index {index} returned multivector; expected dense (CLIP vision is single-vector)"
+                            ),
+                            None,
+                        ));
+                    }
+                };
+                if dense.len() != want_dim {
                     return Err(QqlError::execution(
                         "QQL-EMBEDDING-IMAGE",
                         format!(
-                            "image embedding index {} returned multivector; expected dense (CLIP vision is single-vector)",
-                            item.index
+                            "image embedding dimension mismatch for index {index}: got {} want {want_dim}",
+                            dense.len(),
                         ),
                         None,
                     ));
                 }
-            };
-            if dense.len() != want_dim {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-IMAGE",
-                    format!(
-                        "image embedding dimension mismatch for index {}: got {} want {}",
-                        item.index,
-                        dense.len(),
-                        want_dim
-                    ),
-                    None,
-                ));
-            }
-            vectors[item.index] = Some(dense);
-        }
-
-        let mut result = Vec::with_capacity(vectors.len());
-        for (i, v) in vectors.into_iter().enumerate() {
-            if let Some(vec) = v {
-                result.push(vec);
-            } else {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING-IMAGE",
-                    format!("missing image embedding at index {}", i),
-                    None,
-                ));
-            }
-        }
-        Ok(result)
+                Ok(dense)
+            },
+        )
     }
 }
 
