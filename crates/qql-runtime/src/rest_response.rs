@@ -23,7 +23,7 @@ use qql_plan::{
 
 use crate::backend::CollectionInfo;
 use crate::executor::response::{
-    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_f64,
+    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_from_wire,
 };
 use crate::executor::telemetry::ServerTelemetry;
 
@@ -333,11 +333,10 @@ fn parse_hit(value: Value) -> Result<SearchHit, QqlError> {
     )?;
     let score = match record.remove("score") {
         None | Some(Value::Null) => 0.0,
-        Some(Value::Number(number)) => score_f64(
+        Some(Value::Number(number)) => score_from_wire(
             number
                 .as_f64()
-                .ok_or_else(|| envelope_err("point score is not a finite number"))?
-                as f32,
+                .ok_or_else(|| envelope_err("point score is not a finite number"))?,
         ),
         Some(other) => {
             return Err(envelope_err(format!(

@@ -323,14 +323,28 @@ impl Executor {
             ));
         }
 
-        // Rank (score, position) pairs — losers are never cloned — then
-        // paginate the index run and materialize only the output slice.
-        let mut ranked: Vec<(f32, usize)> = scores
+        // Rank on the stored rounded value: `ranked` holds the f64 that lands
+        // on the hit, so output order always matches the visible scores
+        // (sorting the raw f32 pairs could disagree with the rounded values
+        // on near-ties). Losers are never cloned — paginate the index run
+        // and materialize only the output slice below.
+        let mut ranked: Vec<(f64, usize)> = scores
             .into_iter()
             .enumerate()
-            .map(|(k, s)| (s, k))
+            .map(|(k, s)| (score_f64(s), k))
             .collect();
-        ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        // NaN sorts last, by explicit choice: cross-encoder scores should
+        // never be NaN, but `partial_cmp` leaves NaN unordered against
+        // everything, so the old `unwrap_or(Equal)` pinned each NaN at its
+        // arrival slot and could surface it mid-ranking. Sinking NaNs keeps
+        // the ranked prefix meaningful; the stable sort preserves arrival
+        // order among NaNs (and among ties).
+        ranked.sort_by(|a, b| match (a.0.is_nan(), b.0.is_nan()) {
+            (true, true) => std::cmp::Ordering::Equal,
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (false, false) => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
+        });
 
         // Pagination applies after empty-field filtering: candidates lacking
         // the rerank field are dropped before OFFSET/LIMIT, so page boundaries
@@ -356,9 +370,9 @@ impl Executor {
             .map(|(score, k)| {
                 let i = doc_idx[k];
                 let mut h = hits[i].clone();
-                // Rank stays on the raw f32 pairs above (sort order
-                // unchanged); only the stored hit rounds once via `score_f64`.
-                h.score = score_f64(score);
+                // Already rounded at rank time: the sort key and the stored
+                // hit are the same value.
+                h.score = score;
                 h.collection = Some(candidates[hit_coll[i]].0.clone());
                 h
             })
