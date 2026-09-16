@@ -211,8 +211,9 @@ class Client {
      * @param {string[] | null} [stopwords]
      * @param {number | null} [min_token_len]
      * @param {number | null} [max_token_len]
+     * @param {string[] | null} [stopwords_languages]
      */
-    setBm25Text(language, tokenizer, lowercase, ascii_folding, stemmer, stopwords, min_token_len, max_token_len) {
+    setBm25Text(language, tokenizer, lowercase, ascii_folding, stemmer, stopwords, min_token_len, max_token_len, stopwords_languages) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             var ptr0 = isLikeNone(language) ? 0 : passStringToWasm0(language, wasm.__wbindgen_export, wasm.__wbindgen_export2);
@@ -223,7 +224,9 @@ class Client {
             var len2 = WASM_VECTOR_LEN;
             var ptr3 = isLikeNone(stopwords) ? 0 : passArrayJsValueToWasm0(stopwords, wasm.__wbindgen_export);
             var len3 = WASM_VECTOR_LEN;
-            wasm.client_setBm25Text(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(lowercase) ? 0xFFFFFF : lowercase ? 1 : 0, isLikeNone(ascii_folding) ? 0xFFFFFF : ascii_folding ? 1 : 0, ptr2, len2, ptr3, len3, isLikeNone(min_token_len) ? Number.MAX_SAFE_INTEGER : (min_token_len) >>> 0, isLikeNone(max_token_len) ? Number.MAX_SAFE_INTEGER : (max_token_len) >>> 0);
+            var ptr4 = isLikeNone(stopwords_languages) ? 0 : passArrayJsValueToWasm0(stopwords_languages, wasm.__wbindgen_export);
+            var len4 = WASM_VECTOR_LEN;
+            wasm.client_setBm25Text(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(lowercase) ? 0xFFFFFF : lowercase ? 1 : 0, isLikeNone(ascii_folding) ? 0xFFFFFF : ascii_folding ? 1 : 0, ptr2, len2, ptr3, len3, isLikeNone(min_token_len) ? Number.MAX_SAFE_INTEGER : (min_token_len) >>> 0, isLikeNone(max_token_len) ? Number.MAX_SAFE_INTEGER : (max_token_len) >>> 0, ptr4, len4);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {

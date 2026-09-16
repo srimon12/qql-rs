@@ -167,7 +167,7 @@ export class Client {
      * token length limits. All `null` keeps the current value; anything
      * invalid throws (`QQL-VALIDATION-CONFIG`).
      */
-    setBm25Text(language?: string | null, tokenizer?: string | null, lowercase?: boolean | null, ascii_folding?: boolean | null, stemmer?: string | null, stopwords?: string[] | null, min_token_len?: number | null, max_token_len?: number | null): void;
+    setBm25Text(language?: string | null, tokenizer?: string | null, lowercase?: boolean | null, ascii_folding?: boolean | null, stemmer?: string | null, stopwords?: string[] | null, min_token_len?: number | null, max_token_len?: number | null, stopwords_languages?: string[] | null): void;
     /**
      * Set a JS embedder: `async (texts: string[]) => number[][]`.
      * Called with the full batch — do not loop one-by-one inside the callback
