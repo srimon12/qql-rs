@@ -45,9 +45,13 @@ const client = new Client({
         model: "all-minilm:l6-v2",
         dimension: 384,
         // Local sparse BM25 document tuning (write-path only; re-ingest to apply)
-        bm25K1: 2.0,      // tf saturation (default 1.2)
+        bm25K1: 2.0,      // tf saturation (default 1.2; 0 = binary weighting)
         bm25B: 0.5,       // length normalization, [0, 1] (default 0.75)
         bm25AvgLen: 8.0,  // expected avg doc length in tokens (default 256)
+        bm25Language: "es",       // text language: stopwords/stemmer (default "english")
+        bm25Tokenizer: "whitespace", // word (default) | whitespace | prefix
+        bm25AsciiFolding: true,   // ignore accents (default false)
+        bm25Stemmer: "none",      // disable stemming (default: language stemmer)
     },
 });
 

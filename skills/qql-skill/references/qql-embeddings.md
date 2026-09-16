@@ -56,17 +56,19 @@ QUERY TEXT 'kubernetes deployment' FROM incidents USING sparse AS SPARSE LIMIT 1
 
 Key decisions:
 
-- Wire-compatible with Qdrant `qdrant/bm25`. Murmur3-32 token IDs, word tokenizer, English stopwords plus snowball stemming. Queries embed unit weights. Documents use tf saturation.
-- Sparse document encoding is always local. HTTP embedders serve dense, multi, image, and rerank only. Document-side BM25 params tune the write path: `k1`, `b`, `avg_len`. Defaults are `1.2`, `0.75`, `256`. Invalid values raise `QQL-VALIDATION-CONFIG`. Re-ingest to apply.
+- Wire-compatible with Qdrant `qdrant/bm25`. Murmur3-32 token IDs, Qdrant's fold → lowercase → stopwords → stem → length pipeline. Defaults are the server defaults (word tokenizer, English, lowercase on). Queries embed unit weights. Documents use tf saturation.
+- Sparse document encoding is always local. HTTP embedders serve dense, multi, image, and rerank only. Document-side BM25 params tune the write path: `k1`, `b`, `avg_len`. Defaults are `1.2`, `0.75`, `256` (`k1 = 0` is valid: binary weighting, like Qdrant). Invalid values raise `QQL-VALIDATION-CONFIG`. Re-ingest to apply.
+- Text processing is configurable per Qdrant's `Bm25Config`: 30 languages (name or alias, e.g. `spanish`/`es`) driving stopwords/stemmer, tokenizers (`word`/`whitespace`/`prefix`), ASCII folding, custom stopwords (replace the default; `[]` disables), stemmer override (`none` disables), token length limits. Unknown names fail closed. `multilingual` fails closed in the lean core (no charabia dep); the edge engine supports it.
+- `avg_len` is user-supplied everywhere (even server-side) and the `256` default assumes document-length text. Measure a corpus-true value: Rust `Executor::estimate_bm25_avg_len(collection, field, sample)` scrolls a field sample with the executor's own pipeline. Empty samples yield `None` — keep the default.
 - `USING bm25` defaults model to `Qdrant/bm25` when unspecified.
 - Tenant IDF scoping is a search param, not embedding config. `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`. See `qql-params.md`.
 
 Host knobs:
 
-- Rust: `Bm25Params`, `LocalExecutorOptions::bm25_*`, `FastEmbedderOptions`, `HttpEmbedderOptions`.
-- Python: `Client(embedder={..., bm25_k1, bm25_b, bm25_avg_len})`, `local_executor(..., bm25_k1=, ...)`, `http_executor`.
-- Node: `{ bm25K1, bm25B, bm25AvgLen }` on embedder and local executor.
-- WASM: `client.setBm25Params(k1, b, avgLen)`.
+- Rust: `Bm25Params` / `Bm25TextConfig`, `Embedder::bm25_params` / `bm25_text_config`, `HttpEmbedderOptions { bm25_* }`, `QqlConfig.bm25_*`, `qql_edge::{LocalExecutorOptions, FastEmbedderOptions}` (explicit stemmer/stopword overrides stay at language defaults on edge).
+- Python: `Client(embedder={..., bm25_k1, …, bm25_language, bm25_tokenizer, …})`, `local_executor(..., bm25_k1=, …, bm25_language=, …)`, `http_executor` (also `bm25_stopwords=`, `bm25_stemmer=`).
+- Node: `{ bm25K1, …, bm25Language, bm25Tokenizer, … }` on embedder and local executor (snake_case aliases accepted).
+- WASM: `client.setBm25Params(k1, b, avgLen)` + `client.setBm25Text(…)` (see `wasm-sdk.md`).
 - CLI: `qql config edge --bm25-*` and `QQL_EDGE_BM25_*`.
 
 ## Multivector ColBERT

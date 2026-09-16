@@ -76,7 +76,7 @@ qql version
 
 ```bash
 qql --edge run "QUERY 'hello' FROM docs USING dense LIMIT 5"
-qql config edge --bm25-k1 2.0 --bm25-b 0.5 --bm25-avg-len 8.0
+qql config edge --bm25-k1 2.0 --bm25-b 0.5 --bm25-avg-len 8.0 --bm25-language es --bm25-tokenizer whitespace
 qql edge bootstrap docs --from http://localhost:6333
 qql edge bootstrap docs --from http://localhost:6333 --shard-id 0 --force --json
 qql --edge migrate local_docs --target-url http://server:6333 --to docs
