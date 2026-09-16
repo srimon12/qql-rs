@@ -147,16 +147,6 @@ impl Client {
         Ok(())
     }
 
-    /// Current BM25 document parameters (used by the local sparse encoder).
-    pub(crate) fn bm25_params(&self) -> &qql_embed::Bm25Params {
-        &self.bm25.params
-    }
-
-    /// Current BM25 text configuration (used by the local sparse encoder).
-    pub(crate) fn bm25_text_config(&self) -> &qql_embed::Bm25TextConfig {
-        &self.bm25
-    }
-
     // ── Embedder configuration ──────────────────────────────────
 
     /// Set a JS embedder: `async (texts: string[]) => number[][]`.
@@ -794,6 +784,7 @@ impl Client {
             })?;
         Ok(vector_names_from_collection_result(result))
     }
+
     pub(crate) async fn send_json(
         &self,
         method: &str,
@@ -802,35 +793,140 @@ impl Client {
     ) -> Result<serde_json::Value, JsValue> {
         let body_str = body
             .as_ref()
-            .map(|b| serde_json::to_string(b).map_err(|e| JsValue::from_str(&e.to_string())))
+            .map(|b| {
+                serde_json::to_string(b).map_err(|e| {
+                    qql_err_to_js(qql_core::error::QqlError::execution(
+                        "QQL-PLAN-SERIALIZE",
+                        format!("plan IR REST request body serialization failed: {e}"),
+                        None,
+                    ))
+                })
+            })
             .transpose()?;
 
         let rb = self.request(method, path);
         let resp = if let Some(s) = body_str {
             rb.body(s)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
+                .map_err(|e| {
+                    qql_err_to_js(qql_core::error::QqlError::transport(
+                        "QQL-TRANSPORT-REQUEST",
+                        format!("failed to set request body: {e}"),
+                        None,
+                    ))
+                })?
                 .send()
                 .await
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
+                .map_err(|e| {
+                    qql_err_to_js(qql_core::error::QqlError::transport(
+                        "QQL-TRANSPORT-REQUEST",
+                        format!("HTTP request failed: {e}"),
+                        None,
+                    ))
+                })?
         } else {
-            rb.send()
-                .await
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
+            rb.send().await.map_err(|e| {
+                qql_err_to_js(qql_core::error::QqlError::transport(
+                    "QQL-TRANSPORT-REQUEST",
+                    format!("HTTP request failed: {e}"),
+                    None,
+                ))
+            })?
         };
 
         let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let text = resp.text().await.map_err(|e| {
+            qql_err_to_js(qql_core::error::QqlError::backend(
+                "QQL-BACKEND-READ",
+                format!("failed to read response body: {e}"),
+                None,
+            ))
+        })?;
 
         if status >= 400 {
-            return Err(JsValue::from_str(&format!(
-                "Qdrant returned {}: {}",
-                status, text
-            )));
+            let code = classify_backend_error_code(status, &text);
+            return Err(qql_err_to_js(
+                qql_core::error::QqlError::backend(
+                    code,
+                    format!("Qdrant returned {status}: {text}"),
+                    None,
+                )
+                .with_status(status),
+            ));
         }
 
-        serde_json::from_str(&text).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::from_str(&text).map_err(|e| {
+            qql_err_to_js(qql_core::error::QqlError::backend(
+                "QQL-BACKEND-ENVELOPE",
+                format!("failed to parse backend JSON response: {e}"),
+                None,
+            ))
+        })
+    }
+}
+
+fn classify_backend_error_code(status: u16, message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if status == 401
+        || status == 403
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("api key")
+        || lower.contains("bearer")
+    {
+        "QQL-BACKEND-AUTH"
+    } else if status == 404 || lower.contains("not found") {
+        "QQL-BACKEND-COLLECTION-NOT-FOUND"
+    } else if (lower.contains("index")
+        && (lower.contains("not exist")
+            || lower.contains("appropriate")
+            || lower.contains("not ready")
+            || lower.contains("missing")
+            || lower.contains("indexing")
+            || lower.contains("failed")))
+        || lower.contains("no appropriate index")
+    {
+        "QQL-BACKEND-INDEX-NOT-READY"
+    } else if lower.contains("dimension")
+        || lower.contains("vector size")
+        || lower.contains("dimensions")
+    {
+        "QQL-BACKEND-DIMENSION-MISMATCH"
+    } else {
+        "QQL-BACKEND-HTTP"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_backend_error_code() {
+        assert_eq!(classify_backend_error_code(401, ""), "QQL-BACKEND-AUTH");
+        assert_eq!(classify_backend_error_code(403, ""), "QQL-BACKEND-AUTH");
+        assert_eq!(
+            classify_backend_error_code(400, "invalid api key"),
+            "QQL-BACKEND-AUTH"
+        );
+        assert_eq!(
+            classify_backend_error_code(404, ""),
+            "QQL-BACKEND-COLLECTION-NOT-FOUND"
+        );
+        assert_eq!(
+            classify_backend_error_code(500, "collection 'docs' not found"),
+            "QQL-BACKEND-COLLECTION-NOT-FOUND"
+        );
+        assert_eq!(
+            classify_backend_error_code(400, "vector size mismatch: expected 128, got 256"),
+            "QQL-BACKEND-DIMENSION-MISMATCH"
+        );
+        assert_eq!(
+            classify_backend_error_code(400, "no appropriate index for field"),
+            "QQL-BACKEND-INDEX-NOT-READY"
+        );
+        assert_eq!(
+            classify_backend_error_code(500, "internal server error"),
+            "QQL-BACKEND-HTTP"
+        );
     }
 }

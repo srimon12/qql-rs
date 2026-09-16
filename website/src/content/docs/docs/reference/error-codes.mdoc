@@ -150,6 +150,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-BATCH-MIXED` | `BATCH` members mix collections or query/mutation families |
 | `QQL-VALIDATION-BATCH-PARAMS` | `PARAMS` timeout/consistency placed on a member instead of the `BATCH` header (or vice versa) |
 | `QQL-VALIDATION-BATCH-WAIT` | `WAIT` placed on a member instead of the `BATCH` header, or on a query batch |
+| `QQL-VALIDATION-ANALYZE-BATCH` | `EXPLAIN ANALYZE` does not support `BATCH` scripts; analyze single statements individually |
 | `QQL-VALIDATION-MIN-SHOULD` | `MIN SHOULD` count must be `>= 1` |
 
 ## Planning
@@ -230,6 +231,8 @@ The same structured fields are projected differently by each host binding.
 |---|---|
 | `QQL-JSON-NONFINITE` | A non-finite float cannot be serialized to JSON |
 | `QQL-JSON-NUMBER` | A value cannot be represented as a JSON number |
+| `QQL-SERIALIZE` | Response data failed JSON serialization for the host environment |
+| `QQL-SERIALIZE-AST` | AST failed JSON serialization during bindings export |
 
 ## Binding
 
@@ -251,6 +254,7 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
 | `QQL-BIND-UNSUPPORTED-STATEMENT` | Parameter binding attempted on an unsupported statement type (e.g. DDL) |
 | `QQL-BIND-ALREADY-BOUND` | New params were passed to an already-bound `Stmt` — they would be silently ignored |
+| `QQL-BIND-HEADER` | The leading `-- qql-params: {...}` header is malformed, not single-line JSON, or outside the first 10 lines |
 
 ## Execution
 
@@ -273,6 +277,15 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-EMBEDDING-MODEL` | The requested embedding model is not available from the configured embedder |
 | `QQL-EMBEDDING-MULTI` | Multivector embedding is unavailable (no multi path configured) |
 | `QQL-EMBEDDING-SPARSE` | Sparse embedding is unavailable on this embedder (non-default `MODEL` with local BM25) |
+
+## Lint & formatting
+
+Codes emitted by `qql lint` and `qql fmt` for static code quality and idiom checks.
+
+| Code | Meaning |
+|---|---|
+| `QQL-FMT-NON-CANONICAL` | The file requires formatting to match canonical QQL style (`qql fmt --check`) |
+| `QQL-IDIOM-REDUNDANT-PAYLOAD` | Redundant `WITH PAYLOAD true` clause; payloads are returned by default in QQL |
 
 ## Request correlation
 
@@ -406,6 +419,7 @@ QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
 QQL-BIND-BATCH-LENGTH
 QQL-BIND-DUPLICATE-PARAM
+QQL-BIND-HEADER
 QQL-BIND-INVALID-PARAMS
 QQL-BIND-MISSING-PARAM
 QQL-BIND-MISSING-POSITIONAL
@@ -484,6 +498,7 @@ QQL-EMBEDDING-MULTI
 QQL-EMBEDDING-SPARSE
 QQL-EMBEDDING-TARGET
 QQL-EMBEDDING-TOPOLOGY
+QQL-FMT-NON-CANONICAL
 QQL-GRPC
 QQL-GRPC-BATCH
 QQL-GRPC-DDL-RANGE
@@ -498,6 +513,7 @@ QQL-GRPC-RANGE-TYPE
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
 QQL-GRPC-SCROLL-LIMIT
+QQL-IDIOM-REDUNDANT-PAYLOAD
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER
 QQL-LEX-CHAR
@@ -591,6 +607,8 @@ QQL-RERANK-CROSS-FIELD
 QQL-REST-BATCH
 QQL-REST-CLIENT-SIDE
 QQL-REST-OVERWRITE-BATCH-ONLY
+QQL-SERIALIZE
+QQL-SERIALIZE-AST
 QQL-SNAPSHOT-IO
 QQL-SNAPSHOT-SHARD
 QQL-SNAPSHOT-URL
@@ -601,6 +619,7 @@ QQL-TRANSPORT-REQUEST
 QQL-UNKNOWN-VECTOR
 QQL-VALIDATION-ACORN-SELECTIVITY
 QQL-VALIDATION-ALIASES
+QQL-VALIDATION-ANALYZE-BATCH
 QQL-VALIDATION-BATCH-EMPTY
 QQL-VALIDATION-BATCH-MEMBER
 QQL-VALIDATION-BATCH-MIXED
