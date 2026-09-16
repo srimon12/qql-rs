@@ -132,6 +132,10 @@ fn run_binds_params_with_script_file() {
     std::fs::write(&script, "SHOW COLLECTIONS;\n").unwrap();
     let out = qql(&["run", script.to_str().unwrap(), "-p", "q=x"], &home);
     assert!(
+        !out.status.success(),
+        "a script with a failed statement must exit non-zero, even in Continue mode"
+    );
+    assert!(
         String::from_utf8_lossy(&out.stderr).contains("QQL-BIND-UNSUPPORTED-STATEMENT"),
         "params must reach the binder, stderr: {}",
         String::from_utf8_lossy(&out.stderr)
