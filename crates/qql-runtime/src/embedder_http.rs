@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "rest")]
 use qql_core::error::QqlError;
 #[cfg(feature = "rest")]
-use qql_embed::embedder::Embedder;
+use qql_embed::bm25_text::Bm25TextConfig;
 #[cfg(feature = "rest")]
+use qql_embed::embedder::Embedder;
 use qql_embed::sparse::{Bm25Params, SparseVector};
 
 #[cfg(feature = "rest")]
@@ -75,7 +76,7 @@ pub struct HttpEmbedder {
     rerank_endpoint: Option<String>,
     rerank_api_key: Option<String>,
     rerank_model: Option<String>,
-    bm25: Bm25Params,
+    bm25_text: Bm25TextConfig,
     client: Client,
 }
 
@@ -123,7 +124,7 @@ impl HttpEmbedder {
             ));
         }
 
-        let bm25 = Bm25Params::resolve(opts.bm25_k1, opts.bm25_b, opts.bm25_avg_len)?;
+        let bm25_text = opts.bm25_text_config()?;
 
         let client = Client::builder().build().map_err(|e| {
             QqlError::execution(
@@ -149,7 +150,7 @@ impl HttpEmbedder {
             rerank_endpoint: opts.rerank_endpoint.filter(|s| !s.trim().is_empty()),
             rerank_api_key: opts.rerank_api_key,
             rerank_model: opts.rerank_model.filter(|s| !s.trim().is_empty()),
-            bm25,
+            bm25_text,
             client,
         })
     }
@@ -619,11 +620,15 @@ impl Embedder for HttpEmbedder {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        Ok(qql_embed::sparse::embed_query(text))
+        self.bm25_text.pipeline().embed_query(text)
     }
 
     fn bm25_params(&self) -> Bm25Params {
-        self.bm25
+        self.bm25_text.params
+    }
+
+    fn bm25_text_config(&self) -> qql_embed::Bm25TextConfig {
+        self.bm25_text.clone()
     }
 
     async fn embed_sparse_document(
@@ -634,9 +639,7 @@ impl Embedder for HttpEmbedder {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        Ok(qql_embed::sparse::embed_document_with_params(
-            text, &self.bm25,
-        ))
+        self.bm25_text.pipeline().embed_document(text)
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {

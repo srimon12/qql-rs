@@ -114,7 +114,7 @@ async fn unset_bm25_params_stay_byte_identical_to_defaults() {
 #[test]
 fn http_embedder_rejects_invalid_bm25_params_fail_closed() {
     let cases = [
-        (Some(0.0), None, None),
+        (Some(-1.0), None, None),
         (Some(f64::NAN), None, None),
         (None, Some(-0.5), None),
         (None, Some(1.5), None),

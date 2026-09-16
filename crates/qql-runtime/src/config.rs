@@ -95,6 +95,32 @@ pub struct QqlConfig {
     /// BM25 average document length override; `None` uses the Qdrant default (`256`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language (Qdrant name/alias, e.g. `"spanish"`).
+    /// `None` keeps English. Drives default stopwords/stemmer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer (`"word"`, `"whitespace"`, `"prefix"`). `None` keeps `"word"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching. `None` keeps `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing. `None` keeps `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_ascii_folding: Option<bool>,
+    /// Custom stopwords replacing the language default (`None` keeps it;
+    /// `Some(vec![])` disables filtering).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Stemmer override (`None` = language default; `Some("none")` disables).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_stemmer: Option<String>,
+    /// Drop tokens shorter than this (chars). `None` keeps no minimum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_min_token_len: Option<usize>,
+    /// Drop over-long tokens on the document path (chars). `None` keeps no maximum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_max_token_len: Option<usize>,
 }
 
 impl QqlConfig {
@@ -103,6 +129,24 @@ impl QqlConfig {
     /// written. Unset fields keep the Qdrant `qdrant/bm25` defaults.
     pub fn bm25_params(&self) -> Result<qql_embed::Bm25Params, QqlError> {
         qql_embed::Bm25Params::resolve(self.bm25_k1, self.bm25_b, self.bm25_avg_len)
+    }
+
+    /// Resolve the full BM25 text configuration (single choke point over
+    /// [`qql_embed::Bm25TextConfig::resolve`]).
+    pub fn bm25_text_config(&self) -> Result<qql_embed::Bm25TextConfig, QqlError> {
+        qql_embed::Bm25TextConfig::resolve(
+            self.bm25_k1,
+            self.bm25_b,
+            self.bm25_avg_len,
+            self.bm25_language.as_deref(),
+            self.bm25_tokenizer.as_deref(),
+            self.bm25_lowercase,
+            self.bm25_ascii_folding,
+            self.bm25_stopwords.clone(),
+            self.bm25_stemmer.as_deref(),
+            self.bm25_min_token_len,
+            self.bm25_max_token_len,
+        )
     }
 
     /// Ensure and return the QQL config directory (`$HOME/.qql`).
@@ -212,7 +256,7 @@ mod tests {
 
         for cfg in [
             QqlConfig {
-                bm25_k1: Some(0.0),
+                bm25_k1: Some(-1.0),
                 ..Default::default()
             },
             QqlConfig {

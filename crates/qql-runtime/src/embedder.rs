@@ -6,6 +6,8 @@
 
 // Re-export shared API so existing `qql::embedder::Embedder` paths keep working.
 pub use qql_embed::SparseVector;
+pub use qql_embed::bm25_lang::Language;
+pub use qql_embed::bm25_text::{Bm25Pipeline, Bm25TextConfig, Stemmer, Stopwords, Tokenizer};
 pub use qql_embed::embedder::{Embedder, EmbedderBound, SparseEmbedder};
 pub use qql_embed::sparse::Bm25Params;
 
@@ -59,4 +61,53 @@ pub struct HttpEmbedderOptions {
     /// Client-side BM25 expected average document length in tokens; `None`
     /// keeps the Qdrant default (`256`). See [`Self::bm25_k1`].
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language (Qdrant name or alias, e.g. `"spanish"`,
+    /// `"es"`); `None` keeps English. Drives default stopwords/stemmer, like
+    /// Qdrant's per-vector `language` option. Unknown names fail closed.
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer (`"word"`, `"whitespace"`, `"prefix"`); `None` keeps
+    /// `"word"`. `"multilingual"` parses but fails closed at embed time until
+    /// script-aware segmentation is compiled in.
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching; `None` keeps `true` (Qdrant default).
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing; `None` keeps `false`.
+    pub bm25_ascii_folding: Option<bool>,
+    /// Custom stopwords **replacing** the language default (`None` keeps it;
+    /// `Some(vec![])` disables filtering). Compared post-normalization.
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Stemmer override (`None` = language default; `Some("none")` disables;
+    /// `Some("<language>")` overrides with that language's Snowball stemmer).
+    pub bm25_stemmer: Option<String>,
+    /// Drop tokens shorter than this (chars); `None` keeps no minimum.
+    pub bm25_min_token_len: Option<usize>,
+    /// Drop over-long tokens on the document path (chars); `None` keeps no
+    /// maximum. The prefix query path truncates instead of dropping.
+    pub bm25_max_token_len: Option<usize>,
+}
+
+#[cfg(feature = "rest")]
+impl HttpEmbedderOptions {
+    /// Resolve the numeric BM25 hyperparameters (`k1`/`b`/`avg_len`).
+    pub fn bm25_params(&self) -> Result<Bm25Params, qql_core::error::QqlError> {
+        Bm25Params::resolve(self.bm25_k1, self.bm25_b, self.bm25_avg_len)
+    }
+
+    /// Resolve the full BM25 text configuration (single choke point: every
+    /// text knob flows through [`qql_embed::Bm25TextConfig::resolve`]).
+    pub fn bm25_text_config(&self) -> Result<Bm25TextConfig, qql_core::error::QqlError> {
+        Bm25TextConfig::resolve(
+            self.bm25_k1,
+            self.bm25_b,
+            self.bm25_avg_len,
+            self.bm25_language.as_deref(),
+            self.bm25_tokenizer.as_deref(),
+            self.bm25_lowercase,
+            self.bm25_ascii_folding,
+            self.bm25_stopwords.clone(),
+            self.bm25_stemmer.as_deref(),
+            self.bm25_min_token_len,
+            self.bm25_max_token_len,
+        )
+    }
 }

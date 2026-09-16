@@ -17,6 +17,8 @@ pub(crate) mod batch;
 pub mod ddl;
 pub(crate) mod dispatch;
 pub(crate) mod dml;
+/// Corpus-true BM25 `avg_len` estimation from sampled payloads.
+pub mod estimate;
 pub(crate) mod prepared;
 pub(crate) mod response;
 /// Phase-1 telemetry types: client phase timings plus server `time`/`usage`.
