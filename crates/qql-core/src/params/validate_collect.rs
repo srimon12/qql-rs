@@ -1,577 +1,762 @@
-//! Parameter census for AST statements.
+//! Single-pass parameter census for AST statements.
 //!
-//! Split from `validate.rs` (size hygiene): `collect_statement_params` /
-//! `stmt_has_point_params` and the private `collect_from_*` walkers. Unlike
-//! the validators, collection never fails — it only records which `:named`
-//! and `?N` placeholders a statement contains. Behavior is unchanged.
+//! One traversal produces every parameter answer: the named/positional census
+//! (`collect_statement_params`), the whole-point flag (`stmt_has_point_params`),
+//! the full unbound check (`validate_no_unbound_params`), and the template
+//! check (`validate_no_unbound_scalar_params` with its vector-param flag).
+//! The three historical walkers covered one `Stmt` shape and drifted apart
+//! (missing prefetch arms, DDL gaps, `QueryInput::Vector` handling). This
+//! module visits each node once and folds all answers from that visit.
 
 use crate::ast::Value;
 use crate::ast::filter::{FilterExpr, PointIdPredicate};
 use crate::ast::formula::FormulaExpr;
 use crate::ast::statement::{
-    PointId, PointSelector, PointVectors, PrefetchSource, QueryExpr, QueryInput, QueryStmt,
-    ShardKey, Stmt, VectorValue,
+    CollectionConfig, PointId, PointSelector, PointVectors, Prefetch, PrefetchSource, QueryExpr,
+    QueryInput, QueryStmt, ShardKey, Stmt, VectorValue,
 };
+use crate::error::{QqlError, Span};
 
-fn collect_from_val(
-    val: &Value,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match val {
-        Value::Param(name, _) => {
-            named.insert(name.clone());
-        }
-        Value::PositionalParam(idx, _) => {
-            *max_pos = (*max_pos).max(*idx + 1);
-        }
-        Value::List(items) => {
-            for item in items {
-                collect_from_val(item, named, max_pos);
-            }
-        }
-        Value::Dict(entries) => {
-            for (_, v) in entries {
-                collect_from_val(v, named, max_pos);
-            }
-        }
-        _ => {}
-    }
+fn unbound_named_err(name: &str, span: Option<Span>) -> QqlError {
+    QqlError::validation(
+        "QQL-BIND-MISSING-PARAM",
+        alloc::format!("missing value for named parameter ':{}'", name),
+        span,
+    )
 }
 
-fn collect_from_options(
-    options: &[(String, Value)],
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    for (_, value) in options {
-        collect_from_val(value, named, max_pos);
-    }
+fn unbound_positional_err(idx: usize, span: Option<Span>) -> QqlError {
+    QqlError::validation(
+        "QQL-BIND-MISSING-PARAM",
+        alloc::format!("missing value for positional parameter '?{}'", idx),
+        span,
+    )
 }
 
-fn collect_from_param_str(
-    param: &str,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
+fn unbound_param_str_err(param: &str, span: Option<Span>) -> QqlError {
     if let Some(name) = param.strip_prefix(':') {
-        named.insert(alloc::string::String::from(name));
+        unbound_named_err(name, span)
     } else if let Some(idx_str) = param.strip_prefix('?') {
         if let Ok(idx) = idx_str.parse::<usize>() {
-            *max_pos = (*max_pos).max(idx + 1);
+            unbound_positional_err(idx, span)
         } else {
-            *max_pos = (*max_pos).max(1);
+            QqlError::validation(
+                "QQL-BIND-INVALID-PARAMS",
+                alloc::format!("invalid positional parameter index '?{}'", idx_str),
+                span,
+            )
         }
     } else {
-        named.insert(alloc::string::String::from(param));
+        unbound_named_err(param, span)
     }
 }
 
-fn collect_from_shard_key(
-    key: &Option<ShardKey>,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match key {
-        Some(ShardKey::Param(name, _)) => {
-            named.insert(name.clone());
-        }
-        Some(ShardKey::PositionalParam(idx, _)) => {
-            *max_pos = (*max_pos).max(*idx + 1);
-        }
-        _ => {}
-    }
+/// Every parameter answer for one statement, gathered in a single walk.
+pub(crate) struct Census {
+    pub(crate) named: alloc::collections::BTreeSet<alloc::string::String>,
+    pub(crate) max_pos: usize,
+    pub(crate) has_vec_params: bool,
+    pub(crate) has_point_params: bool,
+    pub(crate) full_err: Option<QqlError>,
+    pub(crate) scalar_err: Option<QqlError>,
 }
 
-fn collect_from_point_id(
-    id: &PointId,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match id {
-        PointId::Param(name, _) => {
-            named.insert(name.clone());
+impl Census {
+    fn new() -> Self {
+        Self {
+            named: alloc::collections::BTreeSet::new(),
+            max_pos: 0,
+            has_vec_params: false,
+            has_point_params: false,
+            full_err: None,
+            scalar_err: None,
         }
-        PointId::PositionalParam(idx, _) => {
-            *max_pos = (*max_pos).max(*idx + 1);
-        }
-        _ => {}
     }
-}
 
-fn collect_from_vector_val(
-    vec: &VectorValue,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match vec {
-        VectorValue::Param(name, _) => {
-            named.insert(name.clone());
-        }
-        VectorValue::PositionalParam(idx, _) => {
-            *max_pos = (*max_pos).max(*idx + 1);
-        }
-        VectorValue::Document { options, .. } | VectorValue::Image { options, .. } => {
-            collect_from_options(options, named, max_pos);
-        }
-        VectorValue::Object {
-            object, options, ..
-        } => {
-            collect_from_val(object, named, max_pos);
-            collect_from_options(options, named, max_pos);
-        }
-        _ => {}
+    fn record_named(&mut self, name: &str) {
+        self.named.insert(alloc::string::String::from(name));
     }
-}
 
-fn collect_from_point_vectors(
-    pv: &PointVectors,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match pv {
-        PointVectors::Param(name, _) => {
-            named.insert(name.clone());
+    fn record_pos(&mut self, idx: usize) {
+        self.max_pos = self.max_pos.max(idx + 1);
+    }
+
+    fn note_full(&mut self, err: QqlError) {
+        if self.full_err.is_none() {
+            self.full_err = Some(err);
         }
-        PointVectors::PositionalParam(idx, _) => {
-            *max_pos = (*max_pos).max(*idx + 1);
+    }
+
+    fn note_scalar(&mut self, err: QqlError) {
+        if self.scalar_err.is_none() {
+            self.scalar_err = Some(err);
         }
-        PointVectors::Unnamed(v) => collect_from_vector_val(v, named, max_pos),
-        PointVectors::Named(entries) => {
-            for (_, v) in entries {
-                collect_from_vector_val(v, named, max_pos);
+    }
+
+    fn note_both(&mut self, full: QqlError, scalar: QqlError) {
+        self.note_full(full);
+        self.note_scalar(scalar);
+    }
+
+    /// Scalar placeholder (`Value`, point ID, `OPTIONS` entry, page limit).
+    /// Both validators reject it; the census records it.
+    fn scalar_named(&mut self, name: &str, span: Option<Span>) {
+        self.record_named(name);
+        let full = unbound_named_err(name, span);
+        let scalar = unbound_named_err(name, span);
+        self.note_both(full, scalar);
+    }
+
+    fn scalar_pos(&mut self, idx: usize, span: Option<Span>) {
+        self.record_pos(idx);
+        let full = unbound_positional_err(idx, span);
+        let scalar = unbound_positional_err(idx, span);
+        self.note_both(full, scalar);
+    }
+
+    /// Vector-tolerant placeholder (`QueryInput` / `VectorValue` /
+    /// `PointVectors` whole-slot params). Full validation rejects it; the
+    /// template check records the vector flag instead.
+    fn vec_named(&mut self, name: &str, span: Option<Span>) {
+        self.record_named(name);
+        self.has_vec_params = true;
+        self.note_full(unbound_named_err(name, span));
+    }
+
+    fn vec_pos(&mut self, idx: usize, span: Option<Span>) {
+        self.record_pos(idx);
+        self.has_vec_params = true;
+        self.note_full(unbound_positional_err(idx, span));
+    }
+
+    /// Routing-shard placeholder. Full validation rejects it; templates bind
+    /// it later like vector params, so the scalar check skips it.
+    fn shard_named(&mut self, name: &str, span: Option<Span>) {
+        self.record_named(name);
+        self.note_full(unbound_named_err(name, span));
+    }
+
+    fn shard_pos(&mut self, idx: usize, span: Option<Span>) {
+        self.record_pos(idx);
+        self.note_full(unbound_positional_err(idx, span));
+    }
+
+    /// `":name"` / `"?N"` string placeholder (text params, page limits,
+    /// hybrid/cross-rerank query text). Always scalar in both validators.
+    fn param_str(&mut self, param: &str, span: Option<Span>) {
+        if let Some(name) = param.strip_prefix(':') {
+            self.record_named(name);
+        } else if let Some(idx_str) = param.strip_prefix('?') {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                self.record_pos(idx);
+            } else {
+                self.max_pos = self.max_pos.max(1);
+            }
+        } else {
+            self.record_named(param);
+        }
+        let full = unbound_param_str_err(param, span);
+        let scalar = unbound_param_str_err(param, span);
+        self.note_both(full, scalar);
+    }
+
+    /// Formula `Variable` name. Only `:` / `?` prefixed names are
+    /// placeholders; bare names (`$score`, `rank`) are variables or
+    /// `DEFAULTS` keys and contribute nothing.
+    fn formula_var(&mut self, name: &str) {
+        if let Some(param_name) = name.strip_prefix(':') {
+            self.record_named(param_name);
+            let full = unbound_named_err(param_name, None);
+            let scalar = unbound_named_err(param_name, None);
+            self.note_both(full, scalar);
+        } else if let Some(idx_str) = name.strip_prefix('?') {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                self.record_pos(idx);
+                let full = unbound_positional_err(idx, None);
+                let scalar = unbound_positional_err(idx, None);
+                self.note_both(full, scalar);
+            } else {
+                self.max_pos = self.max_pos.max(1);
+                let full = unbound_param_str_err(name, None);
+                let scalar = unbound_param_str_err(name, None);
+                self.note_both(full, scalar);
             }
         }
     }
-}
 
-fn collect_from_query_input(
-    input: &QueryInput,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match input {
-        QueryInput::Param(name, _) => {
-            named.insert(name.clone());
-        }
-        QueryInput::PositionalParam(idx, _) => {
-            *max_pos = (*max_pos).max(*idx + 1);
-        }
-        QueryInput::Vector(vec) => collect_from_vector_val(vec, named, max_pos),
-        QueryInput::Point(point) => collect_from_point_id(point, named, max_pos),
-        QueryInput::Text {
-            text_param: Some(param),
-            options,
-            ..
-        } => {
-            collect_from_param_str(param, named, max_pos);
-            collect_from_options(options, named, max_pos);
-        }
-        QueryInput::Text { options, .. } => {
-            collect_from_options(options, named, max_pos);
-        }
-        QueryInput::Image { options, .. } => {
-            collect_from_options(options, named, max_pos);
-        }
-        QueryInput::Object {
-            object, options, ..
-        } => {
-            collect_from_val(object, named, max_pos);
-            collect_from_options(options, named, max_pos);
+    fn value(&mut self, val: &Value) {
+        match val {
+            Value::Param(name, span) => {
+                self.scalar_named(name, span.as_deref().copied());
+            }
+            Value::PositionalParam(idx, span) => {
+                self.scalar_pos(*idx, span.as_deref().copied());
+            }
+            Value::List(items) => {
+                for item in items {
+                    self.value(item);
+                }
+            }
+            Value::Dict(entries) => {
+                for (_, v) in entries {
+                    self.value(v);
+                }
+            }
+            _ => {}
         }
     }
-}
 
-fn collect_from_filter(
-    filter: &FilterExpr,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match filter {
-        FilterExpr::PointId(pred) => match pred {
-            PointIdPredicate::Eq(id) => collect_from_point_id(id, named, max_pos),
-            PointIdPredicate::In(ids) => {
+    fn options(&mut self, options: &[(alloc::string::String, Value)]) {
+        for (_, v) in options {
+            self.value(v);
+        }
+    }
+
+    fn point_id(&mut self, id: &PointId) {
+        match id {
+            PointId::Param(name, span) => {
+                self.scalar_named(name, span.as_deref().copied());
+            }
+            PointId::PositionalParam(idx, span) => {
+                self.scalar_pos(*idx, span.as_deref().copied());
+            }
+            _ => {}
+        }
+    }
+
+    fn shard_opt(&mut self, key: &Option<ShardKey>) {
+        match key {
+            Some(ShardKey::Param(name, span)) => {
+                self.shard_named(name, span.as_deref().copied());
+            }
+            Some(ShardKey::PositionalParam(idx, span)) => {
+                self.shard_pos(*idx, span.as_deref().copied());
+            }
+            _ => {}
+        }
+    }
+
+    fn shard_list(&mut self, keys: Option<&alloc::vec::Vec<ShardKey>>) {
+        if let Some(keys) = keys {
+            for key in keys {
+                match key {
+                    ShardKey::Param(name, span) => {
+                        let span = span.as_deref().copied();
+                        self.record_named(name);
+                        let full = unbound_named_err(name, span);
+                        let scalar = unbound_named_err(name, span);
+                        self.note_both(full, scalar);
+                    }
+                    ShardKey::PositionalParam(idx, span) => {
+                        let span = span.as_deref().copied();
+                        self.record_pos(*idx);
+                        let full = unbound_positional_err(*idx, span);
+                        let scalar = unbound_positional_err(*idx, span);
+                        self.note_both(full, scalar);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn ddl_options(&mut self, config: &CollectionConfig) {
+        for options in [&config.wal, &config.strict_mode, &config.metadata]
+            .into_iter()
+            .flatten()
+        {
+            for (_, v) in options {
+                self.value(v);
+            }
+        }
+    }
+
+    fn vector_value(&mut self, vec: &VectorValue) {
+        match vec {
+            VectorValue::Param(name, span) => {
+                self.vec_named(name, span.as_deref().copied());
+            }
+            VectorValue::PositionalParam(idx, span) => {
+                self.vec_pos(*idx, span.as_deref().copied());
+            }
+            VectorValue::Document { options, .. } | VectorValue::Image { options, .. } => {
+                self.options(options);
+            }
+            VectorValue::Object {
+                object, options, ..
+            } => {
+                self.value(object);
+                self.options(options);
+            }
+            _ => {}
+        }
+    }
+
+    fn point_vectors(&mut self, pv: &PointVectors) {
+        match pv {
+            PointVectors::Param(name, span) => {
+                self.vec_named(name, span.as_deref().copied());
+            }
+            PointVectors::PositionalParam(idx, span) => {
+                self.vec_pos(*idx, span.as_deref().copied());
+            }
+            PointVectors::Unnamed(v) => self.vector_value(v),
+            PointVectors::Named(list) => {
+                for (_, v) in list {
+                    self.vector_value(v);
+                }
+            }
+        }
+    }
+
+    fn query_input(&mut self, input: &QueryInput) {
+        match input {
+            QueryInput::Param(name, span) => {
+                self.vec_named(name, span.as_deref().copied());
+            }
+            QueryInput::PositionalParam(idx, span) => {
+                self.vec_pos(*idx, span.as_deref().copied());
+            }
+            QueryInput::Vector(vec) => self.vector_value(vec),
+            QueryInput::Point(point) => self.point_id(point),
+            QueryInput::Text {
+                text_param: Some(param),
+                options,
+                ..
+            } => {
+                self.param_str(param, None);
+                self.options(options);
+            }
+            QueryInput::Text { options, .. } => self.options(options),
+            QueryInput::Image { options, .. } => self.options(options),
+            QueryInput::Object {
+                object, options, ..
+            } => {
+                self.value(object);
+                self.options(options);
+            }
+        }
+    }
+
+    fn filter(&mut self, filter: &FilterExpr) {
+        match filter {
+            FilterExpr::PointId(pred) => match pred {
+                PointIdPredicate::Eq(id) => self.point_id(id),
+                PointIdPredicate::In(ids) => {
+                    for id in ids {
+                        self.point_id(id);
+                    }
+                }
+            },
+            FilterExpr::Compare { value, .. } => self.value(value),
+            FilterExpr::Between { low, high, .. } => {
+                self.value(low);
+                self.value(high);
+            }
+            FilterExpr::In { values, .. }
+            | FilterExpr::MatchAny { values, .. }
+            | FilterExpr::MatchExcept { values, .. } => {
+                for v in values {
+                    self.value(v);
+                }
+            }
+            FilterExpr::And { operands }
+            | FilterExpr::Or { operands }
+            | FilterExpr::MinShould { operands, .. } => {
+                for op in operands {
+                    self.filter(op);
+                }
+            }
+            FilterExpr::Not { operand } => self.filter(operand),
+            FilterExpr::Nested { filter, .. } => self.filter(filter),
+            _ => {}
+        }
+    }
+
+    fn formula(&mut self, expr: &FormulaExpr) {
+        match expr {
+            FormulaExpr::Variable { name } => self.formula_var(name),
+            FormulaExpr::Sum { left, right }
+            | FormulaExpr::Sub { left, right }
+            | FormulaExpr::Mul { left, right }
+            | FormulaExpr::Div { left, right, .. }
+            | FormulaExpr::Pow {
+                base: left,
+                exponent: right,
+            } => {
+                self.formula(left);
+                self.formula(right);
+            }
+            FormulaExpr::Neg { operand }
+            | FormulaExpr::Abs { x: operand }
+            | FormulaExpr::Sqrt { x: operand }
+            | FormulaExpr::Log { x: operand }
+            | FormulaExpr::Ln { x: operand }
+            | FormulaExpr::Exp { x: operand }
+            | FormulaExpr::Acosh { x: operand } => self.formula(operand),
+            FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
+                for arg in args {
+                    self.formula(arg);
+                }
+            }
+            FormulaExpr::Decay { x, target, .. } => {
+                self.formula(x);
+                if let Some(t) = target {
+                    self.formula(t);
+                }
+            }
+            FormulaExpr::Case { cond, then_, else_ } => {
+                self.filter(cond);
+                self.formula(then_);
+                self.formula(else_);
+            }
+            FormulaExpr::MatchCondition { values, .. } => {
+                for v in values {
+                    self.value(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn prefetch(&mut self, prefetch: &Prefetch) {
+        if let PrefetchSource::Query(q) = &prefetch.source {
+            self.query_stmt(q);
+        }
+        if let Some(f) = &prefetch.filter {
+            self.filter(f);
+        }
+        if let Some(spec) = &prefetch.lookup {
+            self.shard_opt(&spec.shard_key);
+        }
+    }
+
+    fn query_expr(&mut self, expr: &QueryExpr) {
+        match expr {
+            QueryExpr::Points { ids } => {
                 for id in ids {
-                    collect_from_point_id(id, named, max_pos);
+                    self.point_id(id);
                 }
             }
-        },
-        FilterExpr::Compare { value, .. } => collect_from_val(value, named, max_pos),
-        FilterExpr::Between { low, high, .. } => {
-            collect_from_val(low, named, max_pos);
-            collect_from_val(high, named, max_pos);
-        }
-        FilterExpr::In { values, .. }
-        | FilterExpr::MatchAny { values, .. }
-        | FilterExpr::MatchExcept { values, .. } => {
-            for v in values {
-                collect_from_val(v, named, max_pos);
+            QueryExpr::Nearest {
+                input, prefetch, ..
+            } => {
+                self.query_input(input);
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::Recommend {
+                positive,
+                negative,
+                prefetch,
+                ..
+            } => {
+                for item in positive.iter().chain(negative.iter()) {
+                    self.query_input(item);
+                }
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::Context {
+                pairs, prefetch, ..
+            } => {
+                for pair in pairs {
+                    self.query_input(&pair.positive);
+                    self.query_input(&pair.negative);
+                }
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::Discover {
+                target,
+                context,
+                prefetch,
+                ..
+            } => {
+                self.query_input(target);
+                for pair in context {
+                    self.query_input(&pair.positive);
+                    self.query_input(&pair.negative);
+                }
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::OrderBy { start_from, .. } => {
+                if let Some(v) = start_from {
+                    self.value(v);
+                }
+            }
+            QueryExpr::SampleRandom => {}
+            QueryExpr::Fusion { prefetch, .. } => {
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::Formula {
+                expression,
+                defaults,
+                prefetch,
+            } => {
+                self.formula(expression);
+                for (_, v) in defaults {
+                    self.value(v);
+                }
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::RelevanceFeedback {
+                target,
+                feedback,
+                prefetch,
+                ..
+            } => {
+                self.query_input(target);
+                for item in feedback {
+                    self.query_input(&item.example);
+                }
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::Hybrid { text_param, .. } => {
+                if let Some(param) = text_param {
+                    self.param_str(param, None);
+                }
+            }
+            QueryExpr::Rerank {
+                input, prefetch, ..
+            } => {
+                self.query_input(input);
+                for p in prefetch {
+                    self.prefetch(p);
+                }
+            }
+            QueryExpr::CrossRerank {
+                query_param,
+                prefetch,
+                ..
+            } => {
+                if let Some(param) = query_param {
+                    self.param_str(param, None);
+                }
+                for p in prefetch {
+                    self.prefetch(p);
+                }
             }
         }
-        FilterExpr::And { operands }
-        | FilterExpr::Or { operands }
-        | FilterExpr::MinShould { operands, .. } => {
-            for op in operands {
-                collect_from_filter(op, named, max_pos);
-            }
+    }
+
+    fn query_stmt(&mut self, query: &QueryStmt) {
+        for cte in &query.ctes {
+            self.query_stmt(&cte.query);
         }
-        FilterExpr::Not { operand } => collect_from_filter(operand, named, max_pos),
-        FilterExpr::Nested { filter, .. } => collect_from_filter(filter, named, max_pos),
-        _ => {}
+        self.query_expr(&query.expression);
+        if let Some(filter) = &query.filter {
+            self.filter(filter);
+        }
+        self.shard_opt(&query.shard_key);
+        if let Some(param) = &query.page.limit_param {
+            let span = query.page.limit_span;
+            if let Some(name) = param.strip_prefix(':') {
+                self.record_named(name);
+            } else if let Some(idx_str) = param.strip_prefix('?') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    self.record_pos(idx);
+                } else {
+                    self.max_pos = self.max_pos.max(1);
+                }
+            } else {
+                self.record_named(param);
+            }
+            let full = unbound_param_str_err(param, span);
+            let scalar = unbound_param_str_err(param, span);
+            self.note_both(full, scalar);
+        }
+        if let Some(param) = &query.page.offset_param {
+            let span = query.page.offset_span;
+            if let Some(name) = param.strip_prefix(':') {
+                self.record_named(name);
+            } else if let Some(idx_str) = param.strip_prefix('?') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    self.record_pos(idx);
+                } else {
+                    self.max_pos = self.max_pos.max(1);
+                }
+            } else {
+                self.record_named(param);
+            }
+            let full = unbound_param_str_err(param, span);
+            let scalar = unbound_param_str_err(param, span);
+            self.note_both(full, scalar);
+        }
+    }
+
+    fn point_selector(&mut self, sel: &PointSelector) {
+        match sel {
+            PointSelector::Id(id) => self.point_id(id),
+            PointSelector::Ids(ids) => {
+                for id in ids {
+                    self.point_id(id);
+                }
+            }
+            PointSelector::Filter(f) => self.filter(f),
+        }
+    }
+
+    fn page_limit_param(&mut self, param: &str, span: Option<Span>) {
+        self.param_str(param, span);
+    }
+
+    fn stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Query(query) => self.query_stmt(query),
+            Stmt::Scroll(scroll) => {
+                if let Some(filter) = &scroll.filter {
+                    self.filter(filter);
+                }
+                if let Some(after) = &scroll.after {
+                    self.point_id(after);
+                }
+                if let Some(order) = &scroll.order_by
+                    && let Some(v) = &order.start_from
+                {
+                    self.value(v);
+                }
+                if let Some(param) = &scroll.limit_param {
+                    self.page_limit_param(param, scroll.limit_span);
+                }
+                self.shard_opt(&scroll.shard_key);
+            }
+            Stmt::Upsert(upsert) => {
+                for point in &upsert.points {
+                    match point {
+                        crate::ast::PointEntry::Inline(inline) => {
+                            self.point_id(&inline.id);
+                            if let Some(vectors) = &inline.vectors {
+                                self.point_vectors(vectors);
+                            }
+                            for (_, v) in &inline.payload {
+                                self.value(v);
+                            }
+                        }
+                        crate::ast::PointEntry::Param(name, span) => {
+                            self.record_named(name);
+                            self.has_point_params = true;
+                            self.note_full(unbound_named_err(name, span.as_deref().copied()));
+                        }
+                        crate::ast::PointEntry::PositionalParam(idx, span) => {
+                            self.record_pos(*idx);
+                            self.has_point_params = true;
+                            self.note_full(unbound_positional_err(*idx, span.as_deref().copied()));
+                        }
+                    }
+                }
+                if let Some(filter) = &upsert.update_filter {
+                    self.filter(filter);
+                }
+                self.shard_opt(&upsert.shard_key);
+            }
+            Stmt::Delete(del) => {
+                self.point_selector(&del.selector);
+                self.shard_opt(&del.shard_key);
+            }
+            Stmt::ClearPayload(cp) => {
+                self.point_selector(&cp.selector);
+                self.shard_opt(&cp.shard_key);
+            }
+            Stmt::DeletePayload(dp) => {
+                self.point_selector(&dp.selector);
+                self.shard_opt(&dp.shard_key);
+            }
+            Stmt::DeleteVector(dv) => {
+                self.point_selector(&dv.selector);
+                self.shard_opt(&dv.shard_key);
+            }
+            Stmt::UpdateVector(uv) => {
+                for point in &uv.points {
+                    self.point_id(&point.id);
+                    self.point_vectors(&point.vectors);
+                }
+                self.shard_opt(&uv.shard_key);
+            }
+            Stmt::UpdatePayload(up) => {
+                self.point_selector(&up.selector);
+                for (_, v) in &up.payload {
+                    self.value(v);
+                }
+                self.shard_opt(&up.shard_key);
+            }
+            Stmt::Count(count) => {
+                if let Some(filter) = &count.filter {
+                    self.filter(filter);
+                }
+                self.shard_opt(&count.shard_key);
+            }
+            Stmt::Facet(facet) => {
+                if let Some(filter) = &facet.filter {
+                    self.filter(filter);
+                }
+                if let Some(param) = &facet.limit_param {
+                    self.page_limit_param(param, facet.limit_span);
+                }
+                self.shard_opt(&facet.shard_key);
+            }
+            Stmt::CreateShardKey(sk) => self.shard_opt(&Some(sk.shard_key.clone())),
+            Stmt::DropShardKey(sk) => self.shard_opt(&Some(sk.shard_key.clone())),
+            Stmt::CreateCollection(cc) => {
+                self.shard_list(
+                    cc.config
+                        .as_ref()
+                        .and_then(|config| config.params.as_ref())
+                        .and_then(|params| params.shard_keys.as_ref()),
+                );
+                if let Some(config) = &cc.config {
+                    self.ddl_options(config);
+                }
+            }
+            Stmt::AlterCollection(ac) => {
+                self.shard_list(
+                    ac.config
+                        .as_ref()
+                        .and_then(|config| config.params.as_ref())
+                        .and_then(|params| params.shard_keys.as_ref()),
+                );
+                if let Some(config) = &ac.config {
+                    self.ddl_options(config);
+                }
+            }
+            Stmt::Batch(batch) => {
+                for member in &batch.statements {
+                    self.stmt(member);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
-fn collect_from_formula(
-    formula: &FormulaExpr,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    match formula {
-        FormulaExpr::Variable { name } => {
-            collect_from_param_str(name, named, max_pos);
-        }
-        FormulaExpr::Sum { left, right }
-        | FormulaExpr::Sub { left, right }
-        | FormulaExpr::Mul { left, right }
-        | FormulaExpr::Div { left, right, .. }
-        | FormulaExpr::Pow {
-            base: left,
-            exponent: right,
-        } => {
-            collect_from_formula(left, named, max_pos);
-            collect_from_formula(right, named, max_pos);
-        }
-        FormulaExpr::Neg { operand }
-        | FormulaExpr::Abs { x: operand }
-        | FormulaExpr::Sqrt { x: operand }
-        | FormulaExpr::Log { x: operand }
-        | FormulaExpr::Ln { x: operand }
-        | FormulaExpr::Exp { x: operand }
-        | FormulaExpr::Acosh { x: operand } => {
-            collect_from_formula(operand, named, max_pos);
-        }
-        FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
-            for arg in args {
-                collect_from_formula(arg, named, max_pos);
-            }
-        }
-        FormulaExpr::Decay { x, target, .. } => {
-            collect_from_formula(x, named, max_pos);
-            if let Some(t) = target {
-                collect_from_formula(t, named, max_pos);
-            }
-        }
-        FormulaExpr::Case { cond, then_, else_ } => {
-            collect_from_filter(cond, named, max_pos);
-            collect_from_formula(then_, named, max_pos);
-            collect_from_formula(else_, named, max_pos);
-        }
-        FormulaExpr::MatchCondition { values, .. } => {
-            for v in values {
-                collect_from_val(v, named, max_pos);
-            }
-        }
-        _ => {}
-    }
+pub(crate) fn run_census(stmt: &Stmt) -> Census {
+    let mut census = Census::new();
+    census.stmt(stmt);
+    census
 }
 
-fn collect_from_query_stmt(
-    query: &QueryStmt,
-    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
-    max_pos: &mut usize,
-) {
-    for cte in &query.ctes {
-        collect_from_query_stmt(&cte.query, named, max_pos);
-    }
-    match &query.expression {
-        QueryExpr::Points { ids } => {
-            for id in ids {
-                collect_from_point_id(id, named, max_pos);
-            }
-        }
-        QueryExpr::Nearest { input, .. } => collect_from_query_input(input, named, max_pos),
-        QueryExpr::Recommend {
-            positive, negative, ..
-        } => {
-            for item in positive.iter().chain(negative.iter()) {
-                collect_from_query_input(item, named, max_pos);
-            }
-        }
-        QueryExpr::Context { pairs, .. } => {
-            for pair in pairs {
-                collect_from_query_input(&pair.positive, named, max_pos);
-                collect_from_query_input(&pair.negative, named, max_pos);
-            }
-        }
-        QueryExpr::Discover {
-            target, context, ..
-        } => {
-            collect_from_query_input(target, named, max_pos);
-            for pair in context {
-                collect_from_query_input(&pair.positive, named, max_pos);
-                collect_from_query_input(&pair.negative, named, max_pos);
-            }
-        }
-        QueryExpr::OrderBy {
-            start_from: Some(value),
-            ..
-        } => {
-            collect_from_val(value, named, max_pos);
-        }
-        QueryExpr::OrderBy {
-            start_from: None, ..
-        } => {}
-        QueryExpr::Formula {
-            expression,
-            defaults,
-            ..
-        } => {
-            collect_from_formula(expression, named, max_pos);
-            for (_, val) in defaults {
-                collect_from_val(val, named, max_pos);
-            }
-        }
-        QueryExpr::RelevanceFeedback {
-            target,
-            feedback,
-            prefetch,
-            ..
-        } => {
-            collect_from_query_input(target, named, max_pos);
-            for item in feedback {
-                collect_from_query_input(&item.example, named, max_pos);
-            }
-            for p in prefetch {
-                if let PrefetchSource::Query(sub) = &p.source {
-                    collect_from_query_stmt(sub, named, max_pos);
-                }
-                if let Some(f) = &p.filter {
-                    collect_from_filter(f, named, max_pos);
-                }
-                if let Some(spec) = &p.lookup {
-                    collect_from_shard_key(&spec.shard_key, named, max_pos);
-                }
-            }
-        }
-        QueryExpr::Hybrid {
-            text_param: Some(param),
-            ..
-        } => {
-            collect_from_param_str(param, named, max_pos);
-        }
-        QueryExpr::Rerank {
-            input, prefetch, ..
-        } => {
-            collect_from_query_input(input, named, max_pos);
-            for p in prefetch {
-                if let PrefetchSource::Query(sub) = &p.source {
-                    collect_from_query_stmt(sub, named, max_pos);
-                }
-                if let Some(f) = &p.filter {
-                    collect_from_filter(f, named, max_pos);
-                }
-                if let Some(spec) = &p.lookup {
-                    collect_from_shard_key(&spec.shard_key, named, max_pos);
-                }
-            }
-        }
-        QueryExpr::CrossRerank {
-            query_param,
-            prefetch,
-            ..
-        } => {
-            if let Some(param) = query_param {
-                collect_from_param_str(param, named, max_pos);
-            }
-            for p in prefetch {
-                if let PrefetchSource::Query(sub) = &p.source {
-                    collect_from_query_stmt(sub, named, max_pos);
-                }
-                if let Some(f) = &p.filter {
-                    collect_from_filter(f, named, max_pos);
-                }
-                if let Some(spec) = &p.lookup {
-                    collect_from_shard_key(&spec.shard_key, named, max_pos);
-                }
-            }
-        }
-        _ => {}
-    }
-    if let Some(filter) = &query.filter {
-        collect_from_filter(filter, named, max_pos);
-    }
-    collect_from_shard_key(&query.shard_key, named, max_pos);
-    if let Some(param) = &query.page.limit_param {
-        collect_from_param_str(param, named, max_pos);
-    }
-    if let Some(param) = &query.page.offset_param {
-        collect_from_param_str(param, named, max_pos);
-    }
+/// Collect all named parameter names and the maximum positional parameter
+/// index present anywhere in a statement AST.
+pub fn collect_statement_params(
+    stmt: &Stmt,
+) -> (alloc::collections::BTreeSet<alloc::string::String>, usize) {
+    let census = run_census(stmt);
+    (census.named, census.max_pos)
 }
 
 /// Whether an upsert template carries whole-point placeholders (`VALUES :p`
 /// / `VALUES ?`) needing dict splice at execution time.
-///
-/// Point-position placeholders are bound to point dicts (or lists of them),
-/// unlike every other placeholder kind — executors branch on this to take
-/// the point-splice fast path instead of scalar binding.
 pub fn stmt_has_point_params(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Batch(batch) => batch.statements.iter().any(stmt_has_point_params),
-        Stmt::Upsert(upsert) => upsert.points.iter().any(|point| {
-            matches!(
-                point,
-                crate::ast::PointEntry::Param(..) | crate::ast::PointEntry::PositionalParam(..)
-            )
-        }),
-        _ => false,
-    }
-}
-
-/// Collect all named parameter names and the maximum positional parameter index
-/// present anywhere in a statement AST.
-pub fn collect_statement_params(
-    stmt: &Stmt,
-) -> (alloc::collections::BTreeSet<alloc::string::String>, usize) {
-    let mut named = alloc::collections::BTreeSet::new();
-    let mut max_pos = 0;
-    match stmt {
-        Stmt::Query(query) => collect_from_query_stmt(query, &mut named, &mut max_pos),
-        Stmt::Scroll(scroll) => {
-            if let Some(filter) = &scroll.filter {
-                collect_from_filter(filter, &mut named, &mut max_pos);
-            }
-            if let Some(after) = &scroll.after {
-                collect_from_point_id(after, &mut named, &mut max_pos);
-            }
-            if let Some(order) = &scroll.order_by
-                && let Some(value) = &order.start_from
-            {
-                collect_from_val(value, &mut named, &mut max_pos);
-            }
-            collect_from_shard_key(&scroll.shard_key, &mut named, &mut max_pos);
-            if let Some(param) = &scroll.limit_param {
-                collect_from_param_str(param, &mut named, &mut max_pos);
-            }
-        }
-        Stmt::Upsert(upsert) => {
-            for point in &upsert.points {
-                match point {
-                    crate::ast::PointEntry::Inline(inline) => {
-                        collect_from_point_id(&inline.id, &mut named, &mut max_pos);
-                        if let Some(vectors) = &inline.vectors {
-                            collect_from_point_vectors(vectors, &mut named, &mut max_pos);
-                        }
-                        for (_k, v) in &inline.payload {
-                            collect_from_val(v, &mut named, &mut max_pos);
-                        }
-                    }
-                    crate::ast::PointEntry::Param(name, _) => {
-                        named.insert(name.clone());
-                    }
-                    crate::ast::PointEntry::PositionalParam(idx, _) => {
-                        max_pos = max_pos.max(*idx + 1);
-                    }
-                }
-            }
-            if let Some(filter) = &upsert.update_filter {
-                collect_from_filter(filter, &mut named, &mut max_pos);
-            }
-            collect_from_shard_key(&upsert.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::Delete(del) => {
-            match &del.selector {
-                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
-                PointSelector::Ids(ids) => {
-                    for id in ids {
-                        collect_from_point_id(id, &mut named, &mut max_pos);
-                    }
-                }
-                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
-            }
-            collect_from_shard_key(&del.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::ClearPayload(cp) => {
-            match &cp.selector {
-                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
-                PointSelector::Ids(ids) => {
-                    for id in ids {
-                        collect_from_point_id(id, &mut named, &mut max_pos);
-                    }
-                }
-                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
-            }
-            collect_from_shard_key(&cp.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::DeletePayload(dp) => {
-            match &dp.selector {
-                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
-                PointSelector::Ids(ids) => {
-                    for id in ids {
-                        collect_from_point_id(id, &mut named, &mut max_pos);
-                    }
-                }
-                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
-            }
-            collect_from_shard_key(&dp.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::DeleteVector(dv) => {
-            match &dv.selector {
-                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
-                PointSelector::Ids(ids) => {
-                    for id in ids {
-                        collect_from_point_id(id, &mut named, &mut max_pos);
-                    }
-                }
-                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
-            }
-            collect_from_shard_key(&dv.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::UpdateVector(uv) => {
-            for point in &uv.points {
-                collect_from_point_id(&point.id, &mut named, &mut max_pos);
-                collect_from_point_vectors(&point.vectors, &mut named, &mut max_pos);
-            }
-            collect_from_shard_key(&uv.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::UpdatePayload(up) => {
-            match &up.selector {
-                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
-                PointSelector::Ids(ids) => {
-                    for id in ids {
-                        collect_from_point_id(id, &mut named, &mut max_pos);
-                    }
-                }
-                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
-            }
-            for (_k, v) in &up.payload {
-                collect_from_val(v, &mut named, &mut max_pos);
-            }
-            collect_from_shard_key(&up.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::Count(count) => {
-            if let Some(filter) = &count.filter {
-                collect_from_filter(filter, &mut named, &mut max_pos);
-            }
-            collect_from_shard_key(&count.shard_key, &mut named, &mut max_pos);
-        }
-        Stmt::Facet(facet) => {
-            if let Some(filter) = &facet.filter {
-                collect_from_filter(filter, &mut named, &mut max_pos);
-            }
-            collect_from_shard_key(&facet.shard_key, &mut named, &mut max_pos);
-            if let Some(param) = &facet.limit_param {
-                collect_from_param_str(param, &mut named, &mut max_pos);
-            }
-        }
-        Stmt::Batch(batch) => {
-            for member in &batch.statements {
-                let (names, pos) = collect_statement_params(member);
-                named.extend(names);
-                max_pos = max_pos.max(pos);
-            }
-        }
-        _ => {}
-    }
-    (named, max_pos)
+    run_census(stmt).has_point_params
 }
