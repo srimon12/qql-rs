@@ -15,6 +15,7 @@ export const client_hasEmbedder: (a: number) => number;
 export const client_new: (a: number, b: number, c: number, d: number) => number;
 export const client_routeAffinity: (a: number, b: number) => void;
 export const client_setBm25Params: (a: number, b: number, c: number, d: number, e: number) => void;
+export const client_setBm25Text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
 export const client_setEmbedder: (a: number, b: number) => void;
 export const client_setHttpEmbedder: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const client_setHttpImageEmbedder: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;

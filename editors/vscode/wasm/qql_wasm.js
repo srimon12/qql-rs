@@ -176,7 +176,7 @@ class Client {
      * encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
      * documents upserted after the call are encoded; query weights stay unit
      * and server-side inference is untouched. Invalid values throw
-     * (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+     * (`QQL-VALIDATION-CONFIG`): `k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`,
      * all finite.
      * @param {number} k1
      * @param {number} b
@@ -186,6 +186,44 @@ class Client {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             wasm.client_setBm25Params(retptr, this.__wbg_ptr, k1, b, avg_len);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Set client-side BM25 text processing for the built-in local sparse
+     * encoder: language (`"spanish"`, `"es"`, …; `null` keeps current),
+     * tokenizer (`"word"`, `"whitespace"`, `"prefix"`), lowercasing,
+     * ASCII folding, stemmer (`"none"` disables, a language name overrides),
+     * custom stopwords (replaces the language default; `[]` disables), and
+     * token length limits. All `null` keeps the current value; anything
+     * invalid throws (`QQL-VALIDATION-CONFIG`).
+     * @param {string | null} [language]
+     * @param {string | null} [tokenizer]
+     * @param {boolean | null} [lowercase]
+     * @param {boolean | null} [ascii_folding]
+     * @param {string | null} [stemmer]
+     * @param {string[] | null} [stopwords]
+     * @param {number | null} [min_token_len]
+     * @param {number | null} [max_token_len]
+     */
+    setBm25Text(language, tokenizer, lowercase, ascii_folding, stemmer, stopwords, min_token_len, max_token_len) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            var ptr0 = isLikeNone(language) ? 0 : passStringToWasm0(language, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len0 = WASM_VECTOR_LEN;
+            var ptr1 = isLikeNone(tokenizer) ? 0 : passStringToWasm0(tokenizer, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len1 = WASM_VECTOR_LEN;
+            var ptr2 = isLikeNone(stemmer) ? 0 : passStringToWasm0(stemmer, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len2 = WASM_VECTOR_LEN;
+            var ptr3 = isLikeNone(stopwords) ? 0 : passArrayJsValueToWasm0(stopwords, wasm.__wbindgen_export);
+            var len3 = WASM_VECTOR_LEN;
+            wasm.client_setBm25Text(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(lowercase) ? 0xFFFFFF : lowercase ? 1 : 0, isLikeNone(ascii_folding) ? 0xFFFFFF : ascii_folding ? 1 : 0, ptr2, len2, ptr3, len3, isLikeNone(min_token_len) ? Number.MAX_SAFE_INTEGER : (min_token_len) >>> 0, isLikeNone(max_token_len) ? Number.MAX_SAFE_INTEGER : (max_token_len) >>> 0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1796,6 +1834,16 @@ function makeMutClosure(arg0, arg1, f) {
     };
     CLOSURE_DTORS.register(real, state, state);
     return real;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    const mem = getDataViewMemory0();
+    for (let i = 0; i < array.length; i++) {
+        mem.setUint32(ptr + 4 * i, addHeapObject(array[i]), true);
+    }
+    WASM_VECTOR_LEN = array.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

@@ -154,10 +154,20 @@ export class Client {
      * encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
      * documents upserted after the call are encoded; query weights stay unit
      * and server-side inference is untouched. Invalid values throw
-     * (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+     * (`QQL-VALIDATION-CONFIG`): `k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`,
      * all finite.
      */
     setBm25Params(k1: number, b: number, avg_len: number): void;
+    /**
+     * Set client-side BM25 text processing for the built-in local sparse
+     * encoder: language (`"spanish"`, `"es"`, …; `null` keeps current),
+     * tokenizer (`"word"`, `"whitespace"`, `"prefix"`), lowercasing,
+     * ASCII folding, stemmer (`"none"` disables, a language name overrides),
+     * custom stopwords (replaces the language default; `[]` disables), and
+     * token length limits. All `null` keeps the current value; anything
+     * invalid throws (`QQL-VALIDATION-CONFIG`).
+     */
+    setBm25Text(language?: string | null, tokenizer?: string | null, lowercase?: boolean | null, ascii_folding?: boolean | null, stemmer?: string | null, stopwords?: string[] | null, min_token_len?: number | null, max_token_len?: number | null): void;
     /**
      * Set a JS embedder: `async (texts: string[]) => number[][]`.
      * Called with the full batch — do not loop one-by-one inside the callback
