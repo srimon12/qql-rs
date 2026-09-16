@@ -205,6 +205,60 @@ fn match_except_filter_contract_matches_openapi() {
 }
 
 #[test]
+fn grpc_range_rejects_non_numeric_bounds() {
+    // The bundled proto's `Range` carries doubles only. Numeric bounds
+    // convert; string and datetime bounds error (`QQL-GRPC-RANGE-TYPE`)
+    // instead of lowering to a silent `None` — an empty range that matches
+    // wrong rows. REST keeps carrying them as strings.
+    let stmt =
+        Parser::parse("QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE age >= 21 LIMIT 5;")
+            .unwrap();
+    let op = plan(&stmt).unwrap();
+    let PlannedOperation::Query {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected Query");
+    };
+    let qp = test_api::to_query_points(request, collection).unwrap();
+    let range = qp
+        .filter
+        .expect("filter converts")
+        .must
+        .swap_remove(0)
+        .condition_one_of
+        .and_then(|c| match c {
+            qdrant::condition::ConditionOneOf::Field(f) => f.range,
+            _ => None,
+        })
+        .expect("numeric bound converts to a proto range");
+    assert_eq!(range.gte, Some(21.0));
+
+    for sql in [
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE created_at >= '2024-01-01T00:00:00Z' LIMIT 5;",
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE name > 'm' LIMIT 5;",
+    ] {
+        let stmt = Parser::parse(sql).unwrap();
+        let op = plan(&stmt).unwrap();
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        assert!(
+            body["filter"]["must"][0]["range"].is_object(),
+            "REST keeps the string bound: {body}"
+        );
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+        let err = test_api::to_query_points(request, collection).unwrap_err();
+        assert_eq!(err.code, "QQL-GRPC-RANGE-TYPE");
+    }
+}
+
+#[test]
 fn rest_grpc_hybrid_prefetch_parity() {
     let stmt = Parser::parse(
             "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",

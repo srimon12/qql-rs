@@ -561,34 +561,34 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                     scroll.shard_key.clone(),
                     scroll.with_payload.as_ref(),
                     scroll.with_vector.as_ref(),
-                ),
+                )?,
             })
         }
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
-            request: lower_upsert_request(upsert),
+            request: lower_upsert_request(upsert)?,
             wait: upsert
                 .wait
                 .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty()),
         }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
-            request: lower_delete_request(delete),
+            request: lower_delete_request(delete)?,
             wait: delete.wait.unwrap_or(true),
         }),
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
-            request: lower_clear_payload_request(clear),
+            request: lower_clear_payload_request(clear)?,
             wait: clear.wait.unwrap_or(true),
         }),
         Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
             collection: del.collection.clone(),
-            request: lower_delete_payload_request(del),
+            request: lower_delete_payload_request(del)?,
             wait: del.wait.unwrap_or(true),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
-            request: lower_delete_vector_request(del_vec),
+            request: lower_delete_vector_request(del_vec)?,
             wait: del_vec.wait.unwrap_or(true),
         }),
         Stmt::UpdateVector(update) => Ok(PlannedOperation::UpdateVectors {
@@ -597,7 +597,7 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             wait: update.wait.unwrap_or(true),
         }),
         Stmt::UpdatePayload(update) => {
-            let request = lower_update_payload_request(update);
+            let request = lower_update_payload_request(update)?;
             let wait = update.wait.unwrap_or(true);
             if update.overwrite {
                 Ok(PlannedOperation::OverwritePayload {
@@ -656,7 +656,8 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             let filter = count
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
+                .map(|f| crate::filter::top_level_filter(f))
+                .transpose()?;
             Ok(PlannedOperation::Count {
                 collection,
                 request: CountRequest {
@@ -690,7 +691,8 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             let filter = facet
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
+                .map(|f| crate::filter::top_level_filter(f))
+                .transpose()?;
             Ok(PlannedOperation::Facet {
                 collection,
                 request: FacetRequest {

@@ -53,7 +53,11 @@ pub fn lower_prefetch_with_ctes(
             } else {
                 Some(nested)
             },
-            source_query.filter.as_ref().map(|f| top_level_filter(f)),
+            source_query
+                .filter
+                .as_ref()
+                .map(|f| top_level_filter(f))
+                .transpose()?,
             match source_query.params.as_ref() {
                 Some(p) => lower_search_params(p)?,
                 None => None,
@@ -68,6 +72,7 @@ pub fn lower_prefetch_with_ctes(
         .filter
         .as_ref()
         .map(|f| top_level_filter(f))
+        .transpose()?
         .or(source_filter);
     let score_threshold = prefetch.score_threshold.or(source_score);
 
@@ -127,7 +132,11 @@ pub(crate) fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: dense_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+                filter: query
+                    .filter
+                    .as_ref()
+                    .map(|f| top_level_filter(f))
+                    .transpose()?,
                 params: hybrid_params.clone(),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -140,7 +149,11 @@ pub(crate) fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: sparse_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+                filter: query
+                    .filter
+                    .as_ref()
+                    .map(|f| top_level_filter(f))
+                    .transpose()?,
                 params: hybrid_params,
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),

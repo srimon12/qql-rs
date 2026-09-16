@@ -250,44 +250,52 @@ pub enum PlanFormula {
     DatetimeKey(String),
 }
 
-impl From<&FormulaExpr> for PlanFormula {
-    fn from(expr: &FormulaExpr) -> Self {
-        match expr {
+impl PlanFormula {
+    /// Lower a formula expression into plan IR.
+    ///
+    /// Fallible because `CASE WHEN` conditions lower through
+    /// [`lower_filter`], which rejects mistyped range bounds.
+    pub fn from_expr(expr: &FormulaExpr) -> Result<Self, qql_core::error::QqlError> {
+        Ok(match expr {
             FormulaExpr::Constant { value } => Self::Constant(*value),
             FormulaExpr::Variable { name } => Self::Variable(variable_wire_name(name)),
             FormulaExpr::Sum { left, right } => Self::Sum {
-                left: Box::new(Self::from(&**left)),
-                right: Box::new(Self::from(&**right)),
+                left: Box::new(Self::from_expr(left)?),
+                right: Box::new(Self::from_expr(right)?),
             },
             FormulaExpr::Sub { left, right } => Self::Sub {
-                left: Box::new(Self::from(&**left)),
-                right: Box::new(Self::from(&**right)),
+                left: Box::new(Self::from_expr(left)?),
+                right: Box::new(Self::from_expr(right)?),
             },
             FormulaExpr::Mul { left, right } => Self::Mul {
-                left: Box::new(Self::from(&**left)),
-                right: Box::new(Self::from(&**right)),
+                left: Box::new(Self::from_expr(left)?),
+                right: Box::new(Self::from_expr(right)?),
             },
             FormulaExpr::Div {
                 left,
                 right,
                 by_zero_default,
             } => Self::Div {
-                left: Box::new(Self::from(&**left)),
-                right: Box::new(Self::from(&**right)),
+                left: Box::new(Self::from_expr(left)?),
+                right: Box::new(Self::from_expr(right)?),
                 by_zero_default: *by_zero_default,
             },
-            FormulaExpr::Neg { operand } => Self::Neg(Box::new(Self::from(&**operand))),
-            FormulaExpr::Abs { x } => Self::Abs(Box::new(Self::from(&**x))),
-            FormulaExpr::Sqrt { x } => Self::Sqrt(Box::new(Self::from(&**x))),
-            FormulaExpr::Log { x } => Self::Log10(Box::new(Self::from(&**x))),
-            FormulaExpr::Ln { x } => Self::Ln(Box::new(Self::from(&**x))),
-            FormulaExpr::Exp { x } => Self::Exp(Box::new(Self::from(&**x))),
-            FormulaExpr::Acosh { x } => Self::Acosh(Box::new(Self::from(&**x))),
-            FormulaExpr::Max { args } => Self::Max(args.iter().map(Self::from).collect()),
-            FormulaExpr::Min { args } => Self::Min(args.iter().map(Self::from).collect()),
+            FormulaExpr::Neg { operand } => Self::Neg(Box::new(Self::from_expr(operand)?)),
+            FormulaExpr::Abs { x } => Self::Abs(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Sqrt { x } => Self::Sqrt(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Log { x } => Self::Log10(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Ln { x } => Self::Ln(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Exp { x } => Self::Exp(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Acosh { x } => Self::Acosh(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Max { args } => {
+                Self::Max(args.iter().map(Self::from_expr).collect::<Result<_, _>>()?)
+            }
+            FormulaExpr::Min { args } => {
+                Self::Min(args.iter().map(Self::from_expr).collect::<Result<_, _>>()?)
+            }
             FormulaExpr::Pow { base, exponent } => Self::Pow {
-                base: Box::new(Self::from(&**base)),
-                exponent: Box::new(Self::from(&**exponent)),
+                base: Box::new(Self::from_expr(base)?),
+                exponent: Box::new(Self::from_expr(exponent)?),
             },
             FormulaExpr::GeoDistance { lat, lon, field } => Self::GeoDistance {
                 lat: *lat,
@@ -301,12 +309,15 @@ impl From<&FormulaExpr> for PlanFormula {
                 scale,
                 midpoint,
             } => {
-                let target = target.as_ref().map(|t| Box::new(Self::from(&**t)));
+                let target = target
+                    .as_ref()
+                    .map(|t| Ok(Box::new(Self::from_expr(t)?)))
+                    .transpose()?;
                 // A bare field identifier decaying against a datetime target is
                 // a datetime key, not a numeric variable.
                 let x = match (&**x, matches!(target.as_deref(), Some(Self::Datetime(_)))) {
                     (FormulaExpr::Variable { name }, true) => Self::DatetimeKey(name.clone()),
-                    _ => Self::from(&**x),
+                    _ => Self::from_expr(x)?,
                 };
                 Self::Decay {
                     kind: PlanDecayKind::from_wire(kind),
@@ -317,16 +328,16 @@ impl From<&FormulaExpr> for PlanFormula {
                 }
             }
             FormulaExpr::Case { cond, then_, else_ } => Self::Case {
-                cond: Box::new(Self::Condition(lower_filter(cond))),
-                then_: Box::new(Self::from(&**then_)),
-                else_: Box::new(Self::from(&**else_)),
+                cond: Box::new(Self::Condition(lower_filter(cond)?)),
+                then_: Box::new(Self::from_expr(then_)?),
+                else_: Box::new(Self::from_expr(else_)?),
             },
             FormulaExpr::MatchCondition { field, values } => {
                 Self::Condition(match_condition_filter(field, values))
             }
             FormulaExpr::Datetime { value } => Self::Datetime(value.clone()),
             FormulaExpr::DatetimeKey { key } => Self::DatetimeKey(key.clone()),
-        }
+        })
     }
 }
 
@@ -587,7 +598,7 @@ mod tests {
         let QueryExpr::Formula { expression, .. } = &query.expression else {
             panic!("expected formula");
         };
-        serde_json::to_value(PlanFormula::from(expression.as_ref())).unwrap()
+        serde_json::to_value(PlanFormula::from_expr(expression.as_ref()).unwrap()).unwrap()
     }
 
     #[test]

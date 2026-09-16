@@ -2,12 +2,16 @@ use crate::types::*;
 use qql_core::ast::{
     ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value, looks_like_iso_datetime,
 };
+use qql_core::error::QqlError;
 
 /// Lower a typed AST filter into the transport-neutral `FilterExpression` IR.
-pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
-    match filter {
+pub fn lower_filter(filter: &FilterExpr) -> Result<FilterExpression, QqlError> {
+    Ok(match filter {
         FilterExpr::And { operands } => FilterExpression::Compound(FilterCompound {
-            must: operands.iter().map(lower_clause).collect(),
+            must: operands
+                .iter()
+                .map(lower_clause)
+                .collect::<Result<_, _>>()?,
             must_not: Vec::new(),
             should: Vec::new(),
             min_should: None,
@@ -15,12 +19,15 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
         FilterExpr::Or { operands } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
-            should: operands.iter().map(lower_clause).collect(),
+            should: operands
+                .iter()
+                .map(lower_clause)
+                .collect::<Result<_, _>>()?,
             min_should: None,
         }),
         FilterExpr::Not { operand } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
-            must_not: vec![lower_clause(operand)],
+            must_not: vec![lower_clause(operand)?],
             should: Vec::new(),
             min_should: None,
         }),
@@ -34,20 +41,23 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
             must_not: Vec::new(),
             should: Vec::new(),
             min_should: Some(MinShould {
-                conditions: operands.iter().map(lower_clause).collect(),
+                conditions: operands
+                    .iter()
+                    .map(lower_clause)
+                    .collect::<Result<_, _>>()?,
                 min_count: *min_count,
             }),
         }),
-        other => FilterExpression::Single(Box::new(lower_clause(other))),
-    }
+        other => FilterExpression::Single(Box::new(lower_clause(other)?)),
+    })
 }
 
 /// Normalize a single top-level clause into a compound envelope.
 ///
 /// Shard routing is **not** attached to filters. Both REST and gRPC carry
 /// routing on the operation request (`shard_key` / `ShardKeySelector`).
-pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
-    match lower_filter(filter) {
+pub fn top_level_filter(filter: &FilterExpr) -> Result<FilterExpression, QqlError> {
+    Ok(match lower_filter(filter)? {
         FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
             must: vec![*clause],
             must_not: Vec::new(),
@@ -55,14 +65,14 @@ pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
             min_should: None,
         }),
         compound => compound,
-    }
+    })
 }
 
-fn lower_clause(filter: &FilterExpr) -> FilterClause {
-    match filter {
+fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
+    Ok(match filter {
         FilterExpr::PointId(predicate) => lower_point_id(predicate),
-        FilterExpr::Compare { field, op, value } => lower_compare(field, *op, value),
-        FilterExpr::Between { field, low, high } => lower_between(field, low, high),
+        FilterExpr::Compare { field, op, value } => lower_compare(field, *op, value)?,
+        FilterExpr::Between { field, low, high } => lower_between(field, low, high)?,
         FilterExpr::In { field, values } => lower_match_any(field, values),
         FilterExpr::IsNull { field } => FilterClause::IsNull(IsNullCondition {
             is_null: KeyOnly { key: field.clone() },
@@ -104,7 +114,10 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
             // nested occurrences ride a `{"filter": …}` envelope (top-level
             // `MIN SHOULD` lifts to the compound object in `lower_filter`).
             let min_should = MinShould {
-                conditions: operands.iter().map(lower_clause).collect(),
+                conditions: operands
+                    .iter()
+                    .map(lower_clause)
+                    .collect::<Result<_, _>>()?,
                 min_count: *min_count,
             };
             FilterClause::Filter(Box::new(FilterCompound {
@@ -117,7 +130,7 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
         FilterExpr::Nested { path, filter } => FilterClause::Nested(NestedCondition {
             nested: NestedParams {
                 key: path.clone(),
-                filter: Box::new(lower_filter(filter)),
+                filter: Box::new(lower_filter(filter)?),
             },
         }),
         FilterExpr::HasVector { name } => FilterClause::HasVector(HasVectorCondition {
@@ -172,7 +185,10 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
             })
         }),
         FilterExpr::And { operands } => FilterClause::Filter(Box::new(FilterCompound {
-            must: operands.iter().map(lower_clause).collect(),
+            must: operands
+                .iter()
+                .map(lower_clause)
+                .collect::<Result<_, _>>()?,
             must_not: Vec::new(),
             should: Vec::new(),
             min_should: None,
@@ -180,16 +196,19 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
         FilterExpr::Or { operands } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
-            should: operands.iter().map(lower_clause).collect(),
+            should: operands
+                .iter()
+                .map(lower_clause)
+                .collect::<Result<_, _>>()?,
             min_should: None,
         })),
         FilterExpr::Not { operand } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
-            must_not: vec![lower_clause(operand)],
+            must_not: vec![lower_clause(operand)?],
             should: Vec::new(),
             min_should: None,
         })),
-    }
+    })
 }
 
 fn empty_field_condition(field: &str) -> FieldCondition {
@@ -220,38 +239,44 @@ fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
     FilterClause::HasId(HasIdCondition { has_id: ids })
 }
 
-fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> FilterClause {
+fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> Result<FilterClause, QqlError> {
     if op == ComparisonOp::Eq {
         // Qdrant `match` rejects floats at runtime (MatchInterface has no
         // float variant); exact float equality is `range` with gte == lte.
         if let Value::Float(_) = value {
-            return field_condition(field, |fc| {
+            let bound = range_bound(value)?;
+            return Ok(field_condition(field, |fc| {
                 fc.range = Some(RangeParams {
                     gt: None,
-                    gte: Some(range_bound(value)),
+                    gte: Some(bound.clone()),
                     lt: None,
-                    lte: Some(range_bound(value)),
+                    lte: Some(bound),
                 })
-            });
+            }));
         }
-        return field_condition(field, |fc| {
+        return Ok(field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Value {
                 value: value_to_json(value),
             })
-        });
+        }));
     }
-    field_condition(field, |fc| fc.range = Some(comparison_range(op, value)))
+    let range = comparison_range(op, value)?;
+    Ok(field_condition(field, |fc| {
+        fc.range = Some(range);
+    }))
 }
 
-fn lower_between(field: &str, low: &Value, high: &Value) -> FilterClause {
-    field_condition(field, |fc| {
+fn lower_between(field: &str, low: &Value, high: &Value) -> Result<FilterClause, QqlError> {
+    let gte = range_bound(low)?;
+    let lte = range_bound(high)?;
+    Ok(field_condition(field, |fc| {
         fc.range = Some(RangeParams {
             gt: None,
-            gte: Some(range_bound(low)),
+            gte: Some(gte),
             lt: None,
-            lte: Some(range_bound(high)),
+            lte: Some(lte),
         })
-    })
+    }))
 }
 
 fn lower_match_any(field: &str, values: &[Value]) -> FilterClause {
@@ -259,9 +284,9 @@ fn lower_match_any(field: &str, values: &[Value]) -> FilterClause {
     field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
 }
 
-fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
-    let bound = range_bound(value);
-    match op {
+fn comparison_range(op: ComparisonOp, value: &Value) -> Result<RangeParams, QqlError> {
+    let bound = range_bound(value)?;
+    Ok(match op {
         ComparisonOp::Gt => RangeParams {
             gt: Some(bound),
             gte: None,
@@ -289,28 +314,27 @@ fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
         // `lower_compare` diverts `Eq` before this point, so this arm is a
         // drift guard, not a live path. Lower equality as an exact range
         // (`gte == lte`), mirroring the float-`Eq` handling in
-        // `lower_compare` and the `Eq` arm of `values_count_params` — the
-        // infallible pipeline stays total, so no future caller can panic here.
+        // `lower_compare` and the `Eq` arm of `values_count_params`.
         ComparisonOp::Eq => RangeParams {
             gt: None,
             gte: Some(bound.clone()),
             lt: None,
             lte: Some(bound),
         },
-    }
+    })
 }
 
 /// Convert a filter `Value` into a typed range bound.
 ///
-/// Total: the parser rejects bool/null/array/object literals as inequality
-/// bounds, and both `plan()` (`ensure_no_unbound_params`) and
-/// `plan_template()` (`validate_no_unbound_scalar_params`) reject unbound
-/// placeholders before lowering — but a *bound* placeholder can still carry
-/// any JSON value (`bind_value` substitutes blindly; only null is refused at
-/// bind time). Those degrade to opaque text so every backend still fails
-/// closed on the mistyped bound instead of crashing or matching wrong rows.
-fn range_bound(value: &Value) -> PlanRangeBound {
-    match value {
+/// The parser rejects bool/null/array/object literals as inequality and
+/// `BETWEEN` bounds, and both `plan()` (`ensure_no_unbound_params`) and
+/// `plan_template()` reject unbound placeholders before lowering. A *bound*
+/// placeholder resolving to a mistyped value (`bind_value` substitutes
+/// blindly) is a type error at the placeholder, so it fails here with
+/// `QQL-PLAN-RANGE-TYPE` instead of stringifying into a bound that matches
+/// wrong rows or 400s downstream.
+fn range_bound(value: &Value) -> Result<PlanRangeBound, QqlError> {
+    Ok(match value {
         Value::Int(n) => PlanRangeBound::Int(*n),
         // The parser only produces `UInt` for literals overflowing `i64`;
         // small programmatic values keep their integer wire shape, huge ones
@@ -340,11 +364,18 @@ fn range_bound(value: &Value) -> PlanRangeBound {
                 "invariant violation: unbound positional parameter ?{idx} reached range lowering"
             );
         }
-        // Parser-rejected literals, reachable only bound to a placeholder:
-        // degrade to opaque text (no datetime parses from these renderings)
-        // so the REST backend 400s and the edge/gRPC converters fail closed.
-        other => PlanRangeBound::Text(value_to_json(other).to_string()),
-    }
+        // Parser-rejected literals, reachable only as a bound placeholder's
+        // resolved value: a type error at the placeholder.
+        other => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-RANGE-TYPE",
+                format!(
+                    "range bound has non-scalar value {other:?}; expected a number, string, or datetime"
+                ),
+                value.param_span(),
+            ));
+        }
+    })
 }
 
 fn values_count_params(op: ComparisonOp, count: u64) -> ValuesCountParams {
@@ -461,7 +492,7 @@ mod tests {
             value: Value::Str("active".into()),
         };
         assert_json(
-            &top_level_filter(&f),
+            &top_level_filter(&f).unwrap(),
             json!({"must": [{"key": "status", "match": {"value": "active"}}]}),
         );
     }
@@ -474,7 +505,7 @@ mod tests {
             value: Value::Str("active".into()),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "status", "match": {"value": "active"}}),
         );
     }
@@ -489,7 +520,7 @@ mod tests {
             value: Value::Float(4.5),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "rating", "range": {"gte": 4.5, "lte": 4.5}}),
         );
     }
@@ -499,7 +530,7 @@ mod tests {
         // Drift guard for the `Eq` fallback in `comparison_range`
         // (`lower_compare` diverts `Eq` first): equality must lower to an
         // exact range, never panic.
-        let range = comparison_range(ComparisonOp::Eq, &Value::Int(5));
+        let range = comparison_range(ComparisonOp::Eq, &Value::Int(5)).unwrap();
         let json = serde_json::to_value(&range).unwrap();
         assert_eq!(json, json!({"gte": 5, "lte": 5}));
     }
@@ -512,15 +543,28 @@ mod tests {
             value: Value::Int(5),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "count", "range": {"gt": 5}}),
         );
     }
 
     #[test]
+    fn mistyped_bound_placeholder_fails_closed() {
+        // A bool can only reach range lowering as a bound placeholder's
+        // resolved value; it must error, never stringify into a bound.
+        let f = FilterExpr::Compare {
+            field: "age".into(),
+            op: ComparisonOp::Gt,
+            value: Value::Bool(true),
+        };
+        let err = lower_filter(&f).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-RANGE-TYPE");
+    }
+
+    #[test]
     fn point_id_eq() {
         let f = FilterExpr::PointId(PointIdPredicate::Eq(qql_core::ast::PointId::Number(42)));
-        assert_json(&lower_filter(&f), json!({"has_id": [42]}));
+        assert_json(&lower_filter(&f).unwrap(), json!({"has_id": [42]}));
     }
 
     #[test]
@@ -529,7 +573,7 @@ mod tests {
             qql_core::ast::PointId::Number(1),
             qql_core::ast::PointId::String("uuid".into()),
         ]));
-        assert_json(&lower_filter(&f), json!({"has_id": [1, "uuid"]}));
+        assert_json(&lower_filter(&f).unwrap(), json!({"has_id": [1, "uuid"]}));
     }
 
     #[test]
@@ -539,7 +583,7 @@ mod tests {
             text: "search".into(),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "title", "match": {"text": "search"}}),
         );
     }
@@ -551,7 +595,7 @@ mod tests {
             text: "exact match".into(),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "content", "match": {"phrase": "exact match"}}),
         );
     }
@@ -563,7 +607,7 @@ mod tests {
             prefix: "Comp".into(),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "title", "match": {"prefix": "Comp"}}),
         );
     }
@@ -575,7 +619,7 @@ mod tests {
             values: vec![Value::Str("rust".into()), Value::Str("go".into())],
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "tags", "match": {"any": ["rust", "go"]}}),
         );
     }
@@ -587,7 +631,7 @@ mod tests {
             text: "red shoes".into(),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "title", "match": {"text_any": "red shoes"}}),
         );
     }
@@ -599,7 +643,7 @@ mod tests {
             values: vec![Value::Str("red".into()), Value::Str("blue".into())],
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "tags", "match": {"except": ["red", "blue"]}}),
         );
     }
@@ -611,7 +655,7 @@ mod tests {
             values: vec![Value::Int(1), Value::Int(2)],
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "code", "match": {"except": [1, 2]}}),
         );
     }
@@ -634,7 +678,7 @@ mod tests {
             ],
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"min_should": {"conditions": [
                 {"key": "a", "match": {"value": 1}},
                 {"key": "b", "match": {"value": 2}}
@@ -650,7 +694,7 @@ mod tests {
             value: Value::UInt(18446744073709551615),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "big", "match": {"value": 18446744073709551615u64}}),
         );
     }
@@ -663,7 +707,7 @@ mod tests {
             value: Value::Str("m".into()),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "name", "range": {"gt": "m"}}),
         );
     }
@@ -678,7 +722,7 @@ mod tests {
             }),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"must_not": [{"key": "status", "match": {"value": "deleted"}}]}),
         );
     }
@@ -702,7 +746,7 @@ mod tests {
             }),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"must_not": [{"must": [
                 {"key": "a", "match": {"value": true}},
                 {"key": "b", "range": {"gt": 10}}
@@ -719,7 +763,7 @@ mod tests {
             }),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"must_not": [{"key": "tag", "match": {"any": ["old"]}}]}),
         );
     }
@@ -729,7 +773,10 @@ mod tests {
         let f = FilterExpr::IsNull {
             field: "desc".into(),
         };
-        assert_json(&lower_filter(&f), json!({"is_null": {"key": "desc"}}));
+        assert_json(
+            &lower_filter(&f).unwrap(),
+            json!({"is_null": {"key": "desc"}}),
+        );
     }
 
     #[test]
@@ -737,7 +784,10 @@ mod tests {
         let f = FilterExpr::IsEmpty {
             field: "tags".into(),
         };
-        assert_json(&lower_filter(&f), json!({"is_empty": {"key": "tags"}}));
+        assert_json(
+            &lower_filter(&f).unwrap(),
+            json!({"is_empty": {"key": "tags"}}),
+        );
     }
 
     #[test]
@@ -745,14 +795,14 @@ mod tests {
         let f = FilterExpr::HasVector {
             name: "dense".into(),
         };
-        assert_json(&lower_filter(&f), json!({"has_vector": "dense"}));
+        assert_json(&lower_filter(&f).unwrap(), json!({"has_vector": "dense"}));
     }
 
     #[test]
     fn slice_condition() {
         let f = FilterExpr::Slice { total: 4, index: 1 };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"slice": {"total": 4, "index": 1}}),
         );
     }
@@ -774,7 +824,7 @@ mod tests {
             ],
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"must": [
                 {"key": "a", "match": {"value": true}},
                 {"key": "b", "range": {"gt": 0}}
@@ -790,7 +840,7 @@ mod tests {
             high: Value::Int(65),
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "age", "range": {"gte": 18, "lte": 65}}),
         );
     }
@@ -803,7 +853,7 @@ mod tests {
             count: 3,
         };
         assert_json(
-            &lower_filter(&f),
+            &lower_filter(&f).unwrap(),
             json!({"key": "tags", "values_count": {"gt": 3}}),
         );
     }
@@ -818,7 +868,7 @@ mod tests {
                 value: Value::Str("alice".into()),
             }),
         };
-        let json = serde_json::to_value(lower_filter(&f)).unwrap();
+        let json = serde_json::to_value(lower_filter(&f).unwrap()).unwrap();
         assert_eq!(json["nested"]["key"], "comments");
         assert_eq!(
             json["nested"]["filter"],
@@ -836,7 +886,7 @@ mod tests {
             },
             radius: 1000.0,
         };
-        let json = serde_json::to_value(lower_filter(&f)).unwrap();
+        let json = serde_json::to_value(lower_filter(&f).unwrap()).unwrap();
         assert_eq!(json["key"], "loc");
         assert_eq!(json["geo_radius"]["radius"], 1000.0);
     }
@@ -848,7 +898,7 @@ mod tests {
             top_left: qql_core::ast::GeoPoint { lat: 1.0, lon: 2.0 },
             bottom_right: qql_core::ast::GeoPoint { lat: 3.0, lon: 4.0 },
         };
-        let json = serde_json::to_value(lower_filter(&f)).unwrap();
+        let json = serde_json::to_value(lower_filter(&f).unwrap()).unwrap();
         assert_eq!(json["key"], "area");
         assert_eq!(json["geo_bounding_box"]["top_left"]["lat"], 1.0);
     }
@@ -894,7 +944,7 @@ mod tests {
                 },
             ]],
         };
-        let json = serde_json::to_value(lower_filter(&f)).unwrap();
+        let json = serde_json::to_value(lower_filter(&f).unwrap()).unwrap();
         assert_eq!(json["key"], "area");
         let polygon = &json["geo_polygon"];
         assert_eq!(polygon["exterior"]["points"][0]["lat"], -70.0);

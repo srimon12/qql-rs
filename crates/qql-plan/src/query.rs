@@ -130,7 +130,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 )
             };
             QueryVariant::Formula(FormulaQuery {
-                formula: PlanFormula::from(expression.as_ref()),
+                formula: PlanFormula::from_expr(expression.as_ref())?,
                 defaults,
             })
         }
@@ -250,7 +250,11 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter(f))
+            .transpose()?,
         params: match query.params.as_ref() {
             Some(p) => lower_search_params(p)?,
             None => None,
@@ -314,7 +318,11 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter(f))
+            .transpose()?,
         params: match query.params.as_ref() {
             Some(p) => lower_search_params(p)?,
             None => None,

@@ -446,7 +446,7 @@ impl Executor {
             crate::executor::dml::upsert::map_unnamed_to_single_dense(&mut upsert, info);
             self.validate_embedded_upsert(&upsert, info)?;
         }
-        let request = qql_plan::mutation::lower_upsert_request(&upsert);
+        let request = qql_plan::mutation::lower_upsert_request(&upsert)?;
         let wait = upsert
             .wait
             .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty());
