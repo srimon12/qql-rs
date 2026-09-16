@@ -11,6 +11,8 @@
 pub mod embedder;
 /// AST rewriting: resolve `TEXT` inputs to vectors via the configured embedder.
 pub mod resolve;
+/// Query-side embedding resolution (collect → batch → apply), split from [`resolve`].
+mod resolve_query;
 /// Local wire-compatible BM25 sparse vectors (no network).
 pub mod sparse;
 /// `USING` vector-kind resolution from collection topology (dense/sparse/multi).

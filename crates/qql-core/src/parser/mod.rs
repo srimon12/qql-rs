@@ -1,6 +1,7 @@
 pub(crate) mod alter_drop_show;
 pub(crate) mod batch;
 pub(crate) mod config_parsers;
+pub(crate) mod config_parsers_diff;
 pub(crate) mod config_validation;
 pub(crate) mod create;
 pub(crate) mod filter;
