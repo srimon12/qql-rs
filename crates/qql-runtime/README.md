@@ -46,8 +46,10 @@ Convenience: `Executor::rest(url, api_key)` / `Executor::grpc(url, api_key)`.
 
 `HttpEmbedder` serves dense/multi/image/rerank over HTTP but always encodes
 sparse **documents locally** (wire-compatible `qdrant/bm25`). Tune the document
-encoder via `HttpEmbedderOptions { bm25_k1, bm25_b, bm25_avg_len, .. }` (or
-`QqlConfig.bm25_*` for config-file hosts). Client-side and write-path only:
+encoder via `HttpEmbedderOptions { bm25_k1, …, bm25_language, bm25_tokenizer, … }` (or
+`QqlConfig.bm25_*` for config-file hosts). Thirty languages, three local
+tokenizers, folding, and length limits mirror Qdrant's `Bm25Config`; measure a
+corpus-true `avg_len` with `Executor::estimate_bm25_avg_len`. Client-side and write-path only:
 query weights stay unit, server-side inference is untouched, and vectors
 already written keep their weights — re-ingest to apply. Unset = Qdrant
 defaults (`1.2 / 0.75 / 256`); invalid values fail closed with

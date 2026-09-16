@@ -388,6 +388,27 @@ enum ConfigCommand {
         /// Client-side BM25 expected average document length in tokens (default: 256).
         #[arg(long)]
         bm25_avg_len: Option<f64>,
+        /// BM25 text-processing language, e.g. spanish (default: english).
+        #[arg(long)]
+        bm25_language: Option<String>,
+        /// BM25 tokenizer: word, whitespace, prefix, multilingual (default: word).
+        #[arg(long)]
+        bm25_tokenizer: Option<String>,
+        /// Lowercase before matching (default: true).
+        #[arg(long)]
+        bm25_lowercase: Option<bool>,
+        /// Lucene ASCII folding before lowercasing (default: false).
+        #[arg(long)]
+        bm25_ascii_folding: Option<bool>,
+        /// Drop tokens shorter than this many chars.
+        #[arg(long)]
+        bm25_min_token_len: Option<usize>,
+        /// Drop over-long tokens on the document path (chars).
+        #[arg(long)]
+        bm25_max_token_len: Option<usize>,
+        /// Stemmer override (language name, or "none" to disable).
+        #[arg(long)]
+        bm25_stemmer: Option<String>,
         /// Offline multivector model for fastembed (e.g. bge-m3).
         #[arg(long)]
         multi_model: Option<String>,
@@ -938,6 +959,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bm25_k1,
                 bm25_b,
                 bm25_avg_len,
+                bm25_language,
+                bm25_tokenizer,
+                bm25_lowercase,
+                bm25_ascii_folding,
+                bm25_min_token_len,
+                bm25_max_token_len,
+                bm25_stemmer,
                 multi_model,
                 image_model,
                 reranker_model,
@@ -972,6 +1000,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bm25_k1,
                 bm25_b,
                 bm25_avg_len,
+                bm25_language,
+                bm25_tokenizer,
+                bm25_lowercase,
+                bm25_ascii_folding,
+                bm25_min_token_len,
+                bm25_max_token_len,
+                bm25_stemmer,
                 multi_model,
                 image_model,
                 reranker_model,

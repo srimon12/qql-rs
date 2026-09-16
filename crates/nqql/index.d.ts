@@ -175,6 +175,33 @@ export interface HttpEmbedderOptions {
   /** Client-side BM25 expected average document length in tokens (default 256) */
   bm25AvgLen?: number;
   bm25_avg_len?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english") */
+  bm25Language?: string;
+  bm25_language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" (default "word") */
+  bm25Tokenizer?: string;
+  bm25_tokenizer?: string;
+  /** Lowercase before matching (default true) */
+  bm25Lowercase?: boolean;
+  bm25_lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false) */
+  bm25AsciiFolding?: boolean;
+  bm25_ascii_folding?: boolean;
+  /** Custom stopwords replacing the language default ([] disables) */
+  bm25Stopwords?: string[];
+  bm25_stopwords?: string[];
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
+  bm25_stopwords_languages?: string[];
+  /** Stemmer override ("none" disables; a language name overrides) */
+  bm25Stemmer?: string;
+  bm25_stemmer?: string;
+  /** Drop tokens shorter than this many chars */
+  bm25MinTokenLen?: number;
+  bm25_min_token_len?: number;
+  /** Drop over-long tokens on the document path */
+  bm25MaxTokenLen?: number;
+  bm25_max_token_len?: number;
 }
 
 export class HttpEmbedder {

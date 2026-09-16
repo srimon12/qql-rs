@@ -429,6 +429,26 @@ pub struct LocalExecutorOptions {
     pub bm25_b: Option<f64>,
     /// Client-side BM25 expected average document length in tokens (default `256`).
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language, e.g. `"spanish"` (default `"english"`).
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer: `"word"` | `"whitespace"` | `"prefix"` |
+    /// `"multilingual"` (default `"word"`).
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching (default `true`).
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing (default `false`).
+    pub bm25_ascii_folding: Option<bool>,
+    /// Drop tokens shorter than this many chars.
+    pub bm25_min_token_len: Option<f64>,
+    /// Drop over-long tokens on the document path.
+    pub bm25_max_token_len: Option<f64>,
+    /// Custom stopwords replacing the language default (`undefined` keeps
+    /// it; `[]` disables filtering).
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Stemmer override (`undefined` = language default; `"none"` disables).
+    pub bm25_stemmer: Option<String>,
+    /// Additional language stopword lists merged with `bm25Stopwords`.
+    pub bm25_stopwords_languages: Option<Vec<String>>,
 }
 
 /// Parse `walSegmentMb` (whole MiB) into the byte capacity
@@ -451,6 +471,31 @@ fn wal_segment_capacity(mb: Option<f64>) -> Result<Option<usize>, qql_core::erro
     }
     // `as` saturates; the shared helper rejects any byte count that overflows.
     qql_edge::wal_segment_capacity_bytes(Some(mb as u64))
+}
+
+/// Parse an optional whole-number JS option (token length limits) into
+/// `Option<usize>`. `None` keeps the engine default; fractional, negative,
+/// non-finite, or overflowing values fail closed with
+/// `QQL-VALIDATION-CONFIG`.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn whole_usize(value: Option<f64>, name: &str) -> Result<Option<usize>, qql_core::error::QqlError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 {
+        return Err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            format!("{name} must be a non-negative whole number; omit it for no limit"),
+            None,
+        ));
+    }
+    usize::try_from(value as u64).map(Some).map_err(|_| {
+        qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            format!("{name} is too large for this platform"),
+            None,
+        )
+    })
 }
 
 /// Create a fully-local edge executor backed by fastembed-rs and qdrant-edge.
@@ -493,6 +538,17 @@ pub fn local_executor(
             bm25_k1: opts.bm25_k1,
             bm25_b: opts.bm25_b,
             bm25_avg_len: opts.bm25_avg_len,
+            bm25_language: opts.bm25_language,
+            bm25_tokenizer: opts.bm25_tokenizer,
+            bm25_lowercase: opts.bm25_lowercase,
+            bm25_ascii_folding: opts.bm25_ascii_folding,
+            bm25_min_token_len: whole_usize(opts.bm25_min_token_len, "bm25MinTokenLen")
+                .map_err(common::to_napi_err)?,
+            bm25_max_token_len: whole_usize(opts.bm25_max_token_len, "bm25MaxTokenLen")
+                .map_err(common::to_napi_err)?,
+            bm25_stopwords: opts.bm25_stopwords,
+            bm25_stemmer: opts.bm25_stemmer,
+            bm25_stopwords_languages: opts.bm25_stopwords_languages,
         },
     )
     .map_err(common::to_napi_err)?;
@@ -540,12 +596,11 @@ pub struct EmbeddingModelInfoJs {
 /// - `embedModel` — model name, e.g. `"text-embedding-3-small"`
 /// - `embedDim` — expected output dimension
 ///
-/// `onDiskPayload` defaults to `true`. `bm25K1` / `bm25B` / `bm25AvgLen`
-/// configure the **local** BM25 document encoder used for sparse vectors
-/// (write-path only; defaults 1.2 / 0.75 / 256).
+/// `onDiskPayload` defaults to `true`. `bm25_options` carries the **local**
+/// BM25 document encoder knobs used for sparse vectors (write-path only;
+/// defaults 1.2 / 0.75 / 256, English, word tokenizer).
 #[cfg(feature = "http-embedding")]
 #[napi(js_name = httpExecutor, catch_unwind)]
-#[allow(clippy::too_many_arguments)]
 pub fn http_executor(
     data_dir: String,
     url: String,
@@ -553,11 +608,10 @@ pub fn http_executor(
     embed_model: String,
     embed_dim: u32,
     on_disk_payload: Option<bool>,
-    bm25_k1: Option<f64>,
-    bm25_b: Option<f64>,
-    bm25_avg_len: Option<f64>,
+    bm25_options: Option<serde_json::Value>,
 ) -> napi::Result<JsClient> {
     let on_disk = on_disk_payload.unwrap_or(true);
+    let bm25 = parse_http_bm25_opts(bm25_options.as_ref())?;
     let exec = qql_edge::http_executor_with_options_and_wal(
         data_dir,
         on_disk,
@@ -567,9 +621,18 @@ pub fn http_executor(
             api_key: embed_key,
             model: embed_model,
             dimension: embed_dim as usize,
-            bm25_k1,
-            bm25_b,
-            bm25_avg_len,
+            bm25_k1: bm25.k1,
+            bm25_b: bm25.b,
+            bm25_avg_len: bm25.avg_len,
+            bm25_language: bm25.language,
+            bm25_tokenizer: bm25.tokenizer,
+            bm25_lowercase: bm25.lowercase,
+            bm25_ascii_folding: bm25.ascii_folding,
+            bm25_stopwords: bm25.stopwords,
+            bm25_stemmer: bm25.stemmer,
+            bm25_min_token_len: bm25.min_token_len,
+            bm25_max_token_len: bm25.max_token_len,
+            bm25_stopwords_languages: bm25.stopwords_languages,
             ..Default::default()
         },
     )
@@ -577,13 +640,64 @@ pub fn http_executor(
     Ok(JsClient::from_executor(exec))
 }
 
+/// Parsed BM25 knobs for the HTTP edge path. Numerics stay raw `f64` so the
+/// shared `HttpEmbedderOptions` validator fails closed on them.
+struct HttpBm25Opts {
+    k1: Option<f64>,
+    b: Option<f64>,
+    avg_len: Option<f64>,
+    language: Option<String>,
+    tokenizer: Option<String>,
+    lowercase: Option<bool>,
+    ascii_folding: Option<bool>,
+    stopwords: Option<Vec<String>>,
+    stemmer: Option<String>,
+    min_token_len: Option<usize>,
+    max_token_len: Option<usize>,
+    stopwords_languages: Option<Vec<String>>,
+}
+
+/// Parse BM25 knobs from a plain options object (camelCase/snake_case).
+/// Missing/`null` keeps engine defaults; present-but-malformed fails closed.
+#[cfg(feature = "http-embedding")]
+fn parse_http_bm25_opts(options: Option<&serde_json::Value>) -> napi::Result<HttpBm25Opts> {
+    Ok(HttpBm25Opts {
+        k1: option_f64(options, "bm25K1", "bm25_k1"),
+        b: option_f64(options, "bm25B", "bm25_b"),
+        avg_len: option_f64(options, "bm25AvgLen", "bm25_avg_len"),
+        language: option_str(options, "bm25Language", "bm25_language")?,
+        tokenizer: option_str(options, "bm25Tokenizer", "bm25_tokenizer")?,
+        lowercase: option_bool(options, "bm25Lowercase", "bm25_lowercase")?,
+        ascii_folding: option_bool(options, "bm25AsciiFolding", "bm25_ascii_folding")?,
+        stopwords: option_string_list(options, "bm25Stopwords", "bm25_stopwords")?,
+        stemmer: option_str(options, "bm25Stemmer", "bm25_stemmer")?,
+        min_token_len: whole_usize(
+            option_f64(options, "bm25MinTokenLen", "bm25_min_token_len"),
+            "bm25MinTokenLen",
+        )
+        .map_err(common::to_napi_err)?,
+        max_token_len: whole_usize(
+            option_f64(options, "bm25MaxTokenLen", "bm25_max_token_len"),
+            "bm25MaxTokenLen",
+        )
+        .map_err(common::to_napi_err)?,
+        stopwords_languages: option_string_list(
+            options,
+            "bm25StopwordsLanguages",
+            "bm25_stopwords_languages",
+        )?,
+    })
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Standalone execute (one-shot with a temporary client)
 // ═══════════════════════════════════════════════════════════════════
 
 #[cfg(feature = "fastembed-local")]
-fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOptions {
-    LocalExecutorOptions {
+fn standalone_local_opts(
+    options: Option<&serde_json::Value>,
+) -> napi::Result<LocalExecutorOptions> {
+    Ok(LocalExecutorOptions {
         on_disk_payload: options
             .and_then(|o| o.get("onDiskPayload"))
             .and_then(|v| v.as_bool()),
@@ -619,9 +733,112 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
         bm25_k1: option_f64(options, "bm25K1", "bm25_k1"),
         bm25_b: option_f64(options, "bm25B", "bm25_b"),
         bm25_avg_len: option_f64(options, "bm25AvgLen", "bm25_avg_len"),
+        bm25_language: option_str(options, "bm25Language", "bm25_language")?,
+        bm25_tokenizer: option_str(options, "bm25Tokenizer", "bm25_tokenizer")?,
+        bm25_lowercase: option_bool(options, "bm25Lowercase", "bm25_lowercase")?,
+        bm25_ascii_folding: option_bool(options, "bm25AsciiFolding", "bm25_ascii_folding")?,
+        bm25_min_token_len: option_f64(options, "bm25MinTokenLen", "bm25_min_token_len"),
+        bm25_max_token_len: option_f64(options, "bm25MaxTokenLen", "bm25_max_token_len"),
+        bm25_stopwords: option_string_list(options, "bm25Stopwords", "bm25_stopwords")?,
+        bm25_stemmer: option_str(options, "bm25Stemmer", "bm25_stemmer")?,
+        bm25_stopwords_languages: option_string_list(
+            options,
+            "bm25StopwordsLanguages",
+            "bm25_stopwords_languages",
+        )?,
         // The WAL knob is a localExecutor option; one-shot execute keeps the
         // engine default (the JS wrapper does not forward it here).
         wal_segment_mb: None,
+    })
+}
+
+/// Read a string option by camelCase or snake_case name; missing/`null` →
+/// `None`. A present-but-non-string value fails closed with
+/// `QQL-VALIDATION-CONFIG` instead of silently keeping the default.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn option_str(
+    options: Option<&serde_json::Value>,
+    camel: &str,
+    snake: &str,
+) -> napi::Result<Option<String>> {
+    let key = match options {
+        Some(o) if o.get(camel).is_some() => camel,
+        _ => snake,
+    };
+    let value = options.and_then(|o| o.get(key));
+    match value {
+        None => Ok(None),
+        Some(v) if v.is_null() => Ok(None),
+        Some(v) => v.as_str().map(String::from).map(Some).ok_or_else(|| {
+            common::to_napi_err(qql_core::error::QqlError::validation(
+                "QQL-VALIDATION-CONFIG",
+                format!("{key} must be a string"),
+                None,
+            ))
+        }),
+    }
+}
+
+/// Read a bool option by camelCase or snake_case name; missing/`null` →
+/// `None`. A present-but-non-bool value fails closed with
+/// `QQL-VALIDATION-CONFIG` instead of silently keeping the default.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn option_bool(
+    options: Option<&serde_json::Value>,
+    camel: &str,
+    snake: &str,
+) -> napi::Result<Option<bool>> {
+    let key = match options {
+        Some(o) if o.get(camel).is_some() => camel,
+        _ => snake,
+    };
+    let value = options.and_then(|o| o.get(key));
+    match value {
+        None => Ok(None),
+        Some(v) if v.is_null() => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| {
+            common::to_napi_err(qql_core::error::QqlError::validation(
+                "QQL-VALIDATION-CONFIG",
+                format!("{key} must be a boolean"),
+                None,
+            ))
+        }),
+    }
+}
+
+/// Read a string-array option (custom stopwords); missing/`null` → `None`.
+/// A present-but-malformed value (non-array, or any non-string item) fails
+/// closed — silently dropping an item could disable filtering entirely.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn option_string_list(
+    options: Option<&serde_json::Value>,
+    camel: &str,
+    snake: &str,
+) -> napi::Result<Option<Vec<String>>> {
+    let key = match options {
+        Some(o) if o.get(camel).is_some() => camel,
+        _ => snake,
+    };
+    let value = options.and_then(|o| o.get(key));
+    match value {
+        None => Ok(None),
+        Some(v) if v.is_null() => Ok(None),
+        Some(v) => v
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .map(|item| item.as_str().map(String::from))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .ok_or_else(|| {
+                common::to_napi_err(qql_core::error::QqlError::validation(
+                    "QQL-VALIDATION-CONFIG",
+                    format!("{key} must be an array of strings"),
+                    None,
+                ))
+            })
+            .map(Some),
     }
 }
 
@@ -679,9 +896,8 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
                 .and_then(|o| o.get("embedDim"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
-            let bm25_k1 = option_f64(options, "bm25K1", "bm25_k1");
-            let bm25_b = option_f64(options, "bm25B", "bm25_b");
-            let bm25_avg_len = option_f64(options, "bm25AvgLen", "bm25_avg_len");
+            // Forward the whole options object: parse_http_bm25_opts reads
+            // only the bm25* keys (both cases), so text knobs ride along.
             return http_executor(
                 data_dir.to_string(),
                 embed_url.to_string(),
@@ -689,9 +905,7 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
                 embed_model.to_string(),
                 embed_dim,
                 Some(on_disk),
-                bm25_k1,
-                bm25_b,
-                bm25_avg_len,
+                options.cloned(),
             );
         }
     }
@@ -711,7 +925,7 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
 
     #[cfg(feature = "fastembed-local")]
     {
-        local_executor(data_dir.to_string(), Some(standalone_local_opts(options)))
+        local_executor(data_dir.to_string(), Some(standalone_local_opts(options)?))
     }
 
     #[cfg(not(feature = "fastembed-local"))]

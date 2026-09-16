@@ -307,7 +307,52 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<(), Box<dyn std::erro
         "rerank-model" => {
             config.rerank_model = Some(value.to_string());
         }
-        _ => return Err(format!("unknown configuration key '{}'; supported keys: url, api-key, embed-url, embed-model, embed-dim, rerank-endpoint, rerank-model", key).into()),
+        "bm25-k1" | "bm25-b" | "bm25-avg-len" => {
+            let number: f64 = value
+                .parse()
+                .map_err(|_| format!("'{}' is not a valid number", value))?;
+            if !number.is_finite() {
+                return Err(format!("'{}' must be finite", key).into());
+            }
+            match normalized.as_str() {
+                "bm25-k1" => config.bm25_k1 = Some(number),
+                "bm25-b" => config.bm25_b = Some(number),
+                _ => config.bm25_avg_len = Some(number),
+            }
+        }
+        "bm25-language" | "bm25-tokenizer" | "bm25-stemmer" => {
+            if value.is_empty() {
+                return Err(format!("'{key}' needs a non-empty value (omit it to keep the default)").into());
+            }
+            match normalized.as_str() {
+                "bm25-language" => config.bm25_language = Some(value.to_string()),
+                "bm25-tokenizer" => config.bm25_tokenizer = Some(value.to_string()),
+                _ => config.bm25_stemmer = Some(value.to_string()),
+            }
+        }
+        "bm25-lowercase" | "bm25-ascii-folding" => {
+            let flag = match value.to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => return Err(format!("'{key}' must be true/false, got '{value}'").into()),
+            };
+            if normalized.as_str() == "bm25-lowercase" {
+                config.bm25_lowercase = Some(flag);
+            } else {
+                config.bm25_ascii_folding = Some(flag);
+            }
+        }
+        "bm25-min-token-len" | "bm25-max-token-len" => {
+            let limit: usize = value
+                .parse()
+                .map_err(|_| format!("'{}' is not a valid non-negative integer", value))?;
+            if normalized.as_str() == "bm25-min-token-len" {
+                config.bm25_min_token_len = Some(limit);
+            } else {
+                config.bm25_max_token_len = Some(limit);
+            }
+        }
+        _ => return Err(format!("unknown configuration key '{}'; supported keys: url, api-key, embed-url, embed-model, embed-dim, rerank-endpoint, rerank-model, bm25-k1, bm25-b, bm25-avg-len, bm25-language, bm25-tokenizer, bm25-stemmer, bm25-lowercase, bm25-ascii-folding, bm25-min-token-len, bm25-max-token-len (bm25_stopwords* are config-file only)", key).into()),
     }
 
     config.save()?;

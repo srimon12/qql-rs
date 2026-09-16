@@ -58,23 +58,43 @@ test("client options embedder forwards dense fields", () => {
     bm25K1: undefined,
     bm25B: undefined,
     bm25AvgLen: undefined,
+    bm25Language: undefined,
+    bm25Tokenizer: undefined,
+    bm25Lowercase: undefined,
+    bm25AsciiFolding: undefined,
+    bm25Stopwords: undefined,
+    bm25Stemmer: undefined,
+    bm25MinTokenLen: undefined,
+    bm25MaxTokenLen: undefined,
+    bm25StopwordsLanguages: undefined,
   });
 });
 
 test("client options embedder forwards BM25 document params (camel + snake)", () => {
   const camel = normalizeClientOptions({
-    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25K1: 2, bm25B: 0.5, bm25AvgLen: 8 },
+    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25K1: 2, bm25B: 0.5, bm25AvgLen: 8, bm25Language: "es", bm25Tokenizer: "whitespace", bm25Lowercase: false, bm25AsciiFolding: true, bm25Stopwords: ["el"], bm25Stemmer: "none", bm25MinTokenLen: 2, bm25MaxTokenLen: 9 },
   });
   assert.strictEqual(camel.embedder.bm25K1, 2);
   assert.strictEqual(camel.embedder.bm25B, 0.5);
   assert.strictEqual(camel.embedder.bm25AvgLen, 8);
+  assert.strictEqual(camel.embedder.bm25Language, "es");
+  assert.strictEqual(camel.embedder.bm25Tokenizer, "whitespace");
+  assert.strictEqual(camel.embedder.bm25Lowercase, false);
+  assert.strictEqual(camel.embedder.bm25AsciiFolding, true);
+  assert.deepStrictEqual(camel.embedder.bm25Stopwords, ["el"]);
+  assert.strictEqual(camel.embedder.bm25Stemmer, "none");
+  assert.strictEqual(camel.embedder.bm25MinTokenLen, 2);
+  assert.strictEqual(camel.embedder.bm25MaxTokenLen, 9);
 
   const snake = normalizeClientOptions({
-    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25_k1: 1.5, bm25_b: 0.25, bm25_avg_len: 16 },
+    embedder: { endpoint: "http://x/v1/embeddings", model: "m", dimension: 3, bm25_k1: 1.5, bm25_b: 0.25, bm25_avg_len: 16, bm25_language: "french", bm25_lowercase: true, bm25_stopwords_languages: ["fr", "en"] },
   });
   assert.strictEqual(snake.embedder.bm25K1, 1.5);
   assert.strictEqual(snake.embedder.bm25B, 0.25);
   assert.strictEqual(snake.embedder.bm25AvgLen, 16);
+  assert.strictEqual(snake.embedder.bm25Language, "french");
+  assert.strictEqual(snake.embedder.bm25Lowercase, true);
+  assert.deepStrictEqual(snake.embedder.bm25StopwordsLanguages, ["fr", "en"]);
 
   // Out-of-range values survive normalization; the native layer fails closed.
   const bad = normalizeClientOptions({

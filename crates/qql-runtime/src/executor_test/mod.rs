@@ -4,6 +4,7 @@ mod batch;
 #[cfg(feature = "rest")]
 mod bm25;
 mod ddl;
+mod estimate;
 pub(crate) mod mock;
 mod prepared;
 mod query;

@@ -166,6 +166,24 @@ export interface LocalExecutorOptions {
   bm25B?: number;
   /** Client-side BM25 expected average document length in tokens (default 256). */
   bm25AvgLen?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english"). */
+  bm25Language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" | "multilingual". */
+  bm25Tokenizer?: string;
+  /** Lowercase before matching (default true). */
+  bm25Lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false). */
+  bm25AsciiFolding?: boolean;
+  /** Drop tokens shorter than this many chars. */
+  bm25MinTokenLen?: number;
+  /** Drop over-long tokens on the document path. */
+  bm25MaxTokenLen?: number;
+  /** Custom stopwords replacing the language default ([] disables). */
+  bm25Stopwords?: string[];
+  /** Stemmer override ("none" disables). */
+  bm25Stemmer?: string;
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
 }
 
 export interface StandaloneOptions {
@@ -202,6 +220,24 @@ export interface StandaloneOptions {
   bm25B?: number;
   /** Client-side BM25 expected average document length in tokens (default 256). */
   bm25AvgLen?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english"). */
+  bm25Language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" | "multilingual". */
+  bm25Tokenizer?: string;
+  /** Lowercase before matching (default true). */
+  bm25Lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false). */
+  bm25AsciiFolding?: boolean;
+  /** Drop tokens shorter than this many chars. */
+  bm25MinTokenLen?: number;
+  /** Drop over-long tokens on the document path. */
+  bm25MaxTokenLen?: number;
+  /** Custom stopwords replacing the language default ([] disables). */
+  bm25Stopwords?: string[];
+  /** Stemmer override ("none" disables). */
+  bm25Stemmer?: string;
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
   /** onError behaviour */
   onError?: "stop" | "continue";
   /** Parameter bindings */
@@ -340,9 +376,32 @@ export function httpExecutor(
   embedModel: string,
   embedDim: number,
   onDiskPayload?: boolean,
-  bm25K1?: number,
-  bm25B?: number,
-  bm25AvgLen?: number,
+  bm25Options?: {
+    bm25K1?: number;
+    bm25_k1?: number;
+    bm25B?: number;
+    bm25_b?: number;
+    bm25AvgLen?: number;
+    bm25_avg_len?: number;
+    bm25Language?: string;
+    bm25_language?: string;
+    bm25Tokenizer?: string;
+    bm25_tokenizer?: string;
+    bm25Lowercase?: boolean;
+    bm25_lowercase?: boolean;
+    bm25AsciiFolding?: boolean;
+    bm25_ascii_folding?: boolean;
+    bm25Stopwords?: string[];
+    bm25_stopwords?: string[];
+    bm25Stemmer?: string;
+    bm25_stemmer?: string;
+    bm25StopwordsLanguages?: string[];
+    bm25_stopwords_languages?: string[];
+    bm25MinTokenLen?: number;
+    bm25_min_token_len?: number;
+    bm25MaxTokenLen?: number;
+    bm25_max_token_len?: number;
+  },
 ): Client;
 
 /**

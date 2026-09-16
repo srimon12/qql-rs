@@ -163,6 +163,16 @@ class HttpEmbedder:
         bm25_k1: Optional[float] = None,
         bm25_b: Optional[float] = None,
         bm25_avg_len: Optional[float] = None,
+        bm25_language: Optional[str] = None,
+        bm25_tokenizer: Optional[str] = None,
+        bm25_lowercase: Optional[bool] = None,
+        bm25_ascii_folding: Optional[bool] = None,
+        bm25_stopwords: Optional[List[str]] = None,
+        bm25_stemmer: Optional[str] = None,
+        bm25_stopwords_languages: Optional[List[str]] = None,
+        bm25_stopwords_languages: Optional[List[str]] = None,
+        bm25_min_token_len: Optional[int] = None,
+        bm25_max_token_len: Optional[int] = None,
     ) -> None: ...
 
 class Client:

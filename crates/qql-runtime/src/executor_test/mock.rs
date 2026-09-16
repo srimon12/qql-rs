@@ -176,6 +176,7 @@ impl QdrantOps for MockQdrantClient {
         // Typed per-collection payload when configured.
         if let qql_plan::PlannedOperation::Query { collection, .. }
         | qql_plan::PlannedOperation::QueryGroups { collection, .. }
+        | qql_plan::PlannedOperation::Scroll { collection, .. }
         | qql_plan::PlannedOperation::Facet { collection, .. }
         | qql_plan::PlannedOperation::GetPoints { collection, .. } = op
             && let Some(data) = self.point_map.lock().unwrap().get(collection)

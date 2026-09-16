@@ -211,15 +211,37 @@ class TestBm25EmbedderParams(unittest.TestCase):
             bm25_avg_len=8.0,
         )
         self.assertIsNotNone(emb)
+        # k1 = 0 (binary weighting) matches Qdrant's validator.
+        emb = pyqql.HttpEmbedder(self.ENDPOINT, "unused-dense", 3, bm25_k1=0.0)
+        self.assertIsNotNone(emb)
+        # Full text processing: language, tokenizer, folding, stemmer,
+        # stopwords, and length limits ride the same constructor.
+        emb = pyqql.HttpEmbedder(
+            self.ENDPOINT,
+            "unused-dense",
+            3,
+            bm25_language="es",
+            bm25_tokenizer="whitespace",
+            bm25_lowercase=False,
+            bm25_ascii_folding=True,
+            bm25_stopwords=["el"],
+            bm25_stemmer="none",
+            bm25_min_token_len=2,
+            bm25_max_token_len=9,
+            bm25_stopwords_languages=["fr"],
+        )
+        self.assertIsNotNone(emb)
 
     def test_http_embedder_rejects_invalid_bm25_params(self):
         for kwargs in (
-            {"bm25_k1": 0.0},
             {"bm25_k1": -1.0},
             {"bm25_b": -0.1},
             {"bm25_b": 1.5},
             {"bm25_avg_len": 0.0},
             {"bm25_b": float("nan")},
+            {"bm25_language": "klingon"},
+            {"bm25_tokenizer": "ngram"},
+            {"bm25_stemmer": "yoda"},
         ):
             with self.assertRaises(ValueError) as ctx:
                 pyqql.HttpEmbedder(self.ENDPOINT, "unused-dense", 3, **kwargs)
@@ -247,6 +269,14 @@ class TestBm25EmbedderParams(unittest.TestCase):
                 "bm25_k1": 2.0,
                 "bm25_b": 0.5,
                 "bm25_avg_len": 8.0,
+                "bm25_language": "es",
+                "bm25_tokenizer": "whitespace",
+                "bm25_lowercase": False,
+                "bm25_ascii_folding": True,
+                "bm25_stopwords": ["el"],
+                "bm25_stemmer": "none",
+                "bm25_min_token_len": 2,
+                "bm25_max_token_len": 9,
             }
         )
         client.close()

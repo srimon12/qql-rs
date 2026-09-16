@@ -115,6 +115,37 @@ pub struct LocalExecutorOptions {
     /// keeps the Qdrant default (`256`). See [`Self::bm25_k1`].
     #[cfg(feature = "fastembed-local")]
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language (Qdrant name/alias); `None` keeps
+    /// English. Forwards to the engine (drives its stopwords/stemmer).
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer (`"word"`, `"whitespace"`, `"prefix"`,
+    /// `"multilingual"`); `None` keeps `"word"`.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching; `None` keeps `true`.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing; `None` keeps `false`.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_ascii_folding: Option<bool>,
+    /// Drop tokens shorter than this (chars); `None` keeps no minimum.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_min_token_len: Option<usize>,
+    /// Drop over-long tokens on the document path (chars); `None` keeps no
+    /// maximum.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_max_token_len: Option<usize>,
+    /// Custom stopwords **replacing** the language default (`None` keeps it;
+    /// `Some(vec![])` disables filtering).
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_stopwords: Option<Vec<String>>,
+    /// Stemmer override (`None` = language default; `Some("none")` disables).
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_stemmer: Option<String>,
+    /// Additional language stopword lists merged with `bm25_stopwords`.
+    #[cfg(feature = "fastembed-local")]
+    pub bm25_stopwords_languages: Option<Vec<String>>,
 }
 
 /// Convert a MiB WAL segment capacity into the byte count
@@ -191,6 +222,15 @@ pub fn local_executor_with_options(
         bm25_k1: opts.bm25_k1,
         bm25_b: opts.bm25_b,
         bm25_avg_len: opts.bm25_avg_len,
+        bm25_language: opts.bm25_language,
+        bm25_tokenizer: opts.bm25_tokenizer,
+        bm25_lowercase: opts.bm25_lowercase,
+        bm25_ascii_folding: opts.bm25_ascii_folding,
+        bm25_min_token_len: opts.bm25_min_token_len,
+        bm25_max_token_len: opts.bm25_max_token_len,
+        bm25_stopwords: opts.bm25_stopwords,
+        bm25_stemmer: opts.bm25_stemmer,
+        bm25_stopwords_languages: opts.bm25_stopwords_languages,
     })?;
 
     // Pin collection vector size to the actual model dimension. Without this,

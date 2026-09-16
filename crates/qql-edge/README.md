@@ -36,10 +36,13 @@ sparse inference.
 
 ### Tuning the local BM25 encoder
 
-`LocalExecutorOptions { bm25_k1, bm25_b, bm25_avg_len, .. }` (and the
-`FastEmbedderOptions` equivalents) tune the **document-side** local BM25
-encoder used when no `sparse_model` is configured. Defaults stay
-`1.2 / 0.75 / 256` (Qdrant `qdrant/bm25`). It is a client-side, write-path-only
+`LocalExecutorOptions { bm25_k1, bm25_b, bm25_avg_len, bm25_language,
+bm25_tokenizer, … }` (and the `FastEmbedderOptions` equivalents) tune the
+**document-side** local BM25 encoder used when no `sparse_model` is
+configured. Defaults stay `1.2 / 0.75 / 256` (Qdrant `qdrant/bm25`); language
+(30 stopword lists, 17 stemmers), tokenizer (`word`/`whitespace`/`prefix`/
+`multilingual`), folding, and token length limits forward to Qdrant's own
+pipeline. It is a client-side, write-path-only
 knob: query weights stay unit, server-side inference is untouched, and vectors
 already written keep their weights — re-ingest to apply. Invalid values fail
 closed with `QQL-VALIDATION-CONFIG`. Same knobs on `HttpEmbedderOptions` for

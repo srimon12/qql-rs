@@ -122,6 +122,15 @@ const {
  *   cacheDir?: string,
  *   showDownloadProgress?: boolean,
  *   walSegmentMb?: number,
+ *   bm25K1?: number,
+ *   bm25B?: number,
+ *   bm25AvgLen?: number,
+ *   bm25Language?: string,
+ *   bm25Tokenizer?: string,
+ *   bm25Lowercase?: boolean,
+ *   bm25AsciiFolding?: boolean,
+ *   bm25MinTokenLen?: number,
+ *   bm25MaxTokenLen?: number,
  * }} [options] - boolean is legacy `onDiskPayload`; object is preferred.
  * @returns {Client}
  *
@@ -160,9 +169,15 @@ function listEmbeddingModels() {
  * @param {string}  embedModel   - model name sent in the request body
  * @param {number}  embedDim     - output dimension
  * @param {boolean} [onDiskPayload] - store payloads on disk (default true)
+ * @param {object}  [bm25Options] - local BM25 document encoder options
+ *   (`bm25K1`/`bm25_k1`, `bm25B`/`bm25_b`, `bm25AvgLen`/`bm25_avg_len`,
+ *   `bm25Language`, `bm25Tokenizer`, `bm25Lowercase`, `bm25AsciiFolding`,
+ *   `bm25Stopwords`, `bm25Stemmer`, `bm25MinTokenLen`, `bm25MaxTokenLen`;
+ *   snake_case aliases accepted). Values forward raw; invalid values fail
+ *   closed in the native validator (`QQL-VALIDATION-CONFIG`).
  * @returns {Client}
  */
-function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload) {
+function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload, bm25Options) {
   if (typeof dataDir !== 'string' || !dataDir) {
     throw new TypeError('httpExecutor requires a non-empty dataDir string');
   }
@@ -172,6 +187,13 @@ function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayloa
   if (!Number.isSafeInteger(embedDim) || embedDim <= 0) {
     throw new TypeError('httpExecutor embedDim must be a positive integer');
   }
+  if (
+    bm25Options !== undefined &&
+    (typeof bm25Options !== 'object' || bm25Options === null || Array.isArray(bm25Options))
+  ) {
+    throw new TypeError('httpExecutor bm25Options must be an object');
+  }
+  const bm25 = bm25Options ?? {};
   const inner = callNative(() =>
     nativeBinding.httpExecutor(
       dataDir,
@@ -180,6 +202,21 @@ function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayloa
       embedModel ?? '',
       embedDim,
       onDiskPayload ?? true,
+      {
+        bm25K1: bm25.bm25K1 ?? bm25.bm25_k1,
+        bm25B: bm25.bm25B ?? bm25.bm25_b,
+        bm25AvgLen: bm25.bm25AvgLen ?? bm25.bm25_avg_len,
+        bm25Language: bm25.bm25Language ?? bm25.bm25_language,
+        bm25Tokenizer: bm25.bm25Tokenizer ?? bm25.bm25_tokenizer,
+        bm25Lowercase: bm25.bm25Lowercase ?? bm25.bm25_lowercase,
+        bm25AsciiFolding: bm25.bm25AsciiFolding ?? bm25.bm25_ascii_folding,
+        bm25Stopwords: bm25.bm25Stopwords ?? bm25.bm25_stopwords,
+        bm25Stemmer: bm25.bm25Stemmer ?? bm25.bm25_stemmer,
+        bm25MinTokenLen: bm25.bm25MinTokenLen ?? bm25.bm25_min_token_len,
+        bm25MaxTokenLen: bm25.bm25MaxTokenLen ?? bm25.bm25_max_token_len,
+        bm25StopwordsLanguages:
+          bm25.bm25StopwordsLanguages ?? bm25.bm25_stopwords_languages,
+      },
     ),
   );
   return new Client(inner);
