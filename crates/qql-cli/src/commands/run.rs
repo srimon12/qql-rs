@@ -64,7 +64,42 @@ pub async fn handle_run(
     if !quiet {
         crate::table::render_report(&report, json)?;
     }
+    // Single-query output keeps its table shape (no ScriptResponse print),
+    // but shares the nonzero-on-failure contract so a future Continue mode
+    // here cannot silently exit 0.
+    ensure_run_ok(report.failed, "report above")
+}
+
+/// Shared exit contract for every `qql run` path (script file + single
+/// query): a run with any failed statement exits nonzero. The `Err` only
+/// points at the report already printed on stdout; it never duplicates the
+/// counts. `report_ref` names where that report went.
+fn ensure_run_ok(failed: usize, report_ref: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if failed > 0 {
+        return Err(format!("run failed; see {report_ref}").into());
+    }
     Ok(())
+}
+
+/// The ONE `qql run` script outcome: print the ScriptResponse JSON shape on
+/// stdout, then enforce the shared exit contract. Both Stop and Continue
+/// modes end here so consumers parse one shape.
+fn finish_script(
+    path: &str,
+    succeeded: usize,
+    failed: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ok = failed == 0;
+    let resp = output::ScriptResponse {
+        ok,
+        command: "run".to_string(),
+        path: path.to_string(),
+        succeeded,
+        failed,
+        message: format!("Ran script {path} ({succeeded} succeeded, {failed} failed)"),
+    };
+    println!("{}", serde_json::to_string_pretty(&resp)?);
+    ensure_run_ok(failed, "JSON report on stdout")
 }
 
 pub async fn handle_run_file(
@@ -87,7 +122,6 @@ pub async fn handle_run_file(
     let executor = executor(url, use_edge)?;
     let mut ok_count = 0;
     let mut fail_count = 0;
-    let mut fatal_error = None;
 
     for (index, statement) in statements.iter().enumerate() {
         let on_err = if stop_on_error {
@@ -137,38 +171,13 @@ pub async fn handle_run_file(
                 fail_count += 1;
                 output::print_error(&format!("statement {}: {}", index + 1, error));
                 if stop_on_error {
-                    fatal_error = Some(format!("statement {} failed: {}", index + 1, error));
                     break;
                 }
             }
         }
     }
     executor.close().await?;
-    if let Some(error) = fatal_error {
-        return Err(error.into());
-    }
-
-    let msg = format!(
-        "Ran script {} ({} succeeded, {} failed)",
-        path, ok_count, fail_count
-    );
-
-    let resp = output::ScriptResponse {
-        ok: fail_count == 0,
-        command: "run".to_string(),
-        path: path.to_string(),
-        succeeded: ok_count,
-        failed: fail_count,
-        message: msg.clone(),
-    };
-    let s = serde_json::to_string_pretty(&resp)?;
-    println!("{}", s);
-    // Unix contract: a script with any failed statement exits non-zero, even
-    // in Continue mode (the JSON report above already carries `ok: false`).
-    if fail_count > 0 {
-        return Err(msg.into());
-    }
-    Ok(())
+    finish_script(path, ok_count, fail_count)
 }
 
 pub fn handle_explain(

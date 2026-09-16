@@ -60,6 +60,14 @@ fn lint_json(ok: bool, files: Vec<FileLintReport>, content: Option<String>) -> S
         .expect("lint report serializes")
 }
 
+/// The ONE lint exit rule, shared by every input mode (files, stdin, inline
+/// string) with or without `--fix`: a lint unit is clean iff it reports zero
+/// diagnostics. Fixability only controls whether `--fix` rewrites the input;
+/// a remaining diagnostic — fixable or not — still fails the run.
+fn lint_clean(diags: &[LintDiagnostic]) -> bool {
+    diags.is_empty()
+}
+
 /// A lexed token reduced to its kind and byte span (lifetime-free).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Tok {
@@ -544,11 +552,11 @@ pub fn handle_lint(
                     .map_err(|e| format!("failed to write '{}': {}", display_name, e))?;
                 total_fixed += fix_count;
             }
-            // Re-lint after fixes
+            // Re-lint after fixes; the exit rule counts every remaining
+            // diagnostic (see `lint_clean`), not just the unfixable ones.
             let (diags, _) = collect_source_diagnostics(&fixed_content, display_name, cli_params);
-            let unfixable_count = diags.iter().filter(|d| !d.fixable).count();
-            total_errors += unfixable_count;
-            let valid = unfixable_count == 0;
+            total_errors += diags.len();
+            let valid = lint_clean(&diags);
             if !json {
                 print_report_text(
                     &FileLintReport {
@@ -571,7 +579,7 @@ pub fn handle_lint(
             let (diags, _) = collect_source_diagnostics(&content, display_name, cli_params);
             let err_count = diags.len();
             total_errors += err_count;
-            let valid = err_count == 0;
+            let valid = lint_clean(&diags);
             if !json {
                 print_report_text(
                     &FileLintReport {
@@ -637,12 +645,12 @@ fn lint_stdin(
 
     if fix {
         let (fixed_content, _) = apply_fixes(&buf);
-        // Re-lint what was actually produced: remaining unfixable errors fail.
+        // Re-lint what was actually produced: any remaining diagnostic fails
+        // (see `lint_clean`), not just the unfixable ones.
         let (diags, _) = collect_source_diagnostics(&fixed_content, "<stdin>", cli_params);
-        let unfixable = diags.iter().filter(|d| !d.fixable).count();
         let report = FileLintReport {
             file: "<stdin>".to_string(),
-            valid: unfixable == 0,
+            valid: lint_clean(&diags),
             fixed: fixed_content != buf,
             diagnostics: diags,
         };
@@ -662,7 +670,7 @@ fn lint_stdin(
     }
 
     let (diags, _) = collect_source_diagnostics(&buf, "<stdin>", cli_params);
-    let valid = diags.is_empty();
+    let valid = lint_clean(&diags);
     if json {
         println!(
             "{}",
@@ -709,10 +717,9 @@ fn lint_string(
     if fix {
         let (fixed_content, _) = apply_fixes(query);
         let (diags, _) = collect_source_diagnostics(&fixed_content, "<query>", cli_params);
-        let unfixable = diags.iter().filter(|d| !d.fixable).count();
         let report = FileLintReport {
             file: "<query>".to_string(),
-            valid: unfixable == 0,
+            valid: lint_clean(&diags),
             fixed: fixed_content != query,
             diagnostics: diags,
         };
@@ -732,7 +739,7 @@ fn lint_string(
     }
 
     let (diags, _) = collect_source_diagnostics(query, "<query>", cli_params);
-    let valid = diags.is_empty();
+    let valid = lint_clean(&diags);
     if json {
         println!(
             "{}",
