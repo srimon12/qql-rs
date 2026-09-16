@@ -188,23 +188,25 @@ This is a **client-side, write-path-only** setting:
   defaults unless configured separately.
 - It is **not** a collection/wire setting: existing vectors keep the weights
   they were written with. Re-ingest to apply a change.
-- Invalid values fail closed with `QQL-VALIDATION-CONFIG`: `k1 > 0`,
-  `b` in `[0, 1]`, `avg_len > 0`, all finite (NaN/±Inf rejected).
+- Invalid values fail closed with `QQL-VALIDATION-CONFIG`: `k1 >= 0`
+  (`0` = binary weighting, like Qdrant's validator), `b` in `[0, 1]`,
+  `avg_len > 0`, all finite (NaN/±Inf rejected).
 
 Unset configuration is byte-identical to the previous hardcoded behavior
 (`Bm25Params::default()` == `1.2 / 0.75 / 256`).
 
-Host surfaces:
+Host surfaces (numeric knobs everywhere; text knobs wherever the host
+exposes them — see each row):
 
 | Host | How to set |
 |---|---|
-| Rust | `qql_embed::Bm25Params`; `Embedder::bm25_params` override; `HttpEmbedderOptions { bm25_k1, bm25_b, bm25_avg_len, .. }`; `qql::config::QqlConfig.bm25_*`; `qql_edge::{LocalExecutorOptions, FastEmbedderOptions}` |
-| Python (`pyqql`) | `pyqql.HttpEmbedder(..., bm25_k1=, bm25_b=, bm25_avg_len=)` or the `embedder={...}` dict keys |
-| Python (`pyqql-edge`) | `local_executor(..., bm25_k1=, bm25_b=, bm25_avg_len=)`, one-shot `execute`/`execute_async` kwargs, `http_executor(..., bm25_k1=, ...)` |
-| Node (`nqql`) | `new Client({ embedder: { bm25K1, bm25B, bm25AvgLen } })` (snake_case aliases accepted) |
-| Node (`nqql-edge`) | `localExecutor(dir, { bm25K1, bm25B, bm25AvgLen })`, `httpExecutor(..., bm25K1, bm25B, bm25AvgLen)`, standalone `execute({ bm25K1, ... })` |
-| CLIs | `qql config edge --bm25-k1/--bm25-b/--bm25-avg-len` + `QQL_EDGE_BM25_*`; remote CLI config `~/.qql/config.json` `bm25_k1`/`bm25_b`/`bm25_avg_len` |
-| WASM | `client.setBm25Params(k1, b, avgLen)` |
+| Rust | `qql_embed::Bm25Params` / `Bm25TextConfig`; `Embedder::bm25_params` / `bm25_text_config` overrides; `HttpEmbedderOptions { bm25_k1, …, bm25_language, bm25_tokenizer, … }`; `qql::config::QqlConfig.bm25_*`; `qql_edge::{LocalExecutorOptions, FastEmbedderOptions}` |
+| Python (`pyqql`) | `pyqql.HttpEmbedder(..., bm25_k1=, …, bm25_language=, bm25_tokenizer=, …)` or the `embedder={...}` dict keys |
+| Python (`pyqql-edge`) | `local_executor(..., bm25_k1=, …, bm25_language=, …)`, one-shot `execute`/`execute_async` kwargs, `http_executor(..., bm25_k1=, …, bm25_stopwords=, bm25_stemmer=, …)` |
+| Node (`nqql`) | `new Client({ embedder: { bm25K1, …, bm25Language, bm25Tokenizer, … } })` (snake_case aliases accepted) |
+| Node (`nqql-edge`) | `localExecutor(dir, { bm25K1, …, bm25Language, … })`, standalone `execute({ bm25K1, … })` |
+| CLIs | `qql config edge --bm25-k1/…/--bm25-language/--bm25-tokenizer/…` + `QQL_EDGE_BM25_*`; remote CLI config `~/.qql/config.json` `bm25_*` |
+| WASM | `client.setBm25Params(k1, b, avgLen)` + `client.setBm25Text({…})` |
 
 They only apply when the built-in local BM25 encoder is used. When an ONNX
 sparse model (SPLADE / BGE-M3) or a remote sparse endpoint is configured, sparse
@@ -214,10 +216,64 @@ Vectors produced here can be mixed with server-side `qdrant/bm25` inference on
 the same collection (a golden test pins the exact server output from the
 Qdrant docs).
 
-Like the server defaults, the pipeline is **English-only** (snowball English
-stemmer + English stopwords). Non-English corpora should use server-side
-`qdrant/bm25` inference with explicit `language` / `stemmer` / `stopwords`
-options instead.
+### Text processing: languages, tokenizers, folding
+
+`qql_embed::Bm25TextConfig` mirrors Qdrant's `Bm25Config` option surface with
+the same defaults (word tokenizer, English, lowercase on, folding off,
+language stopwords/stemmer, no length limits):
+
+```rust
+use qql_embed::Bm25TextConfig;
+
+// Spanish pipeline: Spanish stopwords + Snowball stemmer, like Qdrant's
+// `options: {"language": "spanish"}`.
+let config = Bm25TextConfig::resolve(
+    None, None, None,
+    Some("spanish"),  // language (name or alias: "es", "zh", …)
+    None,             // tokenizer: word (default) | whitespace | prefix
+    None,             // lowercase (default true)
+    None,             // ascii_folding (default false)
+    None,             // stopwords: None = language default, Some(list) replaces
+    None,             // stemmer: None = default, Some("none") disables
+    None, None,       // min/max token length (chars)
+)?;
+let pipeline = config.pipeline();
+let d = pipeline.embed_document("La Máquina del Tiempo")?;
+```
+
+Thirty languages carry Qdrant's stopword lists; seventeen add a Snowball
+stemmer (the rest pass tokens through, exactly like Qdrant, whose stemmer
+defaults resolve per language the same way). ASCII folding uses Qdrant's
+Lucene-derived mapping. `multilingual` parses but fails closed at embed
+time — script-aware segmentation (`charabia`/`vaporetto`) is intentionally
+not a dependency of this lean core. The `qql-edge` engine path forwards the
+same knobs to Qdrant's real pipeline instead, and a cross-implementation
+test asserts both produce identical vectors.
+
+### Estimating `avg_len` from real data
+
+The `256` default assumes document-length text; titles and tags need far
+smaller values. `estimate_avg_len` measures the mean post-pipeline token
+count over real field texts — the same `doc_len` the formula consumes — and
+`Executor::estimate_bm25_avg_len(collection, field, sample)` samples it
+straight from a collection via `SCROLL`:
+
+```rust
+let estimate = executor
+    .estimate_bm25_avg_len("books", "title", 1000)
+    .await?
+    .expect("collection has title texts");
+// feed estimate.mean back into bm25_avg_len, then re-ingest to apply
+```
+
+`None` means the sample held no usable texts (keep the default rather than
+storing a meaningless zero).
+
+Like the server defaults, the default pipeline is **English-only** (snowball
+English stemmer + English stopwords). Other languages select
+`Bm25TextConfig` above; non-English corpora that need server-side inference
+should still use `qdrant/bm25` with explicit `language` / `stemmer` /
+`stopwords` options instead.
 
 ## Known WASM limitation
 

@@ -30,12 +30,10 @@
 //! Because this factor is uniform across all terms in a query, ranking order is
 //! mathematically identical, but raw score magnitudes will scale by ~1.665x.
 
-use std::sync::LazyLock;
-
 use murmur3_32::Murmur3;
-use phf::phf_set;
 use qql_core::error::QqlError;
-use rust_stemmers::{Algorithm, Stemmer};
+
+use super::bm25_text::default_pipeline;
 
 /// Sparse embedding (indices + values). Transport-neutral — not a protobuf type.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -87,12 +85,13 @@ impl Default for Bm25Params {
 impl Bm25Params {
     /// Validate and build explicit BM25 parameters.
     ///
-    /// `k1` must be finite and `> 0`, `b` finite and within `[0, 1]`, and
-    /// `avg_len` finite and `> 0`. NaN and ±Inf are rejected for all three.
+    /// `k1` must be finite and `>= 0` (like Qdrant's validator; `0` gives
+    /// binary weighting), `b` finite and within `[0, 1]`, and `avg_len`
+    /// finite and `> 0`. NaN and ±Inf are rejected for all three.
     pub fn new(k1: f64, b: f64, avg_len: f64) -> Result<Self, QqlError> {
-        if !k1.is_finite() || k1 <= 0.0 {
+        if !k1.is_finite() || k1 < 0.0 {
             return Err(config_error(
-                "bm25 k1 must be a finite number greater than zero".to_string(),
+                "bm25 k1 must be a finite number greater than or equal to zero".to_string(),
             ));
         }
         if !b.is_finite() || !(0.0..=1.0).contains(&b) {
@@ -154,260 +153,20 @@ pub fn token_id(token: &str) -> u32 {
     (Murmur3::hash(0, token.as_bytes()) as i32).unsigned_abs()
 }
 
-/// English stopwords, identical to the Qdrant server set
-/// (`lib/segment/src/index/field_index/full_text_index/stop_words/english.rs`).
-static STOPWORDS: phf::Set<&'static str> = phf_set! {
-    "i",
-    "me",
-    "my",
-    "myself",
-    "we",
-    "our",
-    "ours",
-    "ourselves",
-    "you",
-    "you're",
-    "you've",
-    "you'll",
-    "you'd",
-    "your",
-    "yours",
-    "yourself",
-    "yourselves",
-    "he",
-    "him",
-    "his",
-    "himself",
-    "she",
-    "she's",
-    "her",
-    "hers",
-    "herself",
-    "it",
-    "it's",
-    "its",
-    "itself",
-    "they",
-    "them",
-    "their",
-    "theirs",
-    "themselves",
-    "what",
-    "which",
-    "who",
-    "whom",
-    "this",
-    "that",
-    "that'll",
-    "these",
-    "those",
-    "am",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "having",
-    "do",
-    "does",
-    "did",
-    "doing",
-    "a",
-    "an",
-    "the",
-    "and",
-    "but",
-    "if",
-    "or",
-    "because",
-    "as",
-    "until",
-    "while",
-    "of",
-    "at",
-    "by",
-    "for",
-    "with",
-    "about",
-    "against",
-    "between",
-    "into",
-    "through",
-    "during",
-    "before",
-    "after",
-    "above",
-    "below",
-    "to",
-    "from",
-    "up",
-    "down",
-    "in",
-    "out",
-    "on",
-    "off",
-    "over",
-    "under",
-    "again",
-    "further",
-    "then",
-    "once",
-    "here",
-    "there",
-    "when",
-    "where",
-    "why",
-    "how",
-    "all",
-    "any",
-    "both",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "nor",
-    "not",
-    "only",
-    "own",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "s",
-    "t",
-    "can",
-    "will",
-    "just",
-    "don",
-    "don't",
-    "should",
-    "should've",
-    "now",
-    "d",
-    "ll",
-    "m",
-    "o",
-    "re",
-    "ve",
-    "y",
-    "ain",
-    "aren",
-    "aren't",
-    "couldn",
-    "couldn't",
-    "didn",
-    "didn't",
-    "doesn",
-    "doesn't",
-    "hadn",
-    "hadn't",
-    "hasn",
-    "hasn't",
-    "haven",
-    "haven't",
-    "isn",
-    "isn't",
-    "ma",
-    "mightn",
-    "mightn't",
-    "mustn",
-    "mustn't",
-    "needn",
-    "needn't",
-    "shan",
-    "shan't",
-    "shouldn",
-    "shouldn't",
-    "wasn",
-    "wasn't",
-    "weren",
-    "weren't",
-    "won",
-    "won't",
-    "wouldn",
-    "wouldn't",
-};
-
-static STEMMER: LazyLock<Stemmer> = LazyLock::new(|| Stemmer::create(Algorithm::English));
-
-#[inline]
-fn process_token<F>(raw: &str, buf: &mut [u8; 64], f: &mut F)
-where
-    F: FnMut(&str),
-{
-    let bytes = raw.as_bytes();
-    let len = bytes.len();
-    if len <= buf.len() && raw.is_ascii() {
-        for (j, &b) in bytes.iter().enumerate() {
-            buf[j] = b.to_ascii_lowercase();
-        }
-        // Safe: `raw.is_ascii()` guarantees `bytes` is ASCII, and
-        // `to_ascii_lowercase()` maps ASCII to ASCII, so `buf[..len]`
-        // is valid UTF-8. Use the checked conversion so a logic error
-        // fails loudly instead of invoking undefined behavior.
-        let lower =
-            std::str::from_utf8(&buf[..len]).expect("ascii lowercasing preserves valid UTF-8");
-        if !STOPWORDS.contains(lower) {
-            let stemmed = STEMMER.stem(lower);
-            f(&stemmed);
-        }
-    } else {
-        let lower = raw.to_lowercase();
-        if !STOPWORDS.contains(lower.as_str()) {
-            let stemmed = STEMMER.stem(&lower);
-            f(&stemmed);
-        }
-    }
-}
-
-/// Tokenize and iterate over stemmed tokens without intermediate heap allocations.
+/// Tokenize and iterate over processed tokens without intermediate heap
+/// allocations (default English pipeline: word tokenizer, lowercase, English
+/// stopwords, English stemming).
+///
+/// For other languages and options see [`crate::bm25_text::Bm25Pipeline`].
 #[inline]
 pub fn for_each_token<F>(text: &str, mut f: F)
 where
     F: FnMut(&str),
 {
-    let mut buf = [0u8; 64];
-
-    if text.is_ascii() {
-        let bytes = text.as_bytes();
-        let mut start = None;
-        for (i, &b) in bytes.iter().enumerate() {
-            if b.is_ascii_alphanumeric() {
-                if start.is_none() {
-                    start = Some(i);
-                }
-            } else if let Some(s) = start {
-                process_token(&text[s..i], &mut buf, &mut f);
-                start = None;
-            }
-        }
-        if let Some(s) = start {
-            process_token(&text[s..], &mut buf, &mut f);
-        }
-    } else {
-        let mut start = None;
-        for (i, c) in text.char_indices() {
-            if c.is_alphanumeric() {
-                if start.is_none() {
-                    start = Some(i);
-                }
-            } else if let Some(s) = start {
-                process_token(&text[s..i], &mut buf, &mut f);
-                start = None;
-            }
-        }
-        if let Some(s) = start {
-            process_token(&text[s..], &mut buf, &mut f);
+    // The default pipeline only runs the word tokenizer: infallible.
+    if let Ok(tokens) = default_pipeline().doc_tokens(text) {
+        for token in &tokens {
+            f(token);
         }
     }
 }
@@ -427,32 +186,16 @@ where
 /// Unicode lowercase, English stopword removal, English snowball stemming.
 ///
 /// Matches `WordTokenizer` + default `TokensProcessor` on the Qdrant server —
-/// the same pipeline Qdrant Edge's `EdgeBm25` runs.
+/// the same pipeline Qdrant Edge's `EdgeBm25` runs. For other languages and
+/// options see [`crate::bm25_text::Bm25Pipeline`].
 pub fn tokenize(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    for_each_token(text, |token| {
-        tokens.push(token.to_string());
-    });
-    tokens
+    default_pipeline().doc_tokens(text).unwrap_or_default()
 }
 
 /// Embed query text: unique token IDs (sorted) with unit weights — identical
 /// to Qdrant's `qdrant/bm25` query embedding.
 pub fn embed_query(text: &str) -> SparseVector {
-    let mut indices: Vec<u32> = Vec::with_capacity(text.len() / 6 + 1);
-    for_each_token_id(text, |id| {
-        indices.push(id);
-    });
-
-    if indices.is_empty() {
-        return SparseVector::default();
-    }
-
-    indices.sort_unstable();
-    indices.dedup();
-
-    let values = vec![1.0; indices.len()];
-    SparseVector { indices, values }
+    default_pipeline().embed_query(text).unwrap_or_default()
 }
 
 /// Embed document text with BM25 term-frequency saturation using Qdrant's
@@ -466,7 +209,9 @@ pub fn embed_document(text: &str) -> SparseVector {
 /// Prefer this over [`embed_document_with`] on configurable paths: the
 /// parameters are validated once at construction instead of sanitized per call.
 pub fn embed_document_with_params(text: &str, params: &Bm25Params) -> SparseVector {
-    embed_document_impl(text, params.k1, params.b, params.avg_len)
+    super::bm25_text::Bm25Pipeline::with_params(params)
+        .embed_document(text)
+        .unwrap_or_default()
 }
 
 /// Embed document text with explicit BM25 parameters.
@@ -484,41 +229,7 @@ pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVec
     } else {
         DEFAULT_AVGDL
     };
-    embed_document_impl(text, k1, b, safe_avgdl)
-}
-
-fn embed_document_impl(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVector {
-    let mut token_ids: Vec<u32> = Vec::with_capacity(text.len() / 6 + 1);
-    for_each_token_id(text, |id| {
-        token_ids.push(id);
-    });
-
-    if token_ids.is_empty() {
-        return SparseVector::default();
-    }
-
-    let doc_len = token_ids.len() as f64;
-    let denom_scale = k1 * (1.0 - b + b * doc_len / avgdl);
-    let k1p1 = k1 + 1.0;
-
-    token_ids.sort_unstable();
-
-    let mut indices = Vec::with_capacity(token_ids.len());
-    let mut values = Vec::with_capacity(token_ids.len());
-
-    let mut i = 0;
-    while i < token_ids.len() {
-        let id = token_ids[i];
-        let mut count = 1u32;
-        while i + 1 < token_ids.len() && token_ids[i + 1] == id {
-            count += 1;
-            i += 1;
-        }
-        indices.push(id);
-        let n = count as f64;
-        values.push((n * k1p1 / (denom_scale + n)) as f32);
-        i += 1;
-    }
-
-    SparseVector { indices, values }
+    default_pipeline()
+        .embed_document_with(text, k1, b, safe_avgdl)
+        .unwrap_or_default()
 }

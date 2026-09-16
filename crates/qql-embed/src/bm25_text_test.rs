@@ -1,0 +1,504 @@
+//! Tests for the full BM25 text pipeline: languages, tokenizers, folding,
+//! length limits, estimator, and option resolution. Behavioral expectations
+//! mirror Qdrant's own `EdgeBm25` tests where applicable.
+
+use crate::bm25_lang::Language;
+use crate::bm25_text::{AvgLenEstimate, Bm25Pipeline, Bm25TextConfig, Stemmer, Tokenizer};
+use crate::sparse;
+
+fn plain(language: &str) -> Bm25Pipeline {
+    Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        Some(language),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("valid language")
+    .pipeline()
+}
+
+#[test]
+fn language_parse_accepts_names_and_aliases() {
+    assert_eq!(Language::parse("spanish").unwrap(), Language::Spanish);
+    assert_eq!(Language::parse("es").unwrap(), Language::Spanish);
+    assert_eq!(Language::parse("ES").unwrap(), Language::Spanish);
+    assert_eq!(Language::parse("Chinese").unwrap(), Language::Chinese);
+    assert_eq!(Language::parse("zh").unwrap(), Language::Chinese);
+    assert_eq!(Language::parse("hi-en").unwrap(), Language::Hinglish);
+    assert_eq!(Language::parse("english").unwrap(), Language::English);
+    let err = Language::parse("klingon").expect_err("unknown language rejects");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+    let err = Language::parse("armenian").expect_err("no such processing language");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+}
+
+#[test]
+fn stemmer_coverage_matches_qdrant() {
+    // Exactly Qdrant's 17 Snowball-via-language set: every other language has
+    // no default stemmer (tokens pass through, stopwords still apply).
+    let stemmed = [
+        "arabic",
+        "danish",
+        "dutch",
+        "english",
+        "finnish",
+        "french",
+        "german",
+        "greek",
+        "hungarian",
+        "italian",
+        "norwegian",
+        "portuguese",
+        "romanian",
+        "russian",
+        "spanish",
+        "swedish",
+        "turkish",
+    ];
+    for name in stemmed {
+        assert!(
+            Language::parse(name).unwrap().stem_algorithm().is_some(),
+            "{name} must have a stemmer"
+        );
+    }
+    let unstemmed = [
+        "azerbaijani",
+        "basque",
+        "bengali",
+        "catalan",
+        "chinese",
+        "hebrew",
+        "hinglish",
+        "indonesian",
+        "japanese",
+        "kazakh",
+        "nepali",
+        "slovene",
+        "tajik",
+    ];
+    for name in unstemmed {
+        assert!(
+            Language::parse(name).unwrap().stem_algorithm().is_none(),
+            "{name} must have no default stemmer"
+        );
+    }
+    assert_eq!(
+        stemmed.len() + unstemmed.len(),
+        30,
+        "every language must be classified"
+    );
+}
+
+#[test]
+fn tokenizer_parse_round_trips() {
+    for (name, tokenizer) in [
+        ("word", Tokenizer::Word),
+        ("whitespace", Tokenizer::Whitespace),
+        ("prefix", Tokenizer::Prefix),
+        ("multilingual", Tokenizer::Multilingual),
+    ] {
+        assert_eq!(Tokenizer::parse(name).unwrap(), tokenizer);
+        assert_eq!(tokenizer.name(), name);
+    }
+    let err = Tokenizer::parse("ngram").expect_err("unknown tokenizer rejects");
+    assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+}
+
+#[test]
+fn spanish_pipeline_stems_and_filters() {
+    let pipe = plain("spanish");
+    // "la" is a Spanish stopword; "casa" stems to "cas".
+    assert_eq!(pipe.doc_tokens("la casa").unwrap(), vec!["cas"]);
+    // Same text through English keeps different content ("la" is not English).
+    let english = plain("english");
+    assert_ne!(
+        pipe.embed_document("la casa").unwrap().indices,
+        english.embed_document("la casa").unwrap().indices
+    );
+}
+
+#[test]
+fn disabled_stemmer_keeps_inflections_distinct() {
+    // Mirrors Qdrant's own `disabled_stemmer_keeps_inflections_distinct`.
+    let stemmed = plain("english");
+    assert_eq!(
+        stemmed.embed_document("running run").unwrap().indices.len(),
+        1
+    );
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(Vec::new()),
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid");
+    let unstemmed = config.pipeline();
+    assert_eq!(
+        unstemmed
+            .embed_document("running run")
+            .unwrap()
+            .indices
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn custom_stopwords_replace_the_default() {
+    // `Some(vec![])` disables filtering: "the" survives.
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(Vec::new()),
+        None,
+        None,
+        None,
+    )
+    .expect("valid");
+    let tokens = config.pipeline().doc_tokens("the cat").unwrap();
+    assert!(tokens.contains(&"the".to_string()), "got {tokens:?}");
+    // A custom list filters exactly its words (post-normalization).
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(vec!["cat".to_string()]),
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid");
+    assert_eq!(
+        config.pipeline().doc_tokens("the cat").unwrap(),
+        vec!["the"]
+    );
+}
+
+#[test]
+fn ascii_folding_normalizes_before_lowercase() {
+    let folded = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(true),
+        None,
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid")
+    .pipeline();
+    let plain_pipe = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid")
+    .pipeline();
+    assert_eq!(folded.doc_tokens("café").unwrap(), vec!["cafe"]);
+    assert_eq!(
+        folded.embed_query("café").unwrap().indices,
+        folded.embed_query("cafe").unwrap().indices
+    );
+    assert_ne!(
+        plain_pipe.embed_query("café").unwrap().indices,
+        plain_pipe.embed_query("cafe").unwrap().indices
+    );
+}
+
+#[test]
+fn lowercase_off_keeps_case_distinct() {
+    let cased = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(false),
+        None,
+        None,
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid")
+    .pipeline();
+    assert_ne!(
+        cased.embed_query("Hello").unwrap().indices,
+        cased.embed_query("hello").unwrap().indices
+    );
+    let lowered = plain("english");
+    assert_eq!(
+        lowered.embed_query("Hello").unwrap().indices,
+        lowered.embed_query("hello").unwrap().indices
+    );
+}
+
+#[test]
+fn token_length_limits_apply_in_chars() {
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("none"),
+        Some(4),
+        Some(4),
+    )
+    .expect("valid");
+    assert_eq!(
+        config.pipeline().doc_tokens("a bb ccc dddd eeeee").unwrap(),
+        vec!["dddd"]
+    );
+}
+
+#[test]
+fn whitespace_tokenizer_keeps_hyphenated_forms() {
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        Some("whitespace"),
+        None,
+        None,
+        None,
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid");
+    assert_eq!(
+        config.pipeline().doc_tokens("hello-world").unwrap(),
+        vec!["hello-world"]
+    );
+    // Word splitting breaks it apart (modulo stopwords/stemming on pieces).
+    assert!(
+        plain("english")
+            .doc_tokens("hello-world")
+            .unwrap()
+            .iter()
+            .all(|t| t != "hello-world")
+    );
+}
+
+#[test]
+fn prefix_tokenizer_expands_docs_and_truncates_queries() {
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        Some("prefix"),
+        None,
+        None,
+        None,
+        Some("none"),
+        Some(2),
+        None,
+    )
+    .expect("valid");
+    let pipe = config.pipeline();
+    assert_eq!(
+        pipe.doc_tokens("hello").unwrap(),
+        vec!["he", "hel", "hell", "hello"]
+    );
+    // Short words still emit once (full word + break).
+    assert_eq!(pipe.doc_tokens("hi").unwrap(), vec!["hi"]);
+    // Query keeps the longest n-gram only.
+    let mut query_tokens = Vec::new();
+    pipe.for_each_query("hello", |t: &str| query_tokens.push(t.to_string()))
+        .expect("query tokens");
+    assert_eq!(query_tokens, vec!["hello"]);
+    // With a max cap the query truncates.
+    let capped = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        Some("prefix"),
+        None,
+        None,
+        None,
+        Some("none"),
+        Some(2),
+        Some(3),
+    )
+    .expect("valid")
+    .pipeline();
+    assert_eq!(capped.doc_tokens("hello").unwrap(), vec!["he", "hel"]);
+    let mut capped_query = Vec::new();
+    capped
+        .for_each_query("hello", |t: &str| capped_query.push(t.to_string()))
+        .expect("query tokens");
+    assert_eq!(capped_query, vec!["hel"]);
+}
+
+#[test]
+fn multilingual_fails_closed() {
+    let pipe = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        Some("multilingual"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("multilingual parses")
+    .pipeline();
+    for result in [
+        pipe.embed_query("hello"),
+        pipe.embed_document("hello"),
+        pipe.token_count("hello")
+            .map(|_| crate::sparse::SparseVector::default()),
+    ] {
+        let err = result.expect_err("multilingual must fail closed");
+        assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+    }
+}
+
+#[test]
+fn k1_zero_gives_binary_weighting() {
+    let params = sparse::Bm25Params::new(0.0, 0.75, 256.0).expect("k1 = 0 valid");
+    let vector = sparse::embed_document_with_params("cat sat mat cat", &params);
+    assert!(!vector.indices.is_empty());
+    assert!(
+        vector.values.iter().all(|&v| v == 1.0),
+        "k1 = 0 must saturate every term to 1.0, got {:?}",
+        vector.values
+    );
+}
+
+#[test]
+fn tf_formula_matches_qdrant_reference() {
+    // Qdrant `lib/bm25` reference: 5 tokens, "the" 2x; k1=1.2, b=0.75,
+    // avg_len=5 → tf = 2*2.2 / (1.2*(0.25+0.75*1) + 2) = 1.375. Whitespace
+    // tokens with processing disabled reproduce their exact input.
+    let config = Bm25TextConfig {
+        params: sparse::Bm25Params::new(1.2, 0.75, 5.0).expect("valid"),
+        tokenizer: Tokenizer::Whitespace,
+        stopwords: Some(crate::bm25_text::Stopwords::default()),
+        stemmer: Some(Stemmer::Disabled),
+        ..Bm25TextConfig::default()
+    };
+    let vector = config
+        .pipeline()
+        .embed_document("the cat sat on the")
+        .expect("embed");
+    let id = sparse::token_id("the");
+    let value = vector
+        .indices
+        .iter()
+        .zip(&vector.values)
+        .find(|(i, _)| **i == id)
+        .map(|(_, v)| *v)
+        .expect("token 'the' should appear");
+    assert!((value - 1.375).abs() < 1e-6, "got {value}, want 1.375");
+}
+
+#[test]
+fn estimator_measures_post_pipeline_lengths() {
+    let pipe = plain("english");
+    // "the" is filtered: (2 + 1) / 2 = 1.5.
+    let estimate =
+        crate::bm25_text::estimate_avg_len(["the cat sat", "dogs"], &pipe).expect("estimate");
+    assert_eq!(estimate, Some(AvgLenEstimate { mean: 1.5, docs: 2 }));
+    assert_eq!(
+        crate::bm25_text::estimate_avg_len(Vec::<&str>::new(), &pipe).expect("estimate"),
+        None
+    );
+    assert_eq!(
+        crate::bm25_text::estimate_avg_len(["the a"], &pipe).expect("estimate"),
+        None,
+        "all-filtered sample has no meaningful average"
+    );
+}
+
+#[test]
+fn resolve_rejects_bad_names() {
+    for (language, tokenizer, stemmer) in [
+        (Some("klingon"), None, None),
+        (None, Some("ngram"), None),
+        (None, None, Some("yoda")),
+    ] {
+        let err = Bm25TextConfig::resolve(
+            None, None, None, language, tokenizer, None, None, None, stemmer, None, None,
+        )
+        .expect_err("bad option must fail closed");
+        assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+    }
+    // Explicit stemmer override wins over the language default.
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        Some("spanish"),
+        None,
+        None,
+        None,
+        None,
+        Some("none"),
+        None,
+        None,
+    )
+    .expect("valid");
+    assert_eq!(config.stemmer, Some(Stemmer::Disabled));
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        Some("spanish"),
+        None,
+        None,
+        None,
+        None,
+        Some("french"),
+        None,
+        None,
+    )
+    .expect("valid");
+    assert_eq!(config.stemmer, Some(Stemmer::Snowball(Language::French)));
+}
