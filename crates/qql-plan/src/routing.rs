@@ -21,15 +21,6 @@ impl Route {
     pub fn body_json(&self) -> Option<serde_json::Value> {
         self.body.clone()
     }
-
-    /// Borrowed JSON body, or None for bodyless routes.
-    ///
-    /// Zero-clone inspector for callers that only read the payload
-    /// (offline `compile`, contract assertions); [`body_json`](Self::body_json)
-    /// stays as the owned accessor where ownership is required.
-    pub fn body_ref(&self) -> Option<&serde_json::Value> {
-        self.body.as_ref()
-    }
 }
 
 /// Why a planned operation cannot become a single Qdrant REST route.
@@ -49,6 +40,33 @@ pub enum RestProjectionError {
         /// Underlying serde error message.
         message: String,
     },
+}
+
+impl RestProjectionError {
+    /// Shared mapping to a structured [`QqlError`].
+    ///
+    /// REST (`qql-runtime`) and WASM project through here so the code and
+    /// message stay identical on every transport. Call sites must not
+    /// re-spell these arms.
+    pub fn to_qql_error(self) -> QqlError {
+        match self {
+            Self::ClientSideOnly { stmt_type } => QqlError::execution(
+                "QQL-REST-CLIENT-SIDE",
+                format!("{stmt_type} cannot be executed as a single REST route"),
+                None,
+            ),
+            Self::SerializeFailed { message } => QqlError::execution(
+                "QQL-PLAN-SERIALIZE",
+                format!("plan IR REST request body serialization failed: {message}"),
+                None,
+            ),
+            Self::OverwriteRequiresBatch => QqlError::validation(
+                "QQL-REST-OVERWRITE-BATCH-ONLY",
+                "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only; run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
+                None,
+            ),
+        }
+    }
 }
 
 /// Serialize a plan struct to JSON for the REST body.
