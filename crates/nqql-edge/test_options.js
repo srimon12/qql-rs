@@ -36,6 +36,12 @@ test("localExecutor forwards sparse/multi/image/reranker model slots", () => {
     bm25K1: undefined,
     bm25B: undefined,
     bm25AvgLen: undefined,
+    bm25Language: undefined,
+    bm25Tokenizer: undefined,
+    bm25Lowercase: undefined,
+    bm25AsciiFolding: undefined,
+    bm25MinTokenLen: undefined,
+    bm25MaxTokenLen: undefined,
   });
 });
 
@@ -44,10 +50,22 @@ test("localExecutor forwards bm25 document params raw for native validation", ()
     bm25K1: 2.0,
     bm25B: 0.5,
     bm25AvgLen: 8,
+    bm25Language: "es",
+    bm25Tokenizer: "whitespace",
+    bm25Lowercase: false,
+    bm25AsciiFolding: true,
+    bm25MinTokenLen: 2,
+    bm25MaxTokenLen: 9,
   });
   assert.strictEqual(opts.bm25K1, 2.0);
   assert.strictEqual(opts.bm25B, 0.5);
   assert.strictEqual(opts.bm25AvgLen, 8);
+  assert.strictEqual(opts.bm25Language, "es");
+  assert.strictEqual(opts.bm25Tokenizer, "whitespace");
+  assert.strictEqual(opts.bm25Lowercase, false);
+  assert.strictEqual(opts.bm25AsciiFolding, true);
+  assert.strictEqual(opts.bm25MinTokenLen, 2);
+  assert.strictEqual(opts.bm25MaxTokenLen, 9);
   // Invalid values are NOT dropped here — the Rust side rejects them with
   // QQL-VALIDATION-CONFIG instead of silently using the defaults.
   assert.strictEqual(normalizeLocalOptions({ bm25K1: 0 }).bm25K1, 0);
@@ -98,6 +116,7 @@ test("standalone options forward edge model slots and embed fields", () => {
     bm25K1: 1.5,
     bm25B: 0.6,
     bm25AvgLen: 32,
+    bm25Language: "french",
     onError: "continue",
   });
   assert.strictEqual(opts.sparseModel, "splade");
@@ -111,6 +130,7 @@ test("standalone options forward edge model slots and embed fields", () => {
   assert.strictEqual(opts.bm25K1, 1.5);
   assert.strictEqual(opts.bm25B, 0.6);
   assert.strictEqual(opts.bm25AvgLen, 32);
+  assert.strictEqual(opts.bm25Language, "french");
   assert.strictEqual(opts.onError, "continue");
   assert.strictEqual(opts.dataDir, "/data");
 });
@@ -124,6 +144,7 @@ test("standalone options apply defaults", () => {
   assert.strictEqual(opts.bm25K1, undefined);
   assert.strictEqual(opts.bm25B, undefined);
   assert.strictEqual(opts.bm25AvgLen, undefined);
+  assert.strictEqual(opts.bm25Language, undefined);
 });
 
 test("standalone options forward params for prepared statements", () => {

@@ -366,6 +366,49 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             .get("bm25AvgLen")
             .or_else(|| emb.get("bm25_avg_len"))
             .and_then(|v| v.as_f64());
+        config.bm25_language = emb
+            .get("bm25Language")
+            .or_else(|| emb.get("bm25_language"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.bm25_tokenizer = emb
+            .get("bm25Tokenizer")
+            .or_else(|| emb.get("bm25_tokenizer"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.bm25_lowercase = emb
+            .get("bm25Lowercase")
+            .or_else(|| emb.get("bm25_lowercase"))
+            .and_then(|v| v.as_bool());
+        config.bm25_ascii_folding = emb
+            .get("bm25AsciiFolding")
+            .or_else(|| emb.get("bm25_ascii_folding"))
+            .and_then(|v| v.as_bool());
+        config.bm25_stopwords = emb
+            .get("bm25Stopwords")
+            .or_else(|| emb.get("bm25_stopwords"))
+            .and_then(|v| v.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(String::from))
+                    .collect()
+            });
+        config.bm25_stemmer = emb
+            .get("bm25Stemmer")
+            .or_else(|| emb.get("bm25_stemmer"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.bm25_min_token_len = emb
+            .get("bm25MinTokenLen")
+            .or_else(|| emb.get("bm25_min_token_len"))
+            .and_then(|v| v.as_u64())
+            .and_then(|v| usize::try_from(v).ok());
+        config.bm25_max_token_len = emb
+            .get("bm25MaxTokenLen")
+            .or_else(|| emb.get("bm25_max_token_len"))
+            .and_then(|v| v.as_u64())
+            .and_then(|v| usize::try_from(v).ok());
     }
 
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
@@ -423,6 +466,14 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     bm25_k1: config.bm25_k1,
                     bm25_b: config.bm25_b,
                     bm25_avg_len: config.bm25_avg_len,
+                    bm25_language: config.bm25_language.clone(),
+                    bm25_tokenizer: config.bm25_tokenizer.clone(),
+                    bm25_lowercase: config.bm25_lowercase,
+                    bm25_ascii_folding: config.bm25_ascii_folding,
+                    bm25_stopwords: config.bm25_stopwords.clone(),
+                    bm25_stemmer: config.bm25_stemmer.clone(),
+                    bm25_min_token_len: config.bm25_min_token_len,
+                    bm25_max_token_len: config.bm25_max_token_len,
                 })
                 .map_err(common::to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)

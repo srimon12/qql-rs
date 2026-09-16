@@ -98,13 +98,14 @@ wire-compatible BM25. Tune the **document** side before upserting:
 
 ```js
 client.setBm25Params(2.0, 0.5, 8.0); // k1, b, avg_len — throws on invalid values
+client.setBm25Text('es', 'whitespace', null, true, null, null, null, null); // language, tokenizer, …
 ```
 
 Defaults are Qdrant's `1.2 / 0.75 / 256`. Client-side, write-path only: query
 weights stay unit, server-side inference is untouched, and vectors already
 written keep their weights — re-ingest to apply. Invalid values throw the
-`QQL-VALIDATION-CONFIG` error (`k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`, all
-finite).
+`QQL-VALIDATION-CONFIG` error (`k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`, all
+finite; unknown language/tokenizer names too).
 
 ### JS Function Embedder
 

@@ -23,7 +23,6 @@ class TestBm25ParamsValidation(unittest.TestCase):
         tmpdir = tempfile.mkdtemp(prefix="pyqql_edge_bm25_bad_")
         try:
             cases = [
-                {"bm25_k1": 0.0},
                 {"bm25_k1": -1.0},
                 {"bm25_k1": float("nan")},
                 {"bm25_k1": float("inf")},
@@ -33,6 +32,8 @@ class TestBm25ParamsValidation(unittest.TestCase):
                 {"bm25_avg_len": 0.0},
                 {"bm25_avg_len": -5.0},
                 {"bm25_avg_len": float("inf")},
+                {"bm25_language": "klingon"},
+                {"bm25_tokenizer": "ngram"},
             ]
             for kwargs in cases:
                 with self.assertRaises(pyqql_edge.QqlValidationError) as ctx:

@@ -538,10 +538,26 @@ test('HttpEmbedder accepts BM25 fields (camelCase)', () => {
     bm25K1: 2.0,
     bm25B: 0.5,
     bm25AvgLen: 8,
+    bm25Language: 'es',
+    bm25Tokenizer: 'whitespace',
+    bm25Lowercase: false,
+    bm25AsciiFolding: true,
+    bm25Stopwords: ['el'],
+    bm25Stemmer: 'none',
+    bm25MinTokenLen: 2,
+    bm25MaxTokenLen: 9,
   });
   assert.strictEqual(e.bm25K1, 2.0);
   assert.strictEqual(e.bm25B, 0.5);
   assert.strictEqual(e.bm25AvgLen, 8);
+  assert.strictEqual(e.bm25Language, 'es');
+  assert.strictEqual(e.bm25Tokenizer, 'whitespace');
+  assert.strictEqual(e.bm25Lowercase, false);
+  assert.strictEqual(e.bm25AsciiFolding, true);
+  assert.deepStrictEqual(e.bm25Stopwords, ['el']);
+  assert.strictEqual(e.bm25Stemmer, 'none');
+  assert.strictEqual(e.bm25MinTokenLen, 2);
+  assert.strictEqual(e.bm25MaxTokenLen, 9);
 });
 
 test('HttpEmbedder accepts BM25 fields (snake_case aliases)', () => {

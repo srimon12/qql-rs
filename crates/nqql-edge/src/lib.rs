@@ -429,6 +429,19 @@ pub struct LocalExecutorOptions {
     pub bm25_b: Option<f64>,
     /// Client-side BM25 expected average document length in tokens (default `256`).
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language, e.g. `"spanish"` (default `"english"`).
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer: `"word"` | `"whitespace"` | `"prefix"` |
+    /// `"multilingual"` (default `"word"`).
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching (default `true`).
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing (default `false`).
+    pub bm25_ascii_folding: Option<bool>,
+    /// Drop tokens shorter than this many chars.
+    pub bm25_min_token_len: Option<f64>,
+    /// Drop over-long tokens on the document path.
+    pub bm25_max_token_len: Option<f64>,
 }
 
 /// Parse `walSegmentMb` (whole MiB) into the byte capacity
@@ -451,6 +464,31 @@ fn wal_segment_capacity(mb: Option<f64>) -> Result<Option<usize>, qql_core::erro
     }
     // `as` saturates; the shared helper rejects any byte count that overflows.
     qql_edge::wal_segment_capacity_bytes(Some(mb as u64))
+}
+
+/// Parse an optional whole-number JS option (token length limits) into
+/// `Option<usize>`. `None` keeps the engine default; fractional, negative,
+/// non-finite, or overflowing values fail closed with
+/// `QQL-VALIDATION-CONFIG`.
+#[cfg(feature = "fastembed-local")]
+fn whole_usize(value: Option<f64>, name: &str) -> Result<Option<usize>, qql_core::error::QqlError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 {
+        return Err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            format!("{name} must be a non-negative whole number; omit it for no limit"),
+            None,
+        ));
+    }
+    usize::try_from(value as u64).map(Some).map_err(|_| {
+        qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            format!("{name} is too large for this platform"),
+            None,
+        )
+    })
 }
 
 /// Create a fully-local edge executor backed by fastembed-rs and qdrant-edge.
@@ -493,6 +531,14 @@ pub fn local_executor(
             bm25_k1: opts.bm25_k1,
             bm25_b: opts.bm25_b,
             bm25_avg_len: opts.bm25_avg_len,
+            bm25_language: opts.bm25_language,
+            bm25_tokenizer: opts.bm25_tokenizer,
+            bm25_lowercase: opts.bm25_lowercase,
+            bm25_ascii_folding: opts.bm25_ascii_folding,
+            bm25_min_token_len: whole_usize(opts.bm25_min_token_len, "bm25MinTokenLen")
+                .map_err(common::to_napi_err)?,
+            bm25_max_token_len: whole_usize(opts.bm25_max_token_len, "bm25MaxTokenLen")
+                .map_err(common::to_napi_err)?,
         },
     )
     .map_err(common::to_napi_err)?;
@@ -619,10 +665,40 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
         bm25_k1: option_f64(options, "bm25K1", "bm25_k1"),
         bm25_b: option_f64(options, "bm25B", "bm25_b"),
         bm25_avg_len: option_f64(options, "bm25AvgLen", "bm25_avg_len"),
+        bm25_language: option_str(options, "bm25Language", "bm25_language"),
+        bm25_tokenizer: option_str(options, "bm25Tokenizer", "bm25_tokenizer"),
+        bm25_lowercase: option_bool(options, "bm25Lowercase", "bm25_lowercase"),
+        bm25_ascii_folding: option_bool(options, "bm25AsciiFolding", "bm25_ascii_folding"),
+        bm25_min_token_len: option_f64(options, "bm25MinTokenLen", "bm25_min_token_len"),
+        bm25_max_token_len: option_f64(options, "bm25MaxTokenLen", "bm25_max_token_len"),
         // The WAL knob is a localExecutor option; one-shot execute keeps the
         // engine default (the JS wrapper does not forward it here).
         wal_segment_mb: None,
     }
+}
+
+/// Read a string option by camelCase or snake_case name; missing/`null` →
+/// `None`.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn option_str(options: Option<&serde_json::Value>, camel: &str, snake: &str) -> Option<String> {
+    let value = options?.get(camel).or_else(|| options?.get(snake))?;
+    if value.is_null() {
+        return None;
+    }
+    value.as_str().map(String::from)
+}
+
+/// Read a bool option by camelCase or snake_case name; missing/`null` →
+/// `None`. Non-bool values surface as `None` here and fail closed downstream
+/// only when the Rust validator sees them — strings are rejected at the JS
+/// wrapper layer instead.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn option_bool(options: Option<&serde_json::Value>, camel: &str, snake: &str) -> Option<bool> {
+    let value = options?.get(camel).or_else(|| options?.get(snake))?;
+    if value.is_null() {
+        return None;
+    }
+    value.as_bool()
 }
 
 /// Read a numeric option by camelCase or snake_case name; malformed values are

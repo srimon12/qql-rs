@@ -34,6 +34,18 @@ pub struct EdgeConfig {
     /// Client-side BM25 expected average document length in tokens;
     /// `None` → `256`.
     pub bm25_avg_len: Option<f64>,
+    /// BM25 text-processing language (Qdrant name/alias); `None` → English.
+    pub bm25_language: Option<String>,
+    /// BM25 tokenizer (`word`/`whitespace`/`prefix`/`multilingual`).
+    pub bm25_tokenizer: Option<String>,
+    /// Lowercase before matching; `None` → `true`.
+    pub bm25_lowercase: Option<bool>,
+    /// Lucene ASCII folding before lowercasing; `None` → `false`.
+    pub bm25_ascii_folding: Option<bool>,
+    /// Drop tokens shorter than this (chars).
+    pub bm25_min_token_len: Option<usize>,
+    /// Drop over-long tokens on the document path (chars).
+    pub bm25_max_token_len: Option<usize>,
     pub embed_url: Option<String>,
     pub embed_key: String,
     pub embed_model: String,
@@ -68,6 +80,12 @@ impl Default for EdgeConfig {
             bm25_k1: None,
             bm25_b: None,
             bm25_avg_len: None,
+            bm25_language: None,
+            bm25_tokenizer: None,
+            bm25_lowercase: None,
+            bm25_ascii_folding: None,
+            bm25_min_token_len: None,
+            bm25_max_token_len: None,
             embed_url: None,
             embed_key: String::new(),
             embed_model: "nomic-embed-text".to_string(),
@@ -120,6 +138,18 @@ pub struct EdgeConfigPatch {
     pub bm25_b: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bm25_avg_len: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_tokenizer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_lowercase: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_ascii_folding: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_min_token_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_max_token_len: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embed_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -319,6 +349,24 @@ impl EdgeConfig {
         }
         if let Some(value) = env_f64("QQL_EDGE_BM25_AVG_LEN") {
             self.bm25_avg_len = Some(value);
+        }
+        if let Some(value) = env_string("QQL_EDGE_BM25_LANGUAGE") {
+            self.bm25_language = Some(value);
+        }
+        if let Some(value) = env_string("QQL_EDGE_BM25_TOKENIZER") {
+            self.bm25_tokenizer = Some(value);
+        }
+        if let Some(value) = env_bool("QQL_EDGE_BM25_LOWERCASE") {
+            self.bm25_lowercase = Some(value);
+        }
+        if let Some(value) = env_bool("QQL_EDGE_BM25_ASCII_FOLDING") {
+            self.bm25_ascii_folding = Some(value);
+        }
+        if let Some(value) = env_usize("QQL_EDGE_BM25_MIN_TOKEN_LEN") {
+            self.bm25_min_token_len = Some(value);
+        }
+        if let Some(value) = env_usize("QQL_EDGE_BM25_MAX_TOKEN_LEN") {
+            self.bm25_max_token_len = Some(value);
         }
         if let Some(value) = env_bool("QQL_EDGE_ON_DISK") {
             self.on_disk_payload = value;

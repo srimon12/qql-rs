@@ -44,10 +44,10 @@ pub struct Client {
     rerank_endpoint: Option<String>,
     rerank_api_key: Option<String>,
     rerank_model: Option<String>,
-    /// Client-side BM25 document parameters for the built-in local sparse
+    /// Client-side BM25 text configuration for the built-in local sparse
     /// encoder (used for `TEXT` upserts / sparse `TEXT` inputs; write-path
     /// only). Defaults to the Qdrant `qdrant/bm25` values.
-    pub(crate) bm25: qql_embed::Bm25Params,
+    pub(crate) bm25: qql_embed::Bm25TextConfig,
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -75,7 +75,7 @@ impl Client {
             rerank_endpoint: None,
             rerank_api_key: None,
             rerank_model: None,
-            bm25: qql_embed::Bm25Params::default(),
+            bm25: qql_embed::Bm25TextConfig::default(),
         }
     }
 
@@ -96,17 +96,60 @@ impl Client {
     /// encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
     /// documents upserted after the call are encoded; query weights stay unit
     /// and server-side inference is untouched. Invalid values throw
-    /// (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+    /// (`QQL-VALIDATION-CONFIG`): `k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`,
     /// all finite.
     #[wasm_bindgen(js_name = setBm25Params)]
     pub fn set_bm25_params(&mut self, k1: f64, b: f64, avg_len: f64) -> Result<(), JsValue> {
         let params = qql_embed::Bm25Params::new(k1, b, avg_len).map_err(qql_err_to_js)?;
-        self.bm25 = params;
+        self.bm25.params = params;
+        Ok(())
+    }
+
+    /// Set client-side BM25 text processing for the built-in local sparse
+    /// encoder: language (`"spanish"`, `"es"`, …; `null` keeps current),
+    /// tokenizer (`"word"`, `"whitespace"`, `"prefix"`), lowercasing,
+    /// ASCII folding, stemmer (`"none"` disables, a language name overrides),
+    /// custom stopwords (replaces the language default; `[]` disables), and
+    /// token length limits. All `null` keeps the current value; anything
+    /// invalid throws (`QQL-VALIDATION-CONFIG`).
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = setBm25Text)]
+    pub fn set_bm25_text(
+        &mut self,
+        language: Option<String>,
+        tokenizer: Option<String>,
+        lowercase: Option<bool>,
+        ascii_folding: Option<bool>,
+        stemmer: Option<String>,
+        stopwords: Option<Vec<String>>,
+        min_token_len: Option<usize>,
+        max_token_len: Option<usize>,
+    ) -> Result<(), JsValue> {
+        let resolved = qql_embed::Bm25TextConfig::resolve(
+            Some(self.bm25.params.k1()),
+            Some(self.bm25.params.b()),
+            Some(self.bm25.params.avg_len()),
+            language.as_deref().filter(|s| !s.is_empty()),
+            tokenizer.as_deref().filter(|s| !s.is_empty()),
+            lowercase,
+            ascii_folding,
+            stopwords,
+            stemmer.as_deref().filter(|s| !s.is_empty()),
+            min_token_len,
+            max_token_len,
+        )
+        .map_err(qql_err_to_js)?;
+        self.bm25 = resolved;
         Ok(())
     }
 
     /// Current BM25 document parameters (used by the local sparse encoder).
     pub(crate) fn bm25_params(&self) -> &qql_embed::Bm25Params {
+        &self.bm25.params
+    }
+
+    /// Current BM25 text configuration (used by the local sparse encoder).
+    pub(crate) fn bm25_text_config(&self) -> &qql_embed::Bm25TextConfig {
         &self.bm25
     }
 

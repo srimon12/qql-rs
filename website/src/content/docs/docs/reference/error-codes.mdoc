@@ -121,9 +121,11 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
 | `QQL-VALIDATION-ID-PREDICATE` | A point ID predicate uses an operator other than `=`, `!=`, `IN`, or `NOT IN` |
 | `QQL-VALIDATION-EMPTY-SCRIPT` | Nothing to execute — the query is empty, whitespace-only, or the statement list is empty |
+| `QQL-VALIDATION-FIELD` | An executor helper needs a non-empty payload field path |
 | `QQL-VALIDATION-POINT-ID` | A value used as a point ID is neither an unsigned integer nor a string |
 | `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
 | `QQL-VALIDATION-ALIASES` | Collection aliases are not supported on this backend |
+| `QQL-VALIDATION-COLLECTION` | An executor helper needs a non-empty collection name |
 | `QQL-VALIDATION-CONFIG` | Invalid collection configuration block or edge executor option value |
 | `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
 | `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
@@ -604,11 +606,13 @@ QQL-VALIDATION-BATCH-MEMBER
 QQL-VALIDATION-BATCH-MIXED
 QQL-VALIDATION-BATCH-PARAMS
 QQL-VALIDATION-BATCH-WAIT
+QQL-VALIDATION-COLLECTION
 QQL-VALIDATION-CONFIG
 QQL-VALIDATION-CONSISTENCY
 QQL-VALIDATION-CREATE-MODEL
 QQL-VALIDATION-CROSS-RERANK-PREFETCH
 QQL-VALIDATION-EMPTY-SCRIPT
+QQL-VALIDATION-FIELD
 QQL-VALIDATION-FILTER-INJECT
 QQL-VALIDATION-FROM
 QQL-VALIDATION-FUSION

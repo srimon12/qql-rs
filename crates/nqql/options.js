@@ -55,6 +55,17 @@ function normalizeClientOptions(options) {
           bm25K1: options.embedder.bm25K1 ?? options.embedder.bm25_k1,
           bm25B: options.embedder.bm25B ?? options.embedder.bm25_b,
           bm25AvgLen: options.embedder.bm25AvgLen ?? options.embedder.bm25_avg_len,
+          bm25Language: options.embedder.bm25Language ?? options.embedder.bm25_language,
+          bm25Tokenizer: options.embedder.bm25Tokenizer ?? options.embedder.bm25_tokenizer,
+          bm25Lowercase: options.embedder.bm25Lowercase ?? options.embedder.bm25_lowercase,
+          bm25AsciiFolding:
+            options.embedder.bm25AsciiFolding ?? options.embedder.bm25_ascii_folding,
+          bm25Stopwords: options.embedder.bm25Stopwords ?? options.embedder.bm25_stopwords,
+          bm25Stemmer: options.embedder.bm25Stemmer ?? options.embedder.bm25_stemmer,
+          bm25MinTokenLen:
+            options.embedder.bm25MinTokenLen ?? options.embedder.bm25_min_token_len,
+          bm25MaxTokenLen:
+            options.embedder.bm25MaxTokenLen ?? options.embedder.bm25_max_token_len,
         }
       : undefined,
   };

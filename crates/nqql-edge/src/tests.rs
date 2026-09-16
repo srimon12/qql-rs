@@ -59,6 +59,22 @@ fn standalone_local_opts_forwards_bm25_params() {
     assert_eq!(lo.bm25_b, Some(0.25));
     assert_eq!(lo.bm25_avg_len, Some(16.0));
 
+    let text = serde_json::json!({
+        "bm25Language": "es",
+        "bm25Tokenizer": "whitespace",
+        "bm25Lowercase": false,
+        "bm25AsciiFolding": true,
+        "bm25MinTokenLen": 2,
+        "bm25MaxTokenLen": 9,
+    });
+    let lo = standalone_local_opts(Some(&text));
+    assert_eq!(lo.bm25_language.as_deref(), Some("es"));
+    assert_eq!(lo.bm25_tokenizer.as_deref(), Some("whitespace"));
+    assert_eq!(lo.bm25_lowercase, Some(false));
+    assert_eq!(lo.bm25_ascii_folding, Some(true));
+    assert_eq!(lo.bm25_min_token_len, Some(2.0));
+    assert_eq!(lo.bm25_max_token_len, Some(9.0));
+
     // Malformed values must not silently fall back to defaults.
     let bad = serde_json::json!({ "bm25K1": "nope" });
     let lo = standalone_local_opts(Some(&bad));

@@ -166,6 +166,18 @@ export interface LocalExecutorOptions {
   bm25B?: number;
   /** Client-side BM25 expected average document length in tokens (default 256). */
   bm25AvgLen?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english"). */
+  bm25Language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" | "multilingual". */
+  bm25Tokenizer?: string;
+  /** Lowercase before matching (default true). */
+  bm25Lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false). */
+  bm25AsciiFolding?: boolean;
+  /** Drop tokens shorter than this many chars. */
+  bm25MinTokenLen?: number;
+  /** Drop over-long tokens on the document path. */
+  bm25MaxTokenLen?: number;
 }
 
 export interface StandaloneOptions {
@@ -202,6 +214,18 @@ export interface StandaloneOptions {
   bm25B?: number;
   /** Client-side BM25 expected average document length in tokens (default 256). */
   bm25AvgLen?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english"). */
+  bm25Language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" | "multilingual". */
+  bm25Tokenizer?: string;
+  /** Lowercase before matching (default true). */
+  bm25Lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false). */
+  bm25AsciiFolding?: boolean;
+  /** Drop tokens shorter than this many chars. */
+  bm25MinTokenLen?: number;
+  /** Drop over-long tokens on the document path. */
+  bm25MaxTokenLen?: number;
   /** onError behaviour */
   onError?: "stop" | "continue";
   /** Parameter bindings */
