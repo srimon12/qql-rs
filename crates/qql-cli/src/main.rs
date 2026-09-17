@@ -14,6 +14,9 @@ mod dump;
 mod fmt_tests;
 mod migrate;
 mod output;
+mod record;
+#[cfg(test)]
+mod record_tests;
 mod repl;
 mod script;
 mod table;
@@ -179,7 +182,7 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
     },
-    /// Record Qdrant REST traffic (delegates to standalone `qql-record` binary)
+    /// Record Qdrant REST traffic while proxying it unchanged
     Record {
         /// Address to listen on (the app points here instead of Qdrant)
         #[arg(long, default_value = "127.0.0.1:6334")]
@@ -944,33 +947,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             target,
             out,
             qql_out,
-        } => {
-            let mut cmd = std::process::Command::new("qql-record");
-            cmd.arg("--listen")
-                .arg(listen.to_string())
-                .arg("--target")
-                .arg(target)
-                .arg("--out")
-                .arg(out);
-            if let Some(qql_out) = qql_out {
-                cmd.arg("--qql-out").arg(qql_out);
-            }
-            match cmd.status() {
-                Ok(status) => {
-                    if !status.success() {
-                        std::process::exit(status.code().unwrap_or(1));
-                    }
-                    Ok(())
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    eprintln!("'qql record' is now a standalone binary: 'qql-record'.");
-                    eprintln!("To install it, run: cargo install --locked qql-record");
-                    eprintln!("Or build from source: cargo build -p qql-record");
-                    Err("qql-record binary not found on PATH".into())
-                }
-                Err(e) => Err(format!("failed to execute qql-record: {e}").into()),
-            }
-        }
+        } => record::run(record::RecordOptions {
+            listen,
+            target,
+            out,
+            qql_out,
+        })
+        .await
+        .map_err(|e| e as Box<dyn std::error::Error>),
         Command::Config { command } => match *command {
             ConfigCommand::Show { json } => commands::handle_config_show(json),
             ConfigCommand::Get { key } => commands::handle_config_get(&key),

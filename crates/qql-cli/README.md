@@ -4,36 +4,31 @@ CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, migrate, doctor, o
 
 ## Install
 
-Default binary is lean (`rest` + `grpc` only) — edge (ONNX) and record
-(axum) stay opt-in. Prebuilt archives from GitHub releases are default-only;
-feature builds install from crates.io with one command (no clone needed):
+Prebuilt archives on GitHub Releases are available in two editions:
+- **Standard (`qql`)**: Lightweight (~15MB), includes REST, gRPC, built-in transparent traffic recorder (`qql record`), AST converter (`qql convert`), collection migrator (`qql migrate`), dump, REPL, formatter, and linter.
+- **Full (`qql-full`)**: Includes all Standard features plus local client-side FastEmbed ONNX inference and in-process `qdrant-edge` embedded database (`--features full`).
+
+Install from crates.io with one command (no clone needed):
 
 ```bash
-# Default: rest + grpc (matches the release archives)
+# Standard: REST + gRPC + record + convert + migrate (matches qql release archives)
 cargo install qql-cli --locked
 
-# REST only (smallest)
-cargo install qql-cli --locked --no-default-features --features rest
-
-# Local edge backend, no server (`--edge`, `qql edge`, `qql config edge`)
-cargo install qql-cli --locked --features edge
-
-# Local zero-server ONNX embeddings (for remote Qdrant and migrations)
-cargo install qql-cli --locked --features fastembed
-
-# In-process embedded Qdrant edge database
-cargo install qql-cli --locked --features edge
-
-# Everything at once (fastembed + edge)
+# Full: Standard + local FastEmbed ONNX embeddings + in-process qdrant-edge (matches qql-full archives)
 cargo install qql-cli --locked --features full
 
-# Standalone REST traffic recorder proxy
-cargo install qql-record --locked
+# REST only (smallest footprint)
+cargo install qql-cli --locked --no-default-features --features rest
+
+# Local edge backend only, no server (`--edge`, `qql edge`, `qql config edge`)
+cargo install qql-cli --locked --features edge
+
+# Local zero-server ONNX embeddings only (for remote Qdrant and migrations)
+cargo install qql-cli --locked --features fastembed
 
 # From a local checkout instead
 cargo build --release -p qql-cli
-cargo build --release -p qql-cli --features fastembed
-cargo build --release -p qql-record
+cargo build --release -p qql-cli --features full
 ```
 
 Check what's installed: `qql version` reports the enabled `features` array.
@@ -54,7 +49,7 @@ Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 | `qql convert [file.json]` | REST JSON → QQL |
 | `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql run`) |
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
-| `qql record` | Transparent REST recorder → JSONL + QQL (delegates to `qql-record`) |
+| `qql record` | Transparent REST recorder → JSONL + QQL (built-in) |
 | `qql --edge …` | Use configured local edge backend |
 | `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
 | `qql edge bootstrap <coll> --from <url>` | Seed a local edge collection from a remote shard snapshot |
@@ -169,7 +164,7 @@ SHARD 'acme'
 LIMIT 10;
 ```
 
-## Recorder (`qql-record`, standalone tool)
+## Recorder (`qql record`, built-in)
 
 Zero-code-change capture for migration: Qdrant keeps its address, point the
 app at the recorder instead, change nothing else. Every request is forwarded
@@ -178,19 +173,17 @@ preserved); collection and quota routes are appended as wrapped
 `{"method","path","query"?,"body"?}` JSONL for later `qql convert` use.
 Bodyless `SHOW` / `DROP` routes are recorded with no `body`.
 
-`qql-record` is available as a standalone tool (`cargo install qql-record`), and
-`qql record` will automatically delegate to it if installed on your `$PATH`.
+`qql record` is built directly into the CLI:
 
 ```bash
-cargo install qql-record --locked
 # Qdrant stays on :6333, the app now points at the recorder on :6334:
-qql-record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
+qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
   --out capture.jsonl --qql-out capture.qql
 # ... run the app ...
 qql convert --collection docs capture.jsonl   # replay/migrate later
 ```
 
-Bare `qql-record` uses those defaults. Notes: query strings are forwarded
+Bare `qql record` uses those defaults. Notes: query strings are forwarded
 upstream and recorded as a `"query"` object (`wait`, `timeout`,
 `consistency`) so `qql convert` recovers `WAIT` and `PARAMS`; a trailing `/`
 is stripped from the recorded path only; non-JSON bodies are forwarded, not

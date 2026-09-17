@@ -17,7 +17,6 @@ members = [
     "crates/nqql",
     "crates/nqql-common",
     "crates/nqql-edge",
-    "crates/qql-record",
 ]
 
 [workspace.package]
@@ -30,7 +29,7 @@ repository = "https://github.com/srimon12/qql-rs"
 homepage = "https://github.com/srimon12/qql-rs"
 
 [workspace.lints.rust]
-# Public API is the product for the eight published crates; undocumented public
+# Public API is the product for the seven published crates; undocumented public
 # items surface as rustdoc warnings (see docs/rust API pass). Generated files
 # opt out locally via `#![allow(missing_docs)]`.
 missing_docs = "warn"

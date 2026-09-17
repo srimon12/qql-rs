@@ -23,13 +23,7 @@ address instead of Qdrant and change nothing else; every request is forwarded
 to the real server unchanged, and each bodied `/collections/` request is
 appended to a JSONL capture.
 
-`qql-record` is a standalone binary (or invoked via `qql record`):
-
-```bash
-cargo install qql-record --locked
-# ... or from a local checkout:
-# cargo build --release -p qql-record
-```
+`qql record` is built directly into the `qql` CLI:
 
 {% terminal title="Record once, convert after" %}
 # Qdrant stays where it is (default :6333); the app moves to :6334.

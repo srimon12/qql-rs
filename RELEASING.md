@@ -8,11 +8,11 @@ the corresponding Git tag is `v0.4.0`. The QQL language specification version
 
 | Registry | Packages |
 |---|---|
-| crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql-convert`, `qql`, `qql-edge`, `qql-cli`, `qql-record` |
+| crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql-convert`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
 | VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.4.0`) |
-| GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
+| GitHub Releases | Standard (`qql`) and Full (`qql-full`) CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
 Python, Node.js, and WASM set `publish = false` and must never be sent to
@@ -194,8 +194,8 @@ server-side branch rules are therefore mandatory.
 A manual Release run builds and packages every artifact but has no publishing
 jobs. Download and inspect:
 
-- eight `.crate` archives;
-- CLI archives for each supported target;
+- seven `.crate` archives;
+- Standard and Full CLI archives for each supported target;
 - both Python wheels for each supported target;
 - root and platform npm tarballs;
 - the `qql-wasm` npm tarball.

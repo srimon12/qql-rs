@@ -89,14 +89,3 @@ fn repl_help_displays_params_file_flag() {
     assert!(stdout.contains("--params-file"));
     assert!(stdout.contains("--param"));
 }
-
-#[test]
-fn record_command_delegates_or_emits_guidance() {
-    let out = qql(&["record", "--listen", "127.0.0.1:6339"]);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // Either qql-record executes or guidance is printed
-    assert!(
-        stderr.contains("qql-record") || out.status.success(),
-        "expected reference to qql-record binary, got: {stderr}"
-    );
-}
