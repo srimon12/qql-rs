@@ -1,24 +1,24 @@
 ---
-const primary: Array<[string, string, string]> = [
-	["response", "Result", "Live hits. Needs a reachable Qdrant."],
-	["plan", "Plan", "Offline. Compiled plan, no backend needed."],
-	["wire", "Wire", "Offline. REST payload, no backend needed."],
+const tabs: Array<[string, string, string]> = [
+	["response", "Result", "Live hits and query results"],
+	["plan", "Plan", "Execution plan and compiled routes"],
+	["metrics", "Metrics", "Performance benchmarks and timing telemetry"],
+	["explain", "Explain", "Human-readable query execution analysis"],
+	["wire", "Wire", "Qdrant REST JSON wire payload"],
+	["ast", "AST", "Parsed Abstract Syntax Tree"],
+	["tokens", "Tokens", "Lexer token stream"],
 ];
-const secondary: Array<[string, string, string]> = [
-	["ast", "AST", "Offline. Parsed tree, no backend needed."],
-	["explain", "Explain", "Offline. Human readable plan, no backend needed."],
-	["tokens", "Tokens", "Offline. Lexer output, no backend needed."],
-	["metrics", "Metrics", "Offline. Local timings, no backend needed."],
-];
+
 const tabClass =
-	"shrink-0 border-b-2 border-transparent bg-transparent px-2 py-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)] transition-colors hover:text-[var(--sl-color-gray-1)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)] sm:px-2.5";
+	"shrink-0 border-b-2 border-transparent bg-transparent px-2.5 py-2 font-mono text-[0.7rem] text-[var(--sl-color-gray-3)] transition-colors hover:text-[var(--sl-color-white)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)] font-medium whitespace-nowrap";
 ---
 
 <section class="flex min-h-0 min-w-0 flex-col" aria-labelledby="inspector-title">
+  <!-- Inspector Header -->
   <div class="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-3">
     <h2 id="inspector-title" class="flex min-w-0 items-center gap-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
       <span class="h-3 w-px shrink-0 bg-[var(--sl-color-accent)]" aria-hidden="true"></span>
-      <span class="truncate">Compiler</span>
+      <span class="truncate">Compiler &amp; Output</span>
     </h2>
     <div class="flex min-w-0 items-center gap-2">
       <code class="hidden min-w-0 truncate font-mono text-[0.6875rem] text-[var(--sl-color-accent-high)] sm:block" data-route-line></code>
@@ -31,8 +31,9 @@ const tabClass =
     </div>
   </div>
 
-  <div class="tabbar-fade relative flex shrink-0 gap-0.5 overflow-x-auto border-b border-[var(--sl-color-gray-5)] px-2" role="tablist" aria-label="Compiler output">
-    {primary.map(([id, label, title], index) => (
+  <!-- Direct Visible Tabbar (All Tabs Visible, No Hidden More Menu) -->
+  <div class="tabbar-fade relative flex shrink-0 gap-0.5 overflow-x-auto border-b border-[var(--sl-color-gray-5)] px-2 bg-[var(--sl-color-bg)] scrollbar-none" role="tablist" aria-label="Compiler output">
+    {tabs.map(([id, label, title], index) => (
       <button
         type="button"
         role="tab"
@@ -44,43 +45,15 @@ const tabClass =
         title={title}
         class={tabClass}
       >
-        {label}
-      </button>
-    ))}
-    <button
-      type="button"
-      class={tabClass}
-      data-more-button
-      popovertarget="more-menu"
-      aria-haspopup="menu"
-      aria-expanded="false"
-      aria-controls="more-menu"
-      title="More compiler output: AST, Explain, Tokens, Metrics"
-    >
-      <span data-more-label>More</span>
-      <span aria-hidden="true"> ▾</span>
-    </button>
-  </div>
-
-  <div id="more-menu" class="app-share-pop" popover="auto" data-more-menu role="menu" aria-label="More compiler output">
-    {secondary.map(([id, label, title]) => (
-      <button
-        type="button"
-        role="tab"
-        id={`tab-${id}`}
-        aria-controls={`panel-${id}`}
-        aria-selected="false"
-        tabindex={-1}
-        data-inspector-tab={id}
-        title={title}
-        class="app-share-pop__social"
-      >
         <span>{label}</span>
+        {id === "response" && <span class="ml-1.5 hidden rounded-full bg-[var(--sl-color-gray-6)] px-1.5 py-0.5 text-[0.625rem] font-bold text-[var(--sl-color-accent-high)]" data-hit-count-badge></span>}
       </button>
     ))}
   </div>
 
-  <div class="relative min-h-0 flex-1">
+  <!-- Tab Panels -->
+  <div class="relative min-h-0 flex-1 bg-[var(--sl-color-bg)]">
+    <!-- Result Tab Panel -->
     <section
       role="tabpanel"
       id="panel-response"
@@ -89,31 +62,33 @@ const tabClass =
       data-inspector-panel="response"
     >
       <div class="grid min-h-full content-start gap-3 p-4" data-response-rich></div>
-      <pre class="pg-hl m-0 hidden min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output="response">The Result tab needs a reachable Qdrant. Everything else runs offline.</pre>
+      <pre class="pg-hl m-0 hidden min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output="response"></pre>
     </section>
+
+    <!-- Plan Tab Panel -->
     <section class="absolute inset-0 overflow-auto" role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" data-inspector-panel="plan" hidden>
       <div class="mx-auto grid h-full w-full max-w-[640px] content-start justify-items-stretch gap-3 p-4">
         <div class="grid h-full place-content-center justify-items-center p-8 text-center" data-empty-plan>
           <p class="mono-label m-0">Plan</p>
           <p class="m-0 mt-3 max-w-64 font-mono text-[0.72rem] leading-relaxed text-[var(--sl-color-gray-3)]">
-            Paste a statement or load an example. Parsing runs locally; nothing leaves this tab.
+            Type a statement or pick an example. Query planning runs offline inside WebAssembly.
           </p>
         </div>
 
         <div class="flex h-full min-h-0 flex-col" data-plan-card hidden>
-          <div class="grid content-start gap-3 rounded-[var(--q-r)] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-4">
+          <div class="grid content-start gap-3 rounded-[var(--q-r)] border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-4">
             <div class="flex items-center gap-2">
-              <span class="rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-7)] px-1.5 py-1 font-mono text-[0.62rem] font-bold text-[var(--sl-color-gray-1)]" data-route-method>POST</span>
-              <code class="min-w-0 flex-1 truncate font-mono text-[0.72rem] text-[var(--sl-color-accent-high)]" data-route-path>/collections/…</code>
+              <span class="rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-2 py-1 font-mono text-[0.6875rem] font-bold text-[var(--sl-color-accent-high)]" data-route-method>POST</span>
+              <code class="min-w-0 flex-1 truncate font-mono text-[0.75rem] font-medium text-[var(--sl-color-white)]" data-route-path>/collections/…</code>
             </div>
             <dl class="m-0 grid gap-1.5">
-              <div class="flex justify-between gap-4 border-b border-[var(--sl-color-gray-5)] px-2 py-2 text-xs"><dt class="m-0 text-[var(--sl-color-gray-3)]">Statement</dt><dd class="m-0 font-mono text-[var(--sl-color-gray-2)]" data-route-type>Pending</dd></div>
-              <div class="flex justify-between gap-4 border-b border-[var(--sl-color-gray-5)] px-2 py-2 text-xs"><dt class="m-0 text-[var(--sl-color-gray-3)]">Transport</dt><dd class="m-0 font-mono text-[var(--sl-color-gray-2)]">Qdrant REST</dd></div>
-              <div class="flex justify-between gap-4 px-2 py-2 text-xs"><dt class="m-0 text-[var(--sl-color-gray-3)]">Policy</dt><dd class="m-0 font-mono text-[var(--sl-color-gray-2)]" data-route-policy>Source only</dd></div>
+              <div class="flex justify-between gap-4 border-b border-[var(--sl-color-gray-5)] px-2 py-2 text-xs"><dt class="m-0 text-[var(--sl-color-gray-3)]">Statement Type</dt><dd class="m-0 font-mono text-[var(--sl-color-gray-1)]" data-route-type>Query</dd></div>
+              <div class="flex justify-between gap-4 border-b border-[var(--sl-color-gray-5)] px-2 py-2 text-xs"><dt class="m-0 text-[var(--sl-color-gray-3)]">Target Transport</dt><dd class="m-0 font-mono text-[var(--sl-color-gray-1)]">Qdrant REST</dd></div>
+              <div class="flex justify-between gap-4 px-2 py-2 text-xs"><dt class="m-0 text-[var(--sl-color-gray-3)]">Injected Policy</dt><dd class="m-0 font-mono text-[var(--sl-color-gray-1)]" data-route-policy>Source only</dd></div>
             </dl>
           </div>
 
-          <div class="flex min-h-0 flex-1 flex-col" data-routes-section>
+          <div class="flex min-h-0 flex-1 flex-col mt-3" data-routes-section>
             <header class="flex shrink-0 items-baseline justify-between gap-3 px-1 pt-1 pb-2">
               <span class="mono-label">Compiled statements</span>
               <span class="font-mono text-[0.6875rem] text-[var(--sl-color-gray-4)]" data-routes-count>0</span>
@@ -124,7 +99,27 @@ const tabClass =
       </div>
     </section>
 
-    {["wire", "ast", "tokens", "explain", "metrics"].map((id) => (
+    <!-- Metrics Tab Panel -->
+    <section class="absolute inset-0 overflow-auto" role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" data-inspector-panel="metrics" hidden>
+      <div class="flex flex-col gap-4 p-4" data-metrics-container>
+        <div class="flex flex-col gap-4" data-metrics-cards></div>
+        <details class="rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)]/80 p-3.5 transition-colors hover:border-[var(--sl-color-gray-4)]">
+          <summary class="cursor-pointer font-mono text-xs font-semibold text-[var(--sl-color-gray-3)] hover:text-[var(--sl-color-white)] select-none">View Raw Metrics &amp; Telemetry JSON</summary>
+          <pre class="pg-hl mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3 font-mono text-[0.7rem] text-[var(--sl-color-gray-2)]" data-output="metrics"></pre>
+        </details>
+      </div>
+    </section>
+
+    <!-- Explain Tab Panel -->
+    <section class="absolute inset-0 overflow-auto" role="tabpanel" id="panel-explain" aria-labelledby="tab-explain" data-inspector-panel="explain" hidden>
+      <div class="p-4" data-explain-container>
+        <div data-explain-rich class="rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-4 font-mono text-xs leading-relaxed text-[var(--sl-color-gray-1)]"></div>
+        <pre class="pg-hl m-0 hidden" data-output="explain"></pre>
+      </div>
+    </section>
+
+    <!-- Wire, AST, Tokens Tab Panels (Raw Syntax Highlighting) -->
+    {["wire", "ast", "tokens"].map((id) => (
       <section
         role="tabpanel"
         id={`panel-${id}`}
@@ -133,7 +128,11 @@ const tabClass =
         data-inspector-panel={id}
         hidden
       >
-        <pre class="pg-hl m-0 min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output={id}>{`Preparing the parser…`}</pre>
+        <div class="flex items-center justify-between border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-2">
+          <span class="font-mono text-xs uppercase tracking-wider text-[var(--sl-color-gray-3)]">{id} output</span>
+          <button class="app-action px-2" type="button" data-copy-tab={id}>Copy {id}</button>
+        </div>
+        <pre class="pg-hl m-0 min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output={id}>{`Loading compiler…`}</pre>
       </section>
     ))}
   </div>

@@ -4,7 +4,7 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true
+			"preset": "recommended"
 		}
 	},
 	"formatter": {
@@ -24,7 +24,7 @@
 			"!**/.astro",
 			"!**/.wasm",
 			"!**/public",
-			"!**/src/scripts/qql-keywords.generated.ts",
+			"!**/src/lib/playground/qql-keywords.generated.ts",
 			"!**/src/styles/ec-theme.css",
 			"!**/packages/ui/src/styles/*.css"
 		]

@@ -167,57 +167,85 @@ const pageDescription =
     >
       <h1 class="sr-only">QQL Playground</h1>
 
-      {/* ── EnvBar 40px: environment truth only — connection · engine · embeddings ── */}
-      <div
-        class="flex h-10 min-w-0 shrink-0 items-center gap-3 overflow-hidden border-b border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.6875rem] whitespace-nowrap text-[var(--sl-color-gray-3)]"
+      {/* ── Setup & Environment Header ── */}
+      <header
+        class="flex min-h-11 shrink-0 items-center justify-between gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3.5 py-1.5 font-mono text-xs"
         data-status-panel
         role="status"
         aria-live="polite"
         aria-label="Backend status"
       >
-        <span class="flex min-w-0 items-center gap-1.5">
-          <span
-            class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
-            data-connected-dot
-            aria-hidden="true"></span>
-          <span class="hidden md:inline">endpoint </span>
-          <strong class="max-w-[220px] truncate font-medium text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong>
-        </span>
-        <span class="flex shrink-0 items-center gap-1.5">
-          <span
-            class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
-            data-runtime-dot
-            aria-hidden="true"></span>
-          <strong class="hidden font-medium text-[var(--sl-color-gray-1)] sm:inline" data-status-wasm>Loading WASM</strong>
-        </span>
-        <span class="app-chip hidden min-w-0 sm:inline-flex" title="Embedding provider">
-          <span class="app-chip__label">Embed</span>
-          <strong class="app-chip__value max-w-44 truncate font-medium" data-status-embed>MiniLM (browser)</strong>
-          <strong
-            class="ml-1 shrink-0 rounded-full border border-[var(--sl-color-gray-5)] px-1.5 py-px font-medium"
-            data-embed-dim-chip
-            hidden></strong>
-        </span>
-        <button
-          class="app-action shrink-0 px-1.5 sm:hidden"
-          type="button"
-          data-open-settings
-          aria-label="Connection settings"
-          title="Connection settings"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
-        </button>
-        <span class="sr-only" data-runtime-status>Loading current WASM…</span>
-        <a
-          class="app-action ml-auto hidden shrink-0 px-1.5 sm:inline-flex"
-          href="/docs/"
-          data-docs-backlink
-          hidden
-          title="Back to the docs page that opened this query"
-        >
-          Docs <span aria-hidden="true">→</span>
-        </a>
-      </div>
+        <!-- Left: Status indicators -->
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <!-- Database endpoint status pill -->
+          <span class="inline-flex min-w-0 items-center gap-2 rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-2.5 py-1 text-[0.72rem] text-[var(--sl-color-gray-2)]">
+            <span
+              class="size-2 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
+              data-connected-dot
+              aria-hidden="true"
+            ></span>
+            <span class="text-[var(--sl-color-gray-3)]">Qdrant:</span>
+            <strong class="max-w-[200px] truncate font-semibold text-[var(--sl-color-white)]" data-status-endpoint>
+              Not checked yet
+            </strong>
+          </span>
+
+          <!-- WASM engine status pill -->
+          <span class="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-2.5 py-1 text-[0.72rem] text-[var(--sl-color-gray-2)]">
+            <span
+              class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
+              data-runtime-dot
+              aria-hidden="true"
+            ></span>
+            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-wasm>
+              Loading WASM
+            </strong>
+          </span>
+
+          <!-- Embeddings status pill -->
+          <span class="hidden md:inline-flex items-center gap-1.5 rounded-full border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-2.5 py-1 text-[0.72rem] text-[var(--sl-color-gray-2)]" title="Active embedding resolver">
+            <span class="text-[var(--sl-color-accent-high)] font-bold">✦</span>
+            <span class="text-[var(--sl-color-gray-3)]">Embed:</span>
+            <strong class="max-w-40 truncate font-medium text-[var(--sl-color-white)]" data-status-embed>
+              MiniLM (browser)
+            </strong>
+            <span
+              class="rounded bg-[var(--sl-color-gray-7)] px-1 font-mono text-[0.625rem] text-[var(--sl-color-gray-3)]"
+              data-embed-dim-chip
+              hidden
+            ></span>
+          </span>
+        </div>
+
+        <!-- Right: Actions -->
+        <div class="flex shrink-0 items-center gap-2">
+          <!-- Unified Database & Embeddings Configuration trigger -->
+          <button
+            class="app-action h-7.5 px-3 text-xs font-medium gap-1.5 border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] hover:border-[var(--sl-color-gray-4)] hover:bg-[var(--sl-color-gray-7)] text-[var(--sl-color-gray-1)] rounded-md shadow-2xs transition-colors"
+            type="button"
+            data-open-settings
+            aria-label="Configure Database and Embeddings"
+            title="Configure Database and Embeddings"
+          >
+            <svg class="size-3.5 text-[var(--sl-color-gray-3)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span class="font-medium">DB &amp; Embeddings</span>
+          </button>
+
+          <span class="sr-only" data-runtime-status>Loading current WASM…</span>
+          <a
+            class="app-action h-7.5 px-2 text-xs text-[var(--sl-color-gray-3)] hover:text-[var(--sl-color-gray-1)] hidden sm:inline-flex"
+            href="/docs/"
+            data-docs-backlink
+            hidden
+            title="Back to docs"
+          >
+            Docs <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </header>
 
       {/* ── Work area: editor | 8px divider | inspector ── */}
       <div class="min-h-0 min-w-0 flex-1 p-2">
@@ -251,7 +279,7 @@ const pageDescription =
     <SiteFooter />
 
     <script>
-      import "../../scripts/playground";
+      import "../../lib/playground/playground";
     </script>
   </body>
 </html>

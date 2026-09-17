@@ -7,12 +7,12 @@ import type {
 export type EmbedProvider = "browser" | "http" | "none";
 export type PolicyValueType = "string" | "number" | "boolean";
 export type InspectorTab =
+	| "response"
 	| "plan"
 	| "wire"
 	| "ast"
 	| "tokens"
 	| "explain"
-	| "response"
 	| "metrics";
 export type ExportLanguage = "python" | "node" | "rust" | "curl";
 
@@ -44,25 +44,13 @@ export interface PlaygroundMetrics {
 	embedProvider: EmbedProvider;
 }
 
-/** Structured execution failure: `buildError`-style parsing of the WASM throw. */
 export interface PlaygroundFailure {
-	/** Human sentence shown on the card and in the toast. */
 	message: string;
-	/** Machine code (`QQL-MISSING-USING`, …) — null when unparseable. */
 	code: string | null;
 	kind: string | null;
 	span: { start: number; end: number } | null;
 	fields: Record<string, string>;
-	/** Raw throw text for the collapsible details. */
 	raw: string;
-}
-
-/** Live collection vector topology for USING suggestions and presets. */
-export interface LiveCollectionTopology {
-	name: string;
-	dense: string[];
-	sparse: string[];
-	multi: string[];
 }
 
 export interface PlaygroundAnalysis {
@@ -83,12 +71,9 @@ export interface PlaygroundState {
 	metrics: PlaygroundMetrics | null;
 }
 
-/** Documented live environment: LM Studio OpenAI-compatible embeddings. */
 export const LIVE_EMBED_URL = "http://localhost:1234/v1/embeddings";
 export const LIVE_EMBED_MODEL = "text-embedding-bge-small-en-v1.5";
 export const LIVE_EMBED_DIM = 384;
-
-/** Default Qdrant endpoint for fresh installs (stock local Qdrant). */
 export const DEFAULT_QDRANT_URL = "http://localhost:6333";
 
 export const DEFAULT_SETTINGS: PlaygroundSettings = {
@@ -109,3 +94,9 @@ export const DEFAULT_POLICY: RuntimePolicy = {
 	valueType: "string",
 	shardKey: "acme",
 };
+
+export const SETTINGS_KEY = "qql-playground.settings.v1";
+export const POLICY_KEY = "qql-playground.policy.v2";
+export const WORKSPACE_KEY = "qql-playground.workspace.v1";
+export const INSPECTOR_TAB_KEY = "qql-playground.inspector-tab.v1";
+export const SPLIT_KEY = "qql-playground.split.v1";
