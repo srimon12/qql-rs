@@ -221,6 +221,7 @@
               "Mul": {
                 "left": {
                   "Sqrt": {
+                    "domain_default": null,
                     "x": {
                       "Variable": {
                         "name": "$score"
@@ -271,6 +272,7 @@
             ],
             "expression": {
               "Log": {
+                "domain_default": null,
                 "x": {
                   "Sum": {
                     "left": {
@@ -375,6 +377,7 @@
             ],
             "expression": {
               "Acosh": {
+                "domain_default": null,
                 "x": {
                   "Sum": {
                     "left": {
@@ -1134,6 +1137,7 @@
                         },
                         "right": {
                           "Log": {
+                            "domain_default": null,
                             "x": {
                               "Sum": {
                                 "left": {
