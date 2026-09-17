@@ -26,12 +26,19 @@ Status of subsequent waves (`fix/cleanup-waves-1-2`, `feat/bm25-full-compat`):
 - Done when: one heap copy per bound value, `execute_with_named_params`
   comment updated, bind benches (if added) flat.
 
-## 3. `normalize_planned` decoupling (unblocks `into_*_batch`) — [OPEN]
-- Move normalization out of `dispatch.rs` so batch builders can take
-  `Vec<PlannedOperation>` by value. Then add moving `into_*_batch` variants
-  and delete the `request.clone()` per member path.
-- Done when: no `request.clone()` in batch construction, error-path
-  `operations.clone()` gone (already by-ref; keep it that way).
+## 3. `normalize_planned` decoupling (unblocks `into_*_batch`) — [RESOLVED]
+- Normalization moved `dispatch.rs` → `executor/normalize.rs` (free fns;
+  `Executor::normalize_planned` kept as a thin wrapper). Batch hot paths use
+  `normalize_query_item` / `normalize_update_item`, which read only the owned
+  wire batch — never the operation vector.
+- Added moving builders `into_query_batch` / `into_update_batch` plus
+  `planned_to_update_operation_owned` and cold-path inverse
+  `update_operation_into_planned` (only the collection `String` clones, behind
+  `cold_path`). Ambient flush paths (`qql-runtime`, `qql-wasm`) move with zero
+  clones; borrowed `build_*` stay for borrowing callers (forced `BATCH`,
+  REST projection) with their clones intact by design.
+- Done criteria met: no `request.clone()` on any owned batch path, no
+  `operations.clone()` anywhere (retries move or borrow).
 
 ## 4. Deferred span coverage — [PARTIALLY DONE / POLICY DEFENDED]
 - **Completed in 58e6471**: DDL exact spans threaded through all collection/field/index errors.

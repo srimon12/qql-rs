@@ -433,6 +433,150 @@ pub fn planned_to_update_operation(
     }
 }
 
+/// Moving variant of [`planned_to_update_operation`]: destructures an owned
+/// operation into its wire form with zero clones.
+///
+/// Batch builders that own `Vec<PlannedOperation>` use this so the hot
+/// success path never clones request payloads (vectors, filters, payloads).
+pub fn planned_to_update_operation_owned(
+    op: crate::plan::PlannedOperation,
+) -> Option<(String, UpdateOperation)> {
+    use crate::plan::PlannedOperation;
+    match op {
+        PlannedOperation::Upsert {
+            collection,
+            request,
+            ..
+        } => Some((collection, UpdateOperation::Upsert { upsert: request })),
+        PlannedOperation::Delete {
+            collection,
+            request,
+            ..
+        } => Some((collection, UpdateOperation::Delete { delete: request })),
+        PlannedOperation::UpdatePayload {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection,
+            UpdateOperation::SetPayload {
+                set_payload: request,
+            },
+        )),
+        PlannedOperation::OverwritePayload {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection,
+            UpdateOperation::Overwrite {
+                overwrite_payload: request,
+            },
+        )),
+        PlannedOperation::ClearPayload {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection,
+            UpdateOperation::ClearPayload {
+                clear_payload: request,
+            },
+        )),
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection,
+            UpdateOperation::DeletePayload {
+                delete_payload: request,
+            },
+        )),
+        PlannedOperation::UpdateVectors {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection,
+            UpdateOperation::UpdateVectors {
+                update_vectors: request,
+            },
+        )),
+        PlannedOperation::DeleteVectors {
+            collection,
+            request,
+            ..
+        } => Some((
+            collection,
+            UpdateOperation::DeleteVectors {
+                delete_vectors: request,
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// Inverse of [`planned_to_update_operation_owned`]: rebuild a planned
+/// mutation from a moved-out wire operation.
+///
+/// Cold-path only: batch executors consume `Vec<PlannedOperation>` into the
+/// wire batch, and on transport/cardinality failure reconstruct per-member
+/// operations for individual retry. Only the small collection `String` is
+/// cloned per member; request payloads move back untouched.
+///
+/// Rebuilt operations carry `wait: true`, matching ambient batch semantics
+/// ("ambient groups always wait"); the wire batch likewise executes with
+/// `wait=true`, so retry preserves the durability the batch promised.
+pub fn update_operation_into_planned(
+    collection: &str,
+    op: UpdateOperation,
+) -> crate::plan::PlannedOperation {
+    use crate::plan::PlannedOperation;
+    match op {
+        UpdateOperation::Upsert { upsert } => PlannedOperation::Upsert {
+            collection: collection.to_owned(),
+            request: upsert,
+            wait: true,
+        },
+        UpdateOperation::Delete { delete } => PlannedOperation::Delete {
+            collection: collection.to_owned(),
+            request: delete,
+            wait: true,
+        },
+        UpdateOperation::SetPayload { set_payload } => PlannedOperation::UpdatePayload {
+            collection: collection.to_owned(),
+            request: set_payload,
+            wait: true,
+        },
+        UpdateOperation::Overwrite { overwrite_payload } => PlannedOperation::OverwritePayload {
+            collection: collection.to_owned(),
+            request: overwrite_payload,
+            wait: true,
+        },
+        UpdateOperation::ClearPayload { clear_payload } => PlannedOperation::ClearPayload {
+            collection: collection.to_owned(),
+            request: clear_payload,
+            wait: true,
+        },
+        UpdateOperation::DeletePayload { delete_payload } => PlannedOperation::DeletePayload {
+            collection: collection.to_owned(),
+            request: delete_payload,
+            wait: true,
+        },
+        UpdateOperation::UpdateVectors { update_vectors } => PlannedOperation::UpdateVectors {
+            collection: collection.to_owned(),
+            request: update_vectors,
+            wait: true,
+        },
+        UpdateOperation::DeleteVectors { delete_vectors } => PlannedOperation::DeleteVectors {
+            collection: collection.to_owned(),
+            request: delete_vectors,
+            wait: true,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

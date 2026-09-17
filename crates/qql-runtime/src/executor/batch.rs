@@ -223,7 +223,10 @@ impl Executor {
         }
         let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
         if is_query {
-            let (collection, batch) = qql_plan::build_query_batch(&operations)?;
+            // Owned build: each `QueryRequest` moves (zero clones on the hot
+            // path). Success normalizes from the response alone; failures
+            // reconstruct per-member operations for retry (cold path only).
+            let (collection, batch) = qql_plan::into_query_batch(operations)?;
             let expected = batch.searches.len();
             // Ambient groups carry no header opts: per-search read opts stay
             // on the member requests (gRPC) as before.
@@ -233,10 +236,8 @@ impl Executor {
                 .await
             {
                 Ok(responses) if responses.len() == expected => {
-                    for (response, op) in responses.into_iter().zip(operations.iter()) {
-                        // Batch items normalize exactly like singly dispatched
-                        // operations; REST parses each item at its boundary.
-                        results.push(Self::normalize_planned(op, response)?);
+                    for response in responses {
+                        results.push(super::normalize::normalize_query_item(response)?);
                     }
                 }
                 Ok(responses) => {
@@ -246,12 +247,30 @@ impl Executor {
                     if stop_on_error {
                         return Err(error);
                     }
+                    std::hint::cold_path();
+                    let operations = batch
+                        .searches
+                        .into_iter()
+                        .map(|request| PlannedOperation::Query {
+                            collection: collection.clone(),
+                            request,
+                        })
+                        .collect();
                     self.retry_batch_individually(operations, results).await?;
                 }
                 Err(error) => {
                     if stop_on_error {
                         return Err(error);
                     }
+                    std::hint::cold_path();
+                    let operations = batch
+                        .searches
+                        .into_iter()
+                        .map(|request| PlannedOperation::Query {
+                            collection: collection.clone(),
+                            request,
+                        })
+                        .collect();
                     self.retry_batch_individually(operations, results).await?;
                 }
             }
@@ -309,7 +328,10 @@ impl Executor {
                 .await;
         }
 
-        let (collection, _labels, batch) = qql_plan::build_update_batch(&operations)?;
+        // Owned build: each mutation request moves (zero clones on the hot
+        // path). Success normalizes from the owned wire operations; failures
+        // move them back into planned operations for retry (cold path only).
+        let (collection, _, batch) = qql_plan::into_update_batch(operations)?;
         let expected = batch.operations.len();
         // Ambient groups always wait, preserving prior behavior.
         match self
@@ -318,10 +340,10 @@ impl Executor {
             .await
         {
             Ok(responses) if responses.len() == expected => {
-                for (response, op) in responses.into_iter().zip(operations.iter()) {
+                for (response, op) in responses.into_iter().zip(batch.operations.iter()) {
                     // Same normalization as single dispatch: upserts report
                     // their request point count, other writes are status-only.
-                    results.push(Self::normalize_planned(op, response)?);
+                    results.push(super::normalize::normalize_update_item(op, response)?);
                 }
             }
             Ok(responses) => {
@@ -330,12 +352,24 @@ impl Executor {
                 if stop_on_error {
                     return Err(error);
                 }
+                std::hint::cold_path();
+                let operations = batch
+                    .operations
+                    .into_iter()
+                    .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op))
+                    .collect();
                 self.retry_batch_individually(operations, results).await?;
             }
             Err(error) => {
                 if stop_on_error {
                     return Err(error);
                 }
+                std::hint::cold_path();
+                let operations = batch
+                    .operations
+                    .into_iter()
+                    .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op))
+                    .collect();
                 self.retry_batch_individually(operations, results).await?;
             }
         }
