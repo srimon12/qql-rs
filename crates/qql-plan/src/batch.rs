@@ -117,7 +117,19 @@ pub fn build_query_batch(
     let searches = operations
         .iter()
         .map(|operation| match operation {
-            PlannedOperation::Query { request, .. } => Ok(request.clone()),
+            PlannedOperation::Query {
+                request,
+                collection: op_col,
+            } => {
+                if op_col != &collection {
+                    return Err(QqlError::execution(
+                        "QQL-BATCH-INVARIANT",
+                        "query batch contained multiple collections",
+                        None,
+                    ));
+                }
+                Ok(request.clone())
+            }
             _ => Err(QqlError::execution(
                 "QQL-BATCH-INVARIANT",
                 "query batch contained a non-query operation",
@@ -153,7 +165,19 @@ pub fn into_query_batch(
     let mut searches = Vec::with_capacity(operations.len());
     for operation in operations {
         match operation {
-            PlannedOperation::Query { request, .. } => searches.push(request),
+            PlannedOperation::Query {
+                request,
+                collection: op_col,
+            } => {
+                if op_col != collection {
+                    return Err(QqlError::execution(
+                        "QQL-BATCH-INVARIANT",
+                        "query batch contained multiple collections",
+                        None,
+                    ));
+                }
+                searches.push(request);
+            }
             _ => {
                 return Err(QqlError::execution(
                     "QQL-BATCH-INVARIANT",
@@ -415,13 +439,34 @@ mod tests {
     }
 
     #[test]
+    fn into_batches_reject_multiple_collections() {
+        let q1 = planned("QUERY [0.1, 0.2] FROM col_a LIMIT 1;");
+        let q2 = planned("QUERY [0.1, 0.2] FROM col_b LIMIT 1;");
+        assert!(into_query_batch(alloc::vec![q1.clone(), q2.clone()]).is_err());
+        assert!(build_query_batch(&[q1, q2]).is_err());
+
+        let m1 = planned("UPSERT INTO col_a VALUES {id: 1, vector: [0.1, 0.2]};");
+        let m2 = planned("UPSERT INTO col_b VALUES {id: 2, vector: [0.1, 0.2]};");
+        assert!(into_update_batch(alloc::vec![m1.clone(), m2.clone()]).is_err());
+        assert!(build_update_batch(&[m1, m2]).is_err());
+    }
+
+    #[test]
     fn update_operation_owned_roundtrip_preserves_variant_and_collection() {
         let ops = alloc::vec![
             planned("UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]};"),
+            planned("DELETE FROM docs WHERE id = 1;"),
+            planned("UPDATE docs SET PAYLOAD = {a: 1} WHERE id = 1;"),
+            planned("UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1;"),
+            planned("CLEAR PAYLOAD FROM docs WHERE id = 1;"),
             planned("DELETE PAYLOAD a FROM docs WHERE id = 1;"),
+            planned("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;"),
+            planned("DELETE VECTOR default FROM docs WHERE id = 1;"),
         ];
+        assert_eq!(ops.len(), 8);
         let (collection, labels, batch) = into_update_batch(ops).expect("must build");
         assert_eq!(labels.len(), batch.operations.len());
+        assert_eq!(labels.len(), 8);
         for (label, wire_op) in labels.iter().zip(batch.operations) {
             let rebuilt = crate::mutation::update_operation_into_planned(&collection, wire_op);
             assert_eq!(rebuilt.collection().unwrap(), collection);

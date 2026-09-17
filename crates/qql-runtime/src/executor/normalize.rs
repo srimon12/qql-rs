@@ -168,3 +168,146 @@ pub(crate) fn normalize_update_item(
         telemetry,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::SearchHit;
+    use crate::executor::telemetry::ServerTelemetry;
+    use qql_plan::PlanPointId;
+
+    fn hit(id: u64, score: f64) -> SearchHit {
+        SearchHit {
+            id: PlanPointId::Number(id),
+            score,
+            payload: None,
+            collection: None,
+            vector: None,
+        }
+    }
+
+    fn planned(sql: &str) -> PlannedOperation {
+        qql_plan::plan(&qql_core::parser::Parser::parse(sql).expect("parse")).expect("plan")
+    }
+
+    #[test]
+    fn normalize_query_item_matches_normalize_planned() {
+        let op = planned("QUERY [0.1, 0.2] FROM docs LIMIT 10;");
+        let telemetry = Some(ServerTelemetry {
+            time_s: Some(0.012),
+            usage: None,
+        });
+        let response = BackendResponse {
+            data: ExecData::Hits(vec![hit(1, 0.95), hit(2, 0.85)]),
+            telemetry: telemetry.clone(),
+        };
+
+        let planned_res = normalize_planned(&op, response.clone()).expect("normalize_planned");
+        let item_res = normalize_query_item(response).expect("normalize_query_item");
+
+        assert_eq!(item_res, planned_res);
+        assert!(item_res.ok);
+        assert_eq!(item_res.operation, "QUERY");
+        assert_eq!(item_res.message, "Found 2 hits");
+        assert_eq!(item_res.telemetry, telemetry);
+    }
+
+    #[test]
+    fn normalize_update_item_matches_normalize_planned_for_all_mutations() {
+        let cases = [
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]};",
+            "DELETE FROM docs WHERE id = 1;",
+            "UPDATE docs SET PAYLOAD = {a: 1} WHERE id = 1;",
+            "UPDATE docs SET PAYLOAD = {a: 1} OVERWRITE WHERE id = 1;",
+            "CLEAR PAYLOAD FROM docs WHERE id = 1;",
+            "DELETE PAYLOAD a FROM docs WHERE id = 1;",
+            "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;",
+            "DELETE VECTOR default FROM docs WHERE id = 1;",
+        ];
+
+        let telemetry = Some(ServerTelemetry {
+            time_s: Some(0.005),
+            usage: None,
+        });
+
+        for sql in cases {
+            let op = planned(sql);
+            let (_, wire_op) = qql_plan::mutation::planned_to_update_operation(&op)
+                .unwrap_or_else(|| panic!("failed to convert {sql} to UpdateOperation"));
+
+            let resp = BackendResponse {
+                data: ExecData::Mutation { affected: None },
+                telemetry: telemetry.clone(),
+            };
+
+            let from_planned =
+                normalize_planned(&op, resp.clone()).unwrap_or_else(|e| panic!("{sql}: {e}"));
+            let from_item =
+                normalize_update_item(&wire_op, resp).unwrap_or_else(|e| panic!("{sql} item: {e}"));
+
+            assert_eq!(from_planned, from_item, "mismatch for statement: {sql}");
+        }
+    }
+
+    #[test]
+    fn normalize_update_item_upsert_multi_point_count() {
+        let op = planned(
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]}, \
+                                    {id: 2, vector: [0.3, 0.4]}, \
+                                    {id: 3, vector: [0.5, 0.6]};",
+        );
+        let (_, wire_op) = qql_plan::mutation::planned_to_update_operation(&op).unwrap();
+        let resp = BackendResponse {
+            data: ExecData::Mutation { affected: None },
+            telemetry: None,
+        };
+
+        let from_planned = normalize_planned(&op, resp.clone()).unwrap();
+        let from_item = normalize_update_item(&wire_op, resp).unwrap();
+
+        assert_eq!(from_planned, from_item);
+        assert_eq!(from_item.message, "Upserted 3 point(s)");
+        assert_eq!(
+            from_item.data,
+            Some(ExecData::Mutation { affected: Some(3) })
+        );
+    }
+
+    #[test]
+    fn trim_group_offset_behavior() {
+        use qql_plan::PlanGroupId;
+        let make_groups = || {
+            vec![
+                GroupedSearchResult {
+                    group_id: PlanGroupId::Unsigned(1),
+                    hits: vec![hit(1, 0.9)],
+                },
+                GroupedSearchResult {
+                    group_id: PlanGroupId::Unsigned(2),
+                    hits: vec![hit(2, 0.8)],
+                },
+                GroupedSearchResult {
+                    group_id: PlanGroupId::Unsigned(3),
+                    hits: vec![hit(3, 0.7)],
+                },
+            ]
+        };
+
+        let mut groups = make_groups();
+        trim_group_offset(&mut groups, None);
+        assert_eq!(groups.len(), 3);
+
+        let mut groups = make_groups();
+        trim_group_offset(&mut groups, Some(1));
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].group_id, PlanGroupId::Unsigned(2));
+
+        let mut groups = make_groups();
+        trim_group_offset(&mut groups, Some(3));
+        assert_eq!(groups.len(), 0);
+
+        let mut groups = make_groups();
+        trim_group_offset(&mut groups, Some(10));
+        assert_eq!(groups.len(), 0);
+    }
+}

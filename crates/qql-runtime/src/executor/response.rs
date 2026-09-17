@@ -14,7 +14,7 @@ use super::telemetry::{PhaseTimings, ServerTelemetry, ServerUsage};
 
 /// Single-statement execution outcome: status, operation label, message, data,
 /// and optional server telemetry.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ExecResponse {
     /// Whether the statement succeeded.
     pub ok: bool,
