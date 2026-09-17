@@ -318,10 +318,10 @@ fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
         .build()
         .expect("test runtime");
     let report = runtime.block_on(async {
-        let raw = execute_stmt(&stmt, Some(options))
+        execute_stmt(&stmt, Some(options))
             .await
-            .expect("execute_stmt with embedUrl");
-        serde_json::from_str::<serde_json::Value>(&raw).expect("report is JSON")
+            .expect("execute_stmt with embedUrl")
+            .0
     });
 
     assert!(

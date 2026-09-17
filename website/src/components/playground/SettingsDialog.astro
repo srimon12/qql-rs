@@ -1,3 +1,10 @@
+---
+import {
+	DEFAULT_QDRANT_URL,
+	LIVE_EMBED_URL,
+} from "../../scripts/playground-types";
+---
+
 <dialog class="app-dialog" id="settings-dialog" aria-labelledby="settings-title" data-app-dialog>
   <form class="flex max-h-[90vh] flex-col" data-settings-form>
     <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-5 py-4">
@@ -5,6 +12,7 @@
         <p class="mono-label m-0">Runtime</p>
         <h2 id="settings-title" class="m-0 mt-1 text-lg font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">Connection and embeddings</h2>
         <p class="m-0 mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]">Stored only in this browser. QQL is sent directly to your configured Qdrant endpoint.</p>
+        <p class="m-0 mt-1 font-mono text-[0.6875rem] leading-5 text-[var(--sl-color-gray-3)]" data-connection-full></p>
       </div>
       <button class="app-icon-btn" type="button" data-close-dialog aria-label="Close settings">×</button>
     </header>
@@ -12,7 +20,7 @@
     <div class="grid gap-4 overflow-y-auto px-5 py-4">
       <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
         <span>Qdrant REST URL</span>
-        <input class="app-input" name="qdrantUrl" type="url" required placeholder="http://localhost:6333" />
+        <input class="app-input" name="qdrantUrl" type="url" required placeholder={DEFAULT_QDRANT_URL} />
       </label>
       <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
         <span>Qdrant API key <small class="font-normal text-[var(--sl-color-gray-3)]">optional</small></span>
@@ -30,7 +38,7 @@
         <legend class="px-1 text-xs font-medium text-[var(--sl-color-gray-2)]">HTTP embedder</legend>
         <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Endpoint</span>
-          <input class="app-input" name="embedUrl" type="url" placeholder="http://localhost:11434/v1/embeddings" />
+          <input class="app-input" name="embedUrl" type="url" placeholder={LIVE_EMBED_URL} />
         </label>
         <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Model</span>
@@ -50,10 +58,13 @@
     </div>
 
     <footer class="flex flex-col items-stretch justify-between gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-3 sm:flex-row sm:items-center">
-      <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
+      <div class="grid min-w-0 gap-1">
+        <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
+        <span class="max-w-md font-mono text-[0.6875rem] leading-5 text-[var(--sl-color-gray-3)]" data-embed-probe role="status"></span>
+      </div>
       <div class="flex shrink-0 justify-end gap-2">
         <button class="app-action app-action--lg" type="button" data-test-connection>Test connection</button>
-        <button class="app-action app-action--lg app-action--primary" type="submit">Save connection</button>
+        <button class="app-action app-action--lg app-action--primary" type="submit">Save &amp; reconnect</button>
       </div>
     </footer>
   </form>

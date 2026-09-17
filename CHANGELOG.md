@@ -9,39 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
-- **Dead dispatch paths**: Node JSON `execute_dispatch` / `explain_analyze_dispatch` twins (all call sites use the typed path); plan `Route::body_ref` (no callers); core `validate_no_unbound_formula` (superseded by the census).
-- **Duplicated walkers**: three param-validation traversals become one census; four embed batch skeletons become one generic batcher; four HTTP send stacks become one sender with thin wrappers.
-
-### Changed
-- **Single error mapper**: `RestProjectionError::to_qql_error` owns every projection arm; REST and WASM share codes and messages, and WASM errors carry `.code` through `qql_err_to_js`.
-- **Fail-closed drift guards**: embed apply walks consume the collect job list through a mismatch-erroring cursor; edge unsupported catalog test covers every variant.
-- **Strict transport parsing**: alias actions serialize from a real type; `collection_exists` goes through the typed envelope parser.
-
-### Removed
-- **Filter lowering panics**: `top_level_filter` / `lower_filter` and the mutation lowerers return `Result`; mistyped range bounds fail with `QQL-PLAN-RANGE-TYPE`, and `PlanFormula::from_expr` replaces the infallible `From`.
-
-### Changed
-- **DDL spans complete**: every DDL error carries the offending value's span; gRPC rejects non-double range bounds with `QQL-GRPC-RANGE-TYPE`; CLI scripts print one JSON shape on both modes with one lint-clean rule.
-- **Score path**: stack-buffer shortest-repr rounding with no heap alloc; cross-rerank sorts stored scores with NaN last.
-- **Envelope path**: one `execute_envelope` serves single ops and `call_body`; `execute_http` deleted; one method conversion shared.
-
-### Fixed
-- **Score precision contract**: `SearchHit.score` is now `f64`, rounded once at ingestion via `score_f64` — the custom `serialize_f32` widened through `pythonize` to `0.949999988079071` in `results` / DBAPI rows while `hits()` said `0.95`. Custom serializer and pyqql twin deleted; regression test pins it. Vectors stay `Vec<f32>` passthrough by deliberate asymmetry (scalars get compared, vectors don't).
-- **Range bounds typed**: `RangeParams` uses `PlanRangeBound` (`Int` / `Float` / `DateTime` / `Text`); bool / null / array / object RHS to range operators is a parse error (fail-closed).
-- **CLI exit contract**: `qql run` exits non-zero when any script statement fails, Continue mode included.
-- **P0 correctness fail-closed**: curl-converter unsupported flags / OpenAPI variants return `ConvertError` instead of panicking; `SCROLL AFTER` max / UUID-max rejected; `compile_statement` surfaces `SerializeFailed`; `CROSS RERANK` on non-`Hits` envelopes errors; `usize` overflow guarded; `MATCH EXCEPT` contract case added.
-- **DDL / edge fail-closed**: `SHARD` placeholder binding for DDL (`CreateShardKey` / `DropShardKey` / `CreateCollection` shard keys); edge rejects `timeout` / `consistency` / `wait` with typed codes (`QQL-EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); quota span threading; `qql-wasm` workspace deps with dead non-`wasm32` stubs dropped.
-
 ### Added
+- **Exact 64-bit integers in the JS SDKs**: point IDs, counts, and integer payloads cross the WASM (`qql-wasm`) and Node (`nqql`, `nqql-edge`) boundaries losslessly. Values a JS `Number` holds exactly arrive as numbers; anything larger (Qdrant snowflake IDs like `1479834607549681654`) arrives as `BigInt` — never silently rounded. `BigInt` params and scroll cursors round-trip exactly, and `report.count()` narrows counts to `Number`. Integer-valued `number` params past 2⁵³−1 fail closed naming `BigInt` instead of binding a rounded value.
+- **Playground reads like an IDE now**: hit cards (rank, copyable ID, score bar, payload table, in-place raw view), syntax-highlighted Plan/Wire/AST/Explain/Tokens/Metrics output, human error cards with one-click fixes (a missing `USING` applies straight from your live collection topology), live collection presets pulled from your Qdrant, an embedder probe with a `dim ✓` chip on Test-connection, a wrap toggle, and a 3+More tab bar. Connection defaults target stock local Qdrant plus an LM Studio OpenAI-compatible embedder, and saved settings are never rewritten by the app. Underneath, the 2500-line playground script is now 23 focused modules — same behavior, room to grow.
+- **Deploy header guard**: per-section Content-Security-Policy (`/`, `/docs/*`, `/playground/*`) so the live playground can reach user-configured Qdrant and embedder origins; `pnpm check` now runs `scripts/check-headers.mjs`, which fails if policies ever stack again.
 - **SDK typed paths**: Node `execute` / `explain_analyze` via `ExecOptionsInput` + `plan_value_params` (`Float32Array`-safe) with edge parity; WASM JSON errors with `.code`, `injectFilter` alias.
 - **Full BM25 text pipeline**: `qql_embed::Bm25TextConfig` mirrors Qdrant's `Bm25Config` with the same defaults — 30 languages (name/alias, fail-closed) driving stopwords/stemmer, `word`/`whitespace`/`prefix` tokenizers, ASCII folding, custom stopwords plus mergeable language lists, stemmer override, length limits. Thirty stopword lists and the Lucene fold table ported from Qdrant's segment crate; TF formula uses the fused op order and `k1 = 0` validates (binary weighting, like Qdrant). `multilingual` parses but fails closed (no `charabia` dep in lean core). Every surface exposes the knobs (Rust `HttpEmbedderOptions`/`QqlConfig`/edge options, Python/Node kwargs + dicts, WASM `setBm25Text`, CLI flags/env/config); edge forwards to Qdrant's real engine and a cross-test asserts identical vectors. `Executor::estimate_bm25_avg_len` measures corpus-true `avg_len` from a field sample with the writer's own field rules (`QQL-VALIDATION-COLLECTION` / `QQL-VALIDATION-FIELD`).
 - **SDK parity**: `ExecutionReport` `collections()` / `collection()` / `shard_keys()` / `quotas()`; `ScoredPoint.get` attribute-first; native-hit `groups()`; `withoutPayload()`; vector types; Python `Stmt.bound`; Node `Stmt.explain()`; Python edge `scroll_cursor`; WASM `scrollStream`; `HttpEmbedder` validation mirror; CLI script scoped params; READMEs.
 
+### Fixed
+- **Geosmart crash gone**: vector search over collections with snowflake u64 IDs no longer fails with `can't be represented as a JavaScript number` — IDs arrive exact.
+- **Node silent rounding gone**: reports used to hop through a JSON string, so `1479834607549681654` came back `…1700`. The hop is removed; Node now honors the same exactness contract as WASM.
+- **Live-site connection block gone**: stacked Content-Security-Policy headers vetoed the playground's Qdrant/embedder fetches in production despite the playground rule allowing them. One policy per section now.
+- **Score precision contract**: `SearchHit.score` is now `f64`, rounded once at ingestion via `score_f64` — the custom `serialize_f32` widened through `pythonize` to `0.949999988079071` in `results` / DBAPI rows while `hits()` said `0.95`. Custom serializer and pyqql twin deleted; regression test pins it. Cross-rerank sorts stored scores with NaN last. Vectors stay `Vec<f32>` passthrough by deliberate asymmetry (scalars get compared, vectors don't).
+- **Range bounds typed**: `RangeParams` uses `PlanRangeBound` (`Int` / `Float` / `DateTime` / `Text`); bool / null / array / object RHS to range operators is a parse error (fail-closed).
+- **CLI exit contract**: `qql run` exits non-zero when any script statement fails, Continue mode included.
+- **Fail-closed correctness**: converter unsupported flags/OpenAPI variants return `ConvertError` instead of panicking; `SCROLL AFTER` max / UUID-max rejected; `compile_statement` surfaces `SerializeFailed`; `CROSS RERANK` on non-`Hits` envelopes errors; `usize` overflow guarded; filter lowering and mutation lowerers return `Result` (`QQL-PLAN-RANGE-TYPE` on mistyped range bounds); SHARD placeholder binding for DDL; edge rejects `timeout` / `consistency` / `wait` with typed codes; quota span threading.
+
 ### Changed
-- **Perf**: batched sparse / multi / image embeddings (single-walk query jobs, per-model batching); typed REST single-serialize/deserialize; owned response parses; typed gRPC responses; `Arc` schema cache + single metadata probe; prepared borrow-probe; batch retry by reference; upsert single-pass schema + topology guard; scroll validator wiring; `ddl_rest` steps.
-- **Design consistency**: single `plan_and_project` planner core (`try_route` / `compile_statement` thin mappers); `Route::body_ref` zero-clone accessor; full `Span` threading into plan validation (`collection_span` / `field_span` stored on AST, serde-skipped); `QQL-CONFIG` grandfathered, mock-only `QQL-EXECUTION` stays out of contract; top offender file splits (`semantic`, `resolve`, `config_parsers`, `validate`, `rest`, `embedder`, `lint`); prepared-template reuse proven by test instead of removed.
-- **Docs & CI**: `AGENTS.md` truth pass; skill references; `error-codes.mdoc` new codes (`BACKEND-READ`, `TRANSPORT-BUILD` / `REQUEST`, `CLI-IO`, `PARSE-DELIMITER`, `PLAN-SCROLL-AFTER`, `EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); editor WASM bundle rebuilt; script-params test moved to the scoped-binding contract.
+- **Perf**: batched sparse / multi / image embeddings (single-walk query jobs, per-model batching); typed REST single-serialize/deserialize; owned response parses; typed gRPC responses; `Arc` schema cache + single metadata probe; prepared borrow-probe; batch retry by reference; upsert single-pass schema + topology guard; scroll validator wiring; Node reports skip the JSON-string hop.
+- **DDL spans complete**: every DDL error carries the offending value's span; gRPC rejects non-double range bounds with `QQL-GRPC-RANGE-TYPE`; CLI scripts print one JSON shape on both modes.
+- **Internals**: single `plan_and_project` planner core; one `RestProjectionError::to_qql_error` mapper shared by REST and WASM; embed apply walks consume the collect job list through a mismatch-erroring cursor; alias actions serialize from a real type; `collection_exists` through the typed envelope parser; top offender file splits. No user-visible behavior change.
+- **Docs & CI**: `AGENTS.md` truth pass; skill references (incl. the JS BigInt contract); `error-codes.mdoc` new codes (`BACKEND-READ`, `TRANSPORT-BUILD` / `REQUEST`, `CLI-IO`, `PARSE-DELIMITER`, `PLAN-SCROLL-AFTER`, `EDGE-UNSUPPORTED-CROSS-RERANK` / `WAIT`); Node/WASM SDK docs cover BigInt IDs; header guard in `pnpm check`; editor WASM bundle rebuilt.
 
 ## [0.4.0] - 2026-09-12
 

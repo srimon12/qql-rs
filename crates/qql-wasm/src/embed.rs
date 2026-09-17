@@ -53,7 +53,7 @@ impl Embedder for Client {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        self.bm25_text_config().pipeline().embed_query(text)
+        self.bm25.pipeline().embed_query(text)
     }
 
     fn bm25_params(&self) -> qql_embed::Bm25Params {
@@ -72,7 +72,7 @@ impl Embedder for Client {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        self.bm25_text_config().pipeline().embed_document(text)
+        self.bm25.pipeline().embed_document(text)
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {

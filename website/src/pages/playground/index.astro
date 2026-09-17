@@ -67,6 +67,11 @@ const presets = readdirSync(validRoot)
 			description,
 			category: categoryFor(id),
 			query,
+			preview:
+				query
+					.split("\n")
+					.map((line) => line.trim())
+					.find((line) => line && !line.startsWith("--")) ?? "",
 			statements: expected.statements?.length ?? 1,
 		};
 	});
@@ -74,9 +79,9 @@ const presets = readdirSync(validRoot)
 const categories = [
 	...new Set(presets.map((preset) => preset.category)),
 ].sort();
-// Small canned landing query with explicit vectors: it analyzes offline with
-// zero config, needs no embedder, and needs no localhost Qdrant.
-const verifiedQqlDefault = String.raw`QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;`;
+// First Run targets a real live collection (explicit USING, no guessing):
+// the browser/HTTP embedder resolves the TEXT query, Qdrant must be up.
+const verifiedQqlDefault = String.raw`QUERY 'cozy apartment near Mitte' FROM geosmart_berlin_stays USING dense AS DENSE LIMIT 5;`;
 const landingQuery = verifiedQqlDefault;
 const landingLabel = "Quick demo";
 const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
@@ -162,53 +167,47 @@ const pageDescription =
     >
       <h1 class="sr-only">QQL Playground</h1>
 
-      {/* ── Status bar: 28px, single role=status source — telemetry first, current detail second ── */}
+      {/* ── EnvBar 40px: environment truth only — connection · engine · embeddings ── */}
       <div
-        class="app-statusbar flex min-h-7 min-w-0 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 overflow-hidden border-b border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]"
+        class="flex h-10 min-w-0 shrink-0 items-center gap-3 overflow-hidden border-b border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.6875rem] whitespace-nowrap text-[var(--sl-color-gray-3)]"
         data-status-panel
         role="status"
         aria-live="polite"
         aria-label="Backend status"
       >
-        <span class="flex min-w-0 items-center gap-1.5 lg:shrink-0">
+        <span class="flex min-w-0 items-center gap-1.5">
           <span
             class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
             data-connected-dot
             aria-hidden="true"></span>
-          <span class="min-w-0 truncate">
-            <span class="hidden md:inline">endpoint </span>
-            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong>
-          </span>
+          <span class="hidden md:inline">endpoint </span>
+          <strong class="max-w-[220px] truncate font-medium text-[var(--sl-color-gray-1)]" data-status-endpoint>Not checked yet</strong>
         </span>
-        <button
-          class="app-action hidden min-h-6 shrink-0 gap-1.5 px-1.5 sm:inline-flex"
-          type="button"
-          data-open-settings
-          title="Edit the Qdrant URL and embeddings"
-        >
-          <span class="app-chip__label">Connection</span>
-          <span class="max-w-40 truncate" data-connection-value>localhost:6333 · MiniLM</span>
-        </button>
-        <span class="hidden min-w-0 items-center gap-1.5 md:flex lg:shrink-0">
+        <span class="flex shrink-0 items-center gap-1.5">
           <span
             class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)] transition-colors"
             data-runtime-dot
             aria-hidden="true"></span>
-          <span class="min-w-0 truncate">
-            <span class="hidden xl:inline">engine </span>
-            <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-wasm>Loading WASM</strong>
-          </span>
+          <strong class="hidden font-medium text-[var(--sl-color-gray-1)] sm:inline" data-status-wasm>Loading WASM</strong>
         </span>
-        <span class="hidden min-w-0 truncate lg:inline">
-          <span class="hidden xl:inline">embeddings </span>
-          <strong class="font-medium text-[var(--sl-color-gray-1)]" data-status-embed>MiniLM (browser)</strong>
+        <span class="app-chip hidden min-w-0 sm:inline-flex" title="Embedding provider">
+          <span class="app-chip__label">Embed</span>
+          <strong class="app-chip__value max-w-44 truncate font-medium" data-status-embed>MiniLM (browser)</strong>
+          <strong
+            class="ml-1 shrink-0 rounded-full border border-[var(--sl-color-gray-5)] px-1.5 py-px font-medium"
+            data-embed-dim-chip
+            hidden></strong>
         </span>
-        <span class="hidden min-w-0 truncate xl:inline">
-          example <strong class="font-medium text-[var(--sl-color-gray-1)]" data-active-fixture>{landingLabel}</strong>
-        </span>
+        <button
+          class="app-action shrink-0 px-1.5 sm:hidden"
+          type="button"
+          data-open-settings
+          aria-label="Connection settings"
+          title="Connection settings"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+        </button>
         <span class="sr-only" data-runtime-status>Loading current WASM…</span>
-        <span class="sr-only" data-connected-label>Connected: not checked</span>
-        <span class="hidden min-w-0 flex-1 truncate sm:block" data-status-detail hidden></span>
         <a
           class="app-action ml-auto hidden shrink-0 px-1.5 sm:inline-flex"
           href="/docs/"
@@ -227,7 +226,7 @@ const pageDescription =
           data-default-query={landingQuery}
           data-workspace
         >
-          <EditorPanel />
+          <EditorPanel exampleLabel={landingLabel} />
           <div
             aria-label="Resize editor and inspector panels"
             aria-orientation="vertical"

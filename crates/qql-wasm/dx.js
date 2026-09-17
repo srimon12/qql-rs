@@ -171,8 +171,10 @@ export class ExecutionReport {
     const res = this.#resultAt(stmt);
     const data = res?.data;
     // Count / mutation payloads are `{count: n}`; status-only mutations
-    // serialize `null`.
+    // serialize `null`. Counts are u64 so they cross as BigInt — safe to
+    // narrow here, collection sizes never approach MAX_SAFE_INTEGER.
     if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+    if (typeof data.count === 'bigint') return Number(data.count);
     return typeof data.count === 'number' ? data.count : 0;
   }
 
@@ -212,8 +214,9 @@ export class ExecutionReport {
   }
 
   /**
-   * `SHOW SHARD KEYS` keys (`string | number`) for statement `stmt`
-   * (mirrors pyqql `ExecutionReport.shard_keys()`).
+   * `SHOW SHARD KEYS` keys (`string | number | bigint`; numeric keys above
+   * MAX_SAFE_INTEGER cross as BigInt) for statement `stmt` (mirrors pyqql
+   * `ExecutionReport.shard_keys()`).
    */
   shardKeys(stmt = 0) {
     const res = this.#resultAt(stmt);

@@ -162,8 +162,14 @@ console.log(pointReport.groups(-1)); // [{ id: <group key>, hits: [...] }, ...]
 const showReport = await client.execute("SHOW COLLECTIONS");
 console.log(showReport.collections()); // [name, ...]
 console.log(showReport.collection());  // SHOW COLLECTION metadata object, else null
-console.log(showReport.shardKeys());   // SHOW SHARD KEYS keys (string | number)
+console.log(showReport.shardKeys());   // SHOW SHARD KEYS keys (string | number | bigint)
 console.log(showReport.quotas());      // quota config object, else null
+
+// Large point IDs arrive as `BigInt`, never rounded: Qdrant snowflake IDs
+// (e.g. `1479834607549681654`) exceed `Number.MAX_SAFE_INTEGER`, so integers
+// a JS `Number` holds exactly come back as numbers and anything larger as
+// `BigInt`. Pass BigInts straight back — params and scroll cursors round-trip
+// exactly. `report.count()` narrows counts to `Number`.
 
 // 3. Per-result server telemetry (Qdrant time plus hardware and inference usage
 // when reported; null where the route reports nothing)

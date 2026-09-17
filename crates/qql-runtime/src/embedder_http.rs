@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "rest")]
 use qql_core::error::QqlError;
 #[cfg(feature = "rest")]
-use qql_embed::bm25_text::Bm25TextConfig;
+use qql_embed::bm25_text::{Bm25Pipeline, Bm25TextConfig};
 #[cfg(feature = "rest")]
 use qql_embed::embedder::Embedder;
 use qql_embed::sparse::{Bm25Params, SparseVector};
@@ -77,6 +77,7 @@ pub struct HttpEmbedder {
     rerank_api_key: Option<String>,
     rerank_model: Option<String>,
     bm25_text: Bm25TextConfig,
+    bm25_pipeline: Bm25Pipeline,
     client: Client,
 }
 
@@ -125,6 +126,7 @@ impl HttpEmbedder {
         }
 
         let bm25_text = opts.bm25_text_config()?;
+        let bm25_pipeline = bm25_text.pipeline();
 
         let client = Client::builder().build().map_err(|e| {
             QqlError::execution(
@@ -151,6 +153,7 @@ impl HttpEmbedder {
             rerank_api_key: opts.rerank_api_key,
             rerank_model: opts.rerank_model.filter(|s| !s.trim().is_empty()),
             bm25_text,
+            bm25_pipeline,
             client,
         })
     }
@@ -620,7 +623,22 @@ impl Embedder for HttpEmbedder {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        self.bm25_text.pipeline().embed_query(text)
+        self.bm25_pipeline.embed_query(text)
+    }
+
+    async fn embed_sparse_query_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.bm25_pipeline.embed_query(text)?);
+        }
+        Ok(results)
     }
 
     fn bm25_params(&self) -> Bm25Params {
@@ -639,7 +657,22 @@ impl Embedder for HttpEmbedder {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        self.bm25_text.pipeline().embed_document(text)
+        self.bm25_pipeline.embed_document(text)
+    }
+
+    async fn embed_sparse_document_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.bm25_pipeline.embed_document(text)?);
+        }
+        Ok(results)
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {

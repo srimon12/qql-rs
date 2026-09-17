@@ -44,6 +44,27 @@ export interface PlaygroundMetrics {
 	embedProvider: EmbedProvider;
 }
 
+/** Structured execution failure: `buildError`-style parsing of the WASM throw. */
+export interface PlaygroundFailure {
+	/** Human sentence shown on the card and in the toast. */
+	message: string;
+	/** Machine code (`QQL-MISSING-USING`, …) — null when unparseable. */
+	code: string | null;
+	kind: string | null;
+	span: { start: number; end: number } | null;
+	fields: Record<string, string>;
+	/** Raw throw text for the collapsible details. */
+	raw: string;
+}
+
+/** Live collection vector topology for USING suggestions and presets. */
+export interface LiveCollectionTopology {
+	name: string;
+	dense: string[];
+	sparse: string[];
+	multi: string[];
+}
+
 export interface PlaygroundAnalysis {
 	source: string;
 	result: AnalysisResult;
@@ -55,20 +76,28 @@ export interface PlaygroundAnalysis {
 export interface PlaygroundState {
 	analysis: PlaygroundAnalysis | null;
 	response: ExecutionReport | null;
-	executionError: string | null;
+	executionError: PlaygroundFailure | null;
 	selectedStatement: number;
 	inspectorTab: InspectorTab;
 	exportLanguage: ExportLanguage;
 	metrics: PlaygroundMetrics | null;
 }
 
+/** Documented live environment: LM Studio OpenAI-compatible embeddings. */
+export const LIVE_EMBED_URL = "http://localhost:1234/v1/embeddings";
+export const LIVE_EMBED_MODEL = "text-embedding-bge-small-en-v1.5";
+export const LIVE_EMBED_DIM = 384;
+
+/** Default Qdrant endpoint for fresh installs (stock local Qdrant). */
+export const DEFAULT_QDRANT_URL = "http://localhost:6333";
+
 export const DEFAULT_SETTINGS: PlaygroundSettings = {
-	qdrantUrl: "http://localhost:6333",
+	qdrantUrl: DEFAULT_QDRANT_URL,
 	qdrantKey: "",
-	embedProvider: "browser",
-	embedUrl: "http://localhost:11434/v1/embeddings",
-	embedModel: "nomic-embed-text",
-	embedDim: 768,
+	embedProvider: "http",
+	embedUrl: LIVE_EMBED_URL,
+	embedModel: LIVE_EMBED_MODEL,
+	embedDim: LIVE_EMBED_DIM,
 	embedKey: "",
 };
 

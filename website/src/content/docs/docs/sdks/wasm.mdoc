@@ -377,6 +377,28 @@ const analysis = await client.explainAnalyze("QUERY 'x' FROM docs USING dense LI
 console.log(analysis.plan, analysis.phases, analysis.server_time_s, analysis.usage);
 ```
 
+### Large point IDs arrive as `BigInt`
+
+Qdrant point IDs are 64-bit integers and real collections use the full range
+(snowflake IDs like `1479834607549681654` exceed `Number.MAX_SAFE_INTEGER`).
+The binding keeps every integer exact: values a JS `Number` holds exactly
+(counts, small IDs, small payloads) arrive as numbers, anything larger arrives
+as a `BigInt` — never a silently rounded `Number`:
+
+```javascript
+const hits = await executeHits(client, "QUERY 'x' FROM docs USING dense LIMIT 5");
+console.log(typeof hits[0].id); // 'number' for small IDs, 'bigint' for snowflakes
+
+// BigInts round-trip exactly: pass them straight back as params or cursors.
+await client.execute("SCROLL FROM docs AFTER :cursor LIMIT 100", {
+  params: { cursor: hits.at(-1).id },
+});
+```
+
+`report.count()` narrows counts to `Number` (exact in practice). For integers
+above 2⁵³−1 passed *in* as params, use `BigInt` — unsafe `number`s fail
+closed instead of rounding.
+
 ## Memory
 
 Every `Client` and `Stmt` owns WASM allocations. Call `free()` when a handle is
