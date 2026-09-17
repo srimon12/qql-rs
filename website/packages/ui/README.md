@@ -5,6 +5,7 @@ The QQL site's UI package. It owns:
 - **`src/styles/styles.css`** — the single authored stylesheet for the landing page, the playground, and the Starlight docs (tokens, primitives, third-party overrides). Loaded by `website/src/styles/global.css`; nothing else is allowed to add CSS.
 - **`src/styles/ec-theme.css`** — the vendored expressive-code theme, excluded from the budget below. Do not edit by hand; re-vendor when the expressive-code major changes.
 - **Astro components** — `BrandMark`, `ThemeToggle`, `DocsHeader`, `DocsFooter`, `QqlExample`, `Terminal`, `TechBadge`, `GlassCard`, `ApiField`. These render docs and site chrome; the site wires them through Starlight component overrides and `markdoc.config.mjs`.
+- **`src/virtual-starlight.d.ts`** — ambient types for the Starlight virtual modules the docs chrome renders through (`virtual:starlight/components/*`, `virtual:starlight/user-config`). They keep the components override-aware: the virtual modules resolve to the consumer's override when one exists. Delete the file once `@astrojs/starlight` publishes its own declarations again (`files: ["dist"]` currently drops them).
 - **`src/types.ts`** — the config shapes for the docs header and footer.
 
 ## The 500-line budget

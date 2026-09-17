@@ -31,43 +31,18 @@ const HEADING_TAGS: Record<string, number> = {
 	H6: 6,
 };
 
-/** Clipboard write with a legacy fallback for non-secure or restricted contexts. */
+/**
+ * Clipboard write for the copy buttons. The async Clipboard API needs a
+ * secure context (HTTPS or localhost) and permission; when the browser
+ * denies it, the caller flashes the failed state.
+ */
 export async function writeClipboard(text: string): Promise<boolean> {
 	try {
 		await navigator.clipboard.writeText(text);
 		return true;
 	} catch {
-		return legacyWrite(text);
+		return false;
 	}
-}
-
-function legacyWrite(text: string): boolean {
-	const scratch = document.createElement("pre");
-	Object.assign(scratch.style, {
-		position: "fixed",
-		top: "0",
-		left: "0",
-		opacity: "0",
-		pointerEvents: "none",
-	});
-	scratch.setAttribute("aria-hidden", "true");
-	scratch.textContent = text;
-	document.body.append(scratch);
-	const selection = window.getSelection();
-	const range = document.createRange();
-	range.selectNodeContents(scratch);
-	let ok = false;
-	if (selection) {
-		selection.removeAllRanges();
-		selection.addRange(range);
-		try {
-			ok = document.execCommand("copy");
-		} finally {
-			selection.removeAllRanges();
-		}
-	}
-	scratch.remove();
-	return ok;
 }
 
 /**
