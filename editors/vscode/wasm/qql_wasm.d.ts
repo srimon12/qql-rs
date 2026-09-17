@@ -111,12 +111,16 @@ export class Client {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Parse and compile one statement without executing it. Alias for `compile`.
+     * Close the client (no-op: browser `fetch` holds no connections).
+     *
+     * Exists for cross-SDK portability so generic `client.close()` cleanup
+     * code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
      */
-    compileQuery(query: string, params?: any | null): CompiledRoute;
+    close(): void;
     /**
      * Parse and compile one statement without executing it. Optional
-     * `params` bind before parsing (same shape as the module-level `bind`).
+     * `params` bind before parsing (same shape as the module-level `bind`
+     * and `compileQuery`).
      */
     compile(query: string, params?: any | null): CompiledRoute;
     /**
@@ -201,10 +205,6 @@ export class Client {
      */
     setHttpReranker(endpoint: string, model: string, api_key?: string | null): void;
     /**
-     * Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
-     */
-    setRemoteEmbedder(endpoint: string, model: string, dimension: number, api_key?: string | null): void;
-    /**
      * Set Qdrant 1.19 read affinity. Pins reads to a stable replica via the
      * `X-Qdrant-Route-Affinity` header. Pass `null`/`""` to clear.
      */
@@ -218,6 +218,11 @@ export class Client {
      * multivector form — the same inputs as `bind`.
      */
     upsertMany(collection: string, rows: any, options?: any | null): Promise<ExecutionReport>;
+    /**
+     * Whether the client is closed (always `false`: [`close`](Self::close)
+     * is a no-op).
+     */
+    readonly isClosed: boolean;
     /**
      * Current read-affinity key, or `null` when unset.
      */
@@ -233,8 +238,9 @@ export class Stmt {
     bind(params?: any | null): Stmt;
     /**
      * Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+     * Optionally accepts `params` to bind before compiling.
      */
-    compileRouteBytes(): Uint8Array;
+    compileRouteBytes(params?: any | null): Uint8Array;
     /**
      * Compile this Stmt AST directly into a Qdrant REST route object.
      * Optionally accepts `params` to bind before compiling.
@@ -253,9 +259,17 @@ export class Stmt {
      */
     constructor(input: string);
     /**
-     * Serialise the AST to a JSON string.
+     * `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).
+     *
+     * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+     * use [`to_json`](Self::to_json) for exact text.
      */
-    toJSON(): string;
+    toJSON(): any;
+    /**
+     * Serialise the AST to an exact-text JSON string for
+     * transport/forwarding without JS parsing.
+     */
+    toJson(): string;
     /**
      * Serialise the AST to a JS object.
      */
@@ -293,19 +307,16 @@ export function analyze(input: string): AnalysisResult;
 export function bind(query: string, params?: Record<string, unknown> | unknown[], options?: { truncateVectors?: boolean }): string;
 
 /**
+ * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
+ * Optionally accepts `params` to bind before compiling.
+ */
+export function compileBytes(query: string, params?: any | null): Uint8Array;
+
+/**
  * Compile one QQL statement into a JavaScript route object. Optional
  * `params` (object for `:name`, array for `?`) bind before parsing —
  * parity with `Client.compile(query, params)` on the Python and Node SDKs.
- */
-export function compile(query: string, params?: any | null): CompiledRoute;
-
-/**
- * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
- */
-export function compileBytes(query: string): Uint8Array;
-
-/**
- * Compile one QQL statement into a JavaScript route object. Alias for `compile`.
+ * (`compileQuery` is the only module-level name — JS convention.)
  */
 export function compileQuery(query: string, params?: any | null): CompiledRoute;
 
@@ -319,12 +330,10 @@ export function explainBytes(query: string): Uint8Array;
 export function formatQuery(input: string): string;
 
 /**
- * camelCase alias for [`inject_filter`] (JS convention, parity with
- * `nqql`'s `injectFilter`). The snake_case export keeps working.
+ * Inject a WHERE filter into a query string (`injectFilter` is the only
+ * export — JS convention is camelCase).
  */
 export function injectFilter(query: string, field: string, op: string, value: any): any;
-
-export function inject_filter(query: string, field: string, op: string, value: any): any;
 
 export function isValid(input: string): boolean;
 
