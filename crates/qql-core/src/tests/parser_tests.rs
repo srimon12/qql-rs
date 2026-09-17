@@ -233,10 +233,67 @@ fn formula_max_min_acosh_functions() {
         panic!("expected nested MIN, got {:?}", args[1])
     };
     assert_eq!(args.len(), 2);
-    let FormulaExpr::Acosh { x } = right.as_ref() else {
+    let FormulaExpr::Acosh { x, .. } = right.as_ref() else {
         panic!("expected ACOSH, got {right:?}")
     };
     assert!(matches!(x.as_ref(), FormulaExpr::Variable { name } if name == "rank"));
+}
+
+#[test]
+fn formula_domain_default_parsing() {
+    let s = Parser::parse(
+        "QUERY FORMULA ACOSH(rank) [DEFAULT = 0.0] + SQRT(score) [DEFAULT = 0.0] FROM docs;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let QueryExpr::Formula { expression, .. } = &q.expression else {
+        panic!()
+    };
+    let FormulaExpr::Sum { left, right } = expression.as_ref() else {
+        panic!()
+    };
+    let FormulaExpr::Acosh { domain_default, .. } = left.as_ref() else {
+        panic!()
+    };
+    assert_eq!(*domain_default, Some(0.0));
+    let FormulaExpr::Sqrt { domain_default, .. } = right.as_ref() else {
+        panic!()
+    };
+    assert_eq!(*domain_default, Some(0.0));
+
+    let s2 =
+        Parser::parse("QUERY FORMULA LOG(x) [DEFAULT = 1.0] + LN(y) [DEFAULT = 2.0] FROM docs;")
+            .unwrap();
+    let Stmt::Query(q2) = s2 else { panic!() };
+    let QueryExpr::Formula {
+        expression: expr2, ..
+    } = &q2.expression
+    else {
+        panic!()
+    };
+    let FormulaExpr::Sum {
+        left: l2,
+        right: r2,
+    } = expr2.as_ref()
+    else {
+        panic!()
+    };
+    let FormulaExpr::Log {
+        domain_default: d_log,
+        ..
+    } = l2.as_ref()
+    else {
+        panic!()
+    };
+    assert_eq!(*d_log, Some(1.0));
+    let FormulaExpr::Ln {
+        domain_default: d_ln,
+        ..
+    } = r2.as_ref()
+    else {
+        panic!()
+    };
+    assert_eq!(*d_ln, Some(2.0));
 }
 
 #[test]

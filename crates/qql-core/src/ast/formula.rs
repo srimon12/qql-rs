@@ -57,30 +57,38 @@ pub enum FormulaExpr {
         /// Argument.
         x: Box<FormulaExpr>,
     },
-    /// `SQRT(x)`.
+    /// `SQRT(x)` with optional `[DEFAULT n]` negative fallback.
     Sqrt {
         /// Argument.
         x: Box<FormulaExpr>,
+        /// Value substituted or clamped when x < 0.
+        domain_default: Option<f64>,
     },
-    /// `LOG(x)` — base-10 logarithm.
+    /// `LOG(x)` — base-10 logarithm with optional `[DEFAULT n]` non-positive fallback.
     Log {
         /// Argument.
         x: Box<FormulaExpr>,
+        /// Value substituted or clamped when x <= 0.
+        domain_default: Option<f64>,
     },
-    /// `LN(x)` — natural logarithm.
+    /// `LN(x)` — natural logarithm with optional `[DEFAULT n]` non-positive fallback.
     Ln {
         /// Argument.
         x: Box<FormulaExpr>,
+        /// Value substituted or clamped when x <= 0.
+        domain_default: Option<f64>,
     },
     /// `EXP(x)` — e raised to `x`.
     Exp {
         /// Argument.
         x: Box<FormulaExpr>,
     },
-    /// `ACOSH(x)` — inverse hyperbolic cosine.
+    /// `ACOSH(x)` — inverse hyperbolic cosine with optional `[DEFAULT n]` fallback.
     Acosh {
         /// Argument.
         x: Box<FormulaExpr>,
+        /// Value substituted or clamped when x < 1.
+        domain_default: Option<f64>,
     },
     /// `POW(base, exponent)`.
     Pow {

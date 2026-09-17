@@ -389,11 +389,11 @@ impl Census {
             }
             FormulaExpr::Neg { operand }
             | FormulaExpr::Abs { x: operand }
-            | FormulaExpr::Sqrt { x: operand }
-            | FormulaExpr::Log { x: operand }
-            | FormulaExpr::Ln { x: operand }
+            | FormulaExpr::Sqrt { x: operand, .. }
+            | FormulaExpr::Log { x: operand, .. }
+            | FormulaExpr::Ln { x: operand, .. }
             | FormulaExpr::Exp { x: operand }
-            | FormulaExpr::Acosh { x: operand } => self.formula(operand),
+            | FormulaExpr::Acosh { x: operand, .. } => self.formula(operand),
             FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
                 for arg in args {
                     self.formula(arg);

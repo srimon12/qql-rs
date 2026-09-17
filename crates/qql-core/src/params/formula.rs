@@ -43,11 +43,11 @@ where
         }
         FormulaExpr::Neg { operand }
         | FormulaExpr::Abs { x: operand }
-        | FormulaExpr::Sqrt { x: operand }
-        | FormulaExpr::Log { x: operand }
-        | FormulaExpr::Ln { x: operand }
+        | FormulaExpr::Sqrt { x: operand, .. }
+        | FormulaExpr::Log { x: operand, .. }
+        | FormulaExpr::Ln { x: operand, .. }
         | FormulaExpr::Exp { x: operand }
-        | FormulaExpr::Acosh { x: operand } => {
+        | FormulaExpr::Acosh { x: operand, .. } => {
             bind_formula(operand, lookup, positional, bind_filter_fn)?;
         }
         FormulaExpr::Max { args } | FormulaExpr::Min { args } => {

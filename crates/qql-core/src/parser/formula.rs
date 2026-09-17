@@ -182,21 +182,7 @@ fn parse_formula_infix_expression(
             right: Box::new(right),
         }),
         TokenKind::Slash => {
-            let mut by_zero_default = None;
-            if p.peek()?.kind == TokenKind::Lbracket && p.index + 1 < p.tokens.len() {
-                let next_tok = &p.tokens[p.index + 1];
-                if next_tok.kind == TokenKind::Default
-                    || (next_tok.is_keyword_or_identifier()
-                        && ascii_equal(next_tok.text, "DEFAULT"))
-                {
-                    p.advance()?;
-                    p.advance()?;
-                    p.expect(TokenKind::Equals)?;
-                    let val = p.parse_numeric_literal()?;
-                    by_zero_default = Some(val);
-                    p.expect(TokenKind::Rbracket)?;
-                }
-            }
+            let by_zero_default = parse_optional_bracket_default(p)?;
             Ok(FormulaExpr::Div {
                 left: Box::new(left),
                 right: Box::new(right),
@@ -231,6 +217,23 @@ fn parse_formula_case_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, 
         then_: Box::new(then_expr),
         else_: Box::new(else_expr),
     })
+}
+
+fn parse_optional_bracket_default(p: &mut AstLowerer<'_>) -> Result<Option<f64>, QqlError> {
+    if p.peek()?.kind == TokenKind::Lbracket && p.index + 1 < p.tokens.len() {
+        let next_tok = &p.tokens[p.index + 1];
+        if next_tok.kind == TokenKind::Default
+            || (next_tok.is_keyword_or_identifier() && ascii_equal(next_tok.text, "DEFAULT"))
+        {
+            p.advance()?;
+            p.advance()?;
+            p.expect(TokenKind::Equals)?;
+            let val = p.parse_numeric_literal()?;
+            p.expect(TokenKind::Rbracket)?;
+            return Ok(Some(val));
+        }
+    }
+    Ok(None)
 }
 
 // ── Function call dispatcher ────────────────────────────────────
@@ -313,17 +316,29 @@ fn parse_formula_function_call(
         "sqrt" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
                 .map_err(|_| syntax_err("SQRT() expects 1 argument", span))?;
-            Ok(FormulaExpr::Sqrt { x: Box::new(x) })
+            let domain_default = parse_optional_bracket_default(p)?;
+            Ok(FormulaExpr::Sqrt {
+                x: Box::new(x),
+                domain_default,
+            })
         }
         "log" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
                 .map_err(|_| syntax_err("LOG() expects 1 argument", span))?;
-            Ok(FormulaExpr::Log { x: Box::new(x) })
+            let domain_default = parse_optional_bracket_default(p)?;
+            Ok(FormulaExpr::Log {
+                x: Box::new(x),
+                domain_default,
+            })
         }
         "ln" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
                 .map_err(|_| syntax_err("LN() expects 1 argument", span))?;
-            Ok(FormulaExpr::Ln { x: Box::new(x) })
+            let domain_default = parse_optional_bracket_default(p)?;
+            Ok(FormulaExpr::Ln {
+                x: Box::new(x),
+                domain_default,
+            })
         }
         "exp" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
@@ -333,7 +348,11 @@ fn parse_formula_function_call(
         "acosh" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
                 .map_err(|_| syntax_err("ACOSH() expects 1 argument", span))?;
-            Ok(FormulaExpr::Acosh { x: Box::new(x) })
+            let domain_default = parse_optional_bracket_default(p)?;
+            Ok(FormulaExpr::Acosh {
+                x: Box::new(x),
+                domain_default,
+            })
         }
         "max" | "min" => {
             if args.is_empty() {
