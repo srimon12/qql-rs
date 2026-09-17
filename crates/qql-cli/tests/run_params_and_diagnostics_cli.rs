@@ -89,3 +89,26 @@ fn repl_help_displays_params_file_flag() {
     assert!(stdout.contains("--params-file"));
     assert!(stdout.contains("--param"));
 }
+
+#[test]
+fn test_version_command_reports_valid_json_and_edition() {
+    let out = qql(&["version"]);
+    assert!(out.status.success(), "qql version should succeed");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let val: serde_json::Value =
+        serde_json::from_str(&stdout).expect("version output must be valid json");
+    assert_eq!(val["ok"], true);
+    assert_eq!(val["command"], "version");
+    assert!(val["version"].is_string());
+    assert!(val["edition"].is_string());
+    let edition = val["edition"].as_str().unwrap();
+    assert!(
+        edition == "standard" || edition == "full" || edition == "custom",
+        "unexpected edition: {edition}"
+    );
+    let message = val["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("({edition})")),
+        "message should contain edition in parens, got: {message}"
+    );
+}

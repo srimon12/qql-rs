@@ -104,7 +104,7 @@ The default binary (`qql`) — including the prebuilt archives fetched by the
 installer above — is lightweight (~15MB), containing REST, gRPC, the built-in
 `qql record` proxy, `qql convert`, `qql migrate`, `qql dump`, and REPL.
 `edge` (ONNX/FastEmbed models and in-process database) is packaged in the
-`qql-full` release or installed with `--features full`:
+`qql-full-*` archive or installed with `--features full`:
 
 {% terminal title="Feature installs (no clone needed)" %}
 # Standard edition (REST + gRPC + record + convert + migrate)
@@ -112,26 +112,22 @@ cargo install qql-cli --locked
 
 # Full edition (fastembed + edge)
 cargo install qql-cli --locked --features full
-
-# Or individual features
-cargo install qql-cli --locked --features edge
-cargo install qql-cli --locked --features fastembed
 {% /terminal %}
 
-Run `qql version` to confirm: it reports the `edition` ("standard" or "full")
+Run `qql version` to confirm: it reports the `edition` ("standard", "full", or "custom")
 and its `features` array. Python/Node stay split the same way — `pyqql` /
 `@veristamp/nqql` are lean, `pyqql-edge` / `@veristamp/nqql-edge` (plus
 `uv pip install pyqql-edge` / `uv add pyqql-edge`) carry the edge runtime.
 
 ### Edge runtime
 
-The in-process edge backend is an opt-in build. Compile the CLI with the `edge`
-feature to enable `--edge` and `qql config edge`:
+The in-process edge backend is included in the **Full edition** (`--features full`), or can be
+compiled as a custom standalone feature (`--features edge`):
 
 {% terminal title="Edge-enabled CLI build" %}
-cargo install qql-cli --locked --features edge
-# ... or from a local checkout:
-# cargo build --release -p qql-cli --features edge
+cargo install qql-cli --locked --features full
+# ... or custom edge-only without FastEmbed:
+# cargo install qql-cli --locked --features edge
 {% /terminal %}
 
 See [the edge backend overview](/docs/edge/) for capabilities and limits.

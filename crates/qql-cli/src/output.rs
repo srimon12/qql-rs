@@ -15,13 +15,14 @@ pub struct ScriptResponse {
     pub message: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VersionResponse {
     pub ok: bool,
     pub command: String,
     pub version: String,
-    /// Edition of this binary: `"standard"` (lean remote Qdrant driver)
-    /// or `"full"` (includes local ONNX FastEmbed models and in-process edge).
+    /// Edition of this binary: `"standard"` (lean remote Qdrant driver),
+    /// `"full"` (includes local ONNX FastEmbed models and in-process edge),
+    /// or `"custom"` (compiled with custom/partial feature flags).
     pub edition: String,
     /// Cargo features enabled in this binary (e.g. `["grpc", "rest"]`;
     /// full builds add `"edge"` and `"fastembed"`).

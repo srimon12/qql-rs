@@ -31,7 +31,7 @@ irm https://qql.veristamp.in/install.ps1 | iex
 # Standard: REST + gRPC + record + convert + migrate (matches qql release archives)
 cargo install qql-cli --locked
 
-# Full: Standard + local FastEmbed ONNX embeddings + in-process qdrant-edge (matches qql-full archives)
+# Full: Standard + local FastEmbed ONNX embeddings + in-process qdrant-edge (matches qql-full-* archives; archive contains qql exe)
 cargo install qql-cli --locked --features full
 
 # REST only (smallest footprint)

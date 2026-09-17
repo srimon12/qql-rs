@@ -1,6 +1,6 @@
 //! Shared CLI runtime: executor construction, embed settings, explain.
 
-#[cfg(feature = "edge")]
+#[cfg(all(feature = "edge", feature = "fastembed"))]
 use std::io::IsTerminal;
 
 /// Resolve dense embedder settings from env (`EMBED_*`) over persisted config.
@@ -333,39 +333,47 @@ pub(crate) fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::er
     let wal_segment_capacity = qql_edge::wal_segment_capacity_bytes(config.wal_segment_mb)?;
     match config.embedder.as_str() {
         "fastembed" => {
-            let is_tty = std::io::stdout().is_terminal();
-            let show_progress = config.show_download_progress || is_tty;
-            let model_name = config.model.as_deref().unwrap_or("BGESmallENV15");
-            if show_progress {
-                eprintln!(
-                    "ℹ Initializing local edge embedder (model: '{model_name}'). Model weights are downloaded on first run if not cached."
-                );
+            #[cfg(feature = "fastembed")]
+            {
+                let is_tty = std::io::stdout().is_terminal();
+                let show_progress = config.show_download_progress || is_tty;
+                let model_name = config.model.as_deref().unwrap_or("BGESmallENV15");
+                if show_progress {
+                    eprintln!(
+                        "ℹ Initializing local edge embedder (model: '{model_name}'). Model weights are downloaded on first run if not cached."
+                    );
+                }
+                let options = qql_edge::LocalExecutorOptions {
+                    on_disk_payload: config.on_disk_payload,
+                    wal_segment_capacity,
+                    model: config.model,
+                    sparse_model: config.sparse_model,
+                    multi_model: config.multi_model.or(config.multi_embed_model.clone()),
+                    image_model: config.image_model.or(config.image_embed_model.clone()),
+                    reranker_model: config.reranker_model.clone(),
+                    cache_dir: config.cache_dir,
+                    show_download_progress: show_progress,
+                    bm25_k1: config.bm25_k1,
+                    bm25_b: config.bm25_b,
+                    bm25_avg_len: config.bm25_avg_len,
+                    bm25_language: config.bm25_language,
+                    bm25_tokenizer: config.bm25_tokenizer,
+                    bm25_lowercase: config.bm25_lowercase,
+                    bm25_ascii_folding: config.bm25_ascii_folding,
+                    bm25_min_token_len: config.bm25_min_token_len,
+                    bm25_max_token_len: config.bm25_max_token_len,
+                    bm25_stopwords: config.bm25_stopwords,
+                    bm25_stemmer: config.bm25_stemmer,
+                    bm25_stopwords_languages: config.bm25_stopwords_languages,
+                };
+                qql_edge::local_executor_with_options(config.data_dir, options)
+                    .map_err(|error| format!("edge initialization failed: {error}").into())
             }
-            let options = qql_edge::LocalExecutorOptions {
-                on_disk_payload: config.on_disk_payload,
-                wal_segment_capacity,
-                model: config.model,
-                sparse_model: config.sparse_model,
-                multi_model: config.multi_model.or(config.multi_embed_model.clone()),
-                image_model: config.image_model.or(config.image_embed_model.clone()),
-                reranker_model: config.reranker_model.clone(),
-                cache_dir: config.cache_dir,
-                show_download_progress: show_progress,
-                bm25_k1: config.bm25_k1,
-                bm25_b: config.bm25_b,
-                bm25_avg_len: config.bm25_avg_len,
-                bm25_language: config.bm25_language,
-                bm25_tokenizer: config.bm25_tokenizer,
-                bm25_lowercase: config.bm25_lowercase,
-                bm25_ascii_folding: config.bm25_ascii_folding,
-                bm25_min_token_len: config.bm25_min_token_len,
-                bm25_max_token_len: config.bm25_max_token_len,
-                bm25_stopwords: config.bm25_stopwords,
-                bm25_stemmer: config.bm25_stemmer,
-                bm25_stopwords_languages: config.bm25_stopwords_languages,
-            };
-            qql_edge::local_executor_with_options(config.data_dir, options)
-                .map_err(|error| format!("edge initialization failed: {error}").into())
+            #[cfg(not(feature = "fastembed"))]
+            {
+                let _ = wal_segment_capacity;
+                Err("the 'fastembed' embedder requires fastembed support; install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)".into())
+            }
         }
         "http" => {
             let endpoint = config.embed_url.ok_or(
