@@ -8,7 +8,7 @@
  * SQL `''` doubling, triple-quoted strings, raw `r"…"` / `r'…'`, backticks —
  * and splits on top-level `;` only.
  */
-import type { StatementSpan } from "./types";
+import type { StatementSpan } from "../core/types";
 
 const WHITESPACE = /\s/;
 

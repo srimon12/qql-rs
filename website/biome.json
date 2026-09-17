@@ -25,7 +25,7 @@
 			"!**/.wasm",
 			"!**/.cache",
 			"!**/public",
-			"!**/src/lib/playground/qql-keywords.generated.ts",
+			"!**/qql-keywords.generated.ts",
 			"!**/src/styles/ec-theme.css",
 			"!**/packages/ui/src/styles/*.css"
 		]

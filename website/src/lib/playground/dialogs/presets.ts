@@ -2,8 +2,9 @@
  * Examples dialog: search + category filtering for the shipped fixture
  * corpus, plus the live-collection chips fetched from the user's Qdrant.
  */
-import { loadSource } from "./analysis";
-import { byId, escapeHtml, query, queryAll, showToast } from "./dom";
+
+import { byId, escapeHtml, query, queryAll, showToast } from "../core/dom";
+import { loadSource } from "../editor/analysis";
 
 let activeCategory = "all";
 

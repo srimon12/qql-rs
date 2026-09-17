@@ -3,9 +3,12 @@
  * the three chrome surfaces (status bar, statement chrome, inspector) render
  * from the same snapshot, in one pass, without cross-module callbacks.
  */
-import { renderInspector } from "./inspector";
-import { renderRunMenuHint, renderStatementRail } from "./statement-nav";
-import { renderStatusBar } from "./status-bar";
+import { renderInspector } from "../panels/inspector";
+import {
+	renderRunMenuHint,
+	renderStatementRail,
+} from "../panels/statement-nav";
+import { renderStatusBar } from "../panels/status-bar";
 
 /** Editor strip + rail: selection and per-statement status changed. */
 export function refreshStatementUi(): void {

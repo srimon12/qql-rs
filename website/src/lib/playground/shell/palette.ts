@@ -6,7 +6,7 @@
  * renders the filtered list and owns keyboard navigation.
  */
 
-import { escapeHtml } from "./dom";
+import { escapeHtml } from "../core/dom";
 
 export interface PaletteCommand {
 	group: string;

@@ -3,8 +3,9 @@
  * inspector: copy buttons, "load into editor" buttons, and raw-tab copies.
  * Statement chip / route-row clicks are owned by `selection.ts`.
  */
-import { loadSource } from "./analysis";
-import { copyToClipboard, query, showToast } from "./dom";
+
+import { copyToClipboard, query, showToast } from "../core/dom";
+import { loadSource } from "../editor/analysis";
 
 export function setupDocumentDelegates(): void {
 	document.addEventListener("click", (event) => {

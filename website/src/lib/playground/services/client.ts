@@ -1,11 +1,11 @@
 import { Client, type ExecutionReport, Stmt } from "qql-wasm-current";
-import { createBrowserEmbedder } from "./embedder";
 import {
 	browserModelInfo,
 	type PlaygroundSettings,
 	type RuntimePolicy,
-} from "./types";
-import { applyRuntimePolicy } from "./wasm";
+} from "../core/types";
+import { applyRuntimePolicy } from "../core/wasm";
+import { createBrowserEmbedder } from "./embedder";
 
 export interface ExecuteOptions {
 	/** Batch policy when several statements run in one call. */

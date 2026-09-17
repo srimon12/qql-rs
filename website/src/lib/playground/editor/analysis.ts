@@ -4,16 +4,16 @@
  * loading a new document into the editor.
  */
 import type { Diagnostic } from "@codemirror/lint";
-import { query } from "./dom";
-import { scanStatementSpans } from "./statements";
-import { editor, state, syncStatementState } from "./store";
-import { WORKSPACE_KEY } from "./types";
-import { refreshAll, refreshStatementUi } from "./ui";
+import { query } from "../core/dom";
+import { refreshAll, refreshStatementUi } from "../core/refresh";
+import { editor, state, syncStatementState } from "../core/store";
+import { WORKSPACE_KEY } from "../core/types";
 import {
 	analyzeWithPolicy,
 	currentDiagnostic,
 	runtimeDiagnostic,
-} from "./wasm";
+} from "../core/wasm";
+import { scanStatementSpans } from "./statements";
 
 /** Linter source: static analysis errors plus the last runtime failure span. */
 export function editorDiagnostics(): Diagnostic[] {

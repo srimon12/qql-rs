@@ -3,9 +3,9 @@
  * line-wrap, comment toggle, share link.
  */
 import { toggleComment } from "@codemirror/commands";
-import { byId, copyToClipboard, query, queryAll, showToast } from "./dom";
-import { editor, saveWrap, sourceText, state } from "./store";
-import { buildFailure, formatQuery } from "./wasm";
+import { byId, copyToClipboard, query, queryAll, showToast } from "../core/dom";
+import { editor, saveWrap, sourceText, state } from "../core/store";
+import { buildFailure, formatQuery } from "../core/wasm";
 
 export function formatDocument(): void {
 	const source = sourceText();

@@ -3,10 +3,10 @@
  * ⌘↵ / ⇧⌘↵ to run, Escape to close the run menu. Editor-focused keys live in
  * `editor.ts`'s keymap.
  */
-import { queryAll } from "./dom";
+import { queryAll } from "../core/dom";
+import { editor } from "../core/store";
+import { closeRunMenu, runAll, runSmart } from "../run/run";
 import type { CommandPalette } from "./palette";
-import { closeRunMenu, runAll, runSmart } from "./run";
-import { editor } from "./store";
 
 export interface ShortcutOptions {
 	palette: CommandPalette | null;

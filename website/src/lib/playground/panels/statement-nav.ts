@@ -5,10 +5,10 @@
  *
  * Render-only — selection transitions live in `selection.ts`.
  */
-import { escapeHtml, query } from "./dom";
-import { statementKeyword, statementPreview } from "./statements";
-import { editor, sourceText, state } from "./store";
-import type { StatementStatus } from "./types";
+import { escapeHtml, query } from "../core/dom";
+import { editor, sourceText, state } from "../core/store";
+import type { StatementStatus } from "../core/types";
+import { statementKeyword, statementPreview } from "../editor/statements";
 
 export function statusDotClass(status: StatementStatus | undefined): string {
 	switch (status) {

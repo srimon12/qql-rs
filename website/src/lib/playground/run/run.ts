@@ -5,24 +5,24 @@
  * results back onto the editor, and owns the run menu + error policy.
  */
 import { forceLinting } from "@codemirror/lint";
-import { runAnalysis } from "./analysis";
-import { client } from "./connection";
-import { query, queryAll, showToast } from "./dom";
-import {
-	lineAt,
-	statementIndexAt,
-	statementIndicesInRange,
-	statementSource,
-} from "./statements";
+import { query, queryAll, showToast } from "../core/dom";
+import { refreshInspector, refreshStatementUi } from "../core/refresh";
 import {
 	editor,
 	saveInspectorTab,
 	saveRunPrefs,
 	sourceText,
 	state,
-} from "./store";
-import { refreshInspector, refreshStatementUi } from "./ui";
-import { buildFailure, byteOffsetToPosition } from "./wasm";
+} from "../core/store";
+import { buildFailure, byteOffsetToPosition } from "../core/wasm";
+import { runAnalysis } from "../editor/analysis";
+import {
+	lineAt,
+	statementIndexAt,
+	statementIndicesInRange,
+	statementSource,
+} from "../editor/statements";
+import { client } from "../services/connection";
 
 export type RunMode = "smart" | "all" | "statement" | "from";
 

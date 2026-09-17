@@ -4,21 +4,21 @@
  * client reconfiguration on save.
  */
 
-import { probeQdrant } from "./client";
+import { query, showToast } from "../core/dom";
+import { refreshStatusBar } from "../core/refresh";
+import { saveSettings, state } from "../core/store";
+import {
+	browserModelInfo,
+	DEFAULT_SETTINGS,
+	type PlaygroundSettings,
+} from "../core/types";
+import { probeQdrant } from "../services/client";
 import {
 	checkEndpoint,
 	configureClient,
 	renderConnectionDisplay,
 	setEmbedStatus,
-} from "./connection";
-import { query, showToast } from "./dom";
-import { saveSettings, state } from "./store";
-import {
-	browserModelInfo,
-	DEFAULT_SETTINGS,
-	type PlaygroundSettings,
-} from "./types";
-import { refreshStatusBar } from "./ui";
+} from "../services/connection";
 
 type Field = HTMLInputElement | HTMLSelectElement | null;
 

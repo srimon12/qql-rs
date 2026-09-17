@@ -23,6 +23,7 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { basicSetup } from "codemirror";
+import type { StatementSpan } from "../core/types";
 import {
 	qqlCommentTokens,
 	qqlCompletion,
@@ -34,7 +35,6 @@ import {
 	statementIndexAt,
 	statementStartOffset,
 } from "./statements";
-import type { StatementSpan } from "./types";
 
 export type RunShortcut = "smart" | "all";
 

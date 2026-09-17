@@ -1,25 +1,22 @@
 /**
- * Playground entry point. The controller is split by responsibility:
+ * Playground entry point.
  *
- *   bootstrap.ts       composition root — initial doc, editor mount, wiring
- *   store.ts           state + localStorage; the single source of truth
- *   ui.ts              refresh hub; selection.ts keeps caret/rail/inspector in sync
- *   analysis.ts        parse + plan, debounced edit pipeline, diagnostics
- *   run.ts             run targets, execution, per-statement results, run menu
- *   editor.ts          CodeMirror setup, statement gutter, keymap
- *   inspector.ts       plan / code tabs / metrics / response panels
- *   status-bar.ts      header pills, validation badge, statement count
- *   statement-nav.ts   rail chips, cursor readout, status marks
- *   connection.ts      Qdrant client, endpoint probing, embedder config
- *   dom.ts             lookup, escaping, toasts, clipboard, dialogs
- *
- * Supporting modules: client, embedder, statements, render, export, palette,
- * editor-actions, layout, delegates, presets, settings-form, policy-form,
- * exporter, commands, shortcuts, types, wasm.
+ * ```
+ * playground/
+ * ├── playground.ts   this entry — mounts and starts
+ * ├── bootstrap.ts    composition root: initial document, editor, wiring
+ * ├── core/           store, types, DOM plumbing, WASM bridge, refresh hub
+ * ├── editor/         CodeMirror, language, statements, analysis, selection
+ * ├── run/            run targets, execution, per-statement results, run menu
+ * ├── panels/         inspector, status bar, statement chrome, response renderers
+ * ├── dialogs/        presets, settings, policy, export
+ * ├── shell/          workspace layout, palette, commands, shortcuts, delegates
+ * └── services/       Qdrant client, connection, embedder, SDK codegen
+ * ```
  */
 import { start } from "./bootstrap";
 
-export { showToast } from "./dom";
+export { showToast } from "./core/dom";
 
 if (typeof window !== "undefined") {
 	void start();

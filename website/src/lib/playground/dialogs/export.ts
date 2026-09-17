@@ -2,11 +2,11 @@
  * Export dialog: per-language SDK snippets generated from the live source and
  * the selected statement's compiled route.
  */
-import { copyToClipboard, openDialog, query, queryAll } from "./dom";
-import { exportCode } from "./export";
-import { sourceText, state, statementCount } from "./store";
-import type { ExportLanguage } from "./types";
-import { selectedRoute } from "./wasm";
+import { copyToClipboard, openDialog, query, queryAll } from "../core/dom";
+import { sourceText, state, statementCount } from "../core/store";
+import type { ExportLanguage } from "../core/types";
+import { selectedRoute } from "../core/wasm";
+import { exportCode } from "../services/codegen";
 
 /** Regenerate the snippet for the current language + statement. */
 function renderExport(): void {

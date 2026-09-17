@@ -1,5 +1,5 @@
-import { escapeHtml } from "./dom";
-import type { PlaygroundFailure, PlaygroundMetrics } from "./types";
+import { escapeHtml } from "../core/dom";
+import type { PlaygroundFailure, PlaygroundMetrics } from "../core/types";
 
 export function pretty(value: unknown): string {
 	if (value === undefined) return "";

@@ -3,20 +3,21 @@
  * palette engine lives in `palette.ts`; this module only describes commands so
  * shortcuts, menus, and the palette share one implementation per action.
  */
-import { loadSource } from "./analysis";
-import { isMacPlatform, openDialog } from "./dom";
+
+import { isMacPlatform, openDialog } from "../core/dom";
+import { sourceText, state } from "../core/store";
+import { openExporter } from "../dialogs/export";
+import { loadSource } from "../editor/analysis";
 import {
 	copyShareLink,
 	formatDocument,
 	toggleCommentAtCursor,
 	toggleWrap,
-} from "./editor-actions";
-import { openExporter } from "./exporter";
+} from "../editor/editor-actions";
+import { selectStatement } from "../editor/selection";
+import { statementKeyword, statementPreview } from "../editor/statements";
+import { runAll, runMode, runSmart } from "../run/run";
 import type { PaletteCommand } from "./palette";
-import { runAll, runMode, runSmart } from "./run";
-import { selectStatement } from "./selection";
-import { statementKeyword, statementPreview } from "./statements";
-import { sourceText, state } from "./store";
 
 export function buildCommands(): PaletteCommand[] {
 	const mac = isMacPlatform();

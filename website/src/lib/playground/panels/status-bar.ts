@@ -2,10 +2,10 @@
  * Header status bar: connection + runtime + embedder pills, the tenant-policy
  * chip, the validation badge, statement count, and the analysis summary line.
  */
-import { query } from "./dom";
-import { state, statementCount } from "./store";
-import { browserModelInfo } from "./types";
-import { selectedRoute } from "./wasm";
+import { query } from "../core/dom";
+import { state, statementCount } from "../core/store";
+import { browserModelInfo } from "../core/types";
+import { selectedRoute } from "../core/wasm";
 
 export function renderStatusBar(): void {
 	const validationBadge = query("[data-validation-badge]");

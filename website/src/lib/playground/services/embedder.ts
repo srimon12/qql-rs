@@ -1,4 +1,4 @@
-import type { BrowserEmbedDevice } from "./types";
+import type { BrowserEmbedDevice } from "../core/types";
 
 type ProgressUpdate = {
 	status?: string;

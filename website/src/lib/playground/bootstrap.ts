@@ -3,52 +3,57 @@
  * every surface to its module, then starts the WASM runtime and the first
  * analysis pass. This is the only module that knows about all the others.
  */
-import {
-	editorDiagnostics,
-	queueAnalysis,
-	runAnalysis,
-	setFixtureLabel,
-} from "./analysis";
-import { buildCommands } from "./commands";
-import {
-	checkEndpoint,
-	configureClient,
-	renderConnectionDisplay,
-	setEmbedStatus,
-} from "./connection";
-import { setupDocumentDelegates } from "./delegates";
+
 import {
 	applyPlatformKeyLabels,
 	byId,
 	query,
 	setupDialog,
 	showToast,
-} from "./dom";
-import { createPlaygroundEditor } from "./editor";
+} from "./core/dom";
+import { setEditor, state, syncStatementState } from "./core/store";
+import { WORKSPACE_KEY } from "./core/types";
+import { formatError, initQql } from "./core/wasm";
+import { setupExporter } from "./dialogs/export";
+import { setupPolicyForm } from "./dialogs/policy";
+import { setupPresets } from "./dialogs/presets";
+import { setupSettingsForm } from "./dialogs/settings";
+import {
+	editorDiagnostics,
+	queueAnalysis,
+	runAnalysis,
+	setFixtureLabel,
+} from "./editor/analysis";
+import { createPlaygroundEditor } from "./editor/editor";
 import {
 	applyWrap,
 	formatDocument,
 	setupEditorActions,
-} from "./editor-actions";
-import { setupExporter } from "./exporter";
-import { setupInspectorTabs } from "./inspector";
+} from "./editor/editor-actions";
+import {
+	followCursor,
+	selectStatement,
+	setupStatementNav,
+} from "./editor/selection";
+import { scanStatementSpans } from "./editor/statements";
+import { setupInspectorTabs } from "./panels/inspector";
+import { renderCursorStatus } from "./panels/statement-nav";
+import { runAll, runSmart, setRunBusy, setupRunEngine } from "./run/run";
+import {
+	checkEndpoint,
+	configureClient,
+	renderConnectionDisplay,
+	setEmbedStatus,
+} from "./services/connection";
+import { buildCommands } from "./shell/commands";
+import { setupDocumentDelegates } from "./shell/delegates";
 import {
 	applyMobileView,
 	setupMobileViewSwitch,
 	setupSplitHandle,
-} from "./layout";
-import { type CommandPalette, setupCommandPalette } from "./palette";
-import { setupPolicyForm } from "./policy-form";
-import { setupPresets } from "./presets";
-import { runAll, runSmart, setRunBusy, setupRunEngine } from "./run";
-import { followCursor, selectStatement, setupStatementNav } from "./selection";
-import { setupSettingsForm } from "./settings-form";
-import { setupGlobalShortcuts } from "./shortcuts";
-import { renderCursorStatus } from "./statement-nav";
-import { scanStatementSpans } from "./statements";
-import { setEditor, state, syncStatementState } from "./store";
-import { WORKSPACE_KEY } from "./types";
-import { formatError, initQql } from "./wasm";
+} from "./shell/layout";
+import { type CommandPalette, setupCommandPalette } from "./shell/palette";
+import { setupGlobalShortcuts } from "./shell/shortcuts";
 
 const FALLBACK_QUERY = "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;";
 

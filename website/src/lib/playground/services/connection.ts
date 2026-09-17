@@ -3,12 +3,13 @@
  * embedder (re)configuration, and the live-collection presets that come from
  * a successful endpoint check.
  */
+
+import { query } from "../core/dom";
+import { refreshStatusBar } from "../core/refresh";
+import { state } from "../core/store";
+import { connectionHost } from "../core/wasm";
+import { renderLiveCollections } from "../dialogs/presets";
 import { listCollections, probeQdrant, QdrantClient } from "./client";
-import { query } from "./dom";
-import { renderLiveCollections } from "./presets";
-import { state } from "./store";
-import { refreshStatusBar } from "./ui";
-import { connectionHost } from "./wasm";
 
 /** One client per page; `configureClient` reconfigures it in place. */
 export const client = new QdrantClient();

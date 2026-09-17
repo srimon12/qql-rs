@@ -3,11 +3,11 @@
  * rail chips, and the inspector's statement navigator in agreement, plus the
  * click/change wiring for those controls.
  */
-import { query } from "./dom";
-import { renderCursorStatus } from "./statement-nav";
+import { query } from "../core/dom";
+import { refreshInspector, refreshStatementUi } from "../core/refresh";
+import { editor, state } from "../core/store";
+import { renderCursorStatus } from "../panels/statement-nav";
 import { statementIndexAt } from "./statements";
-import { editor, state } from "./store";
-import { refreshInspector, refreshStatementUi } from "./ui";
 
 export interface SelectOptions {
 	/** Move the editor caret into the statement and scroll it into view. */

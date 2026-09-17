@@ -3,10 +3,11 @@
  * shortcuts, and the live clause preview. Applying re-analyzes the document so
  * the plan/wire tabs show the rewritten request.
  */
-import { runAnalysis } from "./analysis";
-import { query, queryAll, showToast } from "./dom";
-import { savePolicy, sourceText, state } from "./store";
-import type { RuntimePolicy } from "./types";
+
+import { query, queryAll, showToast } from "../core/dom";
+import { savePolicy, sourceText, state } from "../core/store";
+import type { RuntimePolicy } from "../core/types";
+import { runAnalysis } from "../editor/analysis";
 
 type Field = HTMLInputElement | HTMLSelectElement | null;
 

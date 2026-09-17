@@ -5,7 +5,17 @@
  *
  * All renderers read the `store` snapshot; none of them mutate state.
  */
-import { escapeHtml, query, queryAll } from "./dom";
+import { escapeHtml, query, queryAll } from "../core/dom";
+import {
+	resultForStatement,
+	saveInspectorTab,
+	sourceText,
+	state,
+	statementCount,
+} from "../core/store";
+import type { InspectorTab } from "../core/types";
+import { buildFailure, selectedRoute } from "../core/wasm";
+import { statementKeyword } from "../editor/statements";
 import {
 	highlightJson,
 	pretty,
@@ -20,16 +30,6 @@ import {
 	statementStatusMark,
 	statusDotClass,
 } from "./statement-nav";
-import { statementKeyword } from "./statements";
-import {
-	resultForStatement,
-	saveInspectorTab,
-	sourceText,
-	state,
-	statementCount,
-} from "./store";
-import type { InspectorTab } from "./types";
-import { buildFailure, selectedRoute } from "./wasm";
 
 export function renderInspector(): void {
 	renderTabs();

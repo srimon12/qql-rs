@@ -2,9 +2,9 @@
  * Workspace layout: the draggable editor/inspector split and the mobile
  * editor/result pane switch.
  */
-import { query, queryAll } from "./dom";
-import { editor, saveMobileView, state } from "./store";
-import { SPLIT_KEY } from "./types";
+import { query, queryAll } from "../core/dom";
+import { editor, saveMobileView, state } from "../core/store";
+import { SPLIT_KEY } from "../core/types";
 
 const DEFAULT_SPLIT = 1.08;
 const MIN_SPLIT = 0.6;

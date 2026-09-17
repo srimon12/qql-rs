@@ -8,7 +8,7 @@
  * through `refresh.ts` — there is no second source of truth.
  */
 import type { ExecutionReport } from "qql-wasm-current";
-import type { PlaygroundEditor } from "./editor";
+import type { PlaygroundEditor } from "../editor/editor";
 import {
 	DEFAULT_POLICY,
 	DEFAULT_RUN_PREFERENCES,
