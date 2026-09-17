@@ -62,10 +62,19 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_formula_expr(&mut self, precedence: u8) -> Result<FormulaExpr, QqlError> {
         let tok = self.peek()?;
         let prefix = formula_prefix_parse_fn(&tok).ok_or_else(|| {
-            syntax_err(
-                alloc::format!("unexpected token in formula: {}", tok.text),
-                tok.span,
-            )
+            let msg = if matches!(
+                tok.kind,
+                TokenKind::Plus | TokenKind::Star | TokenKind::Slash | TokenKind::Equals
+            ) {
+                alloc::format!(
+                    "unexpected token in formula: {}\n\
+                     hint: Did your shell interpolate '$score'? In bash/zsh, use bare 'score' or escape '\\$score'.",
+                    tok.text
+                )
+            } else {
+                alloc::format!("unexpected token in formula: {}", tok.text)
+            };
+            syntax_err(msg, tok.span)
         })?;
 
         let mut left = prefix(self)?;

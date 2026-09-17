@@ -569,3 +569,27 @@ print(report["phases"])          # {"parse_ms": ..., "dispatch_ms": ..., ...}
 print(report["server_time_s"])   # seconds Qdrant spent, when reported
 print(report["results"][0]["telemetry"])  # {"time_s": ..., "usage": {...} | None}
 ```
+
+---
+
+## 13. Formula Queries & Qdrant SDK Interop
+
+In QQL, formula queries are declarative SQL-like strings executed directly via `client.execute()`:
+
+```python
+report = client.execute("""
+    WITH candidates AS (
+        QUERY TEXT 'distributed systems' FROM docs USING dense LIMIT 100
+    )
+    QUERY FORMULA score * 0.8 + LOG(citation_count + 1.0) * 0.2
+    DEFAULTS (score = 0.0, citation_count = 0)
+    FROM docs
+    PREFETCH (candidates)
+    LIMIT 10;
+""")
+```
+
+### Critical Guidance on `qdrant_client.models.FormulaQuery`
+- **Do not wrap QQL strings in `models.FormulaQuery`**: The official Qdrant Python SDK (`qdrant-client`) provides a class named `models.FormulaQuery`. However, it expects an object tree of `Expression` classes (e.g. `models.SumExpression(...)`), **not a query string**. Passing a QQL string to `models.FormulaQuery` triggers a 400 Bad Request: `"Invalid payload variable"`.
+- **Use `Client.execute()` natively**: `pyqql.Client.execute()` parses, plans, and converts formula expressions directly into Qdrant's wire format without manual expression trees.
+- **Prefer bare `score` over `$score`**: While `$score` is valid QQL, POSIX shells (bash, zsh) replace `$score` inside double quotes with an empty string `""`. Bare `score` is canonical, shell-safe, and automatically mapped to wire `"$score"`.

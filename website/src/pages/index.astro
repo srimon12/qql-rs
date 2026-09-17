@@ -62,7 +62,7 @@ const verifiedQqlHybrid = String.raw`QUERY TEXT 'vector database' FROM docs
 
 const verifiedQqlFacet = String.raw`FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;`;
 
-const verifiedQqlFormula = String.raw`QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+const verifiedQqlFormula = String.raw`QUERY FORMULA MAX(MIN(score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0) [DEFAULT = 0.0]
   DEFAULTS (score = 0.0, popularity = 0)
 FROM papers LIMIT 10;`;
 ---

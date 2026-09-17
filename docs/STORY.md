@@ -80,7 +80,7 @@ RECOMMEND POSITIVE (1, 2) FROM docs LIMIT 10;
 QUERY 'text' FROM docs LIMIT 10;
 QUERY RECOMMEND POSITIVE (1, 2) FROM docs LIMIT 10;
 QUERY HYBRID ... FUSION RRF ...
-QUERY FORMULA $score * 2 + 0.3 * popularity ...
+QUERY FORMULA score * 2 + 0.3 * popularity ...
 ```
 
 It added CTEs (`WITH ... AS (...)`) for manual prefetch DAGs, a full formula expression engine (arithmetic, math functions, geo-distance, decay functions, CASE WHEN), parameterized RRF, ORDER BY, SAMPLE RANDOM, and relevance feedback. This was the version that proved QQL could express *any* vector database operation, not just basic search.
@@ -186,7 +186,7 @@ WITH
 QUERY FUSION RRF FROM docs PREFETCH (dense, sparse) LIMIT 10;
 
 -- Formula-based scoring
-QUERY FORMULA $score * 2 + 0.3 * popularity
+QUERY FORMULA score * 2 + 0.3 * popularity
   DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 
 -- Multi-tenant isolation with shard routing

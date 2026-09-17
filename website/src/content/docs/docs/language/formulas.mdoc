@@ -11,14 +11,18 @@ popularity, distance, or a payload tier should influence ranking.
 
 ## Rescore an explicit candidate set
 
-`$score` represents the upstream score. `DEFAULTS` makes missing payload values
-predictable instead of leaving their behavior implicit.
+Bare `score` (or `$score`) represents the upstream score. Prefer bare `score`
+in shell scripts, CLI invocations, and code: POSIX shells (bash, zsh) treat `$score`
+inside double quotes as an environment variable and replace it with `""`, triggering
+syntax errors unless backslash-escaped (`\$score`). Bare `score` is shell-safe and
+canonical. `DEFAULTS` makes missing payload values predictable instead of leaving their
+behavior implicit.
 
 {% qqlExample title="Blend relevance and citation count" %}
 ```sql
 WITH
   candidates AS (QUERY 'distributed systems' USING dense LIMIT 100)
-QUERY FORMULA $score * 0.8 + LOG(citation_count + 1.0) * 0.2 DEFAULTS (score = 0.0, citation_count = 0)
+QUERY FORMULA score * 0.8 + LOG(citation_count + 1.0) * 0.2 DEFAULTS (score = 0.0, citation_count = 0)
 FROM papers
 PREFETCH (candidates)
 LIMIT 10;
@@ -41,7 +45,7 @@ is a datetime string, the payload field automatically infers `datetime_key`.
 
 {% qqlExample title="Freshness and popularity signals" %}
 ```sql
-QUERY FORMULA $score + EXP_DECAY(age_days, TARGET = 0.0, SCALE = 30.0, MIDPOINT = 0.5) + GAUSS_DECAY(popularity, TARGET = 100.0, SCALE = 25.0) DEFAULTS (score = 0.0, age_days = 365, popularity = 0)
+QUERY FORMULA score + EXP_DECAY(age_days, TARGET = 0.0, SCALE = 30.0, MIDPOINT = 0.5) + GAUSS_DECAY(popularity, TARGET = 100.0, SCALE = 25.0) DEFAULTS (score = 0.0, age_days = 365, popularity = 0)
 FROM articles
 LIMIT 10;
 ```
@@ -49,29 +53,30 @@ LIMIT 10;
 
 ## Complete function reference
 
-Function names are case-insensitive. `$score` (or `score`) holds the upstream
+Function names are case-insensitive. Bare `score` (or `$score`) holds the upstream
 candidate score when no `DEFAULTS` entry overrides it.
 
-| Function | Signature |
-|---|---|
-| `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `ACOSH` | `NAME(expr)` |
-| `POW` | `POW(base, exponent)` |
-| `MAX` / `MIN` | `MAX(expr, expr, …)` — largest/smallest of n ≥ 1 operands |
-| `GEO_DISTANCE` | `GEO_DISTANCE(lat, lon, field)` or `GEO_DISTANCE({lat: ..., lon: ...}, field)` |
-| `MATCH` / `MATCH_ANY` | `MATCH(field, value)` or `MATCH_ANY(field, list)` |
-| `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY` | `NAME(field, TARGET = n, SCALE = n, ...)` or positional |
-| `datetime` | `DATETIME('2026-01-01')` — literal timestamp (canonical uppercase; lowercase still parses) |
-| `datetime_key` | `DATETIME_KEY('published_at')` — payload timestamp field |
+| Function | Signature | Notes |
+|---|---|---|
+| `ABS`, `EXP` | `NAME(expr)` | Standard absolute value and $e^x$ |
+| `SQRT`, `LOG`, `LN`, `ACOSH` | `NAME(expr) [DEFAULT = n]` | Optional `[DEFAULT = n]` guards bounded domains against `NaN` crashes |
+| `POW` | `POW(base, exponent)` | Exponentiation |
+| `MAX` / `MIN` | `MAX(expr, expr, …)` | Largest/smallest of n ≥ 1 operands |
+| `GEO_DISTANCE` | `GEO_DISTANCE(lat, lon, field)` or `GEO_DISTANCE({lat: ..., lon: ...}, field)` | Distance in meters |
+| `MATCH` / `MATCH_ANY` | `MATCH(field, value)` or `MATCH_ANY(field, list)` | Payload condition in formulas |
+| `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY` | `NAME(field, TARGET = n, SCALE = n, ...)` | Named or positional decay parameters |
+| `datetime` | `DATETIME('2026-01-01')` | Literal timestamp (canonical uppercase; lowercase still parses) |
+| `datetime_key` | `DATETIME_KEY('published_at')` | Payload timestamp field |
 
 ## Clamp and shape scores
 
 `MAX` / `MIN` fold any number of operands (at least one), and `ACOSH` maps
-scores into a strictly positive range — together they give formula ranking
-hard bounds without `CASE` boilerplate:
+scores into a strictly positive range. Bounded functions accept an optional `[DEFAULT = n]`
+suffix that prevents Qdrant HTTP 400 `NaN` crashes on boundary values:
 
 {% qqlExample title="Clamp a boosted score and shape with ACOSH" %}
 ```sql
-QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+QUERY FORMULA MAX(MIN(score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0) [DEFAULT = 0.0]
   DEFAULTS (score = 0.0, popularity = 0)
 FROM papers
 LIMIT 10;
@@ -88,7 +93,7 @@ an explicit by-zero default with `[DEFAULT = number]`:
 ```sql
 WITH
   candidates AS (QUERY 'distributed systems' USING dense LIMIT 10)
-QUERY FORMULA $score / (views + 1.0) [DEFAULT = 0.0] DEFAULTS (score = 0.0, views = 0)
+QUERY FORMULA score / (views + 1.0) [DEFAULT = 0.0] DEFAULTS (score = 0.0, views = 0)
 FROM docs
 PREFETCH (candidates)
 LIMIT 10;
@@ -102,17 +107,25 @@ missing or non-matching value remains easy to audit.
 
 {% qqlExample title="Boost a premium tier" %}
 ```sql
-QUERY FORMULA CASE WHEN tier MATCH ANY ('premium') THEN $score * 1.5 ELSE $score END DEFAULTS (score = 0.0)
+QUERY FORMULA CASE WHEN tier MATCH ANY ('premium') THEN score * 1.5 ELSE score END DEFAULTS (score = 0.0)
 FROM docs
 LIMIT 10;
 ```
 {% /qqlExample %}
 
+{% aside type="note" title="Python SDK vs Qdrant models.FormulaQuery" %}
+In QQL, custom formula scoring is declarative text executed directly via `client.execute()`:
+```python
+client.execute("QUERY FORMULA score * 0.8 + views * 0.2 FROM docs LIMIT 10")
+```
+**Do not** pass QQL formula strings into the official Qdrant SDK's `models.FormulaQuery`. In `qdrant-client`, `FormulaQuery` expects an object tree of `Expression` classes (`models.SumExpression(...)`), not query text. QQL executes formula queries natively.
+{% /aside %}
+
 {% aside type="note" title="Backend parity: gRPC and edge" %}
 Formulas are plan-owned (`PlanFormula`) and convert directly to protobuf /
 edge expressions with no JSON round-trip. `CASE WHEN` conditions and datetime
 `TARGET = "…Z"` inference (payload field infers `datetime_key`) apply on gRPC
-as well as REST. On edge, `$score` resolves to the reserved score variable
+as well as REST. On edge, `score` resolves to the reserved score variable
 (not a payload field named `score`), and `MAX` / `MIN` / `ACOSH` fail closed
 with `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` (qdrant-edge 0.8 has no such
 `Expression` variants) — use remote Qdrant for those functions.

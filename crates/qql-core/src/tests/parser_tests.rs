@@ -1330,3 +1330,14 @@ fn batch_block_binds_and_injects_into_members() {
         "{formatted}"
     );
 }
+
+#[test]
+fn formula_missing_operand_hints_shell_score_interpolation() {
+    let err = Parser::parse("QUERY FORMULA 0.5 * + 0.1 * rating FROM stays;").unwrap_err();
+    assert!(
+        err.message
+            .contains("hint: Did your shell interpolate '$score'?"),
+        "expected shell interpolation hint, got: {}",
+        err.message
+    );
+}
