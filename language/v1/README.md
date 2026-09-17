@@ -43,7 +43,7 @@ The relationship between the single source of truth (`language/v1/grammar.pest`)
 | Generated Pest Grammar | Derived | `crates/qql-core/grammar/qql.generated.pest` | `qql-grammar-gen check` (CI) |
 | VS Code TextMate Syntax | Derived | `editors/vscode/syntaxes/qql.tmLanguage.json` | `qql-grammar-gen check` (CI) |
 | VS Code TS Keywords | Derived | `editors/vscode/src/keywords.generated.ts` | `qql-grammar-gen check` (CI) |
-| Website TS Keywords | Derived | `website/src/scripts/qql-keywords.generated.ts` | `qql-grammar-gen check` (CI) |
+| Website TS Keywords | Derived | `website/src/lib/playground/qql-keywords.generated.ts` | `qql-grammar-gen check` (CI) |
 | Rust Keyword PHF Map | Derived | `crates/qql-core/src/keywords.generated.rs` | `qql-grammar-gen check` + `cargo check` (CI) |
 | Lexer & Token Table | Hand-written | `crates/qql-core/src/token.rs` | `grammar_keywords_in_token_rs` test (CI) |
 | Recursive Descent Parser | Hand-written | `crates/qql-core/src/parser/*` | `parser_keywords_exist_in_grammar` test (CI) |

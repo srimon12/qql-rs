@@ -43,7 +43,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             contents: render_typescript(&literals),
         },
         Artifact {
-            path: root.join("website/src/scripts/qql-keywords.generated.ts"),
+            path: root.join("website/src/lib/playground/qql-keywords.generated.ts"),
             contents: render_typescript(&literals),
         },
         Artifact {
