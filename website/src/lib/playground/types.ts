@@ -5,6 +5,7 @@ import type {
 } from "qql-wasm-current";
 
 export type EmbedProvider = "browser" | "http" | "none";
+export type BrowserEmbedDevice = "auto" | "webgpu" | "wasm";
 export type PolicyValueType = "string" | "number" | "boolean";
 export type InspectorTab =
 	| "response"
@@ -24,6 +25,16 @@ export interface PlaygroundSettings {
 	embedModel: string;
 	embedDim: number;
 	embedKey: string;
+	/** Transformers.js model id used by the in-browser embedder. */
+	embedBrowserModel: string;
+	/** Preferred inference backend; `auto` probes WebGPU then falls back. */
+	embedBrowserDevice: BrowserEmbedDevice;
+}
+
+/** Run controls for multi-statement scripts. */
+export interface RunPreferences {
+	/** `false` maps to the executor's `onError: "continue"` batch mode. */
+	stopOnError: boolean;
 }
 
 export interface RuntimePolicy {
@@ -76,6 +87,64 @@ export const LIVE_EMBED_MODEL = "text-embedding-bge-small-en-v1.5";
 export const LIVE_EMBED_DIM = 384;
 export const DEFAULT_QDRANT_URL = "http://localhost:6333";
 
+/** Curated browser models. `dims` is display metadata only — the pipeline
+ * still reports the real tensor width after the first embedding. */
+export const BROWSER_MODELS: Array<{
+	id: string;
+	label: string;
+	dims: number;
+	note: string;
+}> = [
+	{
+		id: "Xenova/all-MiniLM-L6-v2",
+		label: "MiniLM L6 v2",
+		dims: 384,
+		note: "Smallest download, English",
+	},
+	{
+		id: "Xenova/bge-small-en-v1.5",
+		label: "BGE small EN v1.5",
+		dims: 384,
+		note: "Sharper English retrieval",
+	},
+	{
+		id: "Xenova/bge-base-en-v1.5",
+		label: "BGE base EN v1.5",
+		dims: 768,
+		note: "Larger, better recall",
+	},
+	{
+		id: "Xenova/gte-small",
+		label: "GTE small",
+		dims: 384,
+		note: "Balanced general text",
+	},
+	{
+		id: "Xenova/multilingual-e5-small",
+		label: "Multilingual E5 small",
+		dims: 384,
+		note: "100+ languages",
+	},
+	{
+		id: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+		label: "Paraphrase multilingual MiniLM",
+		dims: 384,
+		note: "Translation-tolerant matching",
+	},
+];
+
+export const DEFAULT_BROWSER_MODEL = BROWSER_MODELS[0].id;
+
+export function browserModelInfo(id: string): {
+	label: string;
+	dims: number | null;
+} {
+	const known = BROWSER_MODELS.find((model) => model.id === id);
+	if (known) return { label: known.label, dims: known.dims };
+	const short = id.split("/").at(-1) ?? id;
+	return { label: short || "Browser model", dims: null };
+}
+
 export const DEFAULT_SETTINGS: PlaygroundSettings = {
 	qdrantUrl: DEFAULT_QDRANT_URL,
 	qdrantKey: "",
@@ -84,7 +153,11 @@ export const DEFAULT_SETTINGS: PlaygroundSettings = {
 	embedModel: LIVE_EMBED_MODEL,
 	embedDim: LIVE_EMBED_DIM,
 	embedKey: "",
+	embedBrowserModel: DEFAULT_BROWSER_MODEL,
+	embedBrowserDevice: "auto",
 };
+
+export const DEFAULT_RUN_PREFERENCES: RunPreferences = { stopOnError: true };
 
 export const DEFAULT_POLICY: RuntimePolicy = {
 	enabled: false,
@@ -100,3 +173,6 @@ export const POLICY_KEY = "qql-playground.policy.v2";
 export const WORKSPACE_KEY = "qql-playground.workspace.v1";
 export const INSPECTOR_TAB_KEY = "qql-playground.inspector-tab.v1";
 export const SPLIT_KEY = "qql-playground.split.v1";
+export const RUN_KEY = "qql-playground.run.v1";
+export const WRAP_KEY = "qql-playground.wrap.v1";
+export const MOBILE_VIEW_KEY = "qql-playground.mobile-view.v1";

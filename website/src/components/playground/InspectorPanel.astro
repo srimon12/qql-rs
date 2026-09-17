@@ -22,12 +22,18 @@ const tabClass =
     </h2>
     <div class="flex min-w-0 items-center gap-2">
       <code class="hidden min-w-0 truncate font-mono text-[0.6875rem] text-[var(--sl-color-accent-high)] sm:block" data-route-line></code>
-      <label class="min-w-0" data-statement-wrap hidden>
-        <span class="sr-only">Statement</span>
-        <select class="app-select min-h-7 w-auto min-w-24 px-2 font-mono text-[0.72rem]" data-statement-select name="statement-select" aria-label="Inspect statement" disabled hidden>
-          <option value="0">Statement 1</option>
-        </select>
-      </label>
+      <div class="flex items-center gap-1" data-statement-wrap hidden>
+        <button class="app-icon-btn size-6" type="button" data-stmt-prev aria-label="Previous statement" title="Previous statement">
+          <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <label class="min-w-0">
+          <span class="sr-only">Inspect statement</span>
+          <select class="app-select h-7 w-auto min-w-28 px-2 font-mono text-[0.72rem]" data-statement-select name="statement-select" aria-label="Inspect statement"></select>
+        </label>
+        <button class="app-icon-btn size-6" type="button" data-stmt-next aria-label="Next statement" title="Next statement">
+          <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -61,6 +67,13 @@ const tabClass =
       class="absolute inset-0 overflow-auto"
       data-inspector-panel="response"
     >
+      <div class="sticky top-0 z-10 hidden flex-wrap items-center justify-between gap-2 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-2 font-mono text-[0.68rem]" data-response-context>
+        <span class="inline-flex min-w-0 items-center gap-2 text-[var(--sl-color-gray-2)]">
+          <span class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)]" data-response-context-dot></span>
+          <strong class="truncate font-semibold text-[var(--sl-color-white)]" data-response-context-label></strong>
+        </span>
+        <span class="shrink-0 tabular-nums text-[var(--sl-color-gray-3)]" data-response-context-meta></span>
+      </div>
       <div class="grid min-h-full content-start gap-3 p-4" data-response-rich></div>
       <pre class="pg-hl m-0 hidden min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output="response"></pre>
     </section>

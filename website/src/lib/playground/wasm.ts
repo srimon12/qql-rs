@@ -136,6 +136,35 @@ export function selectedRoute(
 	return analysis?.effectiveRoutes[selected] ?? analysis?.result.route ?? null;
 }
 
+/**
+ * Inline marker for the span a failed run reported (executor errors carry
+ * byte offsets into the run's source). Empty when the failure has no span.
+ */
+export function runtimeDiagnostic(
+	failure: PlaygroundFailure | null,
+	source: string,
+): Diagnostic[] {
+	if (!failure?.span) return [];
+	if (!source) return [];
+	const from = Math.min(
+		byteOffsetToPosition(source, failure.span.start),
+		source.length,
+	);
+	const rawTo = Math.min(
+		byteOffsetToPosition(source, failure.span.end),
+		source.length,
+	);
+	const to = Math.max(from + 1, rawTo);
+	return [
+		{
+			from,
+			to: Math.min(to, source.length),
+			severity: "error",
+			message: `${failure.code ?? "QQL-ERROR"}: ${failure.message}`,
+		},
+	];
+}
+
 export function formatError(error: unknown): string {
 	if (error instanceof Error) return error.message;
 	if (typeof error === "string") return error;

@@ -1,7 +1,16 @@
 import { Client, type ExecutionReport, Stmt } from "qql-wasm-current";
 import { createBrowserEmbedder } from "./embedder";
-import type { PlaygroundSettings, RuntimePolicy } from "./types";
+import {
+	browserModelInfo,
+	type PlaygroundSettings,
+	type RuntimePolicy,
+} from "./types";
 import { applyRuntimePolicy } from "./wasm";
+
+export interface ExecuteOptions {
+	/** Batch policy when several statements run in one call. */
+	onError?: "stop" | "continue";
+}
 
 export class QdrantClient {
 	private current: Client | null = null;
@@ -15,14 +24,22 @@ export class QdrantClient {
 	configure(
 		settings: PlaygroundSettings,
 		onBrowserEmbedStatus: (message: string) => void,
+		onBrowserDims?: (dims: number) => void,
 	): string {
 		const previous = this.current;
 		const next = new Client(settings.qdrantUrl, settings.qdrantKey || null);
 
 		let note: string;
 		if (settings.embedProvider === "browser") {
-			next.setEmbedder(createBrowserEmbedder(onBrowserEmbedStatus));
-			note = "Browser model loads only when execution needs text embeddings.";
+			next.setEmbedder(
+				createBrowserEmbedder({
+					model: settings.embedBrowserModel,
+					device: settings.embedBrowserDevice,
+					onStatus: onBrowserEmbedStatus,
+					onDims: onBrowserDims,
+				}),
+			);
+			note = `${browserModelInfo(settings.embedBrowserModel).label} loads only when a run needs text embeddings.`;
 		} else if (settings.embedProvider === "http") {
 			if (!settings.embedUrl || !settings.embedModel || settings.embedDim < 1) {
 				next.free();
@@ -52,6 +69,7 @@ export class QdrantClient {
 	async execute(
 		source: string,
 		policy: RuntimePolicy,
+		options?: ExecuteOptions,
 	): Promise<ExecutionReport> {
 		const client = this.current;
 		if (!client) throw new Error("Qdrant client is not configured.");
@@ -61,9 +79,9 @@ export class QdrantClient {
 			if (policy.enabled) {
 				statement = new Stmt(source);
 				applyRuntimePolicy(statement, policy);
-				return await client.executeStmt(statement);
+				return await client.executeStmt(statement, options);
 			}
-			return await client.execute(source);
+			return await client.execute(source, options);
 		} finally {
 			statement?.free();
 			this.active -= 1;

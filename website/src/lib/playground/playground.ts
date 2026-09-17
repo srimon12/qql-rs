@@ -1,52 +1,61 @@
-import { indentWithTab } from "@codemirror/commands";
-import { linter, lintGutter } from "@codemirror/lint";
-import { EditorState } from "@codemirror/state";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
-import { basicSetup } from "codemirror";
+import { toggleComment } from "@codemirror/commands";
+import { forceLinting } from "@codemirror/lint";
 import type { ExecutionReport } from "qql-wasm-current";
 import { listCollections, probeQdrant, QdrantClient } from "./client";
+import { createPlaygroundEditor, type PlaygroundEditor } from "./editor";
 import { exportCode } from "./export";
-import { qqlCompletion, qqlHighlighting, qqlLanguage } from "./language";
+import { setupCommandPalette } from "./palette";
 import {
 	escapeHtml,
 	highlightJson,
 	pretty,
-	renderCollections,
-	renderCount,
 	renderEmpty,
 	renderError,
+	renderExecResponse,
 	renderExplain,
-	renderFacets,
-	renderGroups,
-	renderHits,
 	renderMetrics,
-	renderMutation,
-	renderShardKeys,
-	type ScoredPoint,
 } from "./render";
 import {
+	lineAt,
+	type StatementSpan,
+	scanStatementSpans,
+	statementIndexAt,
+	statementIndicesInRange,
+	statementKeyword,
+	statementPreview,
+	statementSource,
+} from "./statements";
+import {
+	browserModelInfo,
 	DEFAULT_POLICY,
+	DEFAULT_RUN_PREFERENCES,
 	DEFAULT_SETTINGS,
 	type ExportLanguage,
 	INSPECTOR_TAB_KEY,
 	type InspectorTab,
+	MOBILE_VIEW_KEY,
 	type PlaygroundAnalysis,
 	type PlaygroundMetrics,
 	type PlaygroundSettings,
 	POLICY_KEY,
+	RUN_KEY,
+	type RunPreferences,
 	type RuntimePolicy,
 	SETTINGS_KEY,
 	SPLIT_KEY,
 	WORKSPACE_KEY,
+	WRAP_KEY,
 } from "./types";
 import {
 	analyzeWithPolicy,
 	buildFailure,
+	byteOffsetToPosition,
 	connectionHost,
 	currentDiagnostic,
 	formatError,
 	formatQuery,
 	initQql,
+	runtimeDiagnostic,
 	selectedRoute,
 } from "./wasm";
 
@@ -72,16 +81,31 @@ function queryAll<T extends HTMLElement>(
 
 // ── State ────────────────────────────────────────────────────────────────────
 
+type StatementStatus = "idle" | "running" | "ok" | "error" | "skipped";
+type MobileView = "editor" | "result";
+
 let settings: PlaygroundSettings = loadSettings();
 let policy: RuntimePolicy = loadPolicy();
+let runPrefs: RunPreferences = loadRunPrefs();
 let activeTab: InspectorTab = loadTab();
 let activeLanguage: ExportLanguage = "python";
+let mobileView: MobileView = loadMobileView();
+let wrapEnabled = loadWrap();
 let analysis: PlaygroundAnalysis | null = null;
 let metrics: PlaygroundMetrics | null = null;
 let selectedStmtIndex = 0;
 let lastExecutionReport: ExecutionReport | null = null;
 let lastExecutionError: ReturnType<typeof buildFailure> | null = null;
 let lastExecuteMs: number | null = null;
+/** Statement spans of the live document (text-level scan). */
+let statementSpans: StatementSpan[] = [];
+/** Editor statement indices covered by the last run, in execution order. */
+let executedIndices: number[] = [];
+const statementStatus = new Map<number, StatementStatus>();
+/** Real tensor width reported by the in-browser model, once loaded. */
+let browserDims: number | null = null;
+/** Editor handle, wired in `start()`. */
+let activeEditor: PlaygroundEditor;
 
 const client = new QdrantClient();
 
@@ -139,6 +163,53 @@ function saveTab(tab: InspectorTab): void {
 	}
 }
 
+function loadRunPrefs(): RunPreferences {
+	try {
+		const raw = localStorage.getItem(RUN_KEY);
+		if (raw) return { ...DEFAULT_RUN_PREFERENCES, ...JSON.parse(raw) };
+	} catch {
+		// use default
+	}
+	return { ...DEFAULT_RUN_PREFERENCES };
+}
+
+function saveRunPrefs(next: RunPreferences): void {
+	runPrefs = next;
+	try {
+		localStorage.setItem(RUN_KEY, JSON.stringify(next));
+	} catch {
+		// local storage quota
+	}
+}
+
+function loadWrap(): boolean {
+	return localStorage.getItem(WRAP_KEY) === "on";
+}
+
+function saveWrap(enabled: boolean): void {
+	wrapEnabled = enabled;
+	try {
+		localStorage.setItem(WRAP_KEY, enabled ? "on" : "off");
+	} catch {
+		// local storage quota
+	}
+}
+
+function loadMobileView(): MobileView {
+	return localStorage.getItem(MOBILE_VIEW_KEY) === "result"
+		? "result"
+		: "editor";
+}
+
+function saveMobileView(view: MobileView): void {
+	mobileView = view;
+	try {
+		localStorage.setItem(MOBILE_VIEW_KEY, view);
+	} catch {
+		// local storage quota
+	}
+}
+
 // ── Toast notifications ──────────────────────────────────────────────────────
 
 export function showToast(message: string, isError = false): void {
@@ -153,6 +224,78 @@ export function showToast(message: string, isError = false): void {
 
 // ── UI Updaters ──────────────────────────────────────────────────────────────
 
+/** Result of the selected statement, mapped through the last run's order. */
+function resultForStatement(
+	index: number,
+): ExecutionReport["results"][number] | null {
+	if (!lastExecutionReport) return null;
+	const position = executedIndices.indexOf(index);
+	if (position < 0) return null;
+	return lastExecutionReport.results[position] ?? null;
+}
+
+function statusDotClass(status: StatementStatus | undefined): string {
+	switch (status) {
+		case "ok":
+			return "bg-[var(--q-ok)]";
+		case "error":
+			return "bg-[var(--q-bad)]";
+		case "running":
+			return "bg-[var(--sl-color-accent)] animate-pulse";
+		case "skipped":
+			return "bg-[var(--sl-color-gray-4)]";
+		default:
+			return "bg-transparent ring-1 ring-inset ring-[var(--sl-color-gray-5)]";
+	}
+}
+
+/** Context strip above the response: which statement the panel is showing. */
+function updateResponseContext(): void {
+	const bar = query("[data-response-context]");
+	if (!bar) return;
+	const label = query("[data-response-context-label]");
+	const meta = query("[data-response-context-meta]");
+	const dot = query("[data-response-context-dot]");
+
+	if (!lastExecutionReport && !lastExecutionError) {
+		bar.hidden = true;
+		return;
+	}
+	bar.hidden = false;
+
+	const source = activeEditor?.source() ?? "";
+	const count = statementSpans.length || analysis?.result.statements_count || 1;
+	const span = statementSpans[selectedStmtIndex];
+	const keyword = span ? statementKeyword(source, span) : "";
+	if (label) {
+		label.textContent = span
+			? `Statement ${selectedStmtIndex + 1} of ${count} · ${keyword}`
+			: `Statement ${selectedStmtIndex + 1} of ${count}`;
+	}
+
+	const status = statementStatus.get(selectedStmtIndex);
+	if (dot) {
+		dot.className = `size-1.5 shrink-0 rounded-full ${statusDotClass(status)}`;
+	}
+
+	const res = resultForStatement(selectedStmtIndex);
+	if (meta) {
+		if (lastExecutionError && status === "error") {
+			meta.textContent = lastExecutionError.code ?? "Run failed";
+		} else if (!res) {
+			meta.textContent = count > 1 ? "Not run · ⌘↵ runs this statement" : "";
+		} else if (!res.ok) {
+			meta.textContent = "Failed · see the result card";
+		} else {
+			const timing =
+				executedIndices.length === 1 && lastExecuteMs !== null
+					? ` · ${lastExecuteMs.toFixed(1)} ms`
+					: "";
+			meta.textContent = `${res.operation}${timing}`;
+		}
+	}
+}
+
 function updateStatusBar(): void {
 	const validationBadge = query("[data-validation-badge]");
 	const summary = query("[data-analysis-summary]");
@@ -164,15 +307,21 @@ function updateStatusBar(): void {
 	const embedDimChip = query("[data-embed-dim-chip]");
 
 	if (embedChip) {
-		if (settings.embedProvider === "browser")
-			embedChip.textContent = "MiniLM (browser)";
-		else if (settings.embedProvider === "http")
+		if (settings.embedProvider === "browser") {
+			embedChip.textContent = `${browserModelInfo(settings.embedBrowserModel).label} (browser)`;
+		} else if (settings.embedProvider === "http") {
 			embedChip.textContent = `${settings.embedModel || "HTTP"}`;
-		else embedChip.textContent = "None (raw vectors)";
+		} else embedChip.textContent = "None (raw vectors)";
 	}
 	if (embedDimChip) {
 		embedDimChip.hidden = settings.embedProvider === "none";
-		embedDimChip.textContent = `${settings.embedDim}d`;
+		if (settings.embedProvider === "browser") {
+			const dims =
+				browserDims ?? browserModelInfo(settings.embedBrowserModel).dims;
+			embedDimChip.textContent = dims ? `${dims}d` : "auto";
+		} else {
+			embedDimChip.textContent = `${settings.embedDim}d`;
+		}
 	}
 
 	if (policyDot) {
@@ -186,7 +335,7 @@ function updateStatusBar(): void {
 	if (!analysis) return;
 
 	if (stmtCount) {
-		const count = analysis.result.statements_count;
+		const count = statementSpans.length || analysis.result.statements_count;
 		stmtCount.textContent = `${count} ${count === 1 ? "stmt" : "stmts"}`;
 	}
 
@@ -234,31 +383,38 @@ function updateInspectorPanels(): void {
 
 	if (!analysis) return;
 
-	// 2. Update Statement Dropdown in inspector header
+	// 2. Update statement navigator in the inspector header
 	const stmtSelect = query<HTMLSelectElement>("[data-statement-select]");
 	const stmtWrap = query("[data-statement-wrap]");
-	const count = analysis.result.statements_count;
+	const count = statementSpans.length || analysis.result.statements_count;
 	if (stmtSelect && stmtWrap) {
+		stmtWrap.hidden = count <= 1;
 		if (count > 1) {
-			stmtWrap.hidden = false;
-			stmtSelect.disabled = false;
-			stmtSelect.hidden = false;
-			stmtSelect.innerHTML = Array.from({ length: count })
-				.map(
-					(_, i) =>
-						`<option value="${i}" ${i === selectedStmtIndex ? "selected" : ""}>Statement ${i + 1}</option>`,
-				)
+			const source = activeEditor?.source() ?? "";
+			stmtSelect.innerHTML = statementSpans
+				.map((span, index) => {
+					const status = statementStatus.get(index);
+					const mark =
+						status === "ok"
+							? " ✓"
+							: status === "error"
+								? " ✕"
+								: status === "skipped"
+									? " –"
+									: "";
+					const kind =
+						source.length > 0 ? statementKeyword(source, span) : "QQL";
+					return `<option value="${index}" ${index === selectedStmtIndex ? "selected" : ""}>${index + 1} · ${escapeHtml(kind)}${mark}</option>`;
+				})
 				.join("");
-		} else {
-			stmtWrap.hidden = true;
-			stmtSelect.disabled = true;
-			stmtSelect.hidden = true;
 		}
 	}
 
 	const route = selectedRoute(analysis, selectedStmtIndex);
 	const routeLine = query("[data-route-line]");
 	if (routeLine) {
+		// Redundant with the Plan tab once per-statement navigation appears.
+		routeLine.hidden = count > 1;
 		routeLine.textContent = route ? `${route.method} ${route.path}` : "";
 	}
 
@@ -288,15 +444,25 @@ function updateInspectorPanels(): void {
 
 			if (listEl) {
 				listEl.innerHTML = analysis.effectiveRoutes
-					.map(
-						(r, idx) => `
-					<button type="button" class="route-row ${idx === selectedStmtIndex ? 'aria-current="true"' : ""}" data-select-stmt="${idx}">
+					.map((r, idx) => {
+						const status = statementStatus.get(idx);
+						const mark =
+							status === "ok"
+								? `<span class="size-1.5 rounded-full bg-[var(--q-ok)]" title="Ran successfully"></span>`
+								: status === "error"
+									? `<span class="size-1.5 rounded-full bg-[var(--q-bad)]" title="Failed"></span>`
+									: status === "running"
+										? `<span class="size-1.5 animate-pulse rounded-full bg-[var(--sl-color-accent)]" title="Running"></span>`
+										: "";
+						return `
+					<button type="button" class="route-row" aria-current="${idx === selectedStmtIndex ? "true" : "false"}" data-select-stmt="${idx}">
 						<span class="route-row__index">${idx + 1}</span>
 						<span class="route-row__type">${escapeHtml(r.path)}</span>
 						<span class="route-row__method">${escapeHtml(r.method)}</span>
+						${mark ? `<span class="col-start-3 row-start-1 justify-self-end">${mark}</span>` : ""}
 					</button>
-				`,
-					)
+				`;
+					})
 					.join("");
 			}
 		}
@@ -337,10 +503,7 @@ function updateInspectorPanels(): void {
 
 	const metricsCards = query("[data-metrics-cards]");
 	const metricsOutput = query(`[data-output="metrics"]`);
-	const currentRes = Array.isArray(lastExecutionReport?.results)
-		? (lastExecutionReport.results[selectedStmtIndex] ??
-			lastExecutionReport.results[0])
-		: null;
+	const currentRes = resultForStatement(selectedStmtIndex);
 	const rawTelemetry =
 		(lastExecutionReport as unknown as { telemetry?: Record<string, unknown> })
 			?.telemetry ??
@@ -373,8 +536,10 @@ function updateInspectorPanels(): void {
 	const responsePre = query(`[data-output="response"]`);
 
 	if (responseRich) {
+		const hitBadge = query("[data-hit-count-badge]");
 		if (lastExecutionError) {
 			renderError(responseRich, lastExecutionError);
+			if (hitBadge) hitBadge.hidden = true;
 			if (responsePre) {
 				responsePre.textContent = lastExecutionError.raw;
 				responsePre.hidden = true;
@@ -386,105 +551,34 @@ function updateInspectorPanels(): void {
 				responsePre.hidden = true;
 			}
 
-			const results = report.results;
-			const res = Array.isArray(results)
-				? (results[selectedStmtIndex] ?? results[0])
-				: null;
-			const data = res ? res.data : null;
-			const hitBadge = query("[data-hit-count-badge]");
-
-			if (Array.isArray(data)) {
-				if (
-					data.length > 0 &&
-					typeof data[0] === "object" &&
-					data[0] !== null &&
-					"value" in data[0] &&
-					"count" in data[0]
-				) {
-					renderFacets(
-						responseRich,
-						data as Array<{ value: unknown; count: number }>,
-						lastExecuteMs,
-					);
-					if (hitBadge) {
-						hitBadge.textContent = String(data.length);
-						hitBadge.hidden = false;
-					}
-				} else if (data.length > 0 && typeof data[0] === "string") {
-					renderCollections(responseRich, data as string[], lastExecuteMs);
-					if (hitBadge) {
-						hitBadge.textContent = String(data.length);
-						hitBadge.hidden = false;
-					}
-				} else {
-					renderHits(responseRich, data as ScoredPoint[], lastExecuteMs);
-					if (hitBadge) {
-						hitBadge.textContent = String(data.length);
-						hitBadge.hidden = false;
-					}
-				}
-			} else if (data && typeof data === "object") {
-				if (
-					typeof (data as { count?: unknown }).count === "number" ||
-					typeof (data as { count?: unknown }).count === "bigint"
-				) {
-					const cnt = Number((data as { count: number | bigint }).count);
-					renderCount(responseRich, cnt, lastExecuteMs);
-					if (hitBadge) {
-						hitBadge.textContent = String(cnt);
-						hitBadge.hidden = false;
-					}
-				} else if (Array.isArray((data as { groups?: unknown }).groups)) {
-					const grps = (
-						data as { groups: Array<{ id: unknown; hits: ScoredPoint[] }> }
-					).groups;
-					renderGroups(responseRich, grps, lastExecuteMs);
-					if (hitBadge) {
-						hitBadge.textContent = String(grps.length);
-						hitBadge.hidden = false;
-					}
-				} else if (
-					Array.isArray((data as { collections?: unknown }).collections)
-				) {
-					const cols = (data as { collections: string[] }).collections;
-					renderCollections(responseRich, cols, lastExecuteMs);
-					if (hitBadge) {
-						hitBadge.textContent = String(cols.length);
-						hitBadge.hidden = false;
-					}
-				} else if (
-					Array.isArray((data as { shard_keys?: unknown }).shard_keys)
-				) {
-					const shards = (data as { shard_keys: unknown[] }).shard_keys;
-					renderShardKeys(responseRich, shards, lastExecuteMs);
-					if (hitBadge) {
-						hitBadge.textContent = String(shards.length);
-						hitBadge.hidden = false;
-					}
-				} else {
-					renderMutation(
-						responseRich,
-						res?.operation ?? "SUCCESS",
-						res?.message ?? "Operation completed.",
-						lastExecuteMs,
-					);
-					if (hitBadge) hitBadge.hidden = true;
-				}
-			} else if (res) {
-				renderMutation(
+			const res = resultForStatement(selectedStmtIndex);
+			if (!res) {
+				renderEmpty(
 					responseRich,
-					res.operation ?? "SUCCESS",
-					res.message ?? "Operation completed successfully.",
-					lastExecuteMs,
+					`Statement ${selectedStmtIndex + 1} has not run in this session. Press ⌘↵ (Ctrl+Enter) to run it, or choose Run all statements.`,
+				);
+				if (hitBadge) hitBadge.hidden = true;
+			} else if (res.ok === false) {
+				// Batched runs report per-statement failures in-band; render the
+				// structured card rather than a raw message.
+				renderError(
+					responseRich,
+					buildFailure(res.message ?? "Statement failed", settings.qdrantUrl),
 				);
 				if (hitBadge) hitBadge.hidden = true;
 			} else {
-				renderEmpty(responseRich, "Query executed successfully.");
-				if (hitBadge) hitBadge.hidden = true;
+				const badgeCount = renderExecResponse(responseRich, res, lastExecuteMs);
+				if (hitBadge) {
+					if (badgeCount == null) {
+						hitBadge.hidden = true;
+					} else {
+						hitBadge.textContent = String(badgeCount);
+						hitBadge.hidden = false;
+					}
+				}
 			}
 		} else {
 			renderEmpty(responseRich);
-			const hitBadge = query("[data-hit-count-badge]");
 			if (hitBadge) hitBadge.hidden = true;
 			if (responsePre) {
 				responsePre.textContent =
@@ -493,6 +587,8 @@ function updateInspectorPanels(): void {
 			}
 		}
 	}
+
+	updateResponseContext();
 }
 
 // ── Main Start Routine ───────────────────────────────────────────────────────
@@ -533,8 +629,8 @@ export async function start(): Promise<void> {
 	}
 
 	// 2. Editor setup
-	let editor: EditorView;
 	const runAnalysis = (source: string) => {
+		statementSpans = scanStatementSpans(source);
 		const out = analyzeWithPolicy(
 			source,
 			policy,
@@ -545,10 +641,14 @@ export async function start(): Promise<void> {
 		metrics = out.metrics;
 		updateStatusBar();
 		updateInspectorPanels();
+		updateStatementRail();
 	};
 
 	let debounceTimer: number | null = null;
 	const queueAnalysis = (source: string) => {
+		statementSpans = scanStatementSpans(source);
+		syncStatementState();
+		updateStatementRail();
 		if (debounceTimer) window.clearTimeout(debounceTimer);
 		debounceTimer = window.setTimeout(() => {
 			runAnalysis(source);
@@ -560,106 +660,361 @@ export async function start(): Promise<void> {
 		}, 80);
 	};
 
-	editor = new EditorView({
-		state: EditorState.create({
-			doc: initialDoc,
-			extensions: [
-				basicSetup,
-				qqlLanguage,
-				qqlCompletion,
-				qqlHighlighting,
-				lintGutter(),
-				linter(() => currentDiagnostic(analysis)),
-				placeholder("-- Type your QQL vector query here…"),
-				keymap.of([
-					indentWithTab,
-					{
-						key: "Mod-Enter",
-						run: () => {
-							void execute();
-							return true;
-						},
-					},
-				]),
-				EditorView.updateListener.of((update) => {
-					if (update.docChanged) {
-						if (activeFixture) activeFixture.textContent = "Custom query";
-						queueAnalysis(update.state.doc.toString());
-					}
-				}),
-			],
-		}),
+	/** Keep selection/statuses inside the live statement list. */
+	const syncStatementState = () => {
+		const count = statementSpans.length;
+		for (const index of [...statementStatus.keys()]) {
+			if (index >= count) statementStatus.delete(index);
+		}
+		selectedStmtIndex = Math.min(
+			Math.max(0, selectedStmtIndex),
+			Math.max(0, count - 1),
+		);
+	};
+
+	const selectStatement = (
+		index: number,
+		options: { reveal?: boolean } = {},
+	): void => {
+		const count = Math.max(1, statementSpans.length);
+		selectedStmtIndex = Math.min(Math.max(0, index), count - 1);
+		updateStatementRail();
+		updateInspectorPanels();
+		updateRunMenuHints();
+		if (options.reveal && statementSpans[selectedStmtIndex]) {
+			activeEditor.revealStatement(selectedStmtIndex);
+		}
+	};
+
+	function updateStatementRail(): void {
+		const rail = query("[data-statement-rail]");
+		const posChip = query("[data-statement-pos]");
+		const source = activeEditor?.source() ?? "";
+		if (posChip) {
+			posChip.hidden = statementSpans.length <= 1;
+			posChip.textContent = `Stmt ${selectedStmtIndex + 1}/${statementSpans.length || 1}`;
+		}
+		if (!rail) return;
+		rail.hidden = statementSpans.length <= 1;
+		if (statementSpans.length <= 1) {
+			rail.innerHTML = "";
+			return;
+		}
+		rail.innerHTML = statementSpans
+			.map((span, index) => {
+				const kind = statementKeyword(source, span);
+				const status = statementStatus.get(index);
+				const active = index === selectedStmtIndex;
+				return `<button type="button" class="app-chip h-7 shrink-0 pl-2" data-stmt-chip="${index}" aria-current="${active}" title="${escapeHtml(statementPreview(source, span, 160))}">
+					<span class="font-mono text-[0.62rem] font-bold tabular-nums text-[var(--sl-color-gray-3)]">${index + 1}</span>
+					<span class="font-mono text-[0.68rem] font-semibold">${escapeHtml(kind)}</span>
+					<span class="size-1.5 shrink-0 rounded-full ${statusDotClass(status)}"></span>
+				</button>`;
+			})
+			.join("");
+	}
+
+	const updateCursorStatus = (): void => {
+		const el = query("[data-cursor-pos]");
+		if (!el || !activeEditor) return;
+		const pos = activeEditor.view.state.selection.main.head;
+		const doc = activeEditor.view.state.doc;
+		const line = doc.lineAt(Math.min(pos, doc.length));
+		el.textContent = `Ln ${line.number}, Col ${pos - line.from + 1}`;
+	};
+
+	const followCursor = (pos: number): void => {
+		updateCursorStatus();
+		const index = statementIndexAt(statementSpans, pos);
+		if (index >= 0 && index !== selectedStmtIndex) {
+			selectedStmtIndex = index;
+			updateStatementRail();
+			updateInspectorPanels();
+			updateRunMenuHints();
+		}
+	};
+
+	activeEditor = createPlaygroundEditor({
 		parent: editorHost,
+		doc: initialDoc,
+		diagnostics: () => [
+			...currentDiagnostic(analysis),
+			...runtimeDiagnostic(lastExecutionError, activeEditor?.source() ?? ""),
+		],
+		onDocChange: (source) => {
+			if (activeFixture) activeFixture.textContent = "Custom query";
+			queueAnalysis(source);
+		},
+		onCursor: (pos) => followCursor(pos),
+		onRun: (shortcut) => {
+			void (shortcut === "all" ? runAll() : runSmart());
+		},
+		onFormat: () => formatDocument(),
+		onSelectStatement: (index) => selectStatement(index, { reveal: true }),
 	});
 
-	// 3. Execution logic
-	async function execute(): Promise<void> {
+	// 3. Execution logic — selection, then cursor statement, then exact line.
+	type RunMode = "smart" | "all" | "statement" | "from";
+	interface RunTarget {
+		text: string;
+		/** Editor statement indices this run covers, in execution order. */
+		statements: number[];
+		label: string;
+	}
+
+	const isMac = /Mac|iPhone|iPad|iPod/.test(
+		`${navigator.platform} ${navigator.userAgent}`,
+	);
+	queryAll("[data-kbd], [data-kbd-short]").forEach((kbd) => {
+		kbd.textContent = isMac ? "⌘↵" : "Ctrl+↵";
+	});
+	queryAll("[data-kbd-all]").forEach((kbd) => {
+		kbd.textContent = isMac ? "⇧⌘↵" : "Shift+Ctrl+↵";
+	});
+	queryAll("[data-open-palette] kbd").forEach((kbd) => {
+		kbd.textContent = isMac ? "⌘K" : "Ctrl+K";
+	});
+
+	const setBusy = (busy: boolean): void => {
 		if (!runBtn) return;
-		const source = editor.state.doc.toString().trim();
-		if (!source) return;
-
-		runBtn.disabled = true;
-		runBtn.setAttribute("aria-busy", "true");
+		runBtn.disabled = busy || !client.ready;
+		runBtn.toggleAttribute("aria-busy", busy);
 		const runLabel = query("[data-run-label]");
-		if (runLabel) runLabel.textContent = "Running…";
+		if (runLabel) runLabel.textContent = busy ? "Running…" : "Run";
+	};
 
+	const resolveRunTarget = (mode: RunMode): RunTarget | null => {
+		const source = activeEditor.source();
+		const spans = statementSpans;
+		if (source.trim().length === 0) return null;
+
+		if (mode === "all") {
+			const label =
+				spans.length === 1 ? "1 statement" : `${spans.length} statements`;
+			return {
+				text: source,
+				statements: spans.map((_, index) => index),
+				label,
+			};
+		}
+
+		if (mode === "smart") {
+			const selection = activeEditor.selectionText();
+			if (selection) {
+				const range = activeEditor.view.state.selection.main;
+				return {
+					text: selection,
+					statements: statementIndicesInRange(spans, range.from, range.to),
+					label: "selection",
+				};
+			}
+		}
+
+		const index = activeEditor.cursorStatement();
+		if (index < 0 || index >= spans.length) {
+			// Comment-only or broken document: run the exact line under the cursor.
+			const line = lineAt(source, activeEditor.view.state.selection.main.head);
+			const text = line.text.trim();
+			return text ? { text, statements: [], label: "current line" } : null;
+		}
+		if (mode === "from") {
+			const text = source.slice(spans[index].start).trim();
+			if (!text) return null;
+			return {
+				text,
+				statements: spans.map((_, i) => i).slice(index),
+				label: `statements ${index + 1}–${spans.length}`,
+			};
+		}
+		const text = statementSource(source, spans[index]);
+		if (!text) return null;
+		return { text, statements: [index], label: `statement ${index + 1}` };
+	};
+
+	const switchTab = (tab: InspectorTab): void => {
+		activeTab = tab;
+		saveTab(tab);
+	};
+
+	async function runTarget(target: RunTarget): Promise<void> {
+		if (policy.enabled && target.statements.length > 1) {
+			showToast(
+				"Tenant policy applies to one statement at a time — run a single statement or disable the policy",
+				true,
+			);
+			return;
+		}
+		for (const index of target.statements)
+			statementStatus.set(index, "running");
+		updateStatementRail();
+		setBusy(true);
 		const started = performance.now();
 		try {
 			lastExecutionError = null;
-			lastExecutionReport = await client.execute(source, policy);
+			lastExecutionReport = await client.execute(target.text, policy, {
+				onError: runPrefs.stopOnError ? "stop" : "continue",
+			});
 			lastExecuteMs = performance.now() - started;
-			showToast("Query completed successfully");
-			// Switch to response tab on successful run
-			activeTab = "response";
-			saveTab("response");
+			const results = lastExecutionReport.results;
+			executedIndices = target.statements.slice(0, results.length);
+			executedIndices.forEach((statementIndex, position) => {
+				statementStatus.set(
+					statementIndex,
+					results[position]?.ok ? "ok" : "error",
+				);
+			});
+			for (const index of target.statements.slice(results.length)) {
+				statementStatus.set(index, "skipped");
+			}
+			const firstFailure = executedIndices.find(
+				(index) => statementStatus.get(index) === "error",
+			);
+			if (firstFailure !== undefined) selectedStmtIndex = firstFailure;
+			else if (executedIndices.length > 0)
+				selectedStmtIndex = executedIndices[0];
+			switchTab("response");
+			const failed = lastExecutionReport.failed ?? 0;
+			if (failed === 0) showToast(`Ran ${target.label}`);
+			else showToast(`${failed} of ${results.length} statements failed`, true);
+			forceLinting(activeEditor.view);
 		} catch (error) {
 			lastExecutionReport = null;
 			lastExecuteMs = performance.now() - started;
 			lastExecutionError = buildFailure(error, settings.qdrantUrl);
+			executedIndices = [];
+			// A stopped multi-statement run reports one error; its span points at
+			// the failing statement. Script parse errors surface through the
+			// analyzer instead, so fall back to its first diagnostic span; with
+			// neither, only the first statement is claimed.
+			const failureSpan =
+				lastExecutionError.span ??
+				(() => {
+					const first = analysis?.result.errors?.[0] ?? analysis?.result.error;
+					return first && first.start != null && first.end != null
+						? { start: first.start, end: first.end }
+						: null;
+				})();
+			const failingIndex = failureSpan
+				? statementIndexAt(
+						statementSpans,
+						byteOffsetToPosition(target.text, failureSpan.start),
+					)
+				: -1;
+			if (target.statements.length <= 1) {
+				for (const index of target.statements)
+					statementStatus.set(index, "error");
+			} else {
+				const stopAt =
+					failingIndex >= 0 ? target.statements.indexOf(failingIndex) : 0;
+				target.statements.forEach((index, position) => {
+					statementStatus.set(
+						index,
+						position < stopAt
+							? "ok"
+							: position === stopAt
+								? "error"
+								: "skipped",
+					);
+				});
+			}
+			switchTab("response");
 			showToast(lastExecutionError.message, true);
-			activeTab = "response";
-			saveTab("response");
 		} finally {
-			runBtn.disabled = false;
-			runBtn.removeAttribute("aria-busy");
-			if (runLabel) runLabel.textContent = "Run";
-			runAnalysis(editor.state.doc.toString());
+			setBusy(false);
+			runAnalysis(activeEditor.source());
+			forceLinting(activeEditor.view);
 		}
 	}
 
+	async function runSmart(): Promise<void> {
+		const target = resolveRunTarget("smart");
+		if (target) await runTarget(target);
+	}
+
+	async function runAll(): Promise<void> {
+		const target = resolveRunTarget("all");
+		if (target) await runTarget(target);
+	}
+
 	if (runBtn) {
-		runBtn.addEventListener("click", () => void execute());
+		runBtn.addEventListener("click", () => void runSmart());
+	}
+
+	// Run menu: extra targets + batch error policy.
+	const runMenu = query("[data-run-menu]");
+	const runMenuToggle = query<HTMLButtonElement>("[data-run-menu-toggle]");
+	const setRunMenu = (open: boolean): void => {
+		if (!runMenu || !runMenuToggle) return;
+		runMenu.hidden = !open;
+		runMenuToggle.setAttribute("aria-expanded", String(open));
+	};
+	const updateRunMenuHints = (): void => {
+		const hint = query("[data-run-statement-hint]");
+		if (hint) hint.textContent = `Stmt ${selectedStmtIndex + 1}`;
+	};
+	runMenuToggle?.addEventListener("click", (event) => {
+		event.stopPropagation();
+		setRunMenu(runMenu ? runMenu.hidden !== false : true);
+		updateRunMenuHints();
+	});
+	queryAll("[data-run-mode]").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			const mode = btn.dataset.runMode as RunMode;
+			setRunMenu(false);
+			const target = resolveRunTarget(mode);
+			if (target) void runTarget(target);
+		});
+	});
+	const stopOnErrorInput = query<HTMLInputElement>("[data-run-stop-on-error]");
+	if (stopOnErrorInput) {
+		stopOnErrorInput.checked = runPrefs.stopOnError;
+		stopOnErrorInput.addEventListener("change", () => {
+			saveRunPrefs({ stopOnError: stopOnErrorInput.checked });
+			showToast(
+				stopOnErrorInput.checked
+					? "Multi-statement runs stop on the first error"
+					: "Multi-statement runs continue past errors",
+			);
+		});
 	}
 
 	// 4. Format logic
-	if (formatBtn) {
-		formatBtn.addEventListener("click", () => {
-			const source = editor.state.doc.toString();
-			try {
-				const formatted = formatQuery(source);
-				if (formatted && formatted !== source) {
-					editor.dispatch({
-						changes: { from: 0, to: source.length, insert: formatted },
-					});
-					showToast("Query formatted");
-				}
-			} catch (e) {
-				showToast(formatError(e), true);
+	const formatDocument = (): void => {
+		const source = activeEditor.source();
+		try {
+			const formatted = formatQuery(source);
+			if (formatted && formatted !== source) {
+				activeEditor.setSource(formatted);
+				showToast("Query formatted");
 			}
-		});
+		} catch (error) {
+			const failure = buildFailure(error, settings.qdrantUrl);
+			showToast(
+				failure.code ? `${failure.code}: ${failure.message}` : failure.message,
+				true,
+			);
+		}
+	};
+	if (formatBtn) {
+		formatBtn.addEventListener("click", formatDocument);
 	}
 
 	// 5. Wrap toggle
 	const wrapBtn = query<HTMLButtonElement>("[data-wrap-toggle]");
+	const applyWrap = (): void => {
+		editorHost.dataset.wrap = wrapEnabled ? "on" : "off";
+		wrapBtn?.setAttribute("aria-pressed", String(wrapEnabled));
+		activeEditor.requestMeasure();
+	};
+	const toggleWrap = (): void => {
+		saveWrap(!wrapEnabled);
+		applyWrap();
+	};
 	if (wrapBtn) {
-		let isWrap = false;
-		wrapBtn.addEventListener("click", () => {
-			isWrap = !isWrap;
-			editorHost.dataset.wrap = isWrap ? "on" : "off";
-			wrapBtn.setAttribute("aria-pressed", isWrap ? "true" : "false");
-			editor.requestMeasure();
-		});
+		wrapBtn.addEventListener("click", toggleWrap);
 	}
+	applyWrap();
+	applyMobileView();
 
 	// 6. Split resizing
 	const splitHandle = query("[data-split-handle]");
@@ -690,7 +1045,7 @@ export async function start(): Promise<void> {
 					((upEvent.clientX - bounds.left - 4) / (bounds.width - 8)) * 2,
 				);
 				localStorage.setItem(SPLIT_KEY, String(final));
-				editor.requestMeasure();
+				activeEditor.requestMeasure();
 				splitHandle.removeEventListener("pointermove", onMove);
 				splitHandle.removeEventListener("pointerup", onUp);
 			};
@@ -701,7 +1056,7 @@ export async function start(): Promise<void> {
 		splitHandle.addEventListener("dblclick", () => {
 			applySplit(1.08);
 			localStorage.setItem(SPLIT_KEY, "1.08");
-			editor.requestMeasure();
+			activeEditor.requestMeasure();
 		});
 	}
 
@@ -716,18 +1071,54 @@ export async function start(): Promise<void> {
 		});
 	});
 
-	// Statement select change
+	// Statement navigation (inspector header + rail chips + plan rows)
 	const stmtSelect = query<HTMLSelectElement>("[data-statement-select]");
-	if (stmtSelect) {
-		stmtSelect.addEventListener("change", () => {
-			selectedStmtIndex = Number(stmtSelect.value) || 0;
-			updateInspectorPanels();
+	stmtSelect?.addEventListener("change", () => {
+		selectStatement(Number(stmtSelect.value) || 0, { reveal: true });
+	});
+	query("[data-stmt-prev]")?.addEventListener("click", () => {
+		selectStatement(selectedStmtIndex - 1, { reveal: true });
+	});
+	query("[data-stmt-next]")?.addEventListener("click", () => {
+		selectStatement(selectedStmtIndex + 1, { reveal: true });
+	});
+
+	// Mobile view switch: the split stacks below lg, so let phones choose a pane.
+	function applyMobileView(): void {
+		if (!workspace) return;
+		workspace.dataset.mobileView = mobileView;
+		queryAll<HTMLButtonElement>("[data-mobile-view]").forEach((btn) => {
+			btn.setAttribute(
+				"aria-pressed",
+				String(btn.dataset.mobileView === mobileView),
+			);
 		});
 	}
+	queryAll<HTMLButtonElement>("[data-mobile-view]").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			saveMobileView(btn.dataset.mobileView === "result" ? "result" : "editor");
+			applyMobileView();
+			activeEditor.requestMeasure();
+		});
+	});
 
 	// Copy and interaction click delegates
 	document.addEventListener("click", (e) => {
 		const target = e.target as HTMLElement;
+
+		// Statement rail chip
+		const chip = target.closest<HTMLButtonElement>("[data-stmt-chip]");
+		if (chip?.dataset.stmtChip) {
+			selectStatement(Number(chip.dataset.stmtChip), { reveal: true });
+			return;
+		}
+
+		// Compiled route row
+		const routeRow = target.closest<HTMLButtonElement>("[data-select-stmt]");
+		if (routeRow?.dataset.selectStmt) {
+			selectStatement(Number(routeRow.dataset.selectStmt), { reveal: true });
+			return;
+		}
 
 		// Copy JSON button
 		const copyJsonBtn = target.closest<HTMLButtonElement>("[data-copy-json]");
@@ -749,9 +1140,7 @@ export async function start(): Promise<void> {
 		const loadQueryBtn = target.closest<HTMLButtonElement>("[data-load-query]");
 		if (loadQueryBtn?.dataset.loadQuery) {
 			const q = loadQueryBtn.dataset.loadQuery;
-			editor.dispatch({
-				changes: { from: 0, to: editor.state.doc.length, insert: q },
-			});
+			activeEditor.setSource(q);
 			showToast("Loaded query into editor");
 			return;
 		}
@@ -831,9 +1220,7 @@ export async function start(): Promise<void> {
 			const q = item.dataset.presetQuery;
 			const label = item.dataset.presetLabel || "Example";
 			if (q) {
-				editor.dispatch({
-					changes: { from: 0, to: editor.state.doc.length, insert: q },
-				});
+				activeEditor.setSource(q);
 				if (activeFixture) activeFixture.textContent = label;
 				presetDialog.close();
 				showToast(`Loaded example: ${label}`);
@@ -866,6 +1253,15 @@ export async function start(): Promise<void> {
 		const embedKeyInput = settingsForm.elements.namedItem(
 			"embedKey",
 		) as HTMLInputElement | null;
+		const browserModelInput = settingsForm.elements.namedItem(
+			"embedBrowserModel",
+		) as HTMLInputElement | null;
+		const browserDeviceSelect = settingsForm.elements.namedItem(
+			"embedBrowserDevice",
+		) as HTMLSelectElement | null;
+		const browserFields = query("[data-browser-embed-fields]", settingsForm);
+		const httpFields = query("[data-http-embed-fields]", settingsForm);
+		const browserDimsEl = query("[data-browser-model-dims]", settingsForm);
 
 		if (urlInput) urlInput.value = settings.qdrantUrl;
 		if (keyInput) keyInput.value = settings.qdrantKey;
@@ -874,19 +1270,54 @@ export async function start(): Promise<void> {
 		if (embedModelInput) embedModelInput.value = settings.embedModel;
 		if (embedDimInput) embedDimInput.value = String(settings.embedDim);
 		if (embedKeyInput) embedKeyInput.value = settings.embedKey;
+		if (browserModelInput) browserModelInput.value = settings.embedBrowserModel;
+		if (browserDeviceSelect)
+			browserDeviceSelect.value = settings.embedBrowserDevice;
+
+		const updateBrowserDims = (): void => {
+			if (!browserDimsEl) return;
+			const model = (browserModelInput?.value || "").trim();
+			const known = model ? browserModelInfo(model).dims : null;
+			const dims = browserDims ?? known;
+			browserDimsEl.textContent = dims
+				? `${dims} dimensions reported`
+				: "Reported after the first embedding";
+		};
+
+		const updateProviderPanels = (): void => {
+			const provider = providerSelect?.value ?? settings.embedProvider;
+			if (browserFields) browserFields.hidden = provider !== "browser";
+			if (httpFields) httpFields.hidden = provider !== "http";
+			updateBrowserDims();
+		};
+		providerSelect?.addEventListener("change", updateProviderPanels);
+		browserModelInput?.addEventListener("input", updateBrowserDims);
+		updateProviderPanels();
 
 		settingsForm.addEventListener("submit", (e) => {
 			e.preventDefault();
 			const formData = new FormData(settingsForm);
-			saveSettings({
+			const provider =
+				(formData.get(
+					"embedProvider",
+				) as PlaygroundSettings["embedProvider"]) || "browser";
+			const browserModel = String(
+				formData.get("embedBrowserModel") || "",
+			).trim();
+			if (provider === "browser" && !browserModel) {
+				showToast(
+					"Enter an in-browser model id, e.g. Xenova/bge-small-en-v1.5",
+					true,
+				);
+				browserModelInput?.focus();
+				return;
+			}
+			const next: PlaygroundSettings = {
 				qdrantUrl: String(
 					formData.get("qdrantUrl") || DEFAULT_SETTINGS.qdrantUrl,
 				).trim(),
 				qdrantKey: String(formData.get("qdrantKey") || "").trim(),
-				embedProvider:
-					(formData.get(
-						"embedProvider",
-					) as PlaygroundSettings["embedProvider"]) || "browser",
+				embedProvider: provider,
 				embedUrl: String(
 					formData.get("embedUrl") || DEFAULT_SETTINGS.embedUrl,
 				).trim(),
@@ -895,14 +1326,34 @@ export async function start(): Promise<void> {
 				).trim(),
 				embedDim: Number(formData.get("embedDim")) || DEFAULT_SETTINGS.embedDim,
 				embedKey: String(formData.get("embedKey") || "").trim(),
-			});
+				embedBrowserModel: browserModel || DEFAULT_SETTINGS.embedBrowserModel,
+				embedBrowserDevice:
+					(formData.get(
+						"embedBrowserDevice",
+					) as PlaygroundSettings["embedBrowserDevice"]) || "auto",
+			};
+			const modelChanged =
+				next.embedBrowserModel !== settings.embedBrowserModel ||
+				next.embedBrowserDevice !== settings.embedBrowserDevice;
+			if (modelChanged) browserDims = null;
+			saveSettings(next);
 
-			client.configure(settings, (msg) => {
-				const statusEl = query("[data-embed-status]");
-				if (statusEl) statusEl.textContent = msg;
-			});
+			const note = client.configure(
+				settings,
+				(msg) => {
+					const statusEl = query("[data-embed-status]");
+					if (statusEl) statusEl.textContent = msg;
+				},
+				(dims) => {
+					browserDims = dims;
+					updateStatusBar();
+				},
+			);
 
+			const statusEl = query("[data-embed-status]");
+			if (statusEl) statusEl.textContent = note;
 			updateConnectionDisplay();
+			updateStatusBar();
 			byId<HTMLDialogElement>("settings-dialog").close();
 			showToast("Settings saved");
 			void checkEndpoint();
@@ -912,18 +1363,29 @@ export async function start(): Promise<void> {
 		if (testBtn) {
 			testBtn.addEventListener("click", async () => {
 				const probeEl = query("[data-embed-probe]", settingsForm);
+				const probeDot = query("[data-embed-probe-dot]", settingsForm);
 				if (probeEl) probeEl.textContent = "Pinging endpoint…";
 				const target = (urlInput?.value || settings.qdrantUrl).trim();
 				const verdict = await probeQdrant(target);
+				const setDot = (cls: string) => {
+					if (!probeDot) return;
+					probeDot.classList.remove("bg-[var(--q-ok)]", "bg-[var(--q-bad)]");
+					probeDot.classList.add(cls);
+				};
 				if (probeEl) {
-					if (verdict.kind === "ok")
+					if (verdict.kind === "ok") {
 						probeEl.textContent = "✓ Connected to Qdrant successfully";
-					else if (verdict.kind === "cors")
+						setDot("bg-[var(--q-ok)]");
+					} else if (verdict.kind === "cors") {
 						probeEl.textContent = "⚠ Qdrant up but blocked by browser CORS";
-					else if (verdict.kind === "http-error")
+						setDot("bg-[var(--q-warn)]");
+					} else if (verdict.kind === "http-error") {
 						probeEl.textContent = `⚠ Qdrant returned HTTP ${verdict.status}`;
-					else
+						setDot("bg-[var(--q-warn)]");
+					} else {
 						probeEl.textContent = "✕ Qdrant unreachable (connection refused)";
+						setDot("bg-[var(--q-bad)]");
+					}
 				}
 			});
 		}
@@ -958,6 +1420,30 @@ export async function start(): Promise<void> {
 		if (typeSelect) typeSelect.value = policy.valueType;
 		if (shardInput) shardInput.value = policy.shardKey;
 
+		const updatePolicyPreview = (): void => {
+			const preview = query("[data-policy-preview]", policyForm);
+			if (!preview) return;
+			if (!enabledInput?.checked) {
+				preview.textContent =
+					"Enable injection to rewrite the AST after parse.";
+				return;
+			}
+			const type = typeSelect?.value || "string";
+			const raw = valueInput?.value ?? "";
+			const literal =
+				type === "string" ? `"${raw}"` : type === "boolean" ? raw : raw;
+			const shard = shardInput?.value.trim() ?? "";
+			const clause = `WHERE ${fieldInput?.value || "tenant_id"} ${opSelect?.value || "="} ${literal}`;
+			preview.textContent = shard ? `${clause}\nSHARD ${shard}` : clause;
+		};
+		for (const input of [enabledInput, fieldInput, valueInput, shardInput]) {
+			input?.addEventListener("input", updatePolicyPreview);
+		}
+		for (const select of [opSelect, typeSelect]) {
+			select?.addEventListener("change", updatePolicyPreview);
+		}
+		updatePolicyPreview();
+
 		policyForm.addEventListener("submit", (e) => {
 			e.preventDefault();
 			const formData = new FormData(policyForm);
@@ -972,7 +1458,7 @@ export async function start(): Promise<void> {
 			});
 			byId<HTMLDialogElement>("policy-dialog").close();
 			showToast("Tenant policy updated");
-			runAnalysis(editor.state.doc.toString());
+			runAnalysis(activeEditor.source());
 		});
 
 		// Recipe buttons
@@ -990,6 +1476,7 @@ export async function start(): Promise<void> {
 						typeSelect.value = recipeBtn.dataset.valueType;
 					if (shardInput && recipeBtn.dataset.shard != null)
 						shardInput.value = recipeBtn.dataset.shard;
+					updatePolicyPreview();
 					showToast(`Loaded policy recipe: ${recipeBtn.dataset.field}`);
 				});
 			},
@@ -1007,9 +1494,10 @@ export async function start(): Promise<void> {
 
 	const updateExport = () => {
 		if (!exportOutput) return;
-		const source = editor.state.doc.toString();
+		const source = activeEditor.source();
 		const route = selectedRoute(analysis, selectedStmtIndex);
-		const count = analysis?.result.statements_count ?? 1;
+		const count =
+			statementSpans.length || analysis?.result.statements_count || 1;
 		exportOutput.textContent = exportCode(
 			activeLanguage,
 			source,
@@ -1095,9 +1583,7 @@ export async function start(): Promise<void> {
 					b.addEventListener("click", () => {
 						const q = b.dataset.presetQuery;
 						if (q) {
-							editor.dispatch({
-								changes: { from: 0, to: editor.state.doc.length, insert: q },
-							});
+							activeEditor.setSource(q);
 							if (activeFixture)
 								activeFixture.textContent =
 									b.dataset.presetLabel || "Collection";
@@ -1111,30 +1597,173 @@ export async function start(): Promise<void> {
 		}
 	}
 
-	// Share functionality
-	const shareBtn = query("[data-overflow-share]");
-	const shareMenu = query<HTMLElement>("[data-share-menu]");
-	const shareUrlInput = query<HTMLInputElement>("[data-share-url]");
-	const shareCopyBtn = query("[data-share-copy]");
-
-	if (shareBtn && shareMenu && shareUrlInput) {
-		shareBtn.addEventListener("click", () => {
-			const url = new URL(window.location.href);
-			url.searchParams.set("q", editor.state.doc.toString());
-			shareUrlInput.value = url.toString();
-		});
-	}
-	if (shareCopyBtn && shareUrlInput) {
-		shareCopyBtn.addEventListener("click", () => {
-			void navigator.clipboard.writeText(shareUrlInput.value);
-			shareCopyBtn.setAttribute("data-copied", "true");
-			showToast("Share URL copied to clipboard");
-			window.setTimeout(
-				() => shareCopyBtn.removeAttribute("data-copied"),
-				2000,
+	// Share: the whole script travels in `?q=` (same contract as docs links).
+	const copyShareLink = async (): Promise<void> => {
+		const url = new URL(window.location.href);
+		url.searchParams.set("q", activeEditor.source());
+		const href = url.toString();
+		if (href.length > 8000) {
+			showToast(
+				"This script is too long to share as a link — use Export instead",
+				true,
 			);
-		});
-	}
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(href);
+			showToast("Shareable link copied to clipboard");
+		} catch {
+			showToast("Could not copy the link", true);
+		}
+	};
+	queryAll("[data-share-link]").forEach((btn) => {
+		btn.addEventListener("click", () => void copyShareLink());
+	});
+
+	// Command palette (⌘K): every action in one place.
+	const palette = query<HTMLDialogElement>("#palette-dialog");
+	const paletteHandle = palette
+		? setupCommandPalette({
+				dialog: palette,
+				getCommands: () => {
+					const source = activeEditor.source();
+					const statementCommands = statementSpans.map((span, index) => ({
+						group: "Statements",
+						label: `${index + 1} · ${statementKeyword(source, span)}`,
+						detail: statementPreview(source, span, 70),
+						run: () => selectStatement(index, { reveal: true }),
+					}));
+					return [
+						{
+							group: "Run",
+							label: "Run statement at cursor",
+							detail: "Selection, else the statement under the caret",
+							hint: isMac ? "⌘↵" : "Ctrl+↵",
+							run: () => void runSmart(),
+						},
+						{
+							group: "Run",
+							label: "Run all statements",
+							detail: "Batch every statement in the script",
+							hint: isMac ? "⇧⌘↵" : "Shift+Ctrl+↵",
+							run: () => void runAll(),
+						},
+						{
+							group: "Run",
+							label: "Run from current statement to end",
+							run: () => {
+								const target = resolveRunTarget("from");
+								if (target) void runTarget(target);
+							},
+						},
+						...statementCommands,
+						{
+							group: "Editor",
+							label: "Format document",
+							hint: "Alt+Shift+F",
+							run: formatDocument,
+						},
+						{
+							group: "Editor",
+							label: wrapEnabled
+								? "Disable line wrapping"
+								: "Enable line wrapping",
+							run: toggleWrap,
+						},
+						{
+							group: "Editor",
+							label: "Comment / uncomment selection",
+							hint: isMac ? "⌘/" : "Ctrl+/",
+							run: () => {
+								if (!toggleComment(activeEditor.view)) {
+									showToast("Nothing to comment on this line", true);
+								}
+							},
+						},
+						{
+							group: "Editor",
+							label: "Clear editor",
+							run: () => {
+								activeEditor.setSource("");
+								activeEditor.view.focus();
+							},
+						},
+						{
+							group: "Workspace",
+							label: "Browse examples",
+							run: () => byId<HTMLDialogElement>("preset-dialog").showModal(),
+						},
+						{
+							group: "Workspace",
+							label: "Database & embeddings setup",
+							run: () => byId<HTMLDialogElement>("settings-dialog").showModal(),
+						},
+						{
+							group: "Workspace",
+							label: "Tenant policy",
+							run: () => byId<HTMLDialogElement>("policy-dialog").showModal(),
+						},
+						{
+							group: "Workspace",
+							label: "Export SDK code",
+							run: () => {
+								updateExport();
+								byId<HTMLDialogElement>("export-dialog").showModal();
+							},
+						},
+						{
+							group: "Workspace",
+							label: "Copy share link",
+							run: () => void copyShareLink(),
+						},
+						{
+							group: "Help",
+							label: "Keyboard shortcuts",
+							run: () =>
+								byId<HTMLDialogElement>("shortcuts-dialog").showModal(),
+						},
+						{
+							group: "Help",
+							label: "Open documentation",
+							run: () => window.open("/docs/", "_blank", "noopener"),
+						},
+					];
+				},
+			})
+		: null;
+
+	// Global shortcuts outside the editor: ⌘K palette, ⌘↵ run, Escape closes menus.
+	queryAll("[data-open-palette]").forEach((btn) => {
+		btn.addEventListener("click", () => paletteHandle?.open());
+	});
+	document.addEventListener("keydown", (event) => {
+		const mod = event.metaKey || event.ctrlKey;
+		if (event.key === "Escape") {
+			setRunMenu(false);
+			return;
+		}
+		if (!mod) return;
+		if (document.querySelector("dialog[open]") && !paletteHandle?.isOpen)
+			return;
+		if (event.key.toLowerCase() === "k") {
+			event.preventDefault();
+			paletteHandle?.toggle();
+			return;
+		}
+		if (event.key === "Enter" && !activeEditor.view.hasFocus) {
+			event.preventDefault();
+			void (event.shiftKey ? runAll() : runSmart());
+		}
+	});
+	document.addEventListener("click", (event) => {
+		if (!runMenu || runMenu.hidden) return;
+		const target = event.target as Node;
+		if (!runMenu.contains(target) && !runMenuToggle?.contains(target)) {
+			setRunMenu(false);
+		}
+	});
+
+	setupDialog("shortcuts-dialog", ["[data-open-shortcuts]"]);
 
 	// 9. WASM Initialization
 	const runtimeDot = query("[data-runtime-dot]");
@@ -1142,10 +1771,17 @@ export async function start(): Promise<void> {
 
 	try {
 		await initQql();
-		client.configure(settings, (msg) => {
-			const statusEl = query("[data-embed-status]");
-			if (statusEl) statusEl.textContent = msg;
-		});
+		client.configure(
+			settings,
+			(msg) => {
+				const statusEl = query("[data-embed-status]");
+				if (statusEl) statusEl.textContent = msg;
+			},
+			(dims) => {
+				browserDims = dims;
+				updateStatusBar();
+			},
+		);
 
 		if (runtimeDot) runtimeDot.classList.add("is-ready");
 		if (statusWasm) statusWasm.textContent = "WASM Ready";
@@ -1153,7 +1789,10 @@ export async function start(): Promise<void> {
 		if (runBtn) runBtn.disabled = false;
 
 		updateConnectionDisplay();
+		statementSpans = scanStatementSpans(initialDoc);
+		syncStatementState();
 		runAnalysis(initialDoc);
+		updateCursorStatus();
 		void checkEndpoint();
 	} catch (e) {
 		const msg = formatError(e);
