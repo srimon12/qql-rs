@@ -8,13 +8,7 @@
  * SQL `''` doubling, triple-quoted strings, raw `r"…"` / `r'…'`, backticks —
  * and splits on top-level `;` only.
  */
-
-export interface StatementSpan {
-	/** Char offset of the first byte after the previous `;` (comments included). */
-	start: number;
-	/** Char offset just past the terminating `;` (or the end of input). */
-	end: number;
-}
+import type { StatementSpan } from "./types";
 
 const WHITESPACE = /\s/;
 

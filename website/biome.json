@@ -23,6 +23,7 @@
 			"!**/dist",
 			"!**/.astro",
 			"!**/.wasm",
+			"!**/.cache",
 			"!**/public",
 			"!**/src/lib/playground/qql-keywords.generated.ts",
 			"!**/src/styles/ec-theme.css",

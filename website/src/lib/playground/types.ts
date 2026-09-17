@@ -7,6 +7,8 @@ import type {
 export type EmbedProvider = "browser" | "http" | "none";
 export type BrowserEmbedDevice = "auto" | "webgpu" | "wasm";
 export type PolicyValueType = "string" | "number" | "boolean";
+export type MobileView = "editor" | "result";
+export type StatementStatus = "idle" | "running" | "ok" | "error" | "skipped";
 export type InspectorTab =
 	| "response"
 	| "plan"
@@ -16,6 +18,14 @@ export type InspectorTab =
 	| "explain"
 	| "metrics";
 export type ExportLanguage = "python" | "node" | "rust" | "curl";
+
+/** Char offsets of one statement in the editor document (`;` included). */
+export interface StatementSpan {
+	/** First char after the previous `;` — leading comments/whitespace included. */
+	start: number;
+	/** Just past the terminating `;`, or the end of the document. */
+	end: number;
+}
 
 export interface PlaygroundSettings {
 	qdrantUrl: string;
@@ -72,14 +82,34 @@ export interface PlaygroundAnalysis {
 	policyError: string | null;
 }
 
+/**
+ * Every piece of playground state in one place. Persisted fields are
+ * rehydrated by `store.ts` from localStorage; the rest is per-session.
+ */
 export interface PlaygroundState {
-	analysis: PlaygroundAnalysis | null;
-	response: ExecutionReport | null;
-	executionError: PlaygroundFailure | null;
-	selectedStatement: number;
+	// ── Persisted ──
+	settings: PlaygroundSettings;
+	policy: RuntimePolicy;
+	runPrefs: RunPreferences;
 	inspectorTab: InspectorTab;
 	exportLanguage: ExportLanguage;
+	mobileView: MobileView;
+	wrapEnabled: boolean;
+
+	// ── Session ──
+	analysis: PlaygroundAnalysis | null;
 	metrics: PlaygroundMetrics | null;
+	selectedStatement: number;
+	response: ExecutionReport | null;
+	executionError: PlaygroundFailure | null;
+	executeMs: number | null;
+	/** Text-level statement map of the live document. */
+	statementSpans: StatementSpan[];
+	/** Editor statement indices covered by the last run, in execution order. */
+	executedStatements: number[];
+	statementStatus: Map<number, StatementStatus>;
+	/** Real tensor width reported by the in-browser model, once loaded. */
+	browserDims: number | null;
 }
 
 export const LIVE_EMBED_URL = "http://localhost:1234/v1/embeddings";

@@ -1,14 +1,5 @@
+import { escapeHtml } from "./dom";
 import type { PlaygroundFailure, PlaygroundMetrics } from "./types";
-
-export function escapeHtml(str: unknown): string {
-	if (str == null) return "";
-	return String(str)
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
-}
 
 export function pretty(value: unknown): string {
 	if (value === undefined) return "";

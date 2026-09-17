@@ -30,11 +30,11 @@ import {
 	qqlLanguage,
 } from "./language";
 import {
-	type StatementSpan,
 	scanStatementSpans,
 	statementIndexAt,
 	statementStartOffset,
 } from "./statements";
+import type { StatementSpan } from "./types";
 
 export type RunShortcut = "smart" | "all";
 
@@ -112,23 +112,27 @@ const activeStatementTint = ViewPlugin.fromClass(
 );
 
 class StatementGutterMarker extends GutterMarker {
-	private readonly dom: HTMLElement;
 	constructor(readonly index: number) {
 		super();
-		this.dom = document.createElement("span");
-		this.dom.className = "cm-stmt-marker";
-		this.dom.dataset.stmtIndex = String(index);
-		this.dom.textContent = String(index + 1);
-	}
-	override toDOM(): HTMLElement {
-		return this.dom;
 	}
 	override elementClass = "cm-stmt-marker-line";
+	/**
+	 * Fresh DOM per insertion: CodeMirror owns gutter elements and may insert
+	 * the same marker into a rebuilt gutter element, so a cached node would be
+	 * moved out from under the previous one.
+	 */
+	override toDOM(): HTMLElement {
+		const marker = document.createElement("span");
+		marker.className = "cm-stmt-marker";
+		marker.textContent = String(this.index + 1);
+		return marker;
+	}
 	override eq(other: GutterMarker): boolean {
 		return other instanceof StatementGutterMarker && other.index === this.index;
 	}
 }
 
+// Stable instances keep RangeSet.eq cheap: unchanged statements skip re-renders.
 const markerCache = new Map<number, StatementGutterMarker>();
 function statementMarker(index: number): StatementGutterMarker {
 	let marker = markerCache.get(index);

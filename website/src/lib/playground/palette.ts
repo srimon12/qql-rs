@@ -6,6 +6,8 @@
  * renders the filtered list and owns keyboard navigation.
  */
 
+import { escapeHtml } from "./dom";
+
 export interface PaletteCommand {
 	group: string;
 	label: string;
@@ -24,14 +26,6 @@ export interface CommandPalette {
 export interface CommandPaletteOptions {
 	dialog: HTMLDialogElement;
 	getCommands: () => PaletteCommand[];
-}
-
-function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
 }
 
 export function setupCommandPalette(
