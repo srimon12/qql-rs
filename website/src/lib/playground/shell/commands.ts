@@ -41,6 +41,12 @@ export function buildCommands(): PaletteCommand[] {
 		},
 		{
 			group: "Run",
+			label: "Run selected statement",
+			detail: `Run statement ${state.selectedStatement + 1} only`,
+			run: () => void runMode("statement"),
+		},
+		{
+			group: "Run",
 			label: "Run all statements",
 			detail: "Batch every statement in the script",
 			hint: mac ? "⇧⌘↵" : "Shift+Ctrl+↵",

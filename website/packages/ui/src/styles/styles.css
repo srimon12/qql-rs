@@ -449,7 +449,7 @@ input[role="switch"].switch:checked::after { transform: translate(1rem, -50%); b
 [data-runtime-dot].is-failed, [data-connected-dot].is-failed { background: var(--q-bad); }
 [data-analysis-summary] a { color: var(--sl-color-accent-high); text-decoration: underline; text-underline-offset: 2px; }
 /* TabBar overflow: right fade mask instead of a visible scrollbar. */
-.tabbar-fade::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1.5rem; background: linear-gradient(90deg, transparent, var(--sl-color-gray-6)); pointer-events: none; }
+.tabbar-fade::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1.5rem; background: linear-gradient(90deg, transparent, var(--sl-color-bg)); pointer-events: none; }
 @media (max-width: 40rem) {
 	[data-policy-chip], [data-docs-backlink] { display: none; }
 	/* Keep the settings entry reachable on phones; shorten the identity only here. */

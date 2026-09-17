@@ -52,7 +52,7 @@ const tabClass =
         class={tabClass}
       >
         <span>{label}</span>
-        {id === "response" && <span class="ml-1.5 hidden rounded-full bg-[var(--sl-color-gray-6)] px-1.5 py-0.5 text-[0.625rem] font-bold text-[var(--sl-color-accent-high)]" data-hit-count-badge></span>}
+        {id === "response" && <span class="ml-1.5 rounded-full bg-[var(--sl-color-gray-6)] px-1.5 py-0.5 text-[0.625rem] font-bold text-[var(--sl-color-accent-high)]" data-hit-count-badge hidden></span>}
       </button>
     ))}
   </div>
@@ -67,7 +67,7 @@ const tabClass =
       class="absolute inset-0 overflow-auto"
       data-inspector-panel="response"
     >
-      <div class="sticky top-0 z-10 hidden flex-wrap items-center justify-between gap-2 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-2 font-mono text-[0.68rem]" data-response-context>
+      <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-2 font-mono text-[0.68rem]" data-response-context hidden>
         <span class="inline-flex min-w-0 items-center gap-2 text-[var(--sl-color-gray-2)]">
           <span class="size-1.5 shrink-0 rounded-full bg-[var(--sl-color-gray-4)]" data-response-context-dot></span>
           <strong class="truncate font-semibold text-[var(--sl-color-white)]" data-response-context-label></strong>
@@ -75,7 +75,7 @@ const tabClass =
         <span class="shrink-0 tabular-nums text-[var(--sl-color-gray-3)]" data-response-context-meta></span>
       </div>
       <div class="grid min-h-full content-start gap-3 p-4" data-response-rich></div>
-      <pre class="pg-hl m-0 hidden min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output="response"></pre>
+      <pre class="pg-hl m-0 min-h-full whitespace-pre-wrap break-words p-4 font-mono text-[0.72rem] leading-5 text-[var(--sl-color-gray-2)]" data-output="response" hidden></pre>
     </section>
 
     <!-- Plan Tab Panel -->
@@ -127,7 +127,7 @@ const tabClass =
     <section class="absolute inset-0 overflow-auto" role="tabpanel" id="panel-explain" aria-labelledby="tab-explain" data-inspector-panel="explain" hidden>
       <div class="p-4" data-explain-container>
         <div data-explain-rich class="rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-4 font-mono text-xs leading-relaxed text-[var(--sl-color-gray-1)]"></div>
-        <pre class="pg-hl m-0 hidden" data-output="explain"></pre>
+        <pre class="pg-hl m-0" data-output="explain" hidden></pre>
       </div>
     </section>
 

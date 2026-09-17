@@ -70,6 +70,7 @@ export interface PlaygroundFailure {
 	code: string | null;
 	kind: string | null;
 	span: { start: number; end: number } | null;
+	startOffset?: number;
 	fields: Record<string, string>;
 	raw: string;
 }
@@ -178,7 +179,7 @@ export function browserModelInfo(id: string): {
 export const DEFAULT_SETTINGS: PlaygroundSettings = {
 	qdrantUrl: DEFAULT_QDRANT_URL,
 	qdrantKey: "",
-	embedProvider: "http",
+	embedProvider: "browser",
 	embedUrl: LIVE_EMBED_URL,
 	embedModel: LIVE_EMBED_MODEL,
 	embedDim: LIVE_EMBED_DIM,

@@ -54,7 +54,7 @@ export interface PlaygroundEditor {
 	readonly view: EditorView;
 	spans(): StatementSpan[];
 	source(): string;
-	setSource(source: string): void;
+	setSource(source: string, options?: { anchor?: number }): void;
 	selectionText(): string | null;
 	cursorStatement(): number;
 	revealStatement(index: number, focus?: boolean): void;
@@ -248,10 +248,14 @@ export function createPlaygroundEditor(
 		view,
 		spans: () => view.state.field(statementSpansField),
 		source: () => view.state.doc.toString(),
-		setSource: (source: string) => {
+		setSource: (source: string, options?: { anchor?: number }) => {
+			const anchor =
+				options?.anchor !== undefined
+					? Math.min(options.anchor, source.length)
+					: Math.min(view.state.selection.main.anchor, source.length);
 			view.dispatch({
 				changes: { from: 0, to: view.state.doc.length, insert: source },
-				selection: { anchor: Math.min(source.length, view.state.doc.length) },
+				selection: { anchor },
 			});
 		},
 		selectionText: () => {

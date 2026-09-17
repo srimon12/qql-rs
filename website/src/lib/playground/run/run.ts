@@ -10,6 +10,7 @@ import { refreshInspector, refreshStatementUi } from "../core/refresh";
 import {
 	editor,
 	saveInspectorTab,
+	saveMobileView,
 	saveRunPrefs,
 	sourceText,
 	state,
@@ -23,6 +24,7 @@ import {
 	statementSource,
 } from "../editor/statements";
 import { client } from "../services/connection";
+import { applyMobileView } from "../shell/layout";
 
 export type RunMode = "smart" | "all" | "statement" | "from";
 
@@ -32,6 +34,8 @@ interface RunTarget {
 	statements: number[];
 	/** Human label for toasts: "statement 2", "selection", "3 statements". */
 	label: string;
+	/** Char offset in sourceText() where target text begins. */
+	startOffset: number;
 }
 
 // ── Target resolution ────────────────────────────────────────────────────────
@@ -46,6 +50,7 @@ function resolveRunTarget(mode: RunMode): RunTarget | null {
 			text: source,
 			statements: spans.map((_, index) => index),
 			label: spans.length === 1 ? "1 statement" : `${spans.length} statements`,
+			startOffset: 0,
 		};
 	}
 
@@ -53,10 +58,14 @@ function resolveRunTarget(mode: RunMode): RunTarget | null {
 		const selection = editor().selectionText();
 		if (selection) {
 			const range = editor().view.state.selection.main;
+			const rawText = editor().view.state.sliceDoc(range.from, range.to);
+			const lead = rawText.search(/\S/);
+			const startOffset = range.from + (lead >= 0 ? lead : 0);
 			return {
 				text: selection,
 				statements: statementIndicesInRange(spans, range.from, range.to),
 				label: "selection",
+				startOffset,
 			};
 		}
 	}
@@ -66,20 +75,34 @@ function resolveRunTarget(mode: RunMode): RunTarget | null {
 		// Comment-only or broken document: run the exact line under the cursor.
 		const line = lineAt(source, editor().view.state.selection.main.head);
 		const text = line.text.trim();
-		return text ? { text, statements: [], label: "current line" } : null;
+		const lead = line.text.search(/\S/);
+		const startOffset = line.start + (lead >= 0 ? lead : 0);
+		return text
+			? { text, statements: [], label: "current line", startOffset }
+			: null;
 	}
 	if (mode === "from") {
 		const text = source.slice(spans[index].start).trim();
 		if (!text) return null;
+		const lead = source.slice(spans[index].start).search(/\S/);
+		const startOffset = spans[index].start + (lead >= 0 ? lead : 0);
 		return {
 			text,
 			statements: spans.map((_, i) => i).slice(index),
 			label: `statements ${index + 1}–${spans.length}`,
+			startOffset,
 		};
 	}
 	const text = statementSource(source, spans[index]);
 	if (!text) return null;
-	return { text, statements: [index], label: `statement ${index + 1}` };
+	const lead = source.slice(spans[index].start, spans[index].end).search(/\S/);
+	const startOffset = spans[index].start + (lead >= 0 ? lead : 0);
+	return {
+		text,
+		statements: [index],
+		label: `statement ${index + 1}`,
+		startOffset,
+	};
 }
 
 // ── Execution ────────────────────────────────────────────────────────────────
@@ -139,10 +162,9 @@ function failingStatementIndex(target: RunTarget): number {
 				: null;
 		})();
 	if (!span) return -1;
-	return statementIndexAt(
-		state.statementSpans,
-		byteOffsetToPosition(target.text, span.start),
-	);
+	const charPos =
+		target.startOffset + byteOffsetToPosition(target.text, span.start);
+	return statementIndexAt(state.statementSpans, charPos);
 }
 
 function applyRunFailure(target: RunTarget): void {
@@ -154,14 +176,27 @@ function applyRunFailure(target: RunTarget): void {
 		}
 		return;
 	}
-	const stopAt =
+	const rawStop =
 		failingIndex >= 0 ? target.statements.indexOf(failingIndex) : 0;
+	const stopAt = rawStop >= 0 ? rawStop : 0;
+	// Keep the inspector on the statement the error actually belongs to, so the
+	// response context strip and the error card agree.
+	if (failingIndex >= 0) state.selectedStatement = failingIndex;
 	target.statements.forEach((index, position) => {
 		state.statementStatus.set(
 			index,
 			position < stopAt ? "ok" : position === stopAt ? "error" : "skipped",
 		);
 	});
+}
+
+function revealResponse(): void {
+	saveInspectorTab("response");
+	if (!window.matchMedia("(min-width: 64rem)").matches) {
+		const workspace = query<HTMLElement>("[data-workspace]");
+		saveMobileView("result");
+		applyMobileView(workspace);
+	}
 }
 
 async function runTarget(target: RunTarget): Promise<void> {
@@ -172,8 +207,11 @@ async function runTarget(target: RunTarget): Promise<void> {
 		);
 		return;
 	}
-	for (const index of target.statements) {
+	target.statements.forEach((index) => {
 		state.statementStatus.set(index, "running");
+	});
+	if (target.statements.length > 0) {
+		state.selectedStatement = target.statements[0];
 	}
 	refreshStatementUi();
 	setBusy(true);
@@ -185,7 +223,7 @@ async function runTarget(target: RunTarget): Promise<void> {
 		});
 		state.executeMs = performance.now() - started;
 		applyRunReport(state.response.results, target);
-		saveInspectorTab("response");
+		revealResponse();
 		refreshStatementUi();
 		refreshInspector();
 
@@ -200,9 +238,13 @@ async function runTarget(target: RunTarget): Promise<void> {
 	} catch (error) {
 		state.response = null;
 		state.executeMs = performance.now() - started;
-		state.executionError = buildFailure(error, state.settings.qdrantUrl);
+		state.executionError = buildFailure(
+			error,
+			state.settings.qdrantUrl,
+			target.startOffset,
+		);
 		applyRunFailure(target);
-		saveInspectorTab("response");
+		revealResponse();
 		refreshStatementUi();
 		refreshInspector();
 		showToast(state.executionError.message, true);

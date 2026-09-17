@@ -146,12 +146,14 @@ export function runtimeDiagnostic(
 ): Diagnostic[] {
 	if (!failure?.span) return [];
 	if (!source) return [];
+	const offset = failure.startOffset ?? 0;
+	const localSource = source.slice(offset);
 	const from = Math.min(
-		byteOffsetToPosition(source, failure.span.start),
+		offset + byteOffsetToPosition(localSource, failure.span.start),
 		source.length,
 	);
 	const rawTo = Math.min(
-		byteOffsetToPosition(source, failure.span.end),
+		offset + byteOffsetToPosition(localSource, failure.span.end),
 		source.length,
 	);
 	const to = Math.max(from + 1, rawTo);
@@ -273,6 +275,7 @@ function humanizeFailure(
 export function buildFailure(
 	error: unknown,
 	qdrantUrl: string,
+	startOffset = 0,
 ): PlaygroundFailure {
 	const raw = formatError(error);
 	const host = connectionHost(qdrantUrl);
@@ -289,6 +292,7 @@ export function buildFailure(
 				code: "QQL-TRANSPORT",
 				kind: "Transport",
 				span: null,
+				startOffset,
 				fields: {},
 				raw,
 			};
@@ -298,6 +302,7 @@ export function buildFailure(
 			code: null,
 			kind: null,
 			span: null,
+			startOffset,
 			fields: {},
 			raw,
 		};
@@ -307,6 +312,7 @@ export function buildFailure(
 		code: parsed.code,
 		kind: parsed.kind ?? null,
 		span: parsed.span,
+		startOffset,
 		fields: parsed.fields,
 		raw,
 	};

@@ -4,7 +4,7 @@
  * client reconfiguration on save.
  */
 
-import { query, showToast } from "../core/dom";
+import { query, queryAll, showToast } from "../core/dom";
 import { refreshStatusBar } from "../core/refresh";
 import { saveSettings, state } from "../core/store";
 import {
@@ -65,11 +65,14 @@ export function setupSettingsForm(): void {
 	const browserDimsEl = query("[data-browser-model-dims]", form);
 
 	// Populate from the persisted snapshot.
-	for (const [name, value] of Object.entries(state.settings)) {
-		const input = field(form, name);
-		if (!input) continue;
-		input.value = String(value);
-	}
+	const populateForm = (): void => {
+		for (const [name, value] of Object.entries(state.settings)) {
+			const input = field(form, name);
+			if (!input) continue;
+			input.value = String(value);
+		}
+		renderProviderPanels();
+	};
 
 	const renderBrowserDims = (): void => {
 		if (!browserDimsEl) return;
@@ -90,7 +93,11 @@ export function setupSettingsForm(): void {
 
 	providerSelect?.addEventListener("change", renderProviderPanels);
 	browserModelInput?.addEventListener("input", renderBrowserDims);
-	renderProviderPanels();
+	populateForm();
+
+	queryAll("[data-open-settings]").forEach((btn) => {
+		btn.addEventListener("click", populateForm);
+	});
 
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
@@ -141,7 +148,12 @@ async function testConnection(
 
 	const setDot = (cls: string): void => {
 		if (!probeDot) return;
-		probeDot.classList.remove("bg-[var(--q-ok)]", "bg-[var(--q-bad)]");
+		probeDot.classList.remove(
+			"bg-[var(--sl-color-gray-4)]",
+			"bg-[var(--q-ok)]",
+			"bg-[var(--q-bad)]",
+			"bg-[var(--q-warn)]",
+		);
 		probeDot.classList.add(cls);
 	};
 	if (!probeEl) return;

@@ -2,7 +2,13 @@
  * Export dialog: per-language SDK snippets generated from the live source and
  * the selected statement's compiled route.
  */
-import { copyToClipboard, openDialog, query, queryAll } from "../core/dom";
+import {
+	copyToClipboard,
+	openDialog,
+	query,
+	queryAll,
+	setupDialog,
+} from "../core/dom";
 import { sourceText, state, statementCount } from "../core/store";
 import type { ExportLanguage } from "../core/types";
 import { selectedRoute } from "../core/wasm";
@@ -12,14 +18,33 @@ import { exportCode } from "../services/codegen";
 function renderExport(): void {
 	const output = query("[data-export-output]");
 	if (!output) return;
+	const count = Math.max(1, statementCount());
+	const route = selectedRoute(state.analysis, state.selectedStatement);
 	output.textContent = exportCode(
 		state.exportLanguage,
 		sourceText(),
 		state.settings,
-		selectedRoute(state.analysis, state.selectedStatement),
+		route,
 		state.selectedStatement,
-		Math.max(1, statementCount()),
+		count,
 	);
+
+	const echo = query("[data-export-echo]");
+	if (echo) {
+		echo.textContent =
+			state.exportLanguage === "curl"
+				? `(cURL exports statement ${state.selectedStatement + 1} of ${count})`
+				: count > 1
+					? `(${count} statements in script)`
+					: "";
+	}
+
+	queryAll<HTMLButtonElement>("[data-export-tab]").forEach((btn) => {
+		btn.setAttribute(
+			"aria-pressed",
+			String(btn.dataset.exportTab === state.exportLanguage),
+		);
+	});
 }
 
 /** Render the current snippet, then open the dialog (menu + palette share this). */
@@ -29,7 +54,7 @@ export function openExporter(): void {
 }
 
 export function setupExporter(): void {
-	const dialog = query<HTMLDialogElement>("#export-dialog");
+	const dialog = setupDialog("export-dialog", []);
 	if (!dialog) return;
 
 	const tabs = queryAll<HTMLButtonElement>("[data-export-tab]", dialog);

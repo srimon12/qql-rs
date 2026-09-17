@@ -31,6 +31,12 @@ import {
 	statusDotClass,
 } from "./statement-nav";
 
+/** `create_collection` → `CREATE COLLECTION` for the plan panel labels. */
+function formatStatementType(stmtType: string | null | undefined): string {
+	if (!stmtType) return "QUERY";
+	return stmtType.replace(/_/g, " ").toUpperCase();
+}
+
 export function renderInspector(): void {
 	renderTabs();
 	renderStatementNavigator();
@@ -43,12 +49,31 @@ export function renderInspector(): void {
 
 /** Tab buttons switch the persisted panel and re-render. */
 export function setupInspectorTabs(): void {
-	queryAll<HTMLElement>("[data-inspector-tab]").forEach((btn) => {
+	const tabButtons = queryAll<HTMLElement>("[data-inspector-tab]");
+	tabButtons.forEach((btn, index) => {
 		btn.addEventListener("click", () => {
 			const tab = btn.dataset.inspectorTab as InspectorTab;
 			if (!tab) return;
 			saveInspectorTab(tab);
 			renderInspector();
+		});
+		btn.addEventListener("keydown", (e: KeyboardEvent) => {
+			let targetIndex = -1;
+			if (e.key === "ArrowRight") targetIndex = (index + 1) % tabButtons.length;
+			else if (e.key === "ArrowLeft")
+				targetIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+			else if (e.key === "Home") targetIndex = 0;
+			else if (e.key === "End") targetIndex = tabButtons.length - 1;
+			if (targetIndex >= 0) {
+				e.preventDefault();
+				const targetBtn = tabButtons[targetIndex];
+				targetBtn.focus();
+				const tab = targetBtn.dataset.inspectorTab as InspectorTab;
+				if (tab) {
+					saveInspectorTab(tab);
+					renderInspector();
+				}
+			}
 		});
 	});
 }
@@ -68,10 +93,15 @@ function renderTabs(): void {
 function renderStatementNavigator(): void {
 	const select = query<HTMLSelectElement>("[data-statement-select]");
 	const wrap = query("[data-statement-wrap]");
+	const prevBtn = query<HTMLButtonElement>("[data-stmt-prev]");
+	const nextBtn = query<HTMLButtonElement>("[data-stmt-next]");
 	const count = statementCount();
 	if (!select || !wrap) return;
 	wrap.hidden = count <= 1;
 	if (count <= 1) return;
+
+	if (prevBtn) prevBtn.disabled = state.selectedStatement <= 0;
+	if (nextBtn) nextBtn.disabled = state.selectedStatement >= count - 1;
 
 	const source = sourceText();
 	select.innerHTML = state.statementSpans
@@ -114,7 +144,7 @@ function renderPlanPanel(): void {
 
 	if (methodEl) methodEl.textContent = route.method;
 	if (pathEl) pathEl.textContent = route.path;
-	if (typeEl) typeEl.textContent = "Query / Mutation";
+	if (typeEl) typeEl.textContent = formatStatementType(route.stmt_type);
 	if (policyEl) {
 		policyEl.textContent = state.policy.enabled
 			? `${state.policy.field} ${state.policy.op} ${state.policy.value}`
@@ -130,8 +160,9 @@ function renderPlanPanel(): void {
 				return `
 					<button type="button" class="route-row" aria-current="${index === state.selectedStatement ? "true" : "false"}" data-select-stmt="${index}">
 						<span class="route-row__index">${index + 1}</span>
-						<span class="route-row__type">${escapeHtml(compiled.path)}</span>
+						<span class="route-row__type">${escapeHtml(formatStatementType(compiled.stmt_type))}</span>
 						<span class="route-row__method">${escapeHtml(compiled.method)}</span>
+						<span class="route-row__path">${escapeHtml(compiled.path)}</span>
 						${badge ? `<span class="col-start-3 row-start-1 justify-self-end">${badge}</span>` : ""}
 					</button>`;
 			})

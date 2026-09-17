@@ -80,10 +80,15 @@ export function resetRunState(): void {
 /**
  * Load a document into the editor (examples, live collections, injected
  * queries): clears stale run output, then runs the normal edit pipeline.
+ *
+ * Focus is asserted after the swap: loading from a modal dialog ends with the
+ * browser restoring focus into the contenteditable, and CodeMirror would adopt
+ * the stale DOM selection instead of the caret we just set.
  */
 export function loadSource(source: string, fixtureLabel?: string): void {
 	resetRunState();
-	editor().setSource(source);
+	editor().setSource(source, { anchor: 0 });
+	editor().view.focus();
 	if (fixtureLabel) setFixtureLabel(fixtureLabel);
 	queueAnalysis(source);
 }

@@ -39,23 +39,42 @@ export function setupPolicyForm(): void {
 	const form = query<HTMLFormElement>("[data-policy-form]");
 	if (!form) return;
 
-	for (const [name, value] of Object.entries(state.policy)) {
-		const input = field(form, name);
-		if (!input) continue;
-		if (input instanceof HTMLInputElement && input.type === "checkbox") {
-			input.checked = Boolean(value);
-		} else {
-			input.value = String(value);
+	const recipes = queryAll<HTMLButtonElement>("[data-policy-recipe]", form);
+	const clearRecipeActive = (): void => {
+		for (const r of recipes) r.setAttribute("aria-pressed", "false");
+	};
+
+	const populateForm = (): void => {
+		for (const [name, value] of Object.entries(state.policy)) {
+			const input = field(form, name);
+			if (!input) continue;
+			if (input instanceof HTMLInputElement && input.type === "checkbox") {
+				input.checked = Boolean(value);
+			} else {
+				input.value = String(value);
+			}
 		}
-	}
+		clearRecipeActive();
+		renderPreview(form);
+	};
 
 	for (const name of ["enabled", "field", "value", "shardKey"]) {
-		field(form, name)?.addEventListener("input", () => renderPreview(form));
+		field(form, name)?.addEventListener("input", () => {
+			clearRecipeActive();
+			renderPreview(form);
+		});
 	}
 	for (const name of ["op", "valueType"]) {
-		field(form, name)?.addEventListener("change", () => renderPreview(form));
+		field(form, name)?.addEventListener("change", () => {
+			clearRecipeActive();
+			renderPreview(form);
+		});
 	}
-	renderPreview(form);
+	populateForm();
+
+	queryAll("[data-open-policy], [data-policy-chip]").forEach((btn) => {
+		btn.addEventListener("click", populateForm);
+	});
 
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
@@ -75,8 +94,10 @@ export function setupPolicyForm(): void {
 		runAnalysis(sourceText());
 	});
 
-	queryAll("[data-policy-recipe]", form).forEach((recipe) => {
+	recipes.forEach((recipe) => {
 		recipe.addEventListener("click", () => {
+			clearRecipeActive();
+			recipe.setAttribute("aria-pressed", "true");
 			const dataset = (recipe as HTMLElement).dataset;
 			const enabled = field(form, "enabled") as HTMLInputElement | null;
 			if (enabled) enabled.checked = true;

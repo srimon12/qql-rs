@@ -30,28 +30,36 @@ import {
 
 // ── Persistence primitives ───────────────────────────────────────────────────
 
-/** Guarded localStorage read; a corrupt entry falls back instead of throwing. */
+/**
+ * Guarded localStorage read. Values are written JSON-encoded; a plain string
+ * is accepted too so entries written by older builds keep working.
+ */
 function readStored<T>(key: string, fallback: T): T {
 	try {
 		const raw = localStorage.getItem(key);
-		if (raw !== null) return JSON.parse(raw) as T;
+		if (raw === null) return fallback;
+		try {
+			return JSON.parse(raw) as T;
+		} catch {
+			// Legacy unquoted string (pre-JSON encoding) — use it as-is.
+			return raw as unknown as T;
+		}
 	} catch {
-		// corrupted entry or storage unavailable — use the fallback
+		// storage unavailable (private mode) — use the fallback
+		return fallback;
 	}
-	return fallback;
 }
 
 /** Fields added since an entry was written keep their defaults. */
 function readStoredMerged<T extends object>(key: string, defaults: T): T {
-	return { ...defaults, ...readStored<Partial<T>>(key, {}) };
+	const stored = readStored<Partial<T> | null>(key, null);
+	if (!stored || typeof stored !== "object") return { ...defaults };
+	return { ...defaults, ...stored };
 }
 
 function writeStored(key: string, value: unknown): void {
 	try {
-		localStorage.setItem(
-			key,
-			typeof value === "string" ? value : JSON.stringify(value),
-		);
+		localStorage.setItem(key, JSON.stringify(value));
 	} catch {
 		// quota or private-mode failures must never break the playground
 	}
@@ -146,8 +154,14 @@ export function resultForStatement(
 ): ExecutionReport["results"][number] | null {
 	if (!state.response) return null;
 	const position = state.executedStatements.indexOf(index);
-	if (position < 0) return null;
-	return state.response.results[position] ?? null;
+	if (position >= 0) return state.response.results[position] ?? null;
+	if (
+		state.executedStatements.length === 0 &&
+		state.response.results.length === 1
+	) {
+		return state.response.results[0] ?? null;
+	}
+	return null;
 }
 
 /**

@@ -84,6 +84,9 @@ export function renderStatementRail(): void {
 			</button>`;
 		})
 		.join("");
+
+	const activeChip = rail.querySelector<HTMLElement>('[aria-current="true"]');
+	activeChip?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 /** `Ln 4, Col 12` readout for the editor status strip. */

@@ -145,7 +145,10 @@ export function setupCommandPalette(
 			"[data-palette-item]",
 		);
 		if (item?.dataset.paletteItem) {
-			setActive(Number(item.dataset.paletteItem));
+			const index = Number(item.dataset.paletteItem);
+			if (index !== activeIndex) {
+				setActive(index);
+			}
 		}
 	});
 	dialog.addEventListener("click", (event) => {

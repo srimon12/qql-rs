@@ -15,14 +15,22 @@ function filterPresets(): void {
 	)
 		.toLowerCase()
 		.trim();
+	let visibleCount = 0;
 	queryAll<HTMLElement>("[data-preset]", dialog).forEach((item) => {
 		const category = item.dataset.presetCategoryValue || "";
 		const categoryMatch =
 			activeCategory === "all" || category === activeCategory;
 		const termMatch =
 			!term || (item.textContent || "").toLowerCase().includes(term);
-		item.hidden = !(categoryMatch && termMatch);
+		const isVisible = categoryMatch && termMatch;
+		item.hidden = !isVisible;
+		if (isVisible) visibleCount += 1;
 	});
+
+	const resultsEl = query("[data-preset-results]", dialog);
+	if (resultsEl) {
+		resultsEl.textContent = `${visibleCount} example${visibleCount === 1 ? "" : "s"} available`;
+	}
 }
 
 /** Live collections from the current endpoint, as one-click SCROLL presets. */
@@ -66,7 +74,9 @@ export function setupPresets(): void {
 	});
 
 	// One delegated handler serves both fixture cards and live-collection
-	// chips, including ones rendered after this setup runs.
+	// chips, including ones rendered after this setup runs. Close the dialog
+	// first: modal focus is trapped, and `loadSource` focuses the editor so the
+	// caret survives the browser's focus restoration.
 	document.addEventListener("click", (event) => {
 		const item = (event.target as HTMLElement).closest<HTMLElement>(
 			"[data-preset-query]",
@@ -75,8 +85,8 @@ export function setupPresets(): void {
 		const source = item.dataset.presetQuery;
 		if (!source) return;
 		const label = item.dataset.presetLabel || "Example";
-		loadSource(source, label);
 		dialog.close();
+		loadSource(source, label);
 		showToast(`Loaded example: ${label}`);
 	});
 }
