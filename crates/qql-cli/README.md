@@ -4,33 +4,51 @@ CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, migrate, doctor, o
 
 ## Install
 
-Default binary is lean (`rest` + `grpc` only) — edge (ONNX) and record
-(axum) stay opt-in. Prebuilt archives from GitHub releases are default-only;
-feature builds install from crates.io with one command (no clone needed):
+The CLI command is always **`qql`**, available in two installation editions:
+- **Standard**: Lightweight (~15MB), remote Qdrant daily driver with REST, gRPC, built-in transparent traffic recorder (`qql record`), AST converter (`qql convert`), collection migrator (`qql migrate`), dump, REPL, formatter, and linter.
+- **Full**: Includes all Standard features plus local client-side FastEmbed ONNX inference and the in-process `qdrant-edge` embedded database (`--features full`).
+*(On GitHub Releases, the prebuilt archives are named `qql-*.tar.gz` and `qql-full-*.tar.gz`; both install the single `qql` executable).*
+
+### Quick Install (Prebuilt Binaries)
 
 ```bash
-# Default: rest + grpc (matches the release archives)
+# Linux / macOS (Standard)
+curl -fsSL https://qql.veristamp.in/install.sh | bash
+
+# Linux / macOS (Full: with ONNX embeddings & embedded edge)
+curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full
+
+# Windows PowerShell (Standard)
+irm https://qql.veristamp.in/install.ps1 | iex
+
+# Windows PowerShell (Full: with ONNX embeddings & embedded edge)
+& ([scriptblock]::Create((irm https://qql.veristamp.in/install.ps1))) -Full
+```
+
+### Install from crates.io
+
+```bash
+# Standard: REST + gRPC + record + convert + migrate (matches qql release archives)
 cargo install qql-cli --locked
 
-# REST only (smallest)
+# Full: Standard + local FastEmbed ONNX embeddings + in-process qdrant-edge (matches qql-full-* archives; archive contains qql exe)
+cargo install qql-cli --locked --features full
+
+# REST only (smallest footprint)
 cargo install qql-cli --locked --no-default-features --features rest
 
-# Local edge backend, no server (`--edge`, `qql edge`, `qql config edge`)
+# Local edge backend only, no server (`--edge`, `qql edge`, `qql config edge`)
 cargo install qql-cli --locked --features edge
 
-# REST traffic recorder (`qql record`)
-cargo install qql-cli --locked --features record
-
-# Everything at once
-cargo install qql-cli --locked --features full
+# Local zero-server ONNX embeddings only (for remote Qdrant and migrations)
+cargo install qql-cli --locked --features fastembed
 
 # From a local checkout instead
 cargo build --release -p qql-cli
-cargo build --release -p qql-cli --no-default-features --features rest
-cargo build --release -p qql-cli --features edge
+cargo build --release -p qql-cli --features full
 ```
 
-Check what's installed: `qql version` reports the enabled `features` array.
+Check what's installed: `qql version` reports the `edition` ("standard" or "full") and enabled `features` array.
 Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 
 ## Commands
@@ -48,7 +66,7 @@ Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 | `qql convert [file.json]` | REST JSON → QQL |
 | `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql run`) |
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
-| `qql record` | Transparent REST recorder → JSONL + QQL (needs `--features record`) |
+| `qql record` | Transparent REST recorder → JSONL + QQL (built-in) |
 | `qql --edge …` | Use configured local edge backend |
 | `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
 | `qql edge bootstrap <coll> --from <url>` | Seed a local edge collection from a remote shard snapshot |
@@ -163,7 +181,7 @@ SHARD 'acme'
 LIMIT 10;
 ```
 
-## Recorder (`qql record`, opt-in)
+## Recorder (`qql record`, built-in)
 
 Zero-code-change capture for migration: Qdrant keeps its address, point the
 app at the recorder instead, change nothing else. Every request is forwarded
@@ -172,10 +190,9 @@ preserved); collection and quota routes are appended as wrapped
 `{"method","path","query"?,"body"?}` JSONL for later `qql convert` use.
 Bodyless `SHOW` / `DROP` routes are recorded with no `body`.
 
+`qql record` is built directly into the CLI:
+
 ```bash
-cargo install qql-cli --locked --features record
-# ... or from a local checkout:
-# cargo build -p qql-cli --features record
 # Qdrant stays on :6333, the app now points at the recorder on :6334:
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
   --out capture.jsonl --qql-out capture.qql
@@ -221,9 +238,9 @@ LIMIT 10;
 |---------|---------|------|
 | `rest` | yes | REST |
 | `grpc` | yes | gRPC |
-| `edge` | no | In-process edge + FastEmbed |
-| `record` | no | Transparent REST recorder (`qql record`; axum + reqwest, versions already pinned) |
-| `full` | no | Convenience alias for `edge,record` |
+| `fastembed` | no | Local zero-server ONNX embeddings (for remote Qdrant and migrations) |
+| `edge` | no | In-process embedded Qdrant edge database |
+| `full` | no | Convenience alias for `fastembed,edge` |
 
 ## Docs
 

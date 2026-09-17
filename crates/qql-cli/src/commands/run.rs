@@ -34,6 +34,7 @@ pub async fn handle_run(
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
+    check_embedder_availability(&executor, query)?;
     let result = match params {
         None => executor.execute(query, qql::executor::OnError::Stop).await,
         Some(serde_json::Value::Object(obj)) => {
@@ -120,6 +121,9 @@ pub async fn handle_run_file(
         .transpose()
         .map_err(|e| format!("{}", e))?;
     let executor = executor(url, use_edge)?;
+    for statement in &statements {
+        check_embedder_availability(&executor, statement)?;
+    }
     let mut ok_count = 0;
     let mut fail_count = 0;
 
@@ -202,4 +206,115 @@ pub fn handle_explain(
         println!("{}", plan);
     }
     Ok(())
+}
+
+fn check_embedder_availability(
+    executor: &qql::executor::Executor,
+    query: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if executor.embedder().is_some() {
+        return Ok(());
+    }
+    // Check if any parsed statement requires an embedder
+    if let Ok(stmts) = qql_core::parser::Parser::parse_all(query) {
+        for stmt in &stmts {
+            if statement_requires_embedder(stmt) {
+                return Err(qql_core::error::QqlError::execution(
+                    "QQL-EMBEDDING-UNAVAILABLE",
+                    "No embedder configured for dense text/image queries.\n\
+                    → Pass precomputed vectors via: QUERY :vec ... with --params-file <file.json>\n\
+                    → Or configure a remote embedding server: qql config set embed_url http://localhost:11434/v1\n\
+                    → Or install with local zero-server ONNX embeddings: cargo install qql-cli --locked --features fastembed\n\
+                    → Or install full package: cargo install qql-cli --locked --features full",
+                    None,
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn statement_requires_embedder(stmt: &qql_core::ast::Stmt) -> bool {
+    match stmt {
+        qql_core::ast::Stmt::Query(q) => query_stmt_requires_embedder(q),
+        qql_core::ast::Stmt::Upsert(u) => u.embedding.is_some(),
+        _ => false,
+    }
+}
+
+fn query_stmt_requires_embedder(q: &qql_core::ast::QueryStmt) -> bool {
+    for cte in &q.ctes {
+        if query_stmt_requires_embedder(&cte.query) {
+            return true;
+        }
+    }
+    query_expr_requires_embedder(&q.expression)
+}
+
+fn query_expr_requires_embedder(expr: &qql_core::ast::QueryExpr) -> bool {
+    use qql_core::ast::{PrefetchSource, QueryExpr};
+    let prefetch_requires = |prefetches: &[qql_core::ast::Prefetch]| {
+        prefetches.iter().any(|p| match &p.source {
+            PrefetchSource::Query(sub) => query_stmt_requires_embedder(sub),
+            _ => false,
+        })
+    };
+    match expr {
+        QueryExpr::Nearest {
+            input, prefetch, ..
+        } => is_embeddable_input(input) || prefetch_requires(prefetch),
+        QueryExpr::Recommend {
+            positive,
+            negative,
+            prefetch,
+            ..
+        } => {
+            positive.iter().any(is_embeddable_input)
+                || negative.iter().any(is_embeddable_input)
+                || prefetch_requires(prefetch)
+        }
+        QueryExpr::Context {
+            pairs, prefetch, ..
+        } => {
+            pairs
+                .iter()
+                .any(|p| is_embeddable_input(&p.positive) || is_embeddable_input(&p.negative))
+                || prefetch_requires(prefetch)
+        }
+        QueryExpr::Discover {
+            target,
+            context,
+            prefetch,
+            ..
+        } => {
+            is_embeddable_input(target)
+                || context
+                    .iter()
+                    .any(|p| is_embeddable_input(&p.positive) || is_embeddable_input(&p.negative))
+                || prefetch_requires(prefetch)
+        }
+        QueryExpr::RelevanceFeedback {
+            target,
+            feedback,
+            prefetch,
+            ..
+        } => {
+            is_embeddable_input(target)
+                || feedback.iter().any(|f| is_embeddable_input(&f.example))
+                || prefetch_requires(prefetch)
+        }
+        QueryExpr::Hybrid { .. } => true,
+        QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
+            prefetch_requires(prefetch)
+        }
+        _ => false,
+    }
+}
+
+fn is_embeddable_input(input: &qql_core::ast::QueryInput) -> bool {
+    matches!(
+        input,
+        qql_core::ast::QueryInput::Text { .. } | qql_core::ast::QueryInput::Image { .. }
+    )
 }

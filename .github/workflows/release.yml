@@ -119,10 +119,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build qql CLI
+      - name: Build standard qql CLI
         run: cargo build --locked --release -p qql-cli --target ${{ matrix.target }}
 
-      - name: Package CLI archive
+      - name: Package standard CLI archive
         shell: bash
         run: |
           set -euo pipefail
@@ -132,11 +132,34 @@ jobs:
           cp LICENSE README.md "dist/$archive/"
           tar -C dist -czf "dist/$archive.tar.gz" "$archive"
 
-      - name: Smoke test CLI binary
+      - name: Smoke test standard CLI binary
         shell: bash
         run: |
           set -euo pipefail
           archive="qql-${{ needs.gate.outputs.version }}-${{ matrix.target }}"
+          bin="dist/$archive/qql${{ matrix.exe }}"
+          chmod +x "$bin"
+          "$bin" version
+          "$bin" explain "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
+
+      - name: Build full qql CLI (with local edge + fastembed)
+        run: cargo build --locked --release -p qql-cli --features full --target ${{ matrix.target }}
+
+      - name: Package full CLI archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="qql-full-${{ needs.gate.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "dist/$archive"
+          cp "target/${{ matrix.target }}/release/qql${{ matrix.exe }}" "dist/$archive/"
+          cp LICENSE README.md "dist/$archive/"
+          tar -C dist -czf "dist/$archive.tar.gz" "$archive"
+
+      - name: Smoke test full CLI binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="qql-full-${{ needs.gate.outputs.version }}-${{ matrix.target }}"
           bin="dist/$archive/qql${{ matrix.exe }}"
           chmod +x "$bin"
           "$bin" version

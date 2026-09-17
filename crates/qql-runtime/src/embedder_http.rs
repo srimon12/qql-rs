@@ -248,11 +248,24 @@ impl HttpEmbedder {
         }
 
         let resp = req.send().await.map_err(|e| {
-            QqlError::execution(
-                "QQL-EMBEDDING",
-                format!("failed to call embedding endpoint: {}", e),
-                None,
-            )
+            if e.is_connect() {
+                QqlError::execution(
+                    "QQL-EMBEDDING-UNAVAILABLE",
+                    format!(
+                        "failed to connect to embedding endpoint at '{endpoint}': {e}\n\
+                        → Ensure your embedding server (e.g. Ollama, vLLM) is running at '{endpoint}'\n\
+                        → Or pass precomputed vectors via --params-file <file.json>\n\
+                        → Or install with local zero-server ONNX embeddings: cargo install qql-cli --locked --features fastembed"
+                    ),
+                    None,
+                )
+            } else {
+                QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!("failed to call embedding endpoint: {}", e),
+                    None,
+                )
+            }
         })?;
 
         let status = resp.status();

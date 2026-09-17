@@ -270,6 +270,7 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | Code | Meaning |
 |---|---|
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
+| `QQL-EMBEDDING-UNAVAILABLE` | No embedder is configured or reachable for text/image embedding |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
 | `QQL-EMBEDDING` | The requested dense model is unavailable on this embedder (omit `MODEL` or use `'default'`) |
 | `QQL-EMBEDDING-DIM` | `embedding_dimension` must be configured when creating collections with `USING MODEL` in local inference mode |
@@ -498,6 +499,7 @@ QQL-EMBEDDING-MULTI
 QQL-EMBEDDING-SPARSE
 QQL-EMBEDDING-TARGET
 QQL-EMBEDDING-TOPOLOGY
+QQL-EMBEDDING-UNAVAILABLE
 QQL-FMT-NON-CANONICAL
 QQL-GRPC
 QQL-GRPC-BATCH

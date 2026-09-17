@@ -9,6 +9,7 @@ pub async fn run_repl(
     url: &str,
     use_edge: bool,
     executor: qql::executor::Executor,
+    initial_params: Option<&serde_json::Value>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     crate::output::print_banner();
     let target = if use_edge { "local edge" } else { url };
@@ -19,7 +20,20 @@ pub async fn run_repl(
 
     let mut rl = rustyline::DefaultEditor::new()?;
     let mut buffer = String::new();
-    let mut session_params = serde_json::Map::new();
+    let mut session_params = match initial_params {
+        Some(serde_json::Value::Object(map)) => map.clone(),
+        _ => serde_json::Map::new(),
+    };
+    if !session_params.is_empty() {
+        println!(
+            "\x1b[1mLoaded {} session parameter(s) from startup:\x1b[0m",
+            session_params.len()
+        );
+        for (k, v) in &session_params {
+            println!("  \x1b[36m:{}\x1b[0m = {}", k, v);
+        }
+        println!();
+    }
 
     loop {
         let prompt = if buffer.is_empty() {
@@ -85,6 +99,39 @@ pub async fn run_repl(
                 } else if trimmed_args.eq_ignore_ascii_case("clear") {
                     session_params.clear();
                     crate::output::print_success("Parameters cleared.");
+                } else if let Some(path_str) = trimmed_args
+                    .strip_prefix("load ")
+                    .or_else(|| trimmed_args.strip_prefix("import "))
+                    .map(str::trim)
+                {
+                    let p = path_str.trim_matches('\'').trim_matches('"');
+                    match std::fs::read_to_string(p) {
+                        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+                            Ok(serde_json::Value::Object(map)) => {
+                                let count = map.len();
+                                for (k, v) in map {
+                                    let key = k.strip_prefix(':').unwrap_or(&k).to_string();
+                                    session_params.insert(key, v);
+                                }
+                                crate::output::print_success(&format!(
+                                    "Loaded {count} parameter(s) from {p}."
+                                ));
+                            }
+                            Ok(_) => {
+                                crate::output::print_error(
+                                    "parameter file must contain a JSON object with key-value pairs",
+                                );
+                            }
+                            Err(e) => {
+                                crate::output::print_error(&format!("invalid JSON in '{p}': {e}"));
+                            }
+                        },
+                        Err(e) => {
+                            crate::output::print_error(&format!(
+                                "failed to read parameter file '{p}': {e}"
+                            ));
+                        }
+                    }
                 } else if let Some((key_raw, val_raw)) = trimmed_args.split_once('=') {
                     let key = key_raw
                         .trim()
@@ -97,7 +144,9 @@ pub async fn run_repl(
                     println!("Set parameter \x1b[36m:{key}\x1b[0m = {val}");
                     session_params.insert(key, val);
                 } else {
-                    crate::output::print_error("param usage: \\p [key=value | clear]");
+                    crate::output::print_error(
+                        "param usage: \\p [key=value | load <file.json> | clear]",
+                    );
                 }
                 continue;
             }
@@ -362,7 +411,7 @@ fn print_repl_help() {
 \n\x1b[1mBuilt-in Commands:\x1b[0m\n\
 \n  \x1b[36mhelp\x1b[0m, \x1b[36m\\h\x1b[0m, \x1b[36m?\x1b[0m       Show this help card (note: bare ? triggers help)\n\
   \x1b[36mdoctor\x1b[0m, \x1b[36m\\d\x1b[0m         Check connection health and loaded model hosts\n\
-  \x1b[36mparam [k=v]\x1b[0m, \x1b[36m\\p\x1b[0m    Set, inspect, or clear session query parameters\n\
+  \x1b[36mparam [k=v | load <file> | clear]\x1b[0m, \x1b[36m\\p\x1b[0m Set, load JSON, inspect, or clear session query parameters\n\
   (named `:name` params only; positional `?` needs `qql run --params-file`)\n\
   \x1b[36mfmt <qql>\x1b[0m, \x1b[36m\\f\x1b[0m      Format QQL into canonical syntax\n\
   \x1b[36mexplain <qql>\x1b[0m     Show hierarchical tree query execution plan\n\

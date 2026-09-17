@@ -14,9 +14,8 @@ mod dump;
 mod fmt_tests;
 mod migrate;
 mod output;
-#[cfg(feature = "record")]
 mod record;
-#[cfg(all(test, feature = "record"))]
+#[cfg(test)]
 mod record_tests;
 mod repl;
 mod script;
@@ -117,7 +116,14 @@ enum Command {
     },
     /// Start interactive REPL connected to Qdrant
     #[command(alias = "connect")]
-    Repl,
+    Repl {
+        /// Parameter in key=value format (can be specified multiple times)
+        #[arg(long = "param", short = 'p')]
+        params: Vec<String>,
+        /// Path to JSON file containing parameter map or positional array
+        #[arg(long = "params-file")]
+        params_file: Option<PathBuf>,
+    },
     /// Convert REST JSON, HTTP snippets, or curl commands to QQL (offline — no connection)
     Convert {
         /// Path to input file (or stdin if omitted): wrapped JSON, bare body,
@@ -176,8 +182,7 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
     },
-    /// Record Qdrant REST traffic while proxying it unchanged (opt-in build; install with `cargo install qql-cli --locked --features record`)
-    #[cfg(feature = "record")]
+    /// Record Qdrant REST traffic while proxying it unchanged
     Record {
         /// Address to listen on (the app points here instead of Qdrant)
         #[arg(long, default_value = "127.0.0.1:6334")]
@@ -188,8 +193,7 @@ enum Command {
         /// JSONL capture file (created/appended, fsynced per line)
         #[arg(long, default_value = "capture.jsonl")]
         out: PathBuf,
-        /// Optional QQL capture file (converted at record time; failures
-        /// become `-- ERROR <file:line> <error>` comments)
+        /// Optional QQL capture file (converted at record time)
         #[arg(long)]
         qql_out: Option<PathBuf>,
     },
@@ -655,7 +659,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    match cli.command.unwrap_or(Command::Repl) {
+    match cli.command.unwrap_or_else(|| Command::Repl {
+        params: Vec::new(),
+        params_file: None,
+    }) {
         Command::Setup {
             embed_url,
             embed_model,
@@ -722,7 +729,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let exec_params = collect_exec_params(&params, params_file.as_ref())?;
             commands::handle_explain(&query, exec_params.as_ref(), json, quiet)
         }
-        Command::Repl => commands::handle_connect(&url, use_edge).await,
+        Command::Repl {
+            params,
+            params_file,
+        } => {
+            let repl_params = collect_exec_params(&params, params_file.as_ref())?;
+            commands::handle_connect(&url, use_edge, repl_params.as_ref()).await
+        }
         Command::Convert { file, collection } => {
             commands::handle_convert(file.as_deref(), collection.as_deref())
         }
@@ -873,7 +886,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = (collection, json, quiet);
                     Err(
-                        "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
+                        "edge support is not installed (this binary is standard edition); install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)"
                             .into(),
                     )
                 }
@@ -905,7 +918,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = (collection, from, api_key, shard_id, force, json, quiet);
                     Err(
-                        "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
+                        "edge support is not installed (this binary is standard edition); install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)"
                             .into(),
                     )
                 }
@@ -929,7 +942,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await
         }
-        #[cfg(feature = "record")]
         Command::Record {
             listen,
             target,
