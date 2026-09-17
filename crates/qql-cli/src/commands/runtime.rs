@@ -142,7 +142,7 @@ pub(crate) fn executor_for(
         #[cfg(not(feature = "edge"))]
         {
             return Err(
-                "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
+                "edge support is not installed (this binary is standard edition); install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)"
                     .into(),
             );
         }
@@ -211,7 +211,7 @@ pub(crate) fn executor_for(
     #[cfg(not(feature = "fastembed"))]
     if is_fastembed {
         return Err(
-            "fastembed support is not compiled into this binary; install with: cargo install qql-cli --locked --features fastembed"
+            "fastembed support is not compiled into this binary (standard edition); install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)"
                 .into(),
         );
     }

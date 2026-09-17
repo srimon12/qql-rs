@@ -118,8 +118,8 @@ cargo install qql-cli --locked --features edge
 cargo install qql-cli --locked --features fastembed
 {% /terminal %}
 
-Run `qql version` to confirm: its `features` array lists what the binary
-supports. Python/Node stay split the same way — `pyqql` /
+Run `qql version` to confirm: it reports the `edition` ("standard" or "full")
+and its `features` array. Python/Node stay split the same way — `pyqql` /
 `@veristamp/nqql` are lean, `pyqql-edge` / `@veristamp/nqql-edge` (plus
 `uv pip install pyqql-edge` / `uv add pyqql-edge`) carry the edge runtime.
 

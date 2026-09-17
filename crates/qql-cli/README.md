@@ -4,9 +4,10 @@ CLI + REPL for QQL: remote Qdrant (REST/gRPC), convert, dump, migrate, doctor, o
 
 ## Install
 
-Prebuilt archives on GitHub Releases are available in two editions:
-- **Standard (`qql`)**: Lightweight (~15MB), includes REST, gRPC, built-in transparent traffic recorder (`qql record`), AST converter (`qql convert`), collection migrator (`qql migrate`), dump, REPL, formatter, and linter.
-- **Full (`qql-full`)**: Includes all Standard features plus local client-side FastEmbed ONNX inference and in-process `qdrant-edge` embedded database (`--features full`).
+The CLI command is always **`qql`**, available in two installation editions:
+- **Standard**: Lightweight (~15MB), remote Qdrant daily driver with REST, gRPC, built-in transparent traffic recorder (`qql record`), AST converter (`qql convert`), collection migrator (`qql migrate`), dump, REPL, formatter, and linter.
+- **Full**: Includes all Standard features plus local client-side FastEmbed ONNX inference and the in-process `qdrant-edge` embedded database (`--features full`).
+*(On GitHub Releases, the prebuilt archives are named `qql-*.tar.gz` and `qql-full-*.tar.gz`; both install the single `qql` executable).*
 
 ### Quick Install (Prebuilt Binaries)
 
@@ -47,7 +48,7 @@ cargo build --release -p qql-cli
 cargo build --release -p qql-cli --features full
 ```
 
-Check what's installed: `qql version` reports the enabled `features` array.
+Check what's installed: `qql version` reports the `edition` ("standard" or "full") and enabled `features` array.
 Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 
 ## Commands

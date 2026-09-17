@@ -20,9 +20,11 @@ pub struct VersionResponse {
     pub ok: bool,
     pub command: String,
     pub version: String,
+    /// Edition of this binary: `"standard"` (lean remote Qdrant driver)
+    /// or `"full"` (includes local ONNX FastEmbed models and in-process edge).
+    pub edition: String,
     /// Cargo features enabled in this binary (e.g. `["grpc", "rest"]`;
-    /// edge/record builds add `"edge"` / `"record"`). Lets users check
-    /// whether `--edge` / `record` / `edge` subcommands are installed.
+    /// full builds add `"edge"` and `"fastembed"`).
     pub features: Vec<String>,
     pub message: String,
 }

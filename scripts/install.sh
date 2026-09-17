@@ -144,13 +144,6 @@ fi
 cp -f "${BINARY_PATH}" "${INSTALL_DIR}/${BINARY_NAME}"
 chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
-# If full edition and qql-full binary exists in archive, copy that as well
-FULL_BINARY="$(find "${TMP_DIR}" -type f -name "qql-full" | head -n 1)"
-if [ -n "$FULL_BINARY" ] && [ -f "$FULL_BINARY" ]; then
-  cp -f "${FULL_BINARY}" "${INSTALL_DIR}/qql-full"
-  chmod +x "${INSTALL_DIR}/qql-full"
-fi
-
 echo "✅ Successfully installed qql (${EDITION} edition) to ${INSTALL_DIR}/${BINARY_NAME}"
 
 case ":$PATH:" in

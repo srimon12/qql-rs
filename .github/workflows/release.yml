@@ -152,7 +152,6 @@ jobs:
           archive="qql-full-${{ needs.gate.outputs.version }}-${{ matrix.target }}"
           mkdir -p "dist/$archive"
           cp "target/${{ matrix.target }}/release/qql${{ matrix.exe }}" "dist/$archive/"
-          cp "target/${{ matrix.target }}/release/qql${{ matrix.exe }}" "dist/$archive/qql-full${{ matrix.exe }}"
           cp LICENSE README.md "dist/$archive/"
           tar -C dist -czf "dist/$archive.tar.gz" "$archive"
 

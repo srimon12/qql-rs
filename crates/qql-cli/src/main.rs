@@ -886,7 +886,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = (collection, json, quiet);
                     Err(
-                        "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
+                        "edge support is not installed (this binary is standard edition); install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)"
                             .into(),
                     )
                 }
@@ -918,7 +918,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = (collection, from, api_key, shard_id, force, json, quiet);
                     Err(
-                        "edge support is not installed (this binary is grpc+rest only); install it with: cargo install qql-cli --locked --features edge"
+                        "edge support is not installed (this binary is standard edition); install the full edition with: curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full (or cargo install qql-cli --locked --features full)"
                             .into(),
                     )
                 }

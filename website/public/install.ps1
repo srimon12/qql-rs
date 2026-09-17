@@ -100,13 +100,6 @@ if (-not $ExtractedBinary) {
 $DestinationPath = Join-Path $InstallDir $BinaryName
 Copy-Item -Path $ExtractedBinary.FullName -Destination $DestinationPath -Force
 
-# Also copy qql-full.exe if present
-$ExtractedFullBinary = Get-ChildItem -Path $TempExtractDir -Filter "qql-full.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($ExtractedFullBinary) {
-    $FullDestinationPath = Join-Path $InstallDir "qql-full.exe"
-    Copy-Item -Path $ExtractedFullBinary.FullName -Destination $FullDestinationPath -Force
-}
-
 Remove-Item -Path $TempArchive -Force -ErrorAction SilentlyContinue
 Remove-Item -Path $TempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
 
