@@ -291,18 +291,15 @@ formula-expr = constant
              | formula-expr, ("+" | "-" | "*" | "/"), formula-expr
              | "-", formula-expr
              | "ABS", "(", formula-expr, ")"
-             | "SQRT", "(", formula-expr, ")"
-             | "LOG", "(", formula-expr, ")"
-             | "LN", "(", formula-expr, ")"
+             | ("SQRT" | "LOG" | "LN" | "ACOSH"), "(", formula-expr, ")", [ "[DEFAULT =", number, "]" ]
              | "EXP", "(", formula-expr, ")"
-             | "ACOSH", "(", formula-expr, ")"
              | ("MAX" | "MIN"), "(", formula-expr, { ",", formula-expr }, ")"
              | "POW", "(", formula-expr, ",", formula-expr, ")"
              | "GEO_DISTANCE", "(", lat, ",", lon, ",", field, ")"
              | decay-function ;
 ```
 
-The formula parser supports standard arithmetic operators with precedence and parentheses. The `$score` variable represents the query score. `MAX` and `MIN` fold n ≥ 1 operands; the empty operand list is a parse error. Decay functions:
+The formula parser supports standard arithmetic operators with precedence and parentheses. The bare `score` variable (or `$score`) represents the query score. Always prefer bare `score` in shell scripts and CLI commands: POSIX shells (bash, zsh) interpret `$score` inside double quotes as an environment variable and substitute an empty string `""`, triggering unexpected operator syntax errors. Bare `score` is shell-safe and canonical. `MAX` and `MIN` fold n ≥ 1 operands; the empty operand list is a parse error. Bounded mathematical functions (`SQRT`, `LOG`, `LN`, `ACOSH`) accept an optional `[DEFAULT = n]` fallback suffix to guard against `NaN` crashes on out-of-domain boundary inputs. Decay functions:
 
 ```ebnf
 decay-function = ("EXP_DECAY" | "GAUSS_DECAY" | "LIN_DECAY"),

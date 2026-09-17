@@ -36,6 +36,27 @@ if not report["ok"]:
 print(report["succeeded"], report["failed"])
 ```
 
+## Formula queries vs Qdrant SDK FormulaQuery
+
+In QQL, custom formula scoring uses declarative, readable query strings executed directly via `client.execute()`:
+
+```python
+report = client.execute("""
+    QUERY FORMULA score * 0.8 + LOG(views + 1.0) * 0.2
+    DEFAULTS (score = 0.0, views = 0)
+    FROM articles
+    LIMIT 10
+""")
+```
+
+{% aside type="caution" title="Do not wrap QQL strings in models.FormulaQuery" %}
+The official Qdrant Python SDK (`qdrant-client`) provides a class named `models.FormulaQuery`. However, it expects an object tree of `Expression` classes (`models.SumExpression(...)`), **not a query string**. Passing a QQL formula string into `models.FormulaQuery` fails with:
+```text
+400 Bad Request: "failed to parse variable ID ...: Invalid payload variable"
+```
+Execute QQL formula queries natively using `pyqql.Client.execute()`. Always use bare `score` instead of `$score` to avoid shell variable interpolation in terminal or script workflows.
+{% /aside %}
+
 ## Parameter binding & prepared queries
 
 Pass `params` as a dictionary for named placeholders (`:name`) or a list for positional placeholders (`?`):

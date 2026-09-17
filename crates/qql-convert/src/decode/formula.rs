@@ -72,11 +72,23 @@ fn formula_object(obj: &json::Obj, path: &str) -> Result<FormulaExpr, ConvertErr
             operand: Box::new(formula(value, &child(path, key))?),
         }),
         "abs" => unary(value, path, key, |x| FormulaExpr::Abs { x }),
-        "sqrt" => unary(value, path, key, |x| FormulaExpr::Sqrt { x }),
-        "log10" => unary(value, path, key, |x| FormulaExpr::Log { x }),
-        "ln" => unary(value, path, key, |x| FormulaExpr::Ln { x }),
+        "sqrt" => unary(value, path, key, |x| FormulaExpr::Sqrt {
+            x,
+            domain_default: None,
+        }),
+        "log10" => unary(value, path, key, |x| FormulaExpr::Log {
+            x,
+            domain_default: None,
+        }),
+        "ln" => unary(value, path, key, |x| FormulaExpr::Ln {
+            x,
+            domain_default: None,
+        }),
         "exp" => unary(value, path, key, |x| FormulaExpr::Exp { x }),
-        "acosh" => unary(value, path, key, |x| FormulaExpr::Acosh { x }),
+        "acosh" => unary(value, path, key, |x| FormulaExpr::Acosh {
+            x,
+            domain_default: None,
+        }),
         "pow" => {
             let params_path = child(path, key);
             let params = json::object(value, &params_path)?;

@@ -192,7 +192,19 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
-    ) -> ExecutionReport: ...
+    ) -> ExecutionReport:
+        """Execute QQL query strings or Stmt objects directly against Qdrant.
+
+        Supports search, hybrid fusion, and formula queries:
+            client.execute("QUERY FORMULA score * 0.8 + views * 0.2 FROM docs LIMIT 10")
+
+        Note:
+            Do not pass QQL formula strings into `qdrant_client.models.FormulaQuery`!
+            In Qdrant SDK, `FormulaQuery` expects an object tree of Expression classes,
+            not query text. Use `Client.execute()` to run QQL formulas natively.
+            Prefer bare `score` over `$score` to avoid shell variable interpolation.
+        """
+        ...
     async def execute_async(
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],

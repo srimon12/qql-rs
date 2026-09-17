@@ -83,6 +83,13 @@ impl PyClient {
     /// Point payloads are included by default (pass `WITH PAYLOAD false` to strip them).
     /// Lists of same-collection QUERY statements are automatically batched into
     /// a single network call.
+    ///
+    /// Note on Formula Queries (vs Qdrant SDK):
+    /// In QQL, custom formula scoring uses declarative query strings:
+    /// `client.execute("QUERY FORMULA score * 0.8 + views * 0.2 FROM docs LIMIT 10")`
+    /// Do not wrap QQL strings in `qdrant_client.models.FormulaQuery`, which expects an
+    /// object tree of Expression classes rather than query text. Run them directly here.
+    /// Always prefer bare `score` over `$score` to prevent shell variable expansion.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute<'py>(
         &self,

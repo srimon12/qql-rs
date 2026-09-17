@@ -282,11 +282,35 @@ impl PlanFormula {
             },
             FormulaExpr::Neg { operand } => Self::Neg(Box::new(Self::from_expr(operand)?)),
             FormulaExpr::Abs { x } => Self::Abs(Box::new(Self::from_expr(x)?)),
-            FormulaExpr::Sqrt { x } => Self::Sqrt(Box::new(Self::from_expr(x)?)),
-            FormulaExpr::Log { x } => Self::Log10(Box::new(Self::from_expr(x)?)),
-            FormulaExpr::Ln { x } => Self::Ln(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Sqrt { x, domain_default } => {
+                let inner = Self::from_expr(x)?;
+                match domain_default {
+                    None => Self::Sqrt(Box::new(inner)),
+                    Some(_) => Self::Sqrt(Box::new(Self::Max(vec![Self::Constant(0.0), inner]))),
+                }
+            }
+            FormulaExpr::Log { x, domain_default } => {
+                let inner = Self::from_expr(x)?;
+                match domain_default {
+                    None => Self::Log10(Box::new(inner)),
+                    Some(_) => Self::Log10(Box::new(Self::Max(vec![Self::Constant(1e-9), inner]))),
+                }
+            }
+            FormulaExpr::Ln { x, domain_default } => {
+                let inner = Self::from_expr(x)?;
+                match domain_default {
+                    None => Self::Ln(Box::new(inner)),
+                    Some(_) => Self::Ln(Box::new(Self::Max(vec![Self::Constant(1e-9), inner]))),
+                }
+            }
             FormulaExpr::Exp { x } => Self::Exp(Box::new(Self::from_expr(x)?)),
-            FormulaExpr::Acosh { x } => Self::Acosh(Box::new(Self::from_expr(x)?)),
+            FormulaExpr::Acosh { x, domain_default } => {
+                let inner = Self::from_expr(x)?;
+                match domain_default {
+                    None => Self::Acosh(Box::new(inner)),
+                    Some(_) => Self::Acosh(Box::new(Self::Max(vec![Self::Constant(1.0), inner]))),
+                }
+            }
             FormulaExpr::Max { args } => {
                 Self::Max(args.iter().map(Self::from_expr).collect::<Result<_, _>>()?)
             }
@@ -634,6 +658,26 @@ mod tests {
         assert_eq!(
             lower("QUERY FORMULA POW(score, 2) FROM docs;"),
             json!({"pow": {"base": "$score", "exponent": 2.0}})
+        );
+    }
+
+    #[test]
+    fn bounded_functions_with_domain_default_desugar_to_max_clamps() {
+        assert_eq!(
+            lower("QUERY FORMULA ACOSH(score) [DEFAULT = 0.0] FROM docs;"),
+            json!({"acosh": {"max": [1.0, "$score"]}})
+        );
+        assert_eq!(
+            lower("QUERY FORMULA SQRT(bonus) [DEFAULT = 0.0] FROM docs;"),
+            json!({"sqrt": {"max": [0.0, "bonus"]}})
+        );
+        assert_eq!(
+            lower("QUERY FORMULA LOG(views) [DEFAULT = 0.0] FROM docs;"),
+            json!({"log10": {"max": [1e-9, "views"]}})
+        );
+        assert_eq!(
+            lower("QUERY FORMULA LN(views) [DEFAULT = 0.0] FROM docs;"),
+            json!({"ln": {"max": [1e-9, "views"]}})
         );
     }
 

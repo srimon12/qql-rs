@@ -34,7 +34,7 @@ QUERY FORMULA (SQRT(score) * LOG(citation_count + 1)) DEFAULTS (citation_count =
   PREFETCH (candidates)
   LIMIT 20;
 
-QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+QUERY FORMULA MAX(MIN(score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0) [DEFAULT = 0.0]
   DEFAULTS (score = 0.0)
   FROM papers
   LIMIT 20;

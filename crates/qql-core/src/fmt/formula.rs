@@ -69,11 +69,35 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
         }
         FormulaExpr::Neg { operand } => format!("-{}", render_formula_min(operand, 3)),
         FormulaExpr::Abs { x } => format!("ABS({})", render_formula_min(x, 0)),
-        FormulaExpr::Sqrt { x } => format!("SQRT({})", render_formula_min(x, 0)),
-        FormulaExpr::Log { x } => format!("LOG({})", render_formula_min(x, 0)),
-        FormulaExpr::Ln { x } => format!("LN({})", render_formula_min(x, 0)),
+        FormulaExpr::Sqrt { x, domain_default } => {
+            let mut out = format!("SQRT({})", render_formula_min(x, 0));
+            if let Some(default) = domain_default {
+                let _ = write!(out, " [DEFAULT = {}]", render_f64(*default));
+            }
+            out
+        }
+        FormulaExpr::Log { x, domain_default } => {
+            let mut out = format!("LOG({})", render_formula_min(x, 0));
+            if let Some(default) = domain_default {
+                let _ = write!(out, " [DEFAULT = {}]", render_f64(*default));
+            }
+            out
+        }
+        FormulaExpr::Ln { x, domain_default } => {
+            let mut out = format!("LN({})", render_formula_min(x, 0));
+            if let Some(default) = domain_default {
+                let _ = write!(out, " [DEFAULT = {}]", render_f64(*default));
+            }
+            out
+        }
         FormulaExpr::Exp { x } => format!("EXP({})", render_formula_min(x, 0)),
-        FormulaExpr::Acosh { x } => format!("ACOSH({})", render_formula_min(x, 0)),
+        FormulaExpr::Acosh { x, domain_default } => {
+            let mut out = format!("ACOSH({})", render_formula_min(x, 0));
+            if let Some(default) = domain_default {
+                let _ = write!(out, " [DEFAULT = {}]", render_f64(*default));
+            }
+            out
+        }
         FormulaExpr::Max { args } => render_formula_call("MAX", args),
         FormulaExpr::Min { args } => render_formula_call("MIN", args),
         FormulaExpr::Pow { base, exponent } => format!(

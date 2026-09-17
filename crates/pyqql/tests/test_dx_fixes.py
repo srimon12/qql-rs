@@ -190,6 +190,14 @@ class TestVerdictRoundTwo(unittest.TestCase):
         bound = stmt.bind({"rank": 5})
         self.assertIn("GAUSS_DECAY(rank", str(bound))
 
+    def test_bare_score_in_formula_parses_and_compiles(self):
+        stmt = pyqql.parse(
+            "QUERY FORMULA score * 0.8 + views * 0.2 DEFAULTS (score = 0.0, views = 0) FROM docs"
+        )[0]
+        route = stmt.compile_route()
+        self.assertEqual(route["method"], "POST")
+        self.assertIn("$score", str(route))
+
 
 class TestBm25EmbedderParams(unittest.TestCase):
     """Client-side BM25 document params on the remote SDK's HttpEmbedder.

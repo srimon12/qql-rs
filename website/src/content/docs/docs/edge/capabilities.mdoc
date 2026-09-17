@@ -149,7 +149,7 @@ LIMIT 10;
 
 {% qqlExample title="Advanced query forms" %}
 ```sql
-QUERY FORMULA $score * 0.8 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA score * 0.8 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 
 QUERY CONTEXT (POSITIVE 'good' NEGATIVE 'bad') FROM docs LIMIT 10;
 

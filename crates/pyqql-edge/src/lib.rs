@@ -41,6 +41,11 @@ pub struct PyClient {
 
 #[pymethods]
 impl PyClient {
+    /// Execute a QQL query string, a pre-parsed Stmt, or a list of either against embedded edge storage.
+    ///
+    /// For formula queries, execute QQL formula strings directly:
+    /// `client.execute("QUERY FORMULA score * 0.8 + views * 0.2 FROM docs LIMIT 10")`
+    /// Prefer bare `score` over `$score` to prevent shell variable expansion.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute<'py>(
         &self,
