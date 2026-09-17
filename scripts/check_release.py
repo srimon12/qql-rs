@@ -63,6 +63,7 @@ PUBLIC_CRATES = (
     "qql-runtime",
     "qql-edge",
     "qql-cli",
+    "qql-record",
 )
 PRIVATE_CRATES = (
     "qql-conformance",

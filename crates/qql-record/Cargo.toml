@@ -22,7 +22,7 @@ qql-convert = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 clap = { version = "4", features = ["derive", "env"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "fs", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

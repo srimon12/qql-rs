@@ -92,7 +92,7 @@ jobs:
         run: >
           cargo clippy --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
-          -p qql-convert
+          -p qql-convert -p qql-record
           --all-targets -- -D warnings
 
       - name: Clippy (private binding helper crates)
@@ -105,7 +105,7 @@ jobs:
         run: >
           cargo test --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
-          -p qql-convert
+          -p qql-convert -p qql-record
 
       # One cargo unit so feature unification (e.g. serde_json/preserve_order
       # pulled in by jsonschema/fastembed) is the same as a workspace build.
@@ -200,7 +200,7 @@ jobs:
         run: >
           cargo check --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
-          -p qql-convert
+          -p qql-convert -p qql-record
 
   docs:
     name: Docs
@@ -221,7 +221,7 @@ jobs:
         run: >
           cargo doc --locked --no-deps --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
-          -p qql-convert
+          -p qql-convert -p qql-record
 
       - name: cargo doc (CLI, deny warnings)
         run: >

@@ -30,7 +30,7 @@ repository = "https://github.com/srimon12/qql-rs"
 homepage = "https://github.com/srimon12/qql-rs"
 
 [workspace.lints.rust]
-# Public API is the product for the six published crates; undocumented public
+# Public API is the product for the eight published crates; undocumented public
 # items surface as rustdoc warnings (see docs/rust API pass). Generated files
 # opt out locally via `#![allow(missing_docs)]`.
 missing_docs = "warn"
