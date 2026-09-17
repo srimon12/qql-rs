@@ -444,8 +444,8 @@ pub enum BatchFamily {
 
 /// Grouping key for statement/operation batching (same collection + family).
 pub use crate::batch::{
-    BatchKey, batch_item_error, build_query_batch, build_update_batch, statement_batch_key,
-    verify_batch_cardinality,
+    BatchKey, batch_item_error, build_query_batch, build_update_batch, into_query_batch,
+    into_update_batch, statement_batch_key, verify_batch_cardinality,
 };
 
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning

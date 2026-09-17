@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### ⚡ Performance & Internal Architecture
+- **Zero-Clone Batch Builds**: ambient query/mutation batches now move requests into the wire batch (`into_query_batch` / `into_update_batch`) instead of cloning per member; response normalization split out of `dispatch.rs` into `executor/normalize.rs` with batch-item normalizers. No user-facing changes (same routes, responses, and retry semantics) (PR [#165](https://github.com/srimon12/qql-rs/pull/165)).
+
 ## [0.4.1] - 2026-09-17
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
