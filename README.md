@@ -104,14 +104,21 @@ What the language layer adds:
 ## Quickstart
 
 ```bash
-# Linux and macOS
-curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
+# Linux and macOS (Standard)
+curl -fsSL https://qql.veristamp.in/install.sh | bash
 
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
+# Linux and macOS (Full: with ONNX + embedded edge)
+curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full
+
+# Windows (PowerShell - Standard)
+irm https://qql.veristamp.in/install.ps1 | iex
+
+# Windows (PowerShell - Full: with ONNX + embedded edge)
+& ([scriptblock]::Create((irm https://qql.veristamp.in/install.ps1))) -Full
 
 # or install from crates.io
 cargo install qql-cli --locked
+cargo install qql-cli --locked --features full
 
 # Run a query, run a script, or open the REPL
 qql run "QUERY [0.12, 0.45, 0.78, 0.03] FROM articles LIMIT 5"
@@ -363,11 +370,10 @@ qql convert curl.txt                    # a pasted curl command
 ```
 
 ### qql record
-
-`qql record` is a transparent proxy that captures live traffic from any application and writes `.qql` files. It needs the `record` feature at install time.
+ 
+`qql record` is a transparent proxy built directly into the CLI that captures live traffic from any application and writes `.qql` files.
 
 ```bash
-cargo install qql-cli --locked --features record
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --qql-out app_queries.qql
 ```
 

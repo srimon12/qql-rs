@@ -377,7 +377,9 @@ jobs:
             "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
             "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
             "crates/pyqql/pyqql/_errors.py crates/pyqql-edge/pyqql_edge/_errors.py" \
-            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py"; do
+            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py" \
+            "scripts/install.sh website/public/install.sh" \
+            "scripts/install.ps1 website/public/install.ps1"; do
             set -- $pair
             if ! diff -q "$1" "$2" >/dev/null; then
               echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"

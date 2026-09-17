@@ -28,11 +28,19 @@ the embedder entirely.
 ## CLI
 
 {% terminal title="Linux and macOS" %}
-curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
+# Standard edition (lean REST/gRPC/record/convert/migrate)
+curl -fsSL https://qql.veristamp.in/install.sh | bash
+
+# Full edition (with local ONNX FastEmbed + embedded qdrant-edge)
+curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full
 {% /terminal %}
 
 {% terminal title="Windows PowerShell" %}
-irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
+# Standard edition
+irm https://qql.veristamp.in/install.ps1 | iex
+
+# Full edition
+& ([scriptblock]::Create((irm https://qql.veristamp.in/install.ps1))) -Full
 {% /terminal %}
 
 The installed binary is `qql`. Run `qql setup` to configure your Qdrant
@@ -90,17 +98,24 @@ cd qql-rs
 cargo build --release --workspace
 {% /terminal %}
 
-### Feature builds (lean by default)
+### Feature builds (Standard vs Full)
 
-The default binary — including the prebuilt archives fetched by the
-installer above — is `rest` + `grpc` only. `edge` (ONNX/FastEmbed, heavy)
-and `record` (axum proxy, cheap) stay opt-in so the default download stays
-small. Install a feature build from crates.io with one command (no clone):
+The default binary (`qql`) — including the prebuilt archives fetched by the
+installer above — is lightweight (~15MB), containing REST, gRPC, the built-in
+`qql record` proxy, `qql convert`, `qql migrate`, `qql dump`, and REPL.
+`edge` (ONNX/FastEmbed models and in-process database) is packaged in the
+`qql-full` release or installed with `--features full`:
 
 {% terminal title="Feature installs (no clone needed)" %}
-cargo install qql-cli --locked --features edge
-cargo install qql-cli --locked --features record
+# Standard edition (REST + gRPC + record + convert + migrate)
+cargo install qql-cli --locked
+
+# Full edition (fastembed + edge)
 cargo install qql-cli --locked --features full
+
+# Or individual features
+cargo install qql-cli --locked --features edge
+cargo install qql-cli --locked --features fastembed
 {% /terminal %}
 
 Run `qql version` to confirm: its `features` array lists what the binary

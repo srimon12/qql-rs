@@ -4,6 +4,14 @@
 /favicon.ico
   Cache-Control: public, max-age=86400
 
+/install.sh
+  Content-Type: text/x-shellscript; charset=utf-8
+  Cache-Control: public, max-age=300
+
+/install.ps1
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+
 # Pagefind (Starlight search) — WASM + worker need CSP allowances
 /pagefind/*
   Cache-Control: public, max-age=3600, s-maxage=3600

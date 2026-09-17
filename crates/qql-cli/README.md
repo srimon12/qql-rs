@@ -8,7 +8,23 @@ Prebuilt archives on GitHub Releases are available in two editions:
 - **Standard (`qql`)**: Lightweight (~15MB), includes REST, gRPC, built-in transparent traffic recorder (`qql record`), AST converter (`qql convert`), collection migrator (`qql migrate`), dump, REPL, formatter, and linter.
 - **Full (`qql-full`)**: Includes all Standard features plus local client-side FastEmbed ONNX inference and in-process `qdrant-edge` embedded database (`--features full`).
 
-Install from crates.io with one command (no clone needed):
+### Quick Install (Prebuilt Binaries)
+
+```bash
+# Linux / macOS (Standard)
+curl -fsSL https://qql.veristamp.in/install.sh | bash
+
+# Linux / macOS (Full: with ONNX embeddings & embedded edge)
+curl -fsSL https://qql.veristamp.in/install.sh | bash -s -- --full
+
+# Windows PowerShell (Standard)
+irm https://qql.veristamp.in/install.ps1 | iex
+
+# Windows PowerShell (Full: with ONNX embeddings & embedded edge)
+& ([scriptblock]::Create((irm https://qql.veristamp.in/install.ps1))) -Full
+```
+
+### Install from crates.io
 
 ```bash
 # Standard: REST + gRPC + record + convert + migrate (matches qql release archives)
