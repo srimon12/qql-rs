@@ -1,47 +1,33 @@
+---
+interface Props {
+	exampleLabel?: string;
+}
+
+const { exampleLabel = "Quick demo" } = Astro.props;
+---
+
 <section class="flex min-h-0 min-w-0 flex-col" aria-labelledby="editor-title">
   <div class="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-3">
     <h2 id="editor-title" class="flex min-w-0 items-center gap-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">
       <span class="h-3 w-px shrink-0 bg-[var(--sl-color-accent)]" aria-hidden="true"></span>
       <span class="truncate">Source</span>
+      <span class="font-medium normal-case tracking-normal text-[var(--sl-color-gray-4)]" data-stmt-count>1 stmt</span>
     </h2>
 
     <div class="flex min-w-0 items-center gap-1">
-      <button class="app-action" type="button" data-open-presets aria-label="Example fixtures" title="Load a conformance fixture">
+      <button class="app-action max-sm:hidden" type="button" data-open-presets aria-label="Example fixtures" title="Load a conformance fixture">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg>
         <span class="hidden sm:inline">Examples</span>
+        <span class="hidden max-w-32 truncate font-normal normal-case tracking-normal opacity-70 xl:inline" data-active-fixture>{exampleLabel}</span>
       </button>
-      <button class="app-action" type="button" data-open-policy aria-label="Tenant policy" title="Inject a trusted tenant predicate after parse">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9v-6L12 3Z"/></svg>
-        <span class="hidden sm:inline">Policy</span>
-        <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]" data-policy-dot></span>
+      <button class="app-action max-sm:hidden" type="button" data-open-settings aria-label="Connection settings" title="Edit the Qdrant URL and embeddings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        <span class="hidden truncate sm:inline" data-connection-value>Not checked yet</span>
       </button>
-      <button class="app-chip hidden max-w-56 sm:inline-flex" type="button" data-policy-chip hidden title="Edit the injected tenant policy">
-        <span class="app-chip__label">Policy</span>
-        <span class="app-chip__value" data-policy-chip-value></span>
+      <button class="app-action" type="button" data-overflow-menu popovertarget="overflow-menu" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="overflow-menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       </button>
-      <button
-        class="app-action"
-        type="button"
-        data-share
-        popovertarget="share-menu"
-        title="Share playground link"
-        aria-label="Share playground link"
-        aria-haspopup="dialog"
-        aria-expanded="false"
-        aria-controls="share-menu"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.9 7.6-4.4M8.2 13.1l7.6 4.4"/></svg>
-        <span class="hidden sm:inline">Share</span>
-      </button>
-      <button class="app-action" type="button" data-format aria-label="Format query" title="Format with the canonical formatter (same as qql fmt)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
-        <span class="hidden sm:inline">Format</span>
-      </button>
-      <button class="app-action" type="button" data-wrap-toggle aria-pressed="false" aria-label="Toggle line wrap" title="Toggle line wrap">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h9"/><path d="m15 9 3 3-3 3"/></svg>
-        <span class="hidden sm:inline">Wrap</span>
-      </button>
-      <button class="app-action app-action--lg app-action--primary ml-1" type="button" data-run aria-label="Run query" disabled>
+      <button class="app-action app-action--lg app-action--primary ml-1 min-w-24" type="button" data-run aria-label="Run query" disabled>
         <svg class="size-3 fill-current" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m8 5 11 7-11 7V5Z"></path>
         </svg>
@@ -49,6 +35,31 @@
         <kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.62rem] opacity-80 sm:inline" data-kbd>⌘↵</kbd>
       </button>
     </div>
+  </div>
+
+  <div id="overflow-menu" class="app-share-pop" popover="auto" data-overflow-pop role="menu" aria-label="More actions">
+    <button class="app-share-pop__social" type="button" data-open-presets role="menuitem">
+      <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg>
+      <span>Examples</span>
+      <kbd class="ml-auto font-mono text-[0.62rem] opacity-70" data-kbd>⌘K</kbd>
+    </button>
+    <button class="app-share-pop__social" type="button" data-overflow-share role="menuitem">
+      <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.9 7.6-4.4M8.2 13.1l7.6 4.4"/></svg>
+      <span>Share</span>
+    </button>
+    <button class="app-share-pop__social" type="button" data-format role="menuitem">
+      <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+      <span>Format</span>
+    </button>
+    <button class="app-share-pop__social" type="button" data-wrap-toggle aria-pressed="false" role="menuitemcheckbox" aria-label="Toggle line wrap">
+      <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h9"/><path d="m15 9 3 3-3 3"/></svg>
+      <span>Wrap</span>
+    </button>
+    <button class="app-share-pop__social" type="button" data-open-policy role="menuitem">
+      <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9v-6L12 3Z"/></svg>
+      <span>Policy</span>
+      <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]" data-policy-dot></span>
+    </button>
   </div>
 
   <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
@@ -131,6 +142,10 @@
       Loading qql-wasm
     </span>
     <span class="min-w-0 flex-1 truncate" data-analysis-summary>Preparing the current workspace parser…</span>
+    <button class="app-chip shrink-0" type="button" data-policy-chip hidden title="Edit the injected tenant policy">
+      <span class="app-chip__label">Policy</span>
+      <span class="app-chip__value" data-policy-chip-value></span>
+    </button>
     <button class="app-chip shrink-0" type="button" data-open-export disabled>
       <span class="app-chip__label">Export</span>
       <span class="app-chip__value">SDK</span>

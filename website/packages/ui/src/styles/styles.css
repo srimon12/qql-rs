@@ -395,6 +395,7 @@ body.app-shell .site-footer { display: none; }
 .app-dialog::backdrop { background: rgb(20 20 19 / 0.72); }
 .app-dialog--wide { width: min(calc(100% - 2rem), 68rem); }
 .app-share-pop { display: none; inset: unset; margin: 0; width: min(22.5rem, calc(100vw - 1.5rem)); padding: 0.9rem; border: 1px solid var(--sl-color-gray-5); border-radius: var(--q-r-sm); background: var(--sl-color-bg); color: var(--sl-color-gray-1); }
+.app-share-pop--open { display: grid; gap: 0.7rem; }
 .app-share-pop:popover-open { display: grid; gap: 0.7rem; }
 .app-share-pop__kicker { margin: 0; color: var(--sl-color-gray-3); font-family: var(--sl-font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
 .app-share-pop__hint { margin: -0.25rem 0 0; color: var(--sl-color-gray-3); font-size: 0.75rem; }
@@ -444,6 +445,15 @@ input[role="switch"].switch:checked::after { transform: translate(1rem, -50%); b
 .pg-hl .tok-str { color: var(--q-sx-string); }
 .pg-hl .tok-num { color: var(--q-sx-number); }
 .pg-hl .tok-lit { color: var(--q-sx-keyword); }
+/* Result motion: stagger-in cards, easing bar, collapsible vectors. */
+.hit-enter { animation: hit-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes hit-in { from { opacity: 0; transform: translateY(6px); } }
+.scorebar-fill { transition: width 320ms ease-out; }
+.vec-summary { cursor: pointer; color: var(--q-sx-keyword); }
+/* Copy buttons reveal on hover (desktop), always visible on touch. */
+.copy-btn--reveal { opacity: 0; }
+*:hover > .copy-btn--reveal, .copy-btn--reveal:focus-visible { opacity: 1; }
+@media (hover: none) { .copy-btn--reveal { opacity: 1; } }
 
 [data-validation-badge].is-valid > span { background: var(--q-ok); }
 [data-validation-badge].is-invalid > span { background: var(--q-bad); }
@@ -451,6 +461,8 @@ input[role="switch"].switch:checked::after { transform: translate(1rem, -50%); b
 [data-runtime-dot].is-ready, [data-connected-dot].is-ready { background: var(--q-ok); }
 [data-runtime-dot].is-failed, [data-connected-dot].is-failed { background: var(--q-bad); }
 [data-analysis-summary] a { color: var(--sl-color-accent-high); text-decoration: underline; text-underline-offset: 2px; }
+/* TabBar overflow: right fade mask instead of a visible scrollbar. */
+.tabbar-fade::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1.5rem; background: linear-gradient(90deg, transparent, var(--sl-color-gray-6)); pointer-events: none; }
 @media (max-width: 40rem) {
 	[data-policy-chip], [data-docs-backlink] { display: none; }
 	/* Keep the settings entry reachable on phones; shorten the identity only here. */
@@ -474,6 +486,7 @@ input[role="switch"].switch:checked::after { transform: translate(1rem, -50%); b
 	*, ::before, ::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 	.ping::after { animation: none; }
 	html.js .reveal { opacity: 1; transform: none; }
-	.route-row, .toast, input[role="switch"].switch { transition: none; }
+	.route-row, .toast, input[role="switch"].switch, .hit-enter, .scorebar-fill { transition: none; }
 	[data-editor-loading]::before { animation: none; }
+	.hit-enter { animation: none; }
 }

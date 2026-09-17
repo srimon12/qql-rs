@@ -13,7 +13,7 @@
 		"generate:og": "node scripts/generate-og.mjs",
 		"validate:qql": "node scripts/verify-qql-docs.mjs",
 		"check:css": "node scripts/check-css-budget.mjs",
-		"check": "pnpm check:css && pnpm validate:qql && pnpm build:wasm && pnpm generate:og && astro build && node scripts/check-site-anchors.mjs",
+		"check": "pnpm check:css && pnpm validate:qql && pnpm build:wasm && pnpm generate:og && astro build && node scripts/check-site-anchors.mjs && node scripts/check-headers.mjs",
 		"preview": "astro preview",
 		"astro": "astro",
 		"lint": "biome check .",

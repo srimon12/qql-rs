@@ -88,13 +88,11 @@ export const LIVE_EMBED_URL = "http://localhost:1234/v1/embeddings";
 export const LIVE_EMBED_MODEL = "text-embedding-bge-small-en-v1.5";
 export const LIVE_EMBED_DIM = 384;
 
-/** Pre-LM-Studio defaults; stored settings matching these migrate forward. */
-const STALE_EMBED_URL = "http://localhost:11434/v1/embeddings";
-const STALE_EMBED_MODEL = "nomic-embed-text";
-const STALE_EMBED_DIM = 768;
+/** Default Qdrant endpoint for fresh installs (stock local Qdrant). */
+export const DEFAULT_QDRANT_URL = "http://localhost:6333";
 
 export const DEFAULT_SETTINGS: PlaygroundSettings = {
-	qdrantUrl: "http://localhost:6333",
+	qdrantUrl: DEFAULT_QDRANT_URL,
 	qdrantKey: "",
 	embedProvider: "http",
 	embedUrl: LIVE_EMBED_URL,
@@ -102,26 +100,6 @@ export const DEFAULT_SETTINGS: PlaygroundSettings = {
 	embedDim: LIVE_EMBED_DIM,
 	embedKey: "",
 };
-
-/** Rewrite stale Ollama-era embedder settings to the LM Studio endpoint. */
-export function migrateSettings(settings: PlaygroundSettings): boolean {
-	if (
-		settings.embedUrl === STALE_EMBED_URL &&
-		settings.embedModel === STALE_EMBED_MODEL &&
-		settings.embedDim === STALE_EMBED_DIM
-	) {
-		settings.embedUrl = LIVE_EMBED_URL;
-		settings.embedModel = LIVE_EMBED_MODEL;
-		settings.embedDim = LIVE_EMBED_DIM;
-		// Untouched installs still point at the old browser default provider;
-		// the documented live environment is the LM Studio HTTP endpoint.
-		if (settings.embedProvider === "browser") {
-			settings.embedProvider = "http";
-		}
-		return true;
-	}
-	return false;
-}
 
 export const DEFAULT_POLICY: RuntimePolicy = {
 	enabled: false,

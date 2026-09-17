@@ -5,6 +5,7 @@ interface Preset {
 	description: string;
 	category: string;
 	query: string;
+	preview: string;
 	statements: number;
 }
 
@@ -79,6 +80,7 @@ const { presets, categories } = Astro.props;
           </span>
           <strong class="text-[0.8125rem] font-semibold text-[var(--sl-color-white)]">{preset.label}</strong>
           <span class="line-clamp-2 text-xs leading-5 text-[var(--sl-color-gray-3)]">{preset.description}</span>
+          <code class="truncate font-mono text-[0.6875rem] text-[var(--sl-color-accent-high)]">{preset.preview}</code>
         </button>
       ))}
     </div>
