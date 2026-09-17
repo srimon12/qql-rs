@@ -11,12 +11,17 @@ import {
 	escapeHtml,
 	highlightJson,
 	pretty,
+	renderCollections,
 	renderCount,
 	renderEmpty,
 	renderError,
+	renderExplain,
 	renderFacets,
+	renderGroups,
 	renderHits,
+	renderMetrics,
 	renderMutation,
+	renderShardKeys,
 	type ScoredPoint,
 } from "./render";
 import {
@@ -318,18 +323,49 @@ function updateInspectorPanels(): void {
 		tokensOutput.innerHTML = highlightJson(pretty(analysis.result.tokens));
 	}
 
+	const explainRich = query("[data-explain-rich]");
 	const explainOutput = query(`[data-output="explain"]`);
+	const explainText =
+		analysis.result.explain ||
+		(analysis.policyError ? analysis.policyError : null);
+	if (explainRich) {
+		renderExplain(explainRich, explainText);
+	}
 	if (explainOutput) {
-		explainOutput.textContent =
-			analysis.result.explain ||
-			(analysis.policyError
-				? analysis.policyError
-				: "No explanation available.");
+		explainOutput.textContent = explainText || "No explanation available.";
 	}
 
+	const metricsCards = query("[data-metrics-cards]");
 	const metricsOutput = query(`[data-output="metrics"]`);
+	const currentRes = Array.isArray(lastExecutionReport?.results)
+		? (lastExecutionReport.results[selectedStmtIndex] ??
+			lastExecutionReport.results[0])
+		: null;
+	const rawTelemetry =
+		(lastExecutionReport as unknown as { telemetry?: Record<string, unknown> })
+			?.telemetry ??
+		(currentRes as unknown as { telemetry?: Record<string, unknown> })
+			?.telemetry ??
+		null;
+
+	if (metricsCards) {
+		renderMetrics(metricsCards, metrics, rawTelemetry);
+	}
 	if (metricsOutput && metrics) {
-		metricsOutput.innerHTML = highlightJson(pretty(metrics));
+		metricsOutput.innerHTML = highlightJson(
+			pretty({
+				...metrics,
+				telemetry: rawTelemetry,
+				reportSummary: lastExecutionReport
+					? {
+							ok: lastExecutionReport.ok,
+							succeeded: lastExecutionReport.succeeded,
+							failed: lastExecutionReport.failed,
+							resultsCount: lastExecutionReport.results?.length ?? 0,
+						}
+					: null,
+			}),
+		);
 	}
 
 	// 5. Update Response Tab
@@ -349,42 +385,107 @@ function updateInspectorPanels(): void {
 				responsePre.innerHTML = highlightJson(pretty(report));
 				responsePre.hidden = true;
 			}
-			// Inspect response type
-			const hits = report.hits
-				? (report.hits(selectedStmtIndex) as unknown as ScoredPoint[])
-				: [];
-			if (hits && hits.length > 0) {
-				renderHits(responseRich, hits, lastExecuteMs);
-			} else if (
-				report.count &&
-				typeof report.count(selectedStmtIndex) === "number"
-			) {
-				renderCount(
-					responseRich,
-					report.count(selectedStmtIndex),
-					lastExecuteMs,
-				);
-			} else if (report.facet && report.facet(selectedStmtIndex)?.length > 0) {
-				renderFacets(
-					responseRich,
-					report.facet(selectedStmtIndex),
-					lastExecuteMs,
-				);
-			} else {
-				const firstRes = report.results?.[selectedStmtIndex];
-				if (firstRes) {
-					renderMutation(
+
+			const results = report.results;
+			const res = Array.isArray(results)
+				? (results[selectedStmtIndex] ?? results[0])
+				: null;
+			const data = res ? res.data : null;
+			const hitBadge = query("[data-hit-count-badge]");
+
+			if (Array.isArray(data)) {
+				if (
+					data.length > 0 &&
+					typeof data[0] === "object" &&
+					data[0] !== null &&
+					"value" in data[0] &&
+					"count" in data[0]
+				) {
+					renderFacets(
 						responseRich,
-						firstRes.operation,
-						firstRes.message,
+						data as Array<{ value: unknown; count: number }>,
 						lastExecuteMs,
 					);
+					if (hitBadge) {
+						hitBadge.textContent = String(data.length);
+						hitBadge.hidden = false;
+					}
+				} else if (data.length > 0 && typeof data[0] === "string") {
+					renderCollections(responseRich, data as string[], lastExecuteMs);
+					if (hitBadge) {
+						hitBadge.textContent = String(data.length);
+						hitBadge.hidden = false;
+					}
 				} else {
-					renderEmpty(responseRich, "Query executed successfully.");
+					renderHits(responseRich, data as ScoredPoint[], lastExecuteMs);
+					if (hitBadge) {
+						hitBadge.textContent = String(data.length);
+						hitBadge.hidden = false;
+					}
 				}
+			} else if (data && typeof data === "object") {
+				if (
+					typeof (data as { count?: unknown }).count === "number" ||
+					typeof (data as { count?: unknown }).count === "bigint"
+				) {
+					const cnt = Number((data as { count: number | bigint }).count);
+					renderCount(responseRich, cnt, lastExecuteMs);
+					if (hitBadge) {
+						hitBadge.textContent = String(cnt);
+						hitBadge.hidden = false;
+					}
+				} else if (Array.isArray((data as { groups?: unknown }).groups)) {
+					const grps = (
+						data as { groups: Array<{ id: unknown; hits: ScoredPoint[] }> }
+					).groups;
+					renderGroups(responseRich, grps, lastExecuteMs);
+					if (hitBadge) {
+						hitBadge.textContent = String(grps.length);
+						hitBadge.hidden = false;
+					}
+				} else if (
+					Array.isArray((data as { collections?: unknown }).collections)
+				) {
+					const cols = (data as { collections: string[] }).collections;
+					renderCollections(responseRich, cols, lastExecuteMs);
+					if (hitBadge) {
+						hitBadge.textContent = String(cols.length);
+						hitBadge.hidden = false;
+					}
+				} else if (
+					Array.isArray((data as { shard_keys?: unknown }).shard_keys)
+				) {
+					const shards = (data as { shard_keys: unknown[] }).shard_keys;
+					renderShardKeys(responseRich, shards, lastExecuteMs);
+					if (hitBadge) {
+						hitBadge.textContent = String(shards.length);
+						hitBadge.hidden = false;
+					}
+				} else {
+					renderMutation(
+						responseRich,
+						res?.operation ?? "SUCCESS",
+						res?.message ?? "Operation completed.",
+						lastExecuteMs,
+					);
+					if (hitBadge) hitBadge.hidden = true;
+				}
+			} else if (res) {
+				renderMutation(
+					responseRich,
+					res.operation ?? "SUCCESS",
+					res.message ?? "Operation completed successfully.",
+					lastExecuteMs,
+				);
+				if (hitBadge) hitBadge.hidden = true;
+			} else {
+				renderEmpty(responseRich, "Query executed successfully.");
+				if (hitBadge) hitBadge.hidden = true;
 			}
 		} else {
 			renderEmpty(responseRich);
+			const hitBadge = query("[data-hit-count-badge]");
+			if (hitBadge) hitBadge.hidden = true;
 			if (responsePre) {
 				responsePre.textContent =
 					"Run a query against your reachable Qdrant to see live hits.";
@@ -404,12 +505,32 @@ export async function start(): Promise<void> {
 	const activeFixture = query("[data-active-fixture]");
 	const editorLoading = query("[data-editor-loading]");
 
-	// 1. Initial document
+	// 1. Initial document: ?q= query parameter takes priority (e.g. from Quickstart or Docs "Try in playground")
+	const pageParams = new URLSearchParams(window.location.search);
+	const urlQuery = pageParams.get("q");
+	const urlRef = pageParams.get("ref") || pageParams.get("from");
 	const savedSource = localStorage.getItem(WORKSPACE_KEY);
-	const initialDoc =
-		savedSource ||
+	const defaultQuery =
 		workspace?.dataset.defaultQuery ||
-		"QUERY points FROM collection LIMIT 5;";
+		"QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;";
+	const initialDoc = urlQuery ?? savedSource ?? defaultQuery;
+
+	if (urlQuery && activeFixture) {
+		activeFixture.textContent = urlRef?.includes("quickstart")
+			? "Quickstart"
+			: urlRef
+				? "From docs"
+				: "Shared query";
+	}
+
+	const docsBacklink = query<HTMLAnchorElement>("[data-docs-backlink]");
+	if (docsBacklink && urlRef) {
+		docsBacklink.href = urlRef;
+		docsBacklink.hidden = false;
+		docsBacklink.textContent = urlRef.includes("quickstart")
+			? "Back to Quickstart →"
+			: "Back to docs →";
+	}
 
 	// 2. Editor setup
 	let editor: EditorView;
@@ -604,14 +725,47 @@ export async function start(): Promise<void> {
 		});
 	}
 
-	// Copy point JSON delegate
+	// Copy and interaction click delegates
 	document.addEventListener("click", (e) => {
-		const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
-			"[data-copy-json]",
-		);
-		if (btn?.dataset.copyJson) {
-			void navigator.clipboard.writeText(btn.dataset.copyJson);
+		const target = e.target as HTMLElement;
+
+		// Copy JSON button
+		const copyJsonBtn = target.closest<HTMLButtonElement>("[data-copy-json]");
+		if (copyJsonBtn?.dataset.copyJson) {
+			void navigator.clipboard.writeText(copyJsonBtn.dataset.copyJson);
 			showToast("Copied JSON to clipboard");
+			return;
+		}
+
+		// Copy Text button (e.g. ID)
+		const copyTextBtn = target.closest<HTMLButtonElement>("[data-copy-text]");
+		if (copyTextBtn?.dataset.copyText) {
+			void navigator.clipboard.writeText(copyTextBtn.dataset.copyText);
+			showToast("Copied ID to clipboard");
+			return;
+		}
+
+		// Load Query button (e.g. collection queries)
+		const loadQueryBtn = target.closest<HTMLButtonElement>("[data-load-query]");
+		if (loadQueryBtn?.dataset.loadQuery) {
+			const q = loadQueryBtn.dataset.loadQuery;
+			editor.dispatch({
+				changes: { from: 0, to: editor.state.doc.length, insert: q },
+			});
+			showToast("Loaded query into editor");
+			return;
+		}
+
+		// Copy Tab button (wire, ast, tokens)
+		const copyTabBtn = target.closest<HTMLButtonElement>("[data-copy-tab]");
+		if (copyTabBtn?.dataset.copyTab) {
+			const tabId = copyTabBtn.dataset.copyTab;
+			const pre = query(`[data-output="${tabId}"]`);
+			if (pre?.textContent) {
+				void navigator.clipboard.writeText(pre.textContent);
+				showToast(`Copied ${tabId} to clipboard`);
+			}
+			return;
 		}
 	});
 
@@ -637,7 +791,7 @@ export async function start(): Promise<void> {
 	setupDialog("export-dialog", ["[data-open-export]"]);
 
 	// Presets search & filtering
-	const presetDialog = byId("preset-dialog");
+	const presetDialog = byId<HTMLDialogElement>("preset-dialog");
 	const presetSearch = query<HTMLInputElement>(
 		"[data-preset-search]",
 		presetDialog,
@@ -929,7 +1083,7 @@ export async function start(): Promise<void> {
 				livePresets.innerHTML = collections
 					.map(
 						(name) => `
-					<button type="button" class="app-chip text-left justify-start" data-preset-query="QUERY points FROM ${escapeHtml(name)} LIMIT 5;" data-preset-label="${escapeHtml(name)}">
+					<button type="button" class="app-chip text-left justify-start" data-preset-query="SCROLL FROM ${escapeHtml(name)} LIMIT 5;" data-preset-label="${escapeHtml(name)}">
 						<span class="app-chip__label">Collection</span>
 						<span class="app-chip__value font-mono font-bold">${escapeHtml(name)}</span>
 					</button>
