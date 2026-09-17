@@ -136,6 +136,37 @@ export function selectedRoute(
 	return analysis?.effectiveRoutes[selected] ?? analysis?.result.route ?? null;
 }
 
+/**
+ * Inline marker for the span a failed run reported (executor errors carry
+ * byte offsets into the run's source). Empty when the failure has no span.
+ */
+export function runtimeDiagnostic(
+	failure: PlaygroundFailure | null,
+	source: string,
+): Diagnostic[] {
+	if (!failure?.span) return [];
+	if (!source) return [];
+	const offset = failure.startOffset ?? 0;
+	const localSource = source.slice(offset);
+	const from = Math.min(
+		offset + byteOffsetToPosition(localSource, failure.span.start),
+		source.length,
+	);
+	const rawTo = Math.min(
+		offset + byteOffsetToPosition(localSource, failure.span.end),
+		source.length,
+	);
+	const to = Math.max(from + 1, rawTo);
+	return [
+		{
+			from,
+			to: Math.min(to, source.length),
+			severity: "error",
+			message: `${failure.code ?? "QQL-ERROR"}: ${failure.message}`,
+		},
+	];
+}
+
 export function formatError(error: unknown): string {
 	if (error instanceof Error) return error.message;
 	if (typeof error === "string") return error;
@@ -244,6 +275,7 @@ function humanizeFailure(
 export function buildFailure(
 	error: unknown,
 	qdrantUrl: string,
+	startOffset = 0,
 ): PlaygroundFailure {
 	const raw = formatError(error);
 	const host = connectionHost(qdrantUrl);
@@ -260,6 +292,7 @@ export function buildFailure(
 				code: "QQL-TRANSPORT",
 				kind: "Transport",
 				span: null,
+				startOffset,
 				fields: {},
 				raw,
 			};
@@ -269,6 +302,7 @@ export function buildFailure(
 			code: null,
 			kind: null,
 			span: null,
+			startOffset,
 			fields: {},
 			raw,
 		};
@@ -278,6 +312,7 @@ export function buildFailure(
 		code: parsed.code,
 		kind: parsed.kind ?? null,
 		span: parsed.span,
+		startOffset,
 		fields: parsed.fields,
 		raw,
 	};

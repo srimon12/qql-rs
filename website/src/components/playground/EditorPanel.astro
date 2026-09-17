@@ -4,6 +4,11 @@ interface Props {
 }
 
 const { exampleLabel = "Quick demo" } = Astro.props;
+
+const menuItem =
+	"flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] transition-colors hover:bg-[var(--sl-color-gray-6)] hover:text-[var(--sl-color-white)]";
+const menuKbd =
+	"rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-1 font-mono text-[0.6rem] text-[var(--sl-color-gray-3)]";
 ---
 
 <section class="flex min-h-0 min-w-0 flex-col" aria-labelledby="editor-title">
@@ -23,8 +28,8 @@ const { exampleLabel = "Quick demo" } = Astro.props;
       </button>
     </div>
 
-    <!-- Right: Action Buttons (All Inline, Zero Hidden Popovers) -->
-    <div class="flex min-w-0 items-center gap-1">
+    <!-- Right: Tools + Run -->
+    <div class="flex min-w-0 items-center gap-0.5">
       <button class="app-action h-7 px-2 text-xs" type="button" data-format title="Format QQL source (Alt+Shift+F)">
         <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M4 7h16M4 12h10M4 17h7"></path>
@@ -39,6 +44,8 @@ const { exampleLabel = "Quick demo" } = Astro.props;
         </svg>
         <span class="hidden md:inline">Wrap</span>
       </button>
+
+      <span class="mx-1 hidden h-4 w-px bg-[var(--sl-color-gray-5)] sm:block" aria-hidden="true"></span>
 
       <button class="app-action h-7 px-2 text-xs" type="button" data-share-link title="Copy shareable link to clipboard">
         <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -56,16 +63,50 @@ const { exampleLabel = "Quick demo" } = Astro.props;
         <span class="hidden md:inline">Policy</span>
       </button>
 
-      <!-- Run Action -->
-      <button class="app-action app-action--primary ml-1.5 h-8 min-w-20 px-3 font-semibold text-xs text-white" type="button" data-run aria-label="Run query" disabled>
-        <svg class="size-3.5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-          <polygon points="5 3 19 12 5 21 5 3"></polygon>
-        </svg>
-        <span data-run-label>Run</span>
-        <kbd class="hidden rounded bg-white/20 px-1 font-mono text-[0.6rem] sm:inline" data-kbd>⌘↵</kbd>
-      </button>
+      <!-- Run: primary = smart target, caret = run menu -->
+      <div class="relative ml-1.5" data-run-group>
+        <div class="flex items-stretch">
+          <button class="app-action app-action--primary h-8 min-w-19 rounded-r-none px-3 font-semibold text-xs text-white" type="button" data-run aria-label="Run" disabled>
+            <svg class="size-3.5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <span data-run-label>Run</span>
+            <kbd class="hidden rounded bg-white/20 px-1 font-mono text-[0.6rem] sm:inline" data-kbd>⌘↵</kbd>
+          </button>
+          <button class="app-action app-action--primary h-8 rounded-l-none border-l border-white/25 px-1.5" type="button" data-run-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="run-menu" aria-label="More run options" title="More run options">
+            <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="absolute right-0 top-[calc(100%+0.4rem)] z-30 w-64 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-1.5 shadow-xl" id="run-menu" role="menu" aria-label="Run options" data-run-menu hidden>
+          <p class="m-0 px-2 pb-1 pt-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.12em] text-[var(--sl-color-gray-3)]">Execution</p>
+          <button class={menuItem} type="button" role="menuitem" data-run-mode="smart">
+            <span>Run statement at cursor</span>
+            <kbd class={menuKbd} data-kbd-short>⌘↵</kbd>
+          </button>
+          <button class={menuItem} type="button" role="menuitem" data-run-mode="statement">
+            <span>Run selected statement</span>
+            <span class="font-mono text-[0.62rem] text-[var(--sl-color-gray-3)]" data-run-statement-hint>Stmt 1</span>
+          </button>
+          <button class={menuItem} type="button" role="menuitem" data-run-mode="all">
+            <span>Run all statements</span>
+            <kbd class={menuKbd} data-kbd-all>⇧⌘↵</kbd>
+          </button>
+          <button class={menuItem} type="button" role="menuitem" data-run-mode="from">
+            <span>Run from statement to end</span>
+          </button>
+          <div class="my-1 h-px bg-[var(--sl-color-gray-5)]" role="separator"></div>
+          <label class="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 font-mono text-[0.72rem] text-[var(--sl-color-gray-2)] hover:bg-[var(--sl-color-gray-6)]">
+            <span>Stop on first error</span>
+            <input name="stopOnError" type="checkbox" role="switch" class="switch" data-run-stop-on-error />
+          </label>
+        </div>
+      </div>
     </div>
   </div>
+
+  <!-- Statement rail: one chip per statement, appears for scripts -->
+  <div class="flex min-h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 py-1 scrollbar-none" data-statement-rail hidden role="group" aria-label="Statements"></div>
 
   <!-- CodeMirror Editor Mount -->
   <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
@@ -89,7 +130,15 @@ const { exampleLabel = "Quick demo" } = Astro.props;
       <span class="truncate font-mono text-[0.7rem] text-[var(--sl-color-gray-3)]" data-analysis-summary>Initializing compiler…</span>
     </div>
 
-    <div class="flex shrink-0 items-center gap-2">
+    <div class="flex shrink-0 items-center gap-2.5">
+      <span class="hidden tabular-nums text-[var(--sl-color-gray-3)] sm:inline" data-cursor-pos>Ln 1, Col 1</span>
+      <span class="hidden rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-1.5 py-0.5 text-[0.65rem] text-[var(--sl-color-gray-2)] md:inline" data-statement-pos hidden>Stmt 1/1</span>
+      <button class="app-action h-6 px-1.5 text-[0.6875rem]" type="button" data-open-shortcuts title="Keyboard shortcuts and commands">
+        <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="6" width="20" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"></path>
+        </svg>
+        <span class="sr-only">Keyboard shortcuts</span>
+      </button>
       <button class="app-chip h-6 px-2 text-[0.6875rem]" type="button" data-policy-chip hidden title="Edit injected tenant policy">
         <span class="app-chip__label">Policy</span>
         <span class="app-chip__value font-semibold text-[var(--sl-color-accent-high)]" data-policy-chip-value></span>

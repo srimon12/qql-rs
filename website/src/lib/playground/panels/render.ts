@@ -1,14 +1,5 @@
-import type { PlaygroundFailure, PlaygroundMetrics } from "./types";
-
-export function escapeHtml(str: unknown): string {
-	if (str == null) return "";
-	return String(str)
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
-}
+import { escapeHtml } from "../core/dom";
+import type { PlaygroundFailure, PlaygroundMetrics } from "../core/types";
 
 export function pretty(value: unknown): string {
 	if (value === undefined) return "";
@@ -510,6 +501,95 @@ export function renderMutation(
 			${timingStr ? `<p class="mt-2 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]">⚡ Execution: ${escapeHtml(timingStr)}</p>` : ""}
 		</div>
 	`;
+}
+
+export interface ExecResponseLike {
+	ok?: boolean | null;
+	operation?: string | null;
+	message?: string | null;
+	data?: unknown;
+}
+
+/**
+ * Route one executor response into the Result panel and report its badge
+ * count (hits, groups, collections, …) — `null` when the shape is not
+ * countable (mutations, empty payloads).
+ */
+export function renderExecResponse(
+	container: HTMLElement,
+	response: ExecResponseLike | null,
+	executeMs: number | null,
+): number | null {
+	const data = response?.data ?? null;
+
+	if (Array.isArray(data)) {
+		if (
+			data.length > 0 &&
+			typeof data[0] === "object" &&
+			data[0] !== null &&
+			"value" in data[0] &&
+			"count" in data[0]
+		) {
+			const facets = data as Array<{ value: unknown; count: number }>;
+			renderFacets(container, facets, executeMs);
+			return facets.length;
+		}
+		if (data.length > 0 && typeof data[0] === "string") {
+			renderCollections(container, data as string[], executeMs);
+			return data.length;
+		}
+		const hits = data as ScoredPoint[];
+		renderHits(container, hits, executeMs);
+		return hits.length;
+	}
+
+	if (data && typeof data === "object") {
+		if (
+			typeof (data as { count?: unknown }).count === "number" ||
+			typeof (data as { count?: unknown }).count === "bigint"
+		) {
+			const count = Number((data as { count: number | bigint }).count);
+			renderCount(container, count, executeMs);
+			return count;
+		}
+		if (Array.isArray((data as { groups?: unknown }).groups)) {
+			const groups = (
+				data as { groups: Array<{ id: unknown; hits: ScoredPoint[] }> }
+			).groups;
+			renderGroups(container, groups, executeMs);
+			return groups.length;
+		}
+		if (Array.isArray((data as { collections?: unknown }).collections)) {
+			const collections = (data as { collections: string[] }).collections;
+			renderCollections(container, collections, executeMs);
+			return collections.length;
+		}
+		if (Array.isArray((data as { shard_keys?: unknown }).shard_keys)) {
+			const shardKeys = (data as { shard_keys: unknown[] }).shard_keys;
+			renderShardKeys(container, shardKeys, executeMs);
+			return shardKeys.length;
+		}
+		renderMutation(
+			container,
+			response?.operation ?? "SUCCESS",
+			response?.message ?? "Operation completed.",
+			executeMs,
+		);
+		return null;
+	}
+
+	if (response) {
+		renderMutation(
+			container,
+			response.operation ?? "SUCCESS",
+			response.message ?? "Operation completed successfully.",
+			executeMs,
+		);
+		return null;
+	}
+
+	renderEmpty(container, "Query executed successfully.");
+	return null;
 }
 
 export function renderMetrics(

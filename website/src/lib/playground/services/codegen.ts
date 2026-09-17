@@ -1,5 +1,5 @@
 import type { CompiledRoute } from "qql-wasm-current";
-import type { ExportLanguage, PlaygroundSettings } from "./types";
+import type { ExportLanguage, PlaygroundSettings } from "../core/types";
 
 function quotePython(source: string): string {
 	return `qql = """${source.replace(/"""/g, '\\"\\"\\"')}"""`;

@@ -4,6 +4,7 @@ import {
 	StreamLanguage,
 	syntaxHighlighting,
 } from "@codemirror/language";
+import { EditorState } from "@codemirror/state";
 import { tags } from "@lezer/highlight";
 import { QQL_CONSTANTS, QQL_KEYWORDS } from "./qql-keywords.generated";
 
@@ -39,6 +40,14 @@ export const qqlLanguage = StreamLanguage.define({
 		return null;
 	},
 });
+
+/**
+ * `--` is QQL's only comment form. `toggleComment` (Mod-/) reads the
+ * `commentTokens` language data; without this entry the command no-ops.
+ */
+export const qqlCommentTokens = EditorState.languageData.of(() => [
+	{ commentTokens: { line: "--" } },
+]);
 
 const completions: Completion[] = [...keywords]
 	.sort()

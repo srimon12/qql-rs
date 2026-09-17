@@ -149,29 +149,16 @@ body:not(.app-shell) :is(h1, h2) {
 /* Code specimen: header strip + slit tick, body, real-state footer strip. */
 .code-card { border: 1px solid var(--sl-color-gray-5); border-radius: var(--q-r); background: var(--sl-color-gray-6); overflow: hidden; }
 .code-card__head {
-	display: grid;
-	grid-template-columns: auto 1fr auto;
-	align-items: center;
-	gap: 0.75rem;
-	height: 2.25rem;
-	padding: 0 0.9rem;
-	border-bottom: 1px solid var(--sl-color-gray-5);
-	font-family: var(--sl-font-mono);
-	font-size: 0.75rem;
+	display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.75rem;
+	height: 2.25rem; padding: 0 0.9rem; border-bottom: 1px solid var(--sl-color-gray-5);
+	font-family: var(--sl-font-mono); font-size: 0.75rem;
 }
 .code-card__tick { width: 1px; height: 12px; background: var(--sl-color-accent); }
 .code-card__meta { font-size: 0.6875rem; color: var(--sl-color-gray-3); }
 .code-card__foot {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 1rem;
-	min-height: 2rem;
-	padding: 0 0.9rem;
-	border-top: 1px solid var(--sl-color-gray-5);
-	font-family: var(--sl-font-mono);
-	font-size: 0.6875rem;
-	color: var(--sl-color-gray-3);
+	display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+	min-height: 2rem; padding: 0 0.9rem; border-top: 1px solid var(--sl-color-gray-5);
+	font-family: var(--sl-font-mono); font-size: 0.6875rem; color: var(--sl-color-gray-3);
 }
 .code-card__foot--stack { display: flex; flex-direction: column; align-items: stretch; gap: 0.15rem; padding-block: 0.4rem; }
 
@@ -462,7 +449,7 @@ input[role="switch"].switch:checked::after { transform: translate(1rem, -50%); b
 [data-runtime-dot].is-failed, [data-connected-dot].is-failed { background: var(--q-bad); }
 [data-analysis-summary] a { color: var(--sl-color-accent-high); text-decoration: underline; text-underline-offset: 2px; }
 /* TabBar overflow: right fade mask instead of a visible scrollbar. */
-.tabbar-fade::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1.5rem; background: linear-gradient(90deg, transparent, var(--sl-color-gray-6)); pointer-events: none; }
+.tabbar-fade::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1.5rem; background: linear-gradient(90deg, transparent, var(--sl-color-bg)); pointer-events: none; }
 @media (max-width: 40rem) {
 	[data-policy-chip], [data-docs-backlink] { display: none; }
 	/* Keep the settings entry reachable on phones; shorten the identity only here. */
@@ -481,6 +468,21 @@ input[role="switch"].switch:checked::after { transform: translate(1rem, -50%); b
 .toast-region { position: fixed; right: 1rem; bottom: 1rem; display: grid; gap: 0.5rem; z-index: 100; }
 .toast { max-width: 22rem; padding: 0.7rem 0.85rem; border: 1px solid var(--sl-color-gray-5); border-radius: var(--q-r-sm); background: var(--sl-color-gray-6); color: var(--sl-color-gray-1); font-size: 0.75rem; }
 .toast--error { border-color: color-mix(in srgb, var(--q-bad) 60%, var(--sl-color-gray-5)); }
+
+/* Statement map: rail chip state, gutter badges, active-statement tint. */
+.app-chip[aria-current="true"] { border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--sl-color-gray-5)); background: color-mix(in srgb, var(--sl-color-accent) 8%, var(--sl-color-bg)); color: var(--sl-color-white); }
+.app-chip[aria-current="true"] .app-chip__label { color: var(--sl-color-accent-high); }
+#qql-editor .cm-stmt-active { background: color-mix(in srgb, var(--sl-color-accent) 4%, transparent); }
+#qql-editor .cm-stmt-start { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--sl-color-accent) 55%, transparent); }
+#qql-editor .cm-stmt-gutter { background: color-mix(in srgb, var(--sl-color-gray-6) 55%, transparent); border-right: 1px solid var(--sl-color-gray-5); }
+#qql-editor .cm-stmt-marker { display: grid; place-items: center; min-width: 1.05rem; margin: 0 0.2rem; padding: 0 0.15rem; border: 1px solid var(--sl-color-gray-5); border-radius: 4px; background: var(--sl-color-bg); color: var(--sl-color-gray-3); font-family: var(--sl-font-mono); font-size: 0.5625rem; font-weight: 700; line-height: 1; cursor: pointer; }
+#qql-editor .cm-stmt-marker:hover { border-color: var(--sl-color-accent); color: var(--sl-color-white); }
+/* Mobile: below lg the split stacks; the header switch picks one pane. */
+@media (max-width: 63.999rem) {
+	[data-workspace][data-mobile-view] { grid-template-rows: minmax(0, 1fr); }
+	[data-workspace][data-mobile-view="editor"] > section:nth-of-type(2),
+	[data-workspace][data-mobile-view="result"] > section:nth-of-type(1) { display: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
 	*, ::before, ::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }

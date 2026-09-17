@@ -87,6 +87,24 @@ const landingLabel = "Quick demo";
 const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
 const pageDescription =
 	"Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
+
+const shortcuts: Array<{ label: string; keys: string[] }> = [
+	{
+		label: "Run selection, else the statement under the caret",
+		keys: ["⌘", "↵"],
+	},
+	{ label: "Run every statement in the script", keys: ["⇧", "⌘", "↵"] },
+	{ label: "Command palette", keys: ["⌘", "K"] },
+	{ label: "Comment or uncomment the selected lines", keys: ["⌘", "/"] },
+	{ label: "Format the document", keys: ["⌥", "⇧", "F"] },
+	{
+		label: "Jump between statements",
+		keys: ["click the rail or gutter badge"],
+	},
+	{ label: "Autocomplete keywords", keys: ["⌃", "Space"] },
+	{ label: "Indent with Tab", keys: ["Tab"] },
+	{ label: "Find in editor", keys: ["⌘", "F"] },
+];
 ---
 
 <!doctype html>
@@ -219,6 +237,27 @@ const pageDescription =
 
         <!-- Right: Actions -->
         <div class="flex shrink-0 items-center gap-2">
+          <!-- Mobile pane switch: the split stacks below lg -->
+          <div class="flex items-center rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-0.5 lg:hidden" role="group" aria-label="Playground pane">
+            <button class="app-action h-6 px-2 text-[0.6875rem]" type="button" data-mobile-view="editor" aria-pressed="true">Editor</button>
+            <button class="app-action h-6 px-2 text-[0.6875rem]" type="button" data-mobile-view="result" aria-pressed="false">Result</button>
+          </div>
+
+          <!-- Command palette trigger -->
+          <button
+            class="app-action hidden h-7.5 gap-2 border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-2.5 text-xs text-[var(--sl-color-gray-3)] hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-gray-1)] sm:inline-flex"
+            type="button"
+            data-open-palette
+            title="Command palette"
+            aria-label="Open command palette"
+          >
+            <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
+            </svg>
+            <span class="hidden font-medium xl:inline">Commands</span>
+            <kbd class="rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-1 font-mono text-[0.6rem]">⌘K</kbd>
+          </button>
+
           <!-- Unified Database & Embeddings Configuration trigger -->
           <button
             class="app-action h-7.5 px-3 text-xs font-medium gap-1.5 border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] hover:border-[var(--sl-color-gray-4)] hover:bg-[var(--sl-color-gray-7)] text-[var(--sl-color-gray-1)] rounded-md shadow-2xs transition-colors"
@@ -275,6 +314,70 @@ const pageDescription =
     <SettingsDialog />
     <PolicyDialog />
     <ExportDialog />
+
+    <!-- Command palette (⌘K) -->
+    <dialog class="app-dialog" id="palette-dialog" aria-labelledby="palette-title" data-app-dialog>
+      <div class="flex flex-col">
+        <header class="flex items-center gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-3">
+          <svg class="size-4 shrink-0 text-[var(--sl-color-gray-3)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
+          </svg>
+          <h2 id="palette-title" class="sr-only">Command palette</h2>
+          <input
+            class="min-w-0 flex-1 border-0 bg-transparent font-mono text-sm text-[var(--sl-color-gray-1)] outline-none placeholder:text-[var(--sl-color-gray-3)]"
+            type="text"
+            id="palette-search"
+            name="palette-search"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="palette-list"
+            aria-autocomplete="list"
+            placeholder="Search actions, statements, and settings…"
+            autocomplete="off"
+            spellcheck="false"
+            data-palette-input
+          />
+          <kbd class="shrink-0 rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-1.5 py-0.5 font-mono text-[0.62rem] text-[var(--sl-color-gray-3)]">esc</kbd>
+        </header>
+        <ul id="palette-list" role="listbox" aria-label="Commands" class="m-0 max-h-[min(24rem,50vh)] min-h-24 list-none overflow-y-auto p-1.5" data-palette-list></ul>
+        <p class="m-0 px-4 py-8 text-center font-mono text-xs text-[var(--sl-color-gray-3)]" data-palette-empty hidden>No matching action.</p>
+        <footer class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-2 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)]">
+          <span><kbd class="text-[var(--sl-color-gray-2)]">↑↓</kbd> navigate</span>
+          <span><kbd class="text-[var(--sl-color-gray-2)]">↵</kbd> run</span>
+          <span><kbd class="text-[var(--sl-color-gray-2)]">esc</kbd> close</span>
+        </footer>
+      </div>
+    </dialog>
+
+    <!-- Keyboard shortcuts reference -->
+    <dialog class="app-dialog" id="shortcuts-dialog" aria-labelledby="shortcuts-title" data-app-dialog>
+      <div class="flex max-h-[85vh] flex-col">
+        <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-5 py-4">
+          <div class="min-w-0">
+            <p class="mono-label m-0">Reference</p>
+            <h2 id="shortcuts-title" class="m-0 mt-1 text-lg font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">Keyboard shortcuts</h2>
+          </div>
+          <button class="app-icon-btn" type="button" data-close-dialog aria-label="Close shortcuts">×</button>
+        </header>
+        <div class="grid gap-1 overflow-y-auto px-5 py-4">
+          {shortcuts.map((row) => (
+            <div class="flex items-center justify-between gap-4 border-b border-[var(--sl-color-gray-5)] px-1 py-2 last:border-b-0">
+              <span class="text-xs text-[var(--sl-color-gray-2)]">{row.label}</span>
+              <span class="flex shrink-0 gap-1">
+                {row.keys.map((key) => (
+                  <kbd class="rounded border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--sl-color-gray-2)]">{key}</kbd>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+        <footer class="flex items-center justify-between gap-4 border-t border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-5 py-3">
+          <span class="font-mono text-[0.65rem] text-[var(--sl-color-gray-3)]">⌘ = Command on macOS, Ctrl elsewhere</span>
+          <button class="app-action app-action--lg" type="button" data-close-dialog>Close</button>
+        </footer>
+      </div>
+    </dialog>
+
     <div class="toast-region" aria-live="polite" aria-atomic="true" data-toast-region></div>
     <SiteFooter />
 

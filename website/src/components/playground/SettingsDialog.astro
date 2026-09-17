@@ -1,5 +1,9 @@
 ---
-import { DEFAULT_QDRANT_URL, LIVE_EMBED_URL } from "../../lib/playground/types";
+import {
+	BROWSER_MODELS,
+	DEFAULT_QDRANT_URL,
+	LIVE_EMBED_URL,
+} from "../../lib/playground/core/types";
 ---
 
 <dialog class="app-dialog app-dialog--wide" id="settings-dialog" aria-labelledby="settings-title" data-app-dialog>
@@ -80,13 +84,53 @@ import { DEFAULT_QDRANT_URL, LIVE_EMBED_URL } from "../../lib/playground/types";
         <div class="mt-4 grid gap-3">
           <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
             <span>Embedding Provider</span>
-            <select class="app-select font-mono text-xs" name="embedProvider">
-              <option value="browser">In-browser MiniLM (384d, zero configuration)</option>
+            <select class="app-select font-mono text-xs" name="embedProvider" data-embed-provider>
+              <option value="browser">In-browser Transformers.js (zero configuration)</option>
               <option value="http">OpenAI-compatible HTTP (Ollama / LocalAI / OpenAI)</option>
               <option value="none">None: Raw vectors only (no text embedding)</option>
             </select>
           </label>
 
+          <!-- Browser (Transformers.js) -->
+          <fieldset class="grid gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3.5" data-browser-embed-fields>
+            <legend class="px-1 font-mono text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--sl-color-accent-high)]">
+              In-browser model
+            </legend>
+
+            <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+              <span class="flex items-center justify-between gap-3">
+                <span>Model ID</span>
+                <span class="font-mono text-[0.65rem] text-[var(--sl-color-gray-4)]">Hugging Face repo, e.g. Xenova/bge-small-en-v1.5</span>
+              </span>
+              <input class="app-input font-mono text-xs" name="embedBrowserModel" type="text" list="browser-model-options" autocomplete="off" spellcheck="false" data-browser-model-input />
+            </label>
+            <datalist id="browser-model-options">
+              {BROWSER_MODELS.map((model) => (
+                <option value={model.id}>{model.label} · {model.dims}d · {model.note}</option>
+              ))}
+            </datalist>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+                <span>Inference backend</span>
+                <select class="app-select font-mono text-xs" name="embedBrowserDevice">
+                  <option value="auto">Auto: WebGPU, else WASM</option>
+                  <option value="webgpu">WebGPU only</option>
+                  <option value="wasm">WASM only (CPU)</option>
+                </select>
+              </label>
+              <div class="grid content-start gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+                <span>Resolved dimensions</span>
+                <span class="flex min-h-10 items-center rounded-md border border-dashed border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.72rem] text-[var(--sl-color-gray-3)]" data-browser-model-dims>Reported after the first embedding</span>
+              </div>
+            </div>
+
+            <p class="m-0 text-[0.6875rem] leading-5 text-[var(--sl-color-gray-3)]">
+              The weights download from the Hugging Face CDN on first use (tens of MB) and stay cached in this browser. The collection's vector size must match the model.
+            </p>
+          </fieldset>
+
+          <!-- HTTP (OpenAI-compatible) -->
           <fieldset class="grid gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3.5" data-http-embed-fields>
             <legend class="px-1 font-mono text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--sl-color-accent-high)]">
               HTTP Embedder Config
