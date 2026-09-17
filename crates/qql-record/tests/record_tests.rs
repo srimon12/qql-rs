@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::record::{RecordOptions, serve};
+use qql_record::{RecordOptions, serve};
 
 /// One request observed by the mock upstream.
 #[derive(Debug, Clone)]
@@ -246,7 +246,8 @@ fn script_statements(capture: &str) -> Vec<String> {
         .filter(|line| !line.starts_with("-- ERROR "))
         .collect::<Vec<_>>()
         .join("\n");
-    crate::script::split_statements(&script).expect("qql-out parses as a script")
+    let stmts = qql_core::parser::Parser::parse_all(&script).expect("qql-out parses as a script");
+    stmts.iter().map(qql_core::fmt::format_stmt).collect()
 }
 
 #[tokio::test]

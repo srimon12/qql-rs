@@ -9,7 +9,7 @@ pub fn handle_version() -> Result<(), Box<dyn std::error::Error>> {
         ("grpc", cfg!(feature = "grpc")),
         ("rest", cfg!(feature = "rest")),
         ("edge", cfg!(feature = "edge")),
-        ("record", cfg!(feature = "record")),
+        ("fastembed", cfg!(feature = "fastembed")),
     ]
     .into_iter()
     .filter(|(_, on)| *on)

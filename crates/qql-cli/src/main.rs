@@ -14,10 +14,6 @@ mod dump;
 mod fmt_tests;
 mod migrate;
 mod output;
-#[cfg(feature = "record")]
-mod record;
-#[cfg(all(test, feature = "record"))]
-mod record_tests;
 mod repl;
 mod script;
 mod table;
@@ -117,7 +113,14 @@ enum Command {
     },
     /// Start interactive REPL connected to Qdrant
     #[command(alias = "connect")]
-    Repl,
+    Repl {
+        /// Parameter in key=value format (can be specified multiple times)
+        #[arg(long = "param", short = 'p')]
+        params: Vec<String>,
+        /// Path to JSON file containing parameter map or positional array
+        #[arg(long = "params-file")]
+        params_file: Option<PathBuf>,
+    },
     /// Convert REST JSON, HTTP snippets, or curl commands to QQL (offline — no connection)
     Convert {
         /// Path to input file (or stdin if omitted): wrapped JSON, bare body,
@@ -176,8 +179,7 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
     },
-    /// Record Qdrant REST traffic while proxying it unchanged (opt-in build; install with `cargo install qql-cli --locked --features record`)
-    #[cfg(feature = "record")]
+    /// Record Qdrant REST traffic (delegates to standalone `qql-record` binary)
     Record {
         /// Address to listen on (the app points here instead of Qdrant)
         #[arg(long, default_value = "127.0.0.1:6334")]
@@ -188,8 +190,7 @@ enum Command {
         /// JSONL capture file (created/appended, fsynced per line)
         #[arg(long, default_value = "capture.jsonl")]
         out: PathBuf,
-        /// Optional QQL capture file (converted at record time; failures
-        /// become `-- ERROR <file:line> <error>` comments)
+        /// Optional QQL capture file (converted at record time)
         #[arg(long)]
         qql_out: Option<PathBuf>,
     },
@@ -655,7 +656,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    match cli.command.unwrap_or(Command::Repl) {
+    match cli.command.unwrap_or_else(|| Command::Repl {
+        params: Vec::new(),
+        params_file: None,
+    }) {
         Command::Setup {
             embed_url,
             embed_model,
@@ -722,7 +726,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let exec_params = collect_exec_params(&params, params_file.as_ref())?;
             commands::handle_explain(&query, exec_params.as_ref(), json, quiet)
         }
-        Command::Repl => commands::handle_connect(&url, use_edge).await,
+        Command::Repl {
+            params,
+            params_file,
+        } => {
+            let repl_params = collect_exec_params(&params, params_file.as_ref())?;
+            commands::handle_connect(&url, use_edge, repl_params.as_ref()).await
+        }
         Command::Convert { file, collection } => {
             commands::handle_convert(file.as_deref(), collection.as_deref())
         }
@@ -929,20 +939,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await
         }
-        #[cfg(feature = "record")]
         Command::Record {
             listen,
             target,
             out,
             qql_out,
-        } => record::run(record::RecordOptions {
-            listen,
-            target,
-            out,
-            qql_out,
-        })
-        .await
-        .map_err(|e| e as Box<dyn std::error::Error>),
+        } => {
+            let mut cmd = std::process::Command::new("qql-record");
+            cmd.arg("--listen")
+                .arg(listen.to_string())
+                .arg("--target")
+                .arg(target)
+                .arg("--out")
+                .arg(out);
+            if let Some(qql_out) = qql_out {
+                cmd.arg("--qql-out").arg(qql_out);
+            }
+            match cmd.status() {
+                Ok(status) => {
+                    if !status.success() {
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Ok(())
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("'qql record' is now a standalone binary: 'qql-record'.");
+                    eprintln!("To install it, run: cargo install --locked qql-record");
+                    eprintln!("Or build from source: cargo build -p qql-record");
+                    Err("qql-record binary not found on PATH".into())
+                }
+                Err(e) => Err(format!("failed to execute qql-record: {e}").into()),
+            }
+        }
         Command::Config { command } => match *command {
             ConfigCommand::Show { json } => commands::handle_config_show(json),
             ConfigCommand::Get { key } => commands::handle_config_get(&key),

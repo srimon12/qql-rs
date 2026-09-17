@@ -4491,7 +4491,6 @@ dependencies = [
 name = "qql-cli"
 version = "0.4.0"
 dependencies = [
- "axum",
  "clap",
  "mimalloc",
  "qql",
@@ -4499,7 +4498,6 @@ dependencies = [
  "qql-core",
  "qql-edge",
  "qql-plan",
- "reqwest 0.12.28",
  "rustyline",
  "serde",
  "serde_json",
@@ -4577,6 +4575,20 @@ dependencies = [
  "qql-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "qql-record"
+version = "0.4.0"
+dependencies = [
+ "axum",
+ "clap",
+ "qql-convert",
+ "qql-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

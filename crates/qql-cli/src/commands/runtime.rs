@@ -102,7 +102,11 @@ pub(crate) fn explain_query_bound(
 }
 
 /// Open the interactive REPL against `url` (or the local edge backend).
-pub async fn handle_connect(url: &str, use_edge: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn handle_connect(
+    url: &str,
+    use_edge: bool,
+    initial_params: Option<&serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
     let initial = executor
         .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
@@ -111,7 +115,7 @@ pub async fn handle_connect(url: &str, use_edge: bool) -> Result<(), Box<dyn std
         executor.close().await?;
         return Err(error.into());
     }
-    crate::repl::run_repl(url, use_edge, executor).await
+    crate::repl::run_repl(url, use_edge, executor, initial_params).await
 }
 
 pub fn explain_query_str(query: &str) -> Result<String, String> {
@@ -184,6 +188,33 @@ pub(crate) fn executor_for(
             );
         }
     };
+
+    let env_embed_type = std::env::var("EMBED_TYPE").ok();
+    let is_fastembed = env_embed_type.as_deref() == Some("fastembed")
+        || (env_embed_type.is_none() && std::env::var("QQL_FASTEMBED").is_ok());
+
+    #[cfg(feature = "fastembed")]
+    if is_fastembed {
+        let model = std::env::var("EMBED_MODEL")
+            .ok()
+            .or(config.embedding_model.clone());
+        let fast_emb = qql_edge::FastEmbedder::try_with_options(qql_edge::FastEmbedderOptions {
+            model,
+            ..Default::default()
+        })?;
+        return Ok(qql::executor::Executor::with_embedder(
+            client,
+            Some(config),
+            Some(std::sync::Arc::new(fast_emb)),
+        ));
+    }
+    #[cfg(not(feature = "fastembed"))]
+    if is_fastembed {
+        return Err(
+            "fastembed support is not compiled into this binary; install with: cargo install qql-cli --locked --features fastembed"
+                .into(),
+        );
+    }
 
     let env_url = std::env::var("EMBED_URL").ok();
     let embedder = if let Some(endpoint) = env_url.as_ref().or(config.embedding_endpoint.as_ref()) {

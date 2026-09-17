@@ -23,12 +23,12 @@ address instead of Qdrant and change nothing else; every request is forwarded
 to the real server unchanged, and each bodied `/collections/` request is
 appended to a JSONL capture.
 
-`qql record` is opt-in because it pulls in the proxy runtime:
+`qql-record` is a standalone binary (or invoked via `qql record`):
 
 ```bash
-cargo install qql-cli --locked --features record
+cargo install qql-record --locked
 # ... or from a local checkout:
-# cargo build --release -p qql-cli --features record
+# cargo build --release -p qql-record
 ```
 
 {% terminal title="Record once, convert after" %}

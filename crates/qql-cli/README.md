@@ -18,16 +18,22 @@ cargo install qql-cli --locked --no-default-features --features rest
 # Local edge backend, no server (`--edge`, `qql edge`, `qql config edge`)
 cargo install qql-cli --locked --features edge
 
-# REST traffic recorder (`qql record`)
-cargo install qql-cli --locked --features record
+# Local zero-server ONNX embeddings (for remote Qdrant and migrations)
+cargo install qql-cli --locked --features fastembed
 
-# Everything at once
+# In-process embedded Qdrant edge database
+cargo install qql-cli --locked --features edge
+
+# Everything at once (fastembed + edge)
 cargo install qql-cli --locked --features full
+
+# Standalone REST traffic recorder proxy
+cargo install qql-record --locked
 
 # From a local checkout instead
 cargo build --release -p qql-cli
-cargo build --release -p qql-cli --no-default-features --features rest
-cargo build --release -p qql-cli --features edge
+cargo build --release -p qql-cli --features fastembed
+cargo build --release -p qql-record
 ```
 
 Check what's installed: `qql version` reports the enabled `features` array.
@@ -48,7 +54,7 @@ Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 | `qql convert [file.json]` | REST JSON → QQL |
 | `qql dump <coll> out.qql` | Export collection as QQL (custom-sharded collections emit `CREATE SHARD KEY` + `SHARD`-routed batches; replay with `qql run`) |
 | `qql migrate <coll> --to <name>` | Version-agnostic collection migration (schema + points) |
-| `qql record` | Transparent REST recorder → JSONL + QQL (needs `--features record`) |
+| `qql record` | Transparent REST recorder → JSONL + QQL (delegates to `qql-record`) |
 | `qql --edge …` | Use configured local edge backend |
 | `qql edge optimize <coll>` | Run qdrant-edge optimizers (merge segments, build HNSW/sparse indexes) |
 | `qql edge bootstrap <coll> --from <url>` | Seed a local edge collection from a remote shard snapshot |
@@ -163,7 +169,7 @@ SHARD 'acme'
 LIMIT 10;
 ```
 
-## Recorder (`qql record`, opt-in)
+## Recorder (`qql-record`, standalone tool)
 
 Zero-code-change capture for migration: Qdrant keeps its address, point the
 app at the recorder instead, change nothing else. Every request is forwarded
@@ -172,18 +178,19 @@ preserved); collection and quota routes are appended as wrapped
 `{"method","path","query"?,"body"?}` JSONL for later `qql convert` use.
 Bodyless `SHOW` / `DROP` routes are recorded with no `body`.
 
+`qql-record` is available as a standalone tool (`cargo install qql-record`), and
+`qql record` will automatically delegate to it if installed on your `$PATH`.
+
 ```bash
-cargo install qql-cli --locked --features record
-# ... or from a local checkout:
-# cargo build -p qql-cli --features record
+cargo install qql-record --locked
 # Qdrant stays on :6333, the app now points at the recorder on :6334:
-qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
+qql-record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
   --out capture.jsonl --qql-out capture.qql
 # ... run the app ...
 qql convert --collection docs capture.jsonl   # replay/migrate later
 ```
 
-Bare `qql record` uses those defaults. Notes: query strings are forwarded
+Bare `qql-record` uses those defaults. Notes: query strings are forwarded
 upstream and recorded as a `"query"` object (`wait`, `timeout`,
 `consistency`) so `qql convert` recovers `WAIT` and `PARAMS`; a trailing `/`
 is stripped from the recorded path only; non-JSON bodies are forwarded, not
@@ -221,9 +228,9 @@ LIMIT 10;
 |---------|---------|------|
 | `rest` | yes | REST |
 | `grpc` | yes | gRPC |
-| `edge` | no | In-process edge + FastEmbed |
-| `record` | no | Transparent REST recorder (`qql record`; axum + reqwest, versions already pinned) |
-| `full` | no | Convenience alias for `edge,record` |
+| `fastembed` | no | Local zero-server ONNX embeddings (for remote Qdrant and migrations) |
+| `edge` | no | In-process embedded Qdrant edge database |
+| `full` | no | Convenience alias for `fastembed,edge` |
 
 ## Docs
 

@@ -17,6 +17,7 @@ members = [
     "crates/nqql",
     "crates/nqql-common",
     "crates/nqql-edge",
+    "crates/qql-record",
 ]
 
 [workspace.package]

@@ -61,7 +61,7 @@ pub async fn run(opts: RecordOptions) -> Result<(), Box<dyn std::error::Error + 
 ///
 /// Split from [`run`] so tests can bind ephemeral ports and shut down
 /// programmatically; the Ctrl-C wiring lives in [`run`].
-pub(crate) async fn serve(
+pub async fn serve(
     listener: tokio::net::TcpListener,
     opts: RecordOptions,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
