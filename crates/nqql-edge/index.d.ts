@@ -2,8 +2,12 @@ export class Stmt {
   constructor(input: string);
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
+  /** Exact-text AST string for transport/forwarding (no V8 parsing). */
   toJson(): string;
-  toJSON(): string;
+  /** `JSON.stringify` hook: BigInt-safe plain object, same as `toObject()`.
+   * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+   * use `toJson()` for exact text. */
+  toJSON(): unknown;
   /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt.
    * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
@@ -19,12 +23,13 @@ export class Stmt {
 }
 
 export class ScoredPoint {
-  id: number | string;
+  id: number | string | bigint;
   score: number;
   payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
   vector: unknown | null;
+  shard_key: string | number | bigint | null;
   [key: string]: unknown;
   get(key: string, defaultValue?: unknown): unknown;
   withoutPayload(): ScoredPoint;
@@ -95,13 +100,13 @@ export class ExecutionReport {
   [key: string]: unknown;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
-  ids(stmt?: number): Array<string | number>;
+  ids(stmt?: number): Array<string | number | bigint>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
   groups(stmt?: number): Array<{ id: unknown; hits: ScoredPoint[] }>;
   collections(stmt?: number): string[];
   collection(stmt?: number): Record<string, unknown> | null;
-  shardKeys(stmt?: number): Array<string | number>;
+  shardKeys(stmt?: number): Array<string | number | bigint>;
   quotas(stmt?: number): Record<string, unknown> | null;
 }
 
@@ -262,6 +267,7 @@ export class Client {
   executeHits(
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
+    stmt?: number,
   ): Promise<ScoredPoint[]>;
   /**
    * Analyze a single query string or Stmt: static plan plus measured
@@ -347,6 +353,7 @@ export function bind(
 export function executeHits(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & StandaloneOptions,
+  stmt?: number,
 ): Promise<ScoredPoint[]>;
 
 /**

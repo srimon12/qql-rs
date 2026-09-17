@@ -199,8 +199,10 @@ console.log(stmt.shardKey);  // -> "acme"
 // Inject filter
 stmt.injectFilter("tenant_id", "=", "acme");
 
-// Serialise
-console.log(stmt.toJSON());
+// Serialise: exact-text string for transport, object for inspection.
+// (`toJSON` is the JSON.stringify hook — same BigInt-safe object as
+// `toObject()`; stringify throws on snowflake BigInts by design.)
+console.log(stmt.toJson());
 console.log(stmt.toObject());
 ```
 

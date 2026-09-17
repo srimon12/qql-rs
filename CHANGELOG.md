@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 💻 SDK Consistency & Breaking DX Cleanup
+- **`toJSON` Is the `JSON.stringify` Hook (object, not string)**: `Stmt.toJSON()` now returns the BigInt-safe plain object (same as `toObject()`) on Node (`nqql` / `nqql-edge`) and WASM. `toJson()` stays the exact-text string for transport/forwarding. `JSON.stringify` throws on snowflake `BigInt` IDs by design instead of silently double-encoding or rounding them — use `toJson()` for exact text.
+- **Unified Batch Error Contract**: `Executor::execute_batch_nodes` and its internal batch helpers (`execute_batch_nodes_inner`, `dispatch_or_collect`, `flush_planned_group`, `flush_update_run`, `execute_batch_op`) take `OnError` instead of a `bool` flag, matching `execute` / `execute_batch`. Callers in `pyqql-common`, `nqql-common`, and the executor tests updated.
+- **WASM Alias Removal**: Deleted exact-duplicate exports — module-level `compile` (use `compileQuery`), `Client.compileQuery` (use `Client.compile`), `setRemoteEmbedder` (use `setHttpEmbedder`), and the snake-case `inject_filter` free function (use `injectFilter`). `compileBytes` / `compileRouteBytes` now accept optional `params` like their siblings.
+- **Batch Hits Shortcuts**: `execute_hits` / `executeHits` accept a statement index (`stmt`, default `0`) on Python (`Client` + module, sync + async) and Node (`Client` + module, server + edge) so batch results don't require manual `report.hits(N)`.
+- **Portable Embedder Configs**: Python dict configs accept camelCase or snake_case (`apiKey`/`api_key`, `multiEndpoint`/`multi_endpoint`, `bm25K1`/`bm25_k1`, …) with camelCase winning, matching Node's `HttpEmbedder`.
+- **Mapped Client Construction Errors**: `new Client(badOptions)` in `nqql` surfaces structured `.code` / `.kind` errors instead of raw native messages.
+- **WASM Lifecycle Parity**: `Client.close()` (no-op) and `isClosed` (always `false`) added so generic cleanup code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
+- **Wider gRPC Constructor**: `Executor::grpc` takes `impl Into<String>` like `Executor::rest`.
+- **Exact Integer Types**: Node `ScoredPoint.id`, `ids()`, and `shardKeys()` include `bigint`, and `ScoredPoint` exposes `shard_key`, across `nqql` and `nqql-edge`.
+- **Stub Fixes**: Removed duplicated `bm25_stopwords_languages` kwargs and restored signature order in the `pyqql` / `pyqql-edge` `.pyi` stubs.
+
 ### 🌐 Website, Playground & DX
 - **Statement-Aware Playground Execution**: Multi-statement scripts are first-class — a statement rail with per-statement status, an inspector navigator, and a split Run control. `⌘↵` runs the selection, the statement under the caret, or the exact line; `⇧⌘↵` runs the whole script. Results, errors, and inline diagnostics are attributed to the statement that produced them, with a persisted stop-on-error policy ([#166](https://github.com/srimon12/qql-rs/pull/166)).
 - **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).

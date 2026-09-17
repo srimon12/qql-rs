@@ -267,8 +267,10 @@ console.log(stmt.shardKey);  // -> "acme"
 // Numeric partitions stay numeric (read back as BigInt):
 // stmt.shardKey = 101;
 
-// Serialise to JSON
-const json = stmt.toJSON();
+// Serialise: exact-text string for transport, object for inspection.
+// (`toJSON` is the JSON.stringify hook — same BigInt-safe object as
+// `toObject()`; stringify throws on snowflake BigInts by design.)
+const json = stmt.toJson();
 const obj = stmt.toObject();
 ```
 
@@ -293,11 +295,11 @@ console.log(stmt.explain());
 ```
 
 Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
-`injectIdfCorpus` and no host JSON corpus. `compile` / `analyze` emit Qdrant’s
+`injectIdfCorpus` and no host JSON corpus. `compileQuery` / `analyze` emit Qdrant’s
 `params.idf` object from the filter AST.
 
 ```js
-import init, { bind, compile } from 'qql-wasm';
+import init, { bind, compileQuery } from 'qql-wasm';
 await init();
 
 const bound = bind(`
@@ -308,7 +310,7 @@ const bound = bind(`
   LIMIT 10
 `, { q: "supply chain", tenant: "acme" });
 
-const route = compile(bound);
+const route = compileQuery(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```
 
@@ -328,7 +330,6 @@ if (!isValid("QUERY 'machine learning' FROM papers LIMIT 20")) {
 }
 
 // Inject tenant filter into a raw query string
-// (`inject_filter` snake_case alias also exported for back-compat)
 const safe = injectFilter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
 ```
 
@@ -341,10 +342,10 @@ Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or
 Lower QQL to a typed REST route object without a Qdrant connection.
 
 ```js
-import init, { compile, parse } from 'qql-wasm';
+import init, { compileQuery, parse } from 'qql-wasm';
 await init();
 
-const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
+const route = compileQuery("QUERY 'search' FROM docs USING dense LIMIT 10");
 // -> { stmt_type, method, path, payload }
 
 for (const stmt of parse(`
@@ -416,7 +417,7 @@ console.log(planTree);
 
 ```js
 import init, { parse, parseJson, isValid, injectFilter,
-              tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
+              tokenize, compileQuery, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
@@ -425,7 +426,7 @@ parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statemen
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 injectFilter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
-compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
+compileQuery("QUERY 'x' FROM docs LIMIT 5");             // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
 bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter

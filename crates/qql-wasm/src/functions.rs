@@ -51,7 +51,9 @@ pub fn is_valid(input: &str) -> bool {
     qql_plan::parse_and_plan(input).is_ok()
 }
 
-#[wasm_bindgen]
+/// Inject a WHERE filter into a query string (`injectFilter` is the only
+/// export — JS convention is camelCase).
+#[wasm_bindgen(js_name = injectFilter)]
 pub fn inject_filter(
     query: &str,
     field: &str,
@@ -63,18 +65,6 @@ pub fn inject_filter(
     let mut stmt = Parser::parse(query).map_err(qql_err_to_js)?;
     ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_err_to_js)?;
     to_js_value(&stmt)
-}
-
-/// camelCase alias for [`inject_filter`] (JS convention, parity with
-/// `nqql`'s `injectFilter`). The snake_case export keeps working.
-#[wasm_bindgen(js_name = injectFilter)]
-pub fn inject_filter_camel(
-    query: &str,
-    field: &str,
-    op: &str,
-    value: JsValue,
-) -> Result<JsValue, JsValue> {
-    inject_filter(query, field, op, value)
 }
 
 pub(crate) fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
@@ -334,22 +324,18 @@ fn build_compile_output(
 /// Compile one QQL statement into a JavaScript route object. Optional
 /// `params` (object for `:name`, array for `?`) bind before parsing —
 /// parity with `Client.compile(query, params)` on the Python and Node SDKs.
-#[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
-pub fn compile(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+/// (`compileQuery` is the only module-level name — JS convention.)
+#[wasm_bindgen(js_name = compileQuery, unchecked_return_type = "CompiledRoute")]
+pub fn compile_query(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
     let output = build_compile_output(query, params)?;
     to_js_value(&output)
 }
 
-/// Compile one QQL statement into a JavaScript route object. Alias for `compile`.
-#[wasm_bindgen(js_name = compileQuery, unchecked_return_type = "CompiledRoute")]
-pub fn compile_query(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
-    compile(query, params)
-}
-
 /// Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
+/// Optionally accepts `params` to bind before compiling.
 #[wasm_bindgen(js_name = compileBytes)]
-pub fn compile_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
-    let output = build_compile_output(query, None)?;
+pub fn compile_bytes(query: &str, params: Option<JsValue>) -> Result<js_sys::Uint8Array, JsValue> {
+    let output = build_compile_output(query, params)?;
     SCRATCH_BUF.with(|cell| {
         let mut buf = cell.borrow_mut();
         buf.clear();

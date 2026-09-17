@@ -75,10 +75,13 @@ test('no extra exports', () => {
 const stmt = nqql.parse('SHOW COLLECTIONS')[0];
 test('Stmt instance methods: toObject', () => assert.strictEqual(typeof stmt.toObject, 'function'));
 test('Stmt instance methods: injectFilter', () => assert.strictEqual(typeof stmt.injectFilter, 'function'));
-test('Stmt.toJson and Stmt.toJSON both exist', () => {
+test('Stmt.toJson (string) and Stmt.toJSON (object hook) differ by design', () => {
   assert.strictEqual(typeof stmt.toJson, 'function');
   assert.strictEqual(typeof stmt.toJSON, 'function');
-  assert.strictEqual(stmt.toJson(), stmt.toJSON());
+  // toJson() is exact text for transport; toJSON() is the JSON.stringify
+  // hook and must return the BigInt-safe plain object, same as toObject().
+  assert.strictEqual(typeof stmt.toJson(), 'string');
+  assert.deepStrictEqual(stmt.toJSON(), stmt.toObject());
 });
 test('Stmt.shardKey property (get)', () => assert.strictEqual(stmt.shardKey, null));
 test('Stmt.shardKey setter supports DELETE PAYLOAD', () => {

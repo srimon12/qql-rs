@@ -73,10 +73,20 @@ impl Stmt {
         self.bound
     }
 
-    /// Serialise the AST to a JSON string.
-    #[wasm_bindgen(js_name = toJSON)]
+    /// Serialise the AST to an exact-text JSON string for
+    /// transport/forwarding without JS parsing.
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).
+    ///
+    /// NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+    /// use [`to_json`](Self::to_json) for exact text.
+    #[wasm_bindgen(js_name = toJSON)]
+    pub fn to_json_object(&self) -> Result<JsValue, JsValue> {
+        to_js_value(&self.inner)
     }
 
     /// Serialise the AST to a JS object.
@@ -158,9 +168,33 @@ impl Stmt {
     }
 
     /// Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+    /// Optionally accepts `params` to bind before compiling.
     #[wasm_bindgen(js_name = compileRouteBytes)]
-    pub fn compile_route_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
-        let compiled = routing::compile_statement(&self.inner).map_err(qql_err_to_js)?;
+    pub fn compile_route_bytes(
+        &self,
+        params: Option<JsValue>,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        let binds_now = params
+            .as_ref()
+            .map(|p| !p.is_undefined() && !p.is_null())
+            .unwrap_or(false);
+        if binds_now && self.bound {
+            return Err(JsValue::from_str(
+                &serde_json::to_string(&QqlError::validation(
+                    "QQL-BIND-ALREADY-BOUND",
+                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+                    None,
+                ))
+                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
+            ));
+        }
+        let mut stmt = self.inner.clone();
+        if binds_now {
+            let p = params.unwrap();
+            let parsed = super::params::jsvalue_to_value(&p).map_err(qql_err_to_js)?;
+            super::params::bind_stmt_values(&mut stmt, &parsed)?;
+        }
+        let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
         let output = compiled_route_json(&compiled);
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();

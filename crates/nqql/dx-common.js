@@ -11,16 +11,25 @@
  */
 
 /**
- * Install the `toJSON` alias and error-mapping wrappers on the native Stmt
+ * Install the `toJSON` hook and error-mapping wrappers on the native Stmt
  * prototype so method errors surface with `.code` / `.kind` / `.span`.
+ *
+ * `toJSON` is the `JSON.stringify` hook: it MUST return a plain object, not
+ * a string. It aliases the BigInt-safe `toObject()` (snowflake u64 point IDs
+ * as `BigInt`, safe ints as `Number`). `toJson()` stays the exact-text
+ * string form for transport/forwarding without V8 parsing.
+ *
+ * NOTE: `JSON.stringify` throws on `BigInt` — that is correct, it signals
+ * precision loss instead of silently rounding snowflake IDs or
+ * double-encoding (`JSON.parse(JSON.stringify(stmt))` would round every u64
+ * through f64). Use `stmt.toJson()` for exact text; never `JSON.stringify`
+ * on statements carrying snowflake IDs.
  */
 function installStmtToJSON(Stmt) {
   if (!Stmt || !Stmt.prototype) return;
-  if (!Stmt.prototype.toJSON) {
-    Stmt.prototype.toJSON = function () {
-      return this.toJson();
-    };
-  }
+  Stmt.prototype.toJSON = function () {
+    return this.toObject();
+  };
   const origBind = Stmt.prototype.bind;
   if (origBind && !origBind._wrapped) {
     Stmt.prototype.bind = function (params) {

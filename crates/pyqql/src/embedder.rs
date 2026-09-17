@@ -271,10 +271,12 @@ fn opt_string_list_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<V
 pub fn extract_embedder_config(
     embedder: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<ParsedEmbedderConfig> {
-    // NOTE (cross-SDK convention): the dict path accepts snake_case keys
-    // only (`api_key`, `multi_endpoint`, …). `nqql`'s `HttpEmbedder` accepts
-    // both camelCase and snake_case aliases; keep that asymmetry in mind
-    // when porting embedder configs between the Python and Node SDKs.
+    // Dict keys accept camelCase or snake_case (`apiKey`/`api_key`,
+    // `multiEndpoint`/`multi_endpoint`, `bm25K1`/`bm25_k1`, …) with camelCase
+    // winning on conflicts — the same convention as `nqql`'s `HttpEmbedder`,
+    // so embedder configs port between the Python and Node SDKs unchanged.
+    // `None` values fall through to the other spelling; single-word keys
+    // (`endpoint`, `model`, `dimension`) are identical in both cases.
     let mut out = ParsedEmbedderConfig::default();
 
     if let Some(emb) = embedder {
@@ -307,6 +309,40 @@ pub fn extract_embedder_config(
             out.bm25_min_token_len = py_emb.bm25_min_token_len;
             out.bm25_max_token_len = py_emb.bm25_max_token_len;
         } else if let Ok(dict) = emb.cast::<PyDict>() {
+            // Normalize camelCase aliases onto their snake_case keys before
+            // reading (camelCase wins; `None` falls through to snake_case).
+            for (camel, snake) in [
+                ("apiKey", "api_key"),
+                ("multiEndpoint", "multi_endpoint"),
+                ("multiApiKey", "multi_api_key"),
+                ("multiModel", "multi_model"),
+                ("multiDimension", "multi_dimension"),
+                ("imageEndpoint", "image_endpoint"),
+                ("imageApiKey", "image_api_key"),
+                ("imageModel", "image_model"),
+                ("imageDimension", "image_dimension"),
+                ("rerankEndpoint", "rerank_endpoint"),
+                ("rerankApiKey", "rerank_api_key"),
+                ("rerankModel", "rerank_model"),
+                ("bm25K1", "bm25_k1"),
+                ("bm25B", "bm25_b"),
+                ("bm25AvgLen", "bm25_avg_len"),
+                ("bm25Language", "bm25_language"),
+                ("bm25Tokenizer", "bm25_tokenizer"),
+                ("bm25Lowercase", "bm25_lowercase"),
+                ("bm25AsciiFolding", "bm25_ascii_folding"),
+                ("bm25Stopwords", "bm25_stopwords"),
+                ("bm25StopwordsLanguages", "bm25_stopwords_languages"),
+                ("bm25Stemmer", "bm25_stemmer"),
+                ("bm25MinTokenLen", "bm25_min_token_len"),
+                ("bm25MaxTokenLen", "bm25_max_token_len"),
+            ] {
+                if let Some(value) = dict.get_item(camel)?
+                    && !value.is_none()
+                {
+                    dict.set_item(snake, value)?;
+                }
+            }
             out.endpoint = Some(
                 dict.get_item("endpoint")?
                     .ok_or_else(|| {

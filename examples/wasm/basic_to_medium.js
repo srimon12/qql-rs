@@ -8,7 +8,7 @@
 const {
   parse,
   isValid,
-  compile,
+  compileQuery,
   explain,
   analyze,
   Stmt,
@@ -18,7 +18,7 @@ const query = "QUERY TEXT 'browser search' FROM docs USING dense LIMIT 5";
 console.log('1. isValid:', isValid(query));
 console.log('2. parse:', JSON.stringify(parse(query)));
 console.log('3. explain:\n' + explain(query));
-console.log('4. compile:', JSON.stringify(compile(query)));
+console.log('4. compileQuery:', JSON.stringify(compileQuery(query)));
 
 // SHARD in QQL
 const sharded = new Stmt(

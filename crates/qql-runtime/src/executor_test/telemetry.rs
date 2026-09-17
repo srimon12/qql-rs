@@ -79,7 +79,10 @@ async fn telemetry_none_for_batch_items() {
          QUERY NEAREST VECTOR [0.4, 0.5, 0.6] FROM docs USING dense LIMIT 5;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, true).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Stop)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r.telemetry.is_none()));
 }

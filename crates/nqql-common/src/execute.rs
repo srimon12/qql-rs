@@ -226,8 +226,6 @@ pub async fn execute_dispatch_typed(
     on_error: qql::executor::OnError,
     params: Option<&ast::Value>,
 ) -> Result<qql::executor::ExecutionReport, QqlError> {
-    let stop = matches!(on_error, qql::executor::OnError::Stop);
-
     match &query {
         serde_json::Value::String(s) => {
             // A scoped params list for a string input: parse once to count
@@ -241,7 +239,7 @@ pub async fn execute_dispatch_typed(
                     for (i, stmt) in stmts.iter_mut().enumerate() {
                         bind_stmt_with_values(stmt, &list[i])?;
                     }
-                    let results = executor.execute_batch_nodes(stmts, stop).await?;
+                    let results = executor.execute_batch_nodes(stmts, on_error).await?;
                     return Ok(qql::executor::ExecutionReport::from_results(results));
                 }
                 // Container lists always scope or err, so the Shared arm is
@@ -301,7 +299,7 @@ pub async fn execute_dispatch_typed(
                     }
                     stmts.push(s);
                 }
-                let results = executor.execute_batch_nodes(stmts, stop).await?;
+                let results = executor.execute_batch_nodes(stmts, on_error).await?;
                 Ok(qql::executor::ExecutionReport::from_results(results))
             }
         }
@@ -312,7 +310,7 @@ pub async fn execute_dispatch_typed(
             if let Some(p) = params {
                 bind_stmt_with_values(&mut s, p)?;
             }
-            let results = executor.execute_batch_nodes(vec![s], stop).await?;
+            let results = executor.execute_batch_nodes(vec![s], on_error).await?;
             Ok(qql::executor::ExecutionReport::from_results(results))
         }
     }
