@@ -70,7 +70,7 @@ qdrant-edge 0.8's own Python binding does not expose this knob.
 | `inject_filter` | Isolation |
 | `Stmt.shard_key` | Property exists for AST parity; **edge rejects SHARD at execute** |
 | `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
-| `compile_query` / `explain` / `execute` | Plan / run (`params=` same as `bind`) |
+| `compile` / `explain` / `execute` | Plan / run (`params=` same as `bind`) |
 
 ## Edge gotchas
 

@@ -30,8 +30,8 @@ test("bind substitutes positional placeholders from an array", () => {
   );
 });
 
-test("compileQuery binds params before parsing", () => {
-  const route = wasm.compileQuery("QUERY TEXT :q FROM docs USING dense LIMIT 10", { q: "hi" });
+test("compile binds params before parsing", () => {
+  const route = wasm.compile("QUERY TEXT :q FROM docs USING dense LIMIT 10", { q: "hi" });
   assert.strictEqual(route.method, "POST");
   assert.strictEqual(route.path, "/collections/docs/points/query");
 });

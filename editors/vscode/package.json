@@ -391,7 +391,7 @@
     "check": "npm run typecheck && npm run lint",
     "fix": "npm run lint:fix && npm run typecheck",
     "test": "node --test \"test/*.test.js\"",
-    "build:wasm": "wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ./wasm",
+    "build:wasm": "wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm",
     "package": "npx @vscode/vsce package",
     "publish": "npx @vscode/vsce publish"
   },

@@ -63,7 +63,7 @@ client.free();
 | `parse` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `injectFilter` | Isolation |
 | `analyze` | tokens + AST + route(s) + explain |
-| `compileQuery` / `explain` | Offline REST projection / plan text |
+| `compile` / `explain` | Offline REST projection / plan text |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
 
 ### `Stmt`

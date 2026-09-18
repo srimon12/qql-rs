@@ -24,8 +24,8 @@ export const client_setHttpMultiEmbedder: (a: number, b: number, c: number, d: n
 export const client_setHttpReranker: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const client_setRouteAffinity: (a: number, b: number, c: number) => void;
 export const client_upsertMany: (a: number, b: number, c: number, d: number, e: number) => number;
+export const compile: (a: number, b: number, c: number, d: number) => void;
 export const compileBytes: (a: number, b: number, c: number, d: number) => void;
-export const compileQuery: (a: number, b: number, c: number, d: number) => void;
 export const explain: (a: number, b: number, c: number) => void;
 export const explainBytes: (a: number, b: number, c: number) => void;
 export const formatQuery: (a: number, b: number, c: number) => void;

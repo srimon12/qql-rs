@@ -356,9 +356,9 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(sdk.parse(q)[0].bind({ v: f64 }).toString(), fromPlain);
   assert.strictEqual(sdk.parse(q)[0].bind({ v: f32 }).toString(), fromPlain);
 
-  // Module bind + compileQuery equivalence.
+  // Module bind + compile equivalence.
   assert.strictEqual(sdk.bind(q, { v: f64 }), sdk.bind(q, { v: vec }));
-  assert.deepStrictEqual(sdk.compileQuery(q, { v: f64 }), sdk.compileQuery(q, { v: vec }));
+  assert.deepStrictEqual(sdk.compile(q, { v: f64 }), sdk.compile(q, { v: vec }));
 
   // Positional ? with typed arrays.
   const qp = 'QUERY ? FROM docs USING dense LIMIT 1';

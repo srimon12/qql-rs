@@ -95,7 +95,7 @@ Binding failures throw errors with stable `QQL-BIND-*` codes — mixed
 placeholder styles, missing parameters, extra positional values, or wrong
 types (see the [error code reference](/docs/reference/error-codes/)).
 
-`compileQuery(query, params?)` and `client.compile(query, params?)` compile a
+`compile(query, params?)` and `client.compile(query, params?)` compile a
 template to its route in one step, and `isValid` runs the full parse + plan
 gate.
 
@@ -246,12 +246,12 @@ behavior.
 ```javascript
 const {
   Client,
-  compileQuery,
+  compile,
   explain,
   parseJson,
 } = require("@veristamp/nqql");
 
-const route = compileQuery(query);
+const route = compile(query);
 console.log(route.method, route.path, route.payload);
 console.log(explain(query)); // plan text; throws a coded Error on invalid source
   // (Python `explain` returns an `{ok, query, plan|error}` dict instead)
@@ -284,7 +284,7 @@ const report = await client.execute([
 | `Stmt.injectFilter`, `Stmt.shardKey` | Trusted filtering and optional routing |
 | `Stmt.toObject`, `toJson`, `toJSON` | AST inspection and serialization |
 | `isValid`, `tokenize`, `explain` | Lightweight parser and diagnostic tools (`isValid` runs parse + plan) |
-| `compileQuery(query, params?)` | Qdrant route inspection without network I/O (optionally binding params) |
+| `compile(query, params?)` | Qdrant route inspection without network I/O (optionally binding params) |
 | `bind(query, params?, { truncateVectors })` | Substitute `:name` / `?` placeholders into a string or `Stmt` |
 | `parseJson` | High-throughput JSON forwarding |
 | `injectFilter`, `execute` | One-shot host convenience functions |

@@ -72,9 +72,9 @@ class TestBindingContract(unittest.TestCase):
         self.assertEqual(str(explicit), str(implicit))
         params = {"v": [[0.1, 0.2], [0.3, 0.4]]}
         self.assertEqual(str(explicit.bind(params)), str(implicit.bind(params)))
-        # compile_query accepts the explicit spelling too (it failed to parse
+        # compile accepts the explicit spelling too (it failed to parse
         # before the fix).
-        route = pyqql.compile_query("QUERY VECTOR :v FROM docs USING dense", params)
+        route = pyqql.compile("QUERY VECTOR :v FROM docs USING dense", params)
         self.assertEqual(route["method"], "POST")
 
     def test_rebinding_a_bound_stmt_raises(self):

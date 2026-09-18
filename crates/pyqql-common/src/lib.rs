@@ -578,7 +578,7 @@ impl PyStmt {
     }
 }
 
-/// Shared route JSON shape for `compile_route` / `compile_query`.
+/// Shared route JSON shape for `compile_route` / `compile`.
 pub fn compiled_route_json(compiled: &qql_plan::routing::CompiledStatement) -> serde_json::Value {
     let (method, path, payload) = match &compiled.route {
         Some(route) => {
@@ -692,10 +692,10 @@ pub fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, Py
 }
 
 /// Compile a QQL query to its transport route (non-executing), optionally
-/// binding `params` first (parity with `nqql.compileQuery`).
+/// binding `params` first (parity with `Client.compile`).
 #[pyfunction]
 #[pyo3(signature = (input, params=None))]
-pub fn compile_query<'py>(
+pub fn compile<'py>(
     py: Python<'py>,
     input: &str,
     params: Option<&Bound<'py, PyAny>>,

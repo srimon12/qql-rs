@@ -300,7 +300,7 @@ impl Client {
 
     /// Parse and compile one statement without executing it. Optional
     /// `params` bind before parsing (same shape as the module-level `bind`
-    /// and `compileQuery`).
+    /// and `compile`).
     #[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
     pub fn compile(&self, query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
         super::functions::compile_query(query, params)

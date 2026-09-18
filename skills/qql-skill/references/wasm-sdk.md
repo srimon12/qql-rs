@@ -295,11 +295,11 @@ console.log(stmt.explain());
 ```
 
 Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
-`injectIdfCorpus` and no host JSON corpus. `compileQuery` / `analyze` emit Qdrant’s
+`injectIdfCorpus` and no host JSON corpus. `compile` / `analyze` emit Qdrant’s
 `params.idf` object from the filter AST.
 
 ```js
-import init, { bind, compileQuery } from 'qql-wasm';
+import init, { bind, compile } from 'qql-wasm';
 await init();
 
 const bound = bind(`
@@ -310,7 +310,7 @@ const bound = bind(`
   LIMIT 10
 `, { q: "supply chain", tenant: "acme" });
 
-const route = compileQuery(bound);
+const route = compile(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```
 
@@ -342,10 +342,10 @@ Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or
 Lower QQL to a typed REST route object without a Qdrant connection.
 
 ```js
-import init, { compileQuery, parse } from 'qql-wasm';
+import init, { compile, parse } from 'qql-wasm';
 await init();
 
-const route = compileQuery("QUERY 'search' FROM docs USING dense LIMIT 10");
+const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
 // -> { stmt_type, method, path, payload }
 
 for (const stmt of parse(`
@@ -417,7 +417,7 @@ console.log(planTree);
 
 ```js
 import init, { parse, parseJson, isValid, injectFilter,
-              tokenize, compileQuery, explain, bind, formatQuery } from 'qql-wasm';
+              tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
@@ -426,7 +426,7 @@ parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statemen
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 injectFilter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
-compileQuery("QUERY 'x' FROM docs LIMIT 5");             // Compile to a route object
+compile("QUERY 'x' FROM docs LIMIT 5");             // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
 bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter

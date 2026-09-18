@@ -27,9 +27,9 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(route["payload"]["limit"], 5)
         self.assertEqual(len(route["payload"]["query"]["nearest"]), 3)
 
-        # Module compile_query and Client.compile accept params too
-        # (parity with nqql compileQuery / Client.compile).
-        route2 = sdk.compile_query(
+        # Module compile and Client.compile accept params too
+        # (parity with nqql compile / Client.compile).
+        route2 = sdk.compile(
             "QUERY :v FROM test_coll LIMIT :lim",
             params={"v": [0.1, 0.2, 0.3], "lim": 5},
         )
@@ -248,13 +248,13 @@ class TestDxImprovements(unittest.TestCase):
                 str(sdk.parse(q)[0].bind({"v": [[0.1, 0.2], [0.3, 0.4]]})),
             )
 
-        # Module bind + compile_query equivalence, incl. flat {data, dim}.
+        # Module bind + compile equivalence, incl. flat {data, dim}.
         self.assertEqual(
             sdk.bind(q, {"v": array.array("d", vec)}), sdk.bind(q, {"v": vec})
         )
         self.assertEqual(
-            sdk.compile_query(q, {"v": array.array("d", vec)}),
-            sdk.compile_query(q, {"v": vec}),
+            sdk.compile(q, {"v": array.array("d", vec)}),
+            sdk.compile(q, {"v": vec}),
         )
         flat = sdk.bind(
             "QUERY VECTOR :m FROM test_coll USING dense",

@@ -324,8 +324,8 @@ fn build_compile_output(
 /// Compile one QQL statement into a JavaScript route object. Optional
 /// `params` (object for `:name`, array for `?`) bind before parsing —
 /// parity with `Client.compile(query, params)` on the Python and Node SDKs.
-/// (`compileQuery` is the only module-level name — JS convention.)
-#[wasm_bindgen(js_name = compileQuery, unchecked_return_type = "CompiledRoute")]
+/// (`compile` is the only module-level name — JS convention.)
+#[wasm_bindgen(js_name = compile, unchecked_return_type = "CompiledRoute")]
 pub fn compile_query(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
     let output = build_compile_output(query, params)?;
     to_js_value(&output)

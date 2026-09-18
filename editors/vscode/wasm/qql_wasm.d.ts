@@ -120,7 +120,7 @@ export class Client {
     /**
      * Parse and compile one statement without executing it. Optional
      * `params` bind before parsing (same shape as the module-level `bind`
-     * and `compileQuery`).
+     * and `compile`).
      */
     compile(query: string, params?: any | null): CompiledRoute;
     /**
@@ -307,18 +307,18 @@ export function analyze(input: string): AnalysisResult;
 export function bind(query: string, params?: Record<string, unknown> | unknown[], options?: { truncateVectors?: boolean }): string;
 
 /**
+ * Compile one QQL statement into a JavaScript route object. Optional
+ * `params` (object for `:name`, array for `?`) bind before parsing —
+ * parity with `Client.compile(query, params)` on the Python and Node SDKs.
+ * (`compile` is the only module-level name — JS convention.)
+ */
+export function compile(query: string, params?: any | null): CompiledRoute;
+
+/**
  * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
  * Optionally accepts `params` to bind before compiling.
  */
 export function compileBytes(query: string, params?: any | null): Uint8Array;
-
-/**
- * Compile one QQL statement into a JavaScript route object. Optional
- * `params` (object for `:name`, array for `?`) bind before parsing —
- * parity with `Client.compile(query, params)` on the Python and Node SDKs.
- * (`compileQuery` is the only module-level name — JS convention.)
- */
-export function compileQuery(query: string, params?: any | null): CompiledRoute;
 
 export function explain(query: string): string;
 

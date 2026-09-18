@@ -23,7 +23,7 @@ class Client {
     /**
      * Parse and compile one statement without executing it. Optional
      * `params` bind before parsing (same shape as the module-level `bind`
-     * and `compileQuery`).
+     * and `compile`).
      * @param {string} query
      * @param {any | null} [params]
      * @returns {CompiledRoute}
@@ -743,6 +743,34 @@ function bind(query, params, options) {
 exports.bind = bind;
 
 /**
+ * Compile one QQL statement into a JavaScript route object. Optional
+ * `params` (object for `:name`, array for `?`) bind before parsing —
+ * parity with `Client.compile(query, params)` on the Python and Node SDKs.
+ * (`compile` is the only module-level name — JS convention.)
+ * @param {string} query
+ * @param {any | null} [params]
+ * @returns {CompiledRoute}
+ */
+function compile(query, params) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.compile(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+exports.compile = compile;
+
+/**
  * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
  * Optionally accepts `params` to bind before compiling.
  * @param {string} query
@@ -767,34 +795,6 @@ function compileBytes(query, params) {
     }
 }
 exports.compileBytes = compileBytes;
-
-/**
- * Compile one QQL statement into a JavaScript route object. Optional
- * `params` (object for `:name`, array for `?`) bind before parsing —
- * parity with `Client.compile(query, params)` on the Python and Node SDKs.
- * (`compileQuery` is the only module-level name — JS convention.)
- * @param {string} query
- * @param {any | null} [params]
- * @returns {CompiledRoute}
- */
-function compileQuery(query, params) {
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.compileQuery(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
-        if (r2) {
-            throw takeObject(r1);
-        }
-        return takeObject(r0);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-    }
-}
-exports.compileQuery = compileQuery;
 
 /**
  * @param {string} query

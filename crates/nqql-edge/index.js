@@ -97,8 +97,8 @@ function explainStmt(stmt) {
   return callNative(() => nativeBinding.explainStmt(stmt));
 }
 
-function compileQuery(query, params) {
-  return callNative(() => nativeBinding.compileQuery(query, params));
+function compile(query, params) {
+  return callNative(() => nativeBinding.compile(query, params));
 }
 
 const {
@@ -375,7 +375,7 @@ module.exports = {
   isValid,
   injectFilter,
   tokenize,
-  compileQuery,
+  compile,
   explain,
   explainStmt,
   bind,

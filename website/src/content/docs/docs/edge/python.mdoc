@@ -161,7 +161,7 @@ binds `:loc.lat`).
 
 The module also exposes parser helpers with the same names as `pyqql`:
 `parse`, `parse_json`, `is_valid` (parse + plan), `tokenize`, `inject_filter`,
-`compile_query(query, params=None)`, `bind(query, params=None, *,
+`compile(query, params=None)`, `bind(query, params=None, *,
 truncate_vectors=False)` (accepts a string or a `Stmt`; `Stmt` +
 `truncate_vectors=True` returns the readable string), and `explain`.
 `inject_filter` works on a `Stmt` or a query string and is the supported way

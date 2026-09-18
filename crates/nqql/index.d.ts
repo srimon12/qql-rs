@@ -277,7 +277,7 @@ export function injectFilter(
 export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
-export function compileQuery(
+export function compile(
   query: string,
   params?: Record<string, unknown> | unknown[],
 ): CompiledRoute;
