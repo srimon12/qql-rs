@@ -9,18 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 💻 SDK Consistency & Breaking DX Cleanup
-- **`toJSON` Is the `JSON.stringify` Hook (object, not string)**: `Stmt.toJSON()` now returns the BigInt-safe plain object (same as `toObject()`) on Node (`nqql` / `nqql-edge`) and WASM. `toJson()` stays the exact-text string for transport/forwarding. `JSON.stringify` throws on snowflake `BigInt` IDs by design instead of silently double-encoding or rounding them — use `toJson()` for exact text.
-- **Unified Batch Error Contract**: `Executor::execute_batch_nodes` and its internal batch helpers (`execute_batch_nodes_inner`, `dispatch_or_collect`, `flush_planned_group`, `flush_update_run`, `execute_batch_op`) take `OnError` instead of a `bool` flag, matching `execute` / `execute_batch`. Callers in `pyqql-common`, `nqql-common`, and the executor tests updated.
-- **WASM Alias Removal**: Deleted exact-duplicate exports — module-level `compile` (use `compileQuery`), `Client.compileQuery` (use `Client.compile`), `setRemoteEmbedder` (use `setHttpEmbedder`), and the snake-case `inject_filter` free function (use `injectFilter`). `compileBytes` / `compileRouteBytes` now accept optional `params` like their siblings.
-- **Batch Hits Shortcuts**: `execute_hits` / `executeHits` accept a statement index (`stmt`, default `0`) on Python (`Client` + module, sync + async) and Node (`Client` + module, server + edge) so batch results don't require manual `report.hits(N)`.
-- **Portable Embedder Configs**: Python dict configs accept camelCase or snake_case (`apiKey`/`api_key`, `multiEndpoint`/`multi_endpoint`, `bm25K1`/`bm25_k1`, …) with camelCase winning, matching Node's `HttpEmbedder`.
-- **Mapped Client Construction Errors**: `new Client(badOptions)` in `nqql` surfaces structured `.code` / `.kind` errors instead of raw native messages.
-- **WASM Lifecycle Parity**: `Client.close()` (no-op) and `isClosed` (always `false`) added so generic cleanup code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
-- **Wider gRPC Constructor**: `Executor::grpc` takes `impl Into<String>` like `Executor::rest`.
-- **Exact Integer Types**: Node `ScoredPoint.id`, `ids()`, and `shardKeys()` include `bigint`, and `ScoredPoint` exposes `shard_key`, across `nqql` and `nqql-edge`.
-- **Stub Fixes**: Removed duplicated `bm25_stopwords_languages` kwargs and restored signature order in the `pyqql` / `pyqql-edge` `.pyi` stubs.
-
 ### 🌐 Website, Playground & DX
 - **Statement-Aware Playground Execution**: Multi-statement scripts are first-class — a statement rail with per-statement status, an inspector navigator, and a split Run control. `⌘↵` runs the selection, the statement under the caret, or the exact line; `⇧⌘↵` runs the whole script. Results, errors, and inline diagnostics are attributed to the statement that produced them, with a persisted stop-on-error policy ([#166](https://github.com/srimon12/qql-rs/pull/166)).
 - **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).
@@ -37,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI Script Non-Zero Exit**: `qql run` exits non-zero when any statement in a script fails, so CI/CD pipelines halt even in continue-on-error mode ([#158](https://github.com/srimon12/qql-rs/pull/158)).
 - **Strict 64-Bit Integers in JS**: Integers beyond `Number.MAX_SAFE_INTEGER` must be passed as `BigInt`; silent truncation of snowflake IDs is no longer possible ([#161](https://github.com/srimon12/qql-rs/pull/161)).
 - **Fail-Closed Converter & Planner**: Unsupported OpenAPI flags return typed `ConvertError`s instead of panicking; `SCROLL AFTER` max/UUID-max values and `CROSS RERANK` on non-`Hits` envelopes fail closed ([#150](https://github.com/srimon12/qql-rs/pull/150)).
+- **Stable `toJSON` Object Contract**: `Stmt.toJSON()` returns the BigInt-safe plain object (same as `toObject()`) on Node and WASM; `toJson()` stays the exact-text string. `JSON.stringify` throws on snowflake `BigInt` IDs by design instead of rounding or double-encoding ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Unified Batch Error Contract**: `Executor::execute_batch_nodes` and its batch internals take `OnError` instead of a `bool` flag ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **WASM Export Cleanup**: Removed duplicate module `compile` (use `compileQuery`), `Client.compileQuery` (use `Client.compile`), `setRemoteEmbedder` (use `setHttpEmbedder`), and snake-case `inject_filter` (use `injectFilter`); `compileBytes` / `compileRouteBytes` accept `params` ([#167](https://github.com/srimon12/qql-rs/pull/167)).
 
 ### 🚀 Core Engine & Language
 - **Wire-Compatible BM25 Text Pipeline**: The document encoder is bit-for-bit compatible with Qdrant's `qdrant/bm25` across 30 languages (ASCII folding, stopword lists, custom vocabularies), so client-embedded sparse vectors are interchangeable with server-side inference ([#160](https://github.com/srimon12/qql-rs/pull/160)).
@@ -50,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured WASM Errors**: Errors thrown to JavaScript carry `.code` and `.fields` for programmatic handling ([#152](https://github.com/srimon12/qql-rs/pull/152)).
 - **Expanded Report Accessors**: `.collections()`, `.shard_keys()`, and `.quotas()` join the existing hit, point, and group accessors across every driver ([#153](https://github.com/srimon12/qql-rs/pull/153)).
 - **Edge Fail-Closed Options**: The edge backend rejects unsupported `timeout`, `consistency`, and `wait` options with typed error codes ([#151](https://github.com/srimon12/qql-rs/pull/151)).
+- **Batch Hits Shortcuts**: `execute_hits` / `executeHits` take a statement index across Python and Node, so batch results don't need manual `report.hits(N)` ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Portable Embedder Configs**: Python dict configs accept camelCase aliases (`apiKey`, `multiEndpoint`, `bm25K1`, …), matching Node ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Construction Errors, Lifecycle & Type Parity**: `nqql` Client errors carry `.code`; WASM gains `close()` / `isClosed`; `Executor::grpc` takes `impl Into<String>`; Node types include `bigint` IDs and `shard_key`; `.pyi` duplicate kwargs fixed ([#167](https://github.com/srimon12/qql-rs/pull/167)).
 
 ### 🌐 Website, Playground & DX
 - **`qql record` & Full Release Archives**: Zero-config Qdrant traffic capture now ships inside `qql-cli`, and releases publish both standard and `full` archives — the latter adding local ONNX inference and in-process `qdrant-edge` ([#164](https://github.com/srimon12/qql-rs/pull/164)).
