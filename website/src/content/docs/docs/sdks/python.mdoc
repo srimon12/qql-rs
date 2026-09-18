@@ -163,12 +163,12 @@ statement and both accept matrix params (ColBERT multi-vectors) since 0.4.0,
 but the implicit form is the canonical, documented shape and reads the same
 across `QUERY`, `HYBRID`, and `RERANK` inputs.
 
-`compile_query(query, params=...)` and `Client.compile(query, params=...)`
+`compile(query, params=...)` and `Client.compile(query, params=...)`
 compile a template to its route in one step, and `is_valid` runs the full
 parse + plan gate:
 
 ```python
-route = compile_query("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+route = compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
 print(client.compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}))
 ```
 
@@ -347,9 +347,9 @@ substitute `!=` for an exclusion rule; model that rule in the source query.
 ## Plan before you send traffic
 
 ```python
-from pyqql import compile_query, explain, tokenize
+from pyqql import compile, explain, tokenize
 
-route = compile_query(query)
+route = compile(query)
 print(route["method"], route["path"])
 print(explain(query))  # {ok, query, plan} — or {ok: False, query, error} on
                        # invalid source (never raises for a parse failure;
@@ -379,7 +379,7 @@ print(tokenize(query))
 | `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
 | `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
 | `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools (`is_valid` runs parse + plan) |
-| `compile_query(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
+| `compile(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
 | `bind(query, params, *, truncate_vectors=False)` | bound string or `Stmt` | Substitute `:name` / `?` parameters; `Stmt` + `truncate_vectors=True` returns a readable string |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
 | `HttpEmbedder` | embedder object | Supply remote dense, multi, image, and rerank endpoints (sparse resolves to local BM25; see the embedder ladder in the API surface reference) |

@@ -2,7 +2,7 @@
 
 Median-of-reps timing (default 50k iterations x 3 reps). Every query benches
 parse / parse_json / explain; the Bound query additionally benches the 0.3.2
-prepared-statement path (bind, compile_query, is_valid).
+prepared-statement path (bind, compile, is_valid).
 
 Usage:
     python3 bench/bench_python.py [--iterations N] [--reps N]
@@ -88,8 +88,8 @@ def main():
         src, params = bound["qql"], bound["params"]
         bind_row = {
             "bind": bench_ops(lambda: pyqql.bind(src, params), 1000, args.iterations, args.reps),
-            "compile_query": bench_ops(
-                lambda: pyqql.compile_query(src, params), 1000, args.iterations, args.reps
+            "compile": bench_ops(
+                lambda: pyqql.compile(src, params), 1000, args.iterations, args.reps
             ),
             "is_valid": bench_ops(
                 lambda: pyqql.is_valid(src), 1000, args.iterations, args.reps

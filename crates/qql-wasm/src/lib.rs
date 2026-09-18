@@ -37,8 +37,8 @@ mod telemetry;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 pub use client::Client;
 pub use functions::{
-    analyze, bind, compile, compile_bytes, compile_query, explain, explain_bytes, format_query,
-    inject_filter, inject_filter_camel, is_valid, parse, tokenize,
+    analyze, bind, compile_bytes, compile_query, explain, explain_bytes, format_query,
+    inject_filter, is_valid, parse, tokenize,
 };
 pub use stmt::Stmt;
 use wasm_bindgen::prelude::*;

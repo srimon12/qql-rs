@@ -3,8 +3,12 @@ export class Stmt {
   constructor(input: string);
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
+  /** Exact-text AST string for transport/forwarding (no V8 parsing). */
   toJson(): string;
-  toJSON(): string;
+  /** `JSON.stringify` hook: BigInt-safe plain object, same as `toObject()`.
+   * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+   * use `toJson()` for exact text. */
+  toJSON(): unknown;
   /** Canonical, re-parseable QQL (mirrors Python `str(stmt)`). */
   toString(): string;
   /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
@@ -22,12 +26,13 @@ export class Stmt {
 }
 
 export class ScoredPoint {
-  id: string | number;
+  id: string | number | bigint;
   score: number;
   payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
   vector: unknown | null;
+  shard_key: string | number | bigint | null;
   get(key: string, defaultValue?: unknown): unknown;
   withoutPayload(): ScoredPoint;
   [key: string]: unknown;
@@ -97,13 +102,13 @@ export class ExecutionReport {
   telemetry?: ServerTelemetry | null;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
-  ids(stmt?: number): Array<string | number>;
+  ids(stmt?: number): Array<string | number | bigint>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
   groups(stmt?: number): Array<{ id: unknown; hits: ScoredPoint[] }>;
   collections(stmt?: number): string[];
   collection(stmt?: number): Record<string, unknown> | null;
-  shardKeys(stmt?: number): Array<string | number>;
+  shardKeys(stmt?: number): Array<string | number | bigint>;
   quotas(stmt?: number): Record<string, unknown> | null;
 }
 
@@ -217,6 +222,7 @@ export class Client {
   executeHits(
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
+    stmt?: number,
   ): Promise<ScoredPoint[]>;
   /**
    * Analyze a single query string or Stmt: static plan plus measured
@@ -271,7 +277,7 @@ export function injectFilter(
 export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
-export function compileQuery(
+export function compile(
   query: string,
   params?: Record<string, unknown> | unknown[],
 ): CompiledRoute;
@@ -291,6 +297,7 @@ export function execute(
 export function executeHits(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & ClientOptions,
+  stmt?: number,
 ): Promise<ScoredPoint[]>;
 export function executeStmt(
   stmt: Stmt,

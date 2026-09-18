@@ -18,7 +18,7 @@ naming and object ownership.
 | Execution profile (client timings plus server time and usage) | `Executor::explain_analyze` | `Client.explain_analyze` | `Client.explainAnalyze` | `Client.explainAnalyze` |
 | DB-API cursor (Python) | — | `pyqql.connect` + cursor (`execute`/`executemany`/`fetch*`/`nextset`, `description`, `rowcount`) | — | — |
 | Lazy scroll cursor | manual `SCROLL ... AFTER :cursor` loop (see Rust SDK page) | `Client.scroll_cursor` (sync generator) plus `Client.scroll_cursor_async` (async generator) | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | `dx.js scrollCursor` helper over `Client.execute` (see WASM SDK page) |
-| Compile | planner/runtime | `compile_query` | `compileQuery` | `compile` |
+| Compile | planner/runtime | `compile` | `compile` | `compile` |
 | Bind parameters | `bind_named` / `bind_positional` (+ `*_readable`) | `bind`, `Stmt.bind`, `execute(…, params=)` | `bind`, `Stmt.bind`, `execute(…, { params })` | `bind`, `Stmt.bind`, `execute(…, { params })` — typed arrays convert directly |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
 | Parse to JSON string | — | `parse_json` | `parseJson` | `parseJson` |

@@ -15,7 +15,6 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let stop_on_error = matches!(on_error, OnError::Stop);
         let mut pending = Vec::with_capacity(queries.len());
         let mut results = Vec::with_capacity(queries.len());
         for query in queries {
@@ -24,11 +23,11 @@ impl Executor {
                 Err(error) => {
                     if !pending.is_empty() {
                         results.extend(
-                            self.execute_batch_nodes(core::mem::take(&mut pending), stop_on_error)
+                            self.execute_batch_nodes(core::mem::take(&mut pending), on_error)
                                 .await?,
                         );
                     }
-                    if stop_on_error {
+                    if matches!(on_error, OnError::Stop) {
                         return Err(error);
                     }
                     results.push(ExecResponse {
@@ -42,7 +41,7 @@ impl Executor {
             }
         }
         if !pending.is_empty() {
-            results.extend(self.execute_batch_nodes(pending, stop_on_error).await?);
+            results.extend(self.execute_batch_nodes(pending, on_error).await?);
         }
         if results.is_empty() {
             return Err(QqlError::validation(
@@ -59,13 +58,13 @@ impl Executor {
     pub async fn execute_batch_nodes(
         &self,
         stmts: Vec<Stmt>,
-        stop_on_error: bool,
+        on_error: OnError,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         self.ensure_open()?;
         if let Some(secs) = self.request_timeout() {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(secs),
-                self.execute_batch_nodes_inner(stmts, stop_on_error),
+                self.execute_batch_nodes_inner(stmts, on_error),
             )
             .await
             {
@@ -77,22 +76,23 @@ impl Executor {
                 )),
             }
         } else {
-            self.execute_batch_nodes_inner(stmts, stop_on_error).await
+            self.execute_batch_nodes_inner(stmts, on_error).await
         }
     }
 
     async fn execute_batch_nodes_inner(
         &self,
         stmts: Vec<Stmt>,
-        stop_on_error: bool,
+        on_error: OnError,
     ) -> Result<Vec<ExecResponse>, QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
         let mut results = Vec::with_capacity(stmts.len());
         let mut grouper = BatchGrouper::new();
 
         for stmt in stmts {
             if let Err(e) = qql_plan::ensure_no_unbound_params(&stmt) {
                 if let Some(ops) = grouper.flush_on_error() {
-                    self.flush_planned_group(ops, stop_on_error, &mut results)
+                    self.flush_planned_group(ops, on_error, &mut results)
                         .await?;
                 }
                 if stop_on_error {
@@ -109,7 +109,7 @@ impl Executor {
             }
 
             if let Some(ops) = grouper.check_statement_barrier(&stmt) {
-                self.flush_planned_group(ops, stop_on_error, &mut results)
+                self.flush_planned_group(ops, on_error, &mut results)
                     .await?;
             }
 
@@ -117,7 +117,7 @@ impl Executor {
                 Ok(p) => p,
                 Err(e) => {
                     if let Some(ops) = grouper.flush_on_error() {
-                        self.flush_planned_group(ops, stop_on_error, &mut results)
+                        self.flush_planned_group(ops, on_error, &mut results)
                             .await?;
                     }
                     if stop_on_error {
@@ -138,7 +138,7 @@ impl Executor {
                 Ok(planned) => planned,
                 Err(e) => {
                     if let Some(ops) = grouper.flush_on_error() {
-                        self.flush_planned_group(ops, stop_on_error, &mut results)
+                        self.flush_planned_group(ops, on_error, &mut results)
                             .await?;
                     }
                     if stop_on_error {
@@ -157,7 +157,7 @@ impl Executor {
 
             let (flush_ops, dispatch_single) = grouper.push_planned(planned);
             if let Some(ops) = flush_ops {
-                self.flush_planned_group(ops, stop_on_error, &mut results)
+                self.flush_planned_group(ops, on_error, &mut results)
                     .await?;
             }
             if let Some(single) = dispatch_single {
@@ -165,20 +165,20 @@ impl Executor {
                 // whatever is pending, then run members as one forced group.
                 if matches!(single, PlannedOperation::Batch { .. }) {
                     if let Some(ops) = grouper.finish() {
-                        self.flush_planned_group(ops, stop_on_error, &mut results)
+                        self.flush_planned_group(ops, on_error, &mut results)
                             .await?;
                     }
-                    self.execute_batch_op(&single, stop_on_error, &mut results)
+                    self.execute_batch_op(&single, on_error, &mut results)
                         .await?;
                 } else {
-                    self.dispatch_or_collect(single, stop_on_error, &mut results)
+                    self.dispatch_or_collect(single, on_error, &mut results)
                         .await?;
                 }
             }
         }
 
         if let Some(ops) = grouper.finish() {
-            self.flush_planned_group(ops, stop_on_error, &mut results)
+            self.flush_planned_group(ops, on_error, &mut results)
                 .await?;
         }
         Ok(results)
@@ -187,9 +187,10 @@ impl Executor {
     pub(crate) async fn dispatch_or_collect(
         &self,
         planned: qql_plan::PlannedOperation,
-        stop_on_error: bool,
+        on_error: OnError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
         match self.dispatch_planned(&planned).await {
             Ok(response) => results.push(response),
             Err(error) if stop_on_error => return Err(error),
@@ -207,19 +208,18 @@ impl Executor {
     async fn flush_planned_group(
         &self,
         mut operations: Vec<qql_plan::PlannedOperation>,
-        stop_on_error: bool,
+        on_error: OnError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         use qql_plan::PlannedOperation;
+        let stop_on_error = matches!(on_error, OnError::Stop);
 
         if operations.is_empty() {
             return Ok(());
         }
         if operations.len() == 1 {
             let planned = operations.pop().expect("pending contains one operation");
-            return self
-                .dispatch_or_collect(planned, stop_on_error, results)
-                .await;
+            return self.dispatch_or_collect(planned, on_error, results).await;
         }
         let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
         if is_query {
@@ -293,13 +293,13 @@ impl Executor {
                 if operation.batch_family() == qql_plan::BatchFamily::Mutation {
                     run.push(operation);
                 } else {
-                    self.flush_update_run(core::mem::take(&mut run), stop_on_error, results)
+                    self.flush_update_run(core::mem::take(&mut run), on_error, results)
                         .await?;
-                    self.dispatch_or_collect(operation, stop_on_error, results)
+                    self.dispatch_or_collect(operation, on_error, results)
                         .await?;
                 }
             }
-            self.flush_update_run(run, stop_on_error, results).await?;
+            self.flush_update_run(run, on_error, results).await?;
         }
         Ok(())
     }
@@ -307,9 +307,10 @@ impl Executor {
     async fn flush_update_run(
         &self,
         operations: Vec<qql_plan::PlannedOperation>,
-        stop_on_error: bool,
+        on_error: OnError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
         if operations.is_empty() {
             return Ok(());
         }
@@ -318,9 +319,7 @@ impl Executor {
                 .into_iter()
                 .next()
                 .expect("run contains one operation");
-            return self
-                .dispatch_or_collect(planned, stop_on_error, results)
-                .await;
+            return self.dispatch_or_collect(planned, on_error, results).await;
         }
 
         // Owned build: each mutation request moves (zero clones on the hot
@@ -378,10 +377,11 @@ impl Executor {
     pub(crate) async fn execute_batch_op(
         &self,
         op: &qql_plan::PlannedOperation,
-        stop_on_error: bool,
+        on_error: OnError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         use qql_plan::PlannedOperation;
+        let stop_on_error = matches!(on_error, OnError::Stop);
         let PlannedOperation::Batch {
             key,
             operations,
@@ -497,7 +497,8 @@ impl Executor {
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         for operation in operations {
-            self.dispatch_or_collect(operation, false, results).await?;
+            self.dispatch_or_collect(operation, OnError::Continue, results)
+                .await?;
         }
         Ok(())
     }

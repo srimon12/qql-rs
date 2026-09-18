@@ -92,6 +92,20 @@ impl Client {
         self.route_affinity.clone()
     }
 
+    /// Close the client (no-op: browser `fetch` holds no connections).
+    ///
+    /// Exists for cross-SDK portability so generic `client.close()` cleanup
+    /// code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
+    #[wasm_bindgen(js_name = close)]
+    pub fn close(&self) {}
+
+    /// Whether the client is closed (always `false`: [`close`](Self::close)
+    /// is a no-op).
+    #[wasm_bindgen(getter, js_name = isClosed)]
+    pub fn is_closed(&self) -> bool {
+        false
+    }
+
     /// Set client-side BM25 document parameters for the built-in local sparse
     /// encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
     /// documents upserted after the call are encoded; query weights stay unit
@@ -198,18 +212,6 @@ impl Client {
         self.embed_model = model;
         self.embed_dim = dimension;
         Ok(())
-    }
-
-    /// Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
-    #[wasm_bindgen(js_name = setRemoteEmbedder)]
-    pub fn set_remote_embedder(
-        &mut self,
-        endpoint: String,
-        model: String,
-        dimension: u32,
-        api_key: Option<String>,
-    ) -> Result<(), JsValue> {
-        self.set_http_embedder(endpoint, model, dimension, api_key)
     }
 
     /// OpenAI-compatible multi/ColBERT endpoint (nested `[[...]]` bags).

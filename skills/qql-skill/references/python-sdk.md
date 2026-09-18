@@ -46,11 +46,11 @@ result = client.execute(stmt)
 ```
 
 Sparse IDF is **not** `inject_filter` and not a JSON corpus object. Write it in
-QQL. `compile_query` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
+QQL. `compile` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
 `params.idf.corpus` filter JSON — hosts do not build that dict.
 
 ```python
-from pyqql import bind, compile_query
+from pyqql import bind, compile
 
 # Isolation + routing + tenant-local BM25 stats (three different layers)
 qql = """
@@ -61,7 +61,7 @@ PARAMS (idf = WHERE tenant_id = :tenant)
 LIMIT 10
 """
 bound = bind(qql, {"q": "supply chain", "tenant": "honeywell"})
-route = compile_query(bound)
+route = compile(bound)
 # route["payload"]["params"]["idf"] ==
 #   {"corpus": {"must": [{"key": "tenant_id", "match": {"value": "honeywell"}}]}}
 ```
@@ -501,7 +501,7 @@ stmts = pyqql.parse("QUERY 'a' FROM docs; COUNT FROM docs") # Parse a script
 ok = pyqql.is_valid("QUERY 'x' FROM docs LIMIT 5")          # Validate without returning the AST
 tokenized = pyqql.tokenize("QUERY 'x' FROM docs LIMIT 5")   # Lex into tokens
 result = pyqql.inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter
-route = pyqql.compile_query("QUERY 'x' FROM docs LIMIT 5")  # Lower to REST route (no execute)
+route = pyqql.compile("QUERY 'x' FROM docs LIMIT 5")  # Lower to REST route (no execute)
 
 # Hierarchical ASCII tree plan. Unlike `nqql` / `qql-wasm` `explain`
 # (which throw on invalid QQL), this never raises: bad input yields
@@ -516,6 +516,8 @@ print(plan_dict["plan"])
 # Standalone parameter binding
 bound = pyqql.bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "test", "lim": 10})
 ```
+
+Note: `from pyqql import compile` shadows Python's builtin `compile` — prefer `pyqql.compile(...)` or alias on import (`from pyqql import compile as qql_compile`).
 
 ---
 

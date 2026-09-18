@@ -267,8 +267,10 @@ console.log(stmt.shardKey);  // -> "acme"
 // Numeric partitions stay numeric (read back as BigInt):
 // stmt.shardKey = 101;
 
-// Serialise to JSON
-const json = stmt.toJSON();
+// Serialise: exact-text string for transport, object for inspection.
+// (`toJSON` is the JSON.stringify hook — same BigInt-safe object as
+// `toObject()`; stringify throws on snowflake BigInts by design.)
+const json = stmt.toJson();
 const obj = stmt.toObject();
 ```
 
@@ -328,7 +330,6 @@ if (!isValid("QUERY 'machine learning' FROM papers LIMIT 20")) {
 }
 
 // Inject tenant filter into a raw query string
-// (`inject_filter` snake_case alias also exported for back-compat)
 const safe = injectFilter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
 ```
 
@@ -425,7 +426,7 @@ parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statemen
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 injectFilter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
-compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
+compile("QUERY 'x' FROM docs LIMIT 5");             // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
 bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter

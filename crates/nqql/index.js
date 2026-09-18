@@ -223,8 +223,8 @@ function explainStmt(stmt) {
   return callNative(() => nativeBinding.explainStmt(stmt));
 }
 
-function compileQuery(query, params) {
-  return callNative(() => nativeBinding.compileQuery(query, params));
+function compile(query, params) {
+  return callNative(() => nativeBinding.compile(query, params));
 }
 
 async function execute(query, options) {
@@ -242,9 +242,9 @@ async function execute(query, options) {
   }
 }
 
-async function executeHits(query, options) {
+async function executeHits(query, options, stmt = 0) {
   const report = await execute(query, options);
-  return report.hits(0);
+  return report.hits(stmt);
 }
 
 async function executeStmt(stmt, options) {
@@ -262,9 +262,13 @@ async function executeStmt(stmt, options) {
 
 class Client {
   constructor(options) {
-    const normalized = normalizeClientOptions(options);
-    this._inner = new nativeBinding.Client(normalized);
-    this._routeAffinity = normalized?.routeAffinity || null;
+    try {
+      const normalized = normalizeClientOptions(options);
+      this._inner = new nativeBinding.Client(normalized);
+      this._routeAffinity = normalized?.routeAffinity || null;
+    } catch (error) {
+      throw buildError(error);
+    }
   }
 
   /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
@@ -284,9 +288,9 @@ class Client {
     }
   }
 
-  async executeHits(query, options) {
+  async executeHits(query, options, stmt = 0) {
     const report = await this.execute(query, options);
-    return report.hits(0);
+    return report.hits(stmt);
   }
 
   /**
@@ -375,7 +379,7 @@ module.exports = {
   isValid,
   injectFilter,
   tokenize,
-  compileQuery,
+  compile,
   explain,
   explainStmt,
   bind,

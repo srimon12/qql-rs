@@ -38,8 +38,8 @@ core and its host SDKs (Python `pyqql`, Node `nqql`, WASM `qql-wasm`).
 | `bench_bind` | 50k × 5 | 0.3.2 paths: `bind_str`, `parse+bind_stmt`, `parse+bind+plan`, `parse_and_plan` (`is_valid` gate), `compile_statement`, `format` |
 | `bench_sparse` | 100k × 5 | BM25 `embed_document` / `embed_query` (wire-compatible with `qdrant/bm25`) |
 | `bench_upsert` | 200k × 5 | UPSERT parse → `try_route` → `body_json` breakdown |
-| `bench_python.py` | 50k × 3 | `parse` / `parse_json` / `explain` per query + Bound `bind` / `compile_query` / `is_valid` |
-| `bench_node.js` | 50k × 3 | NAPI `parse()` / `parseJson()` / WASM `parse()` per query + Bound `bind` / `compileQuery` / `isValid` (+ WASM `bind`) |
+| `bench_python.py` | 50k × 3 | `parse` / `parse_json` / `explain` per query + Bound `bind` / `compile` / `is_valid` |
+| `bench_node.js` | 50k × 3 | NAPI `parse()` / `parseJson()` / WASM `parse()` per query + Bound `bind` / `compile` / `isValid` (+ WASM `bind`) |
 
 ## Corpus
 
@@ -142,7 +142,7 @@ Route projection ≈ 1,445 ns/op; JSON body extraction ≈ 726 ns/op.
 | Count | 1,481,977 | 1,100,107 | 699,691 |
 | Bound | 740,602 | 493,446 | 446,315 |
 
-Bound prepared path: `bind` 572,497 · `compile_query` 121,664 · `is_valid`
+Bound prepared path: `bind` 572,497 · `compile` 121,664 · `is_valid`
 752,111 ops/s (`is_valid` +11% vs v0.3.2). Net vs v0.3.2: parse +0.1–7.9%,
 parseJson −4.2–+2.2%, explain −2.1–+6.8% — the `Box<Span>` layout keeps the
 FFI walk flat while bind errors stay located.
@@ -165,7 +165,7 @@ FFI walk flat while bind errors stay located.
 | Count | 377,842 | 978,304 | 408,613 |
 | Bound | 255,283 | 431,893 | 171,175 |
 
-Bound prepared path: `bind` 477,124 · `compileQuery` 67,973 · `isValid`
+Bound prepared path: `bind` 477,124 · `compile` 67,973 · `isValid`
 691,180 (NAPI) · WASM `bind` 377,763 ops/s.
 
 Node/WASM parse is flat vs v0.3.2 (−7% worst case on parameter-heavy

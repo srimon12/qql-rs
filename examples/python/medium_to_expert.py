@@ -130,7 +130,7 @@ def main() -> int:
     ]
     print("── Qdrant 1.19 surface (offline) ──")
     for s in q19:
-        route = pyqql.compile_query(s)
+        route = pyqql.compile(s)
         print(f"  valid={pyqql.is_valid(s)}  {route.get('method')} {route.get('path')}")
     print()
 

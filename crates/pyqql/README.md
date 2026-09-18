@@ -53,7 +53,7 @@ client.execute(stmt)
 | `parse` / `parse_json` / `is_valid` / `tokenize` | Frontend — `is_valid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `inject_filter(query\|Stmt, field, op, value)` | Host isolation (AST) |
 | `Stmt.shard_key` | Same field as QQL `SHARD '…'` (get/set; no `inject_shard_key`) |
-| `compile_query` / `explain` | Offline plan / REST projection |
+| `compile` / `explain` | Offline plan / REST projection |
 | `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
 | `execute` / `execute_async` | One-shot free functions (`params=` same as `bind`) |
 | `execute_hits` / `execute_async_hits` | One-shot free functions returning `List[ScoredPoint]` |

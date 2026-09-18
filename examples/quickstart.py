@@ -25,7 +25,7 @@ stmt.shard_key = "acme"
 
 # 3. Bind + compile offline — the exact REST route, no I/O.
 param_q = "QUERY TEXT :q FROM docs WHERE tenant_id = :t LIMIT :lim"
-route = pyqql.compile_query(
+route = pyqql.compile(
     param_q, {"q": "vector databases", "t": "acme", "lim": 10}
 )
 assert route["method"] == "POST"

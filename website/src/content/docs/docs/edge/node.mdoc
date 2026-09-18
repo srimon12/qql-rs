@@ -163,7 +163,7 @@ statement index counts from the end, matching Python list semantics.
 | `isValid(query)` | Boolean parse + plan check |
 | `injectFilter(query, field, op, value)` | Return a filtered statement |
 | `tokenize(query)` | Token list `{kind, text, pos, end, len}` |
-| `compileQuery(query, params?)` | Non-executing route (optionally binding params) |
+| `compile(query, params?)` | Non-executing route (optionally binding params) |
 | `bind(query, params?, { truncateVectors? })` | Substitute `:name` (object) or `?` (array) placeholders into a string or `Stmt` |
 | `explain(query)` / `explainStmt(stmt)` | Plan rendering |
 | `listEmbeddingModels()` | Catalog of loadable ONNX models |

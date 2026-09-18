@@ -91,12 +91,12 @@ const result = await client.execute(stmt);
 
 `injectFilter` does not support `!=` — use equality or rewrite the query.
 
-Sparse IDF is QQL, not an inject and not a JSON corpus. `compileQuery` lowers
+Sparse IDF is QQL, not an inject and not a JSON corpus. `compile` lowers
 `idf = WHERE tenant_id = '…'` to Qdrant `params.idf.corpus` — do not build that
 object in JS.
 
 ```js
-const { bind, compileQuery } = require('@veristamp/nqql');
+const { bind, compile } = require('@veristamp/nqql');
 
 const bound = bind(`
   QUERY TEXT :q FROM sec10k USING sparse
@@ -106,7 +106,7 @@ const bound = bind(`
   LIMIT 10
 `, { q: "supply chain", tenant: "honeywell" });
 
-const route = compileQuery(bound);
+const route = compile(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```
 
@@ -199,8 +199,10 @@ console.log(stmt.shardKey);  // -> "acme"
 // Inject filter
 stmt.injectFilter("tenant_id", "=", "acme");
 
-// Serialise
-console.log(stmt.toJSON());
+// Serialise: exact-text string for transport, object for inspection.
+// (`toJSON` is the JSON.stringify hook — same BigInt-safe object as
+// `toObject()`; stringify throws on snowflake BigInts by design.)
+console.log(stmt.toJson());
 console.log(stmt.toObject());
 ```
 
@@ -366,7 +368,7 @@ console.log(grouped.ids(-1)); // last statement's hit ids
 ## 7. Free Functions & Explain
 
 ```js
-const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery, explain, bind } = require('@veristamp/nqql');
+const { parse, parseJson, isValid, injectFilter, tokenize, compile, explain, bind } = require('@veristamp/nqql');
 
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
 parse("QUERY 'x' FROM docs LIMIT 5; COUNT FROM docs");   // Script -> Stmt[]
@@ -374,8 +376,8 @@ parseJson("QUERY 'x' FROM docs LIMIT 5");                // Raw JSON string (2×
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Parse + plan gate
 injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");
 tokenize("QUERY 'x'");
-compileQuery("QUERY 'x' FROM docs LIMIT 5");                   // Route object
-compileQuery("QUERY TEXT :q FROM docs LIMIT :lim", { q: "x", lim: 5 }); // With parameter binding
+compile("QUERY 'x' FROM docs LIMIT 5");                   // Route object
+compile("QUERY TEXT :q FROM docs LIMIT :lim", { q: "x", lim: 5 }); // With parameter binding
 
 // Hierarchical ASCII tree plan (throws on invalid QQL — unlike pyqql's
 // `explain`, which returns `{ok: false, error}` instead of raising)

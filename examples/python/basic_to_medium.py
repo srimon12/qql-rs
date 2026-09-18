@@ -5,7 +5,7 @@ Basic → Medium (Python / pyqql)
 Offline walkthrough:
   1. parse / is_valid
   2. explain
-  3. compile_query
+  3. compile
   4. inject_filter (logical isolation)
   5. SHARD in QQL + Stmt.shard_key (physical routing)
   6. hybrid shorthand
@@ -33,8 +33,8 @@ print("2. explain()")
 print(pyqql.explain(q).get("plan", ""))
 print()
 
-route = pyqql.compile_query(q)
-print("3. compile_query()")
+route = pyqql.compile(q)
+print("3. compile()")
 print(f"   stmt_type={route.get('stmt_type')}  {route.get('method')} {route.get('path')}\n")
 
 # Fast JSON-only parse — same AST as parse(), no Python Stmt objects.

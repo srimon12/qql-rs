@@ -411,7 +411,7 @@ releases it automatically.
 | `init` / `initSync` | initialized WASM module | One-time module initialization |
 | `parse`, `isValid`, `tokenize` | AST values, boolean, token list | Strict local parser primitives |
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
-| `compile` / `compileQuery`, `explain`, `injectFilter` | route, text, rewritten statement | One-shot offline planning helpers (`compileQuery` is an alias of `compile`; `explain` throws a coded JSON `Error` on invalid source; the snake_case `inject_filter` export is a legacy alias) |
+| `compile`, `explain`, `injectFilter` | route, text, rewritten statement | One-shot offline planning helpers (`explain` throws a coded JSON `Error` on invalid source) |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
 | `bind(query, params?, { truncateVectors })` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline; `params` optional — omitted returns the query unchanged |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |

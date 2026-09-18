@@ -86,9 +86,10 @@ impl Executor {
 
     /// Create an executor connected to Qdrant over gRPC.
     #[cfg(feature = "grpc")]
-    pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
+    pub fn grpc(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
+        let url = url.into();
         Ok(Self::new(
-            Box::new(crate::grpc::GrpcQdrant::from_url(url, api_key)?),
+            Box::new(crate::grpc::GrpcQdrant::from_url(&url, api_key)?),
             None,
         ))
     }
@@ -201,10 +202,9 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let stop_on_error = matches!(on_error, OnError::Stop);
         let statements = match parser::Parser::parse_all(query) {
             Ok(statements) => statements,
-            Err(error) if stop_on_error => return Err(error),
+            Err(error) if matches!(on_error, OnError::Stop) => return Err(error),
             Err(error) => {
                 return Ok(ExecutionReport::from_results(vec![ExecResponse {
                     ok: false,
@@ -222,7 +222,7 @@ impl Executor {
                 None,
             ));
         }
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -238,8 +238,7 @@ impl Executor {
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |k| params.get(k).cloned(), &[])?;
         }
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -264,8 +263,7 @@ impl Executor {
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |k| lookup_map.get(k).map(|v| (*v).clone()), &[])?;
         }
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -281,8 +279,7 @@ impl Executor {
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |_| None, params)?;
         }
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 

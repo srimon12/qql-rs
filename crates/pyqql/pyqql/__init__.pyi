@@ -169,10 +169,9 @@ class HttpEmbedder:
         bm25_ascii_folding: Optional[bool] = None,
         bm25_stopwords: Optional[List[str]] = None,
         bm25_stemmer: Optional[str] = None,
-        bm25_stopwords_languages: Optional[List[str]] = None,
-        bm25_stopwords_languages: Optional[List[str]] = None,
         bm25_min_token_len: Optional[int] = None,
         bm25_max_token_len: Optional[int] = None,
+        bm25_stopwords_languages: Optional[List[str]] = None,
     ) -> None: ...
 
 class Client:
@@ -218,6 +217,7 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]: ...
     async def execute_async_hits(
         self,
@@ -225,6 +225,7 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]: ...
     def explain(self, query: Union[str, Stmt]) -> Dict[str, Any]: ...
     def explain_analyze(
@@ -277,7 +278,7 @@ def parse(input: str) -> List[Stmt]: ...
 def parse_json(input: str) -> str: ...
 def is_valid(input: str) -> bool: ...
 def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
-def compile_query(query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None) -> Dict[str, Any]: ...
+def compile(query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None) -> Dict[str, Any]: ...
 def tokenize(input: str) -> List[Dict[str, Any]]: ...
 def inject_filter(query: Union[str, Stmt], field: str, op: str, value: Any) -> Stmt: ...
 def bind(
@@ -318,6 +319,7 @@ def execute_hits(
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
     route_affinity: Optional[str] = None,
+    stmt: int = 0,
 ) -> List[ScoredPoint]: ...
 async def execute_async_hits(
     query: Query,
@@ -329,4 +331,5 @@ async def execute_async_hits(
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
     route_affinity: Optional[str] = None,
+    stmt: int = 0,
 ) -> List[ScoredPoint]: ...

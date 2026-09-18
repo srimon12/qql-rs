@@ -2,7 +2,7 @@
 //
 // Median-of-reps timing (default 50k iterations x 3 reps). Every query benches
 // NAPI parse() / parseJson() / WASM parse(); the Bound query additionally
-// benches the 0.3.2 prepared-statement path (bind, compileQuery, isValid).
+// benches the 0.3.2 prepared-statement path (bind, compile, isValid).
 //
 // Usage:
 //   node bench/bench_node.js [--iterations N] [--reps N] [--filter SUBSTR] [--json]
@@ -103,8 +103,8 @@ let boundRow = null;
 if (boundQ) {
   boundRow = {
     bind: bench(() => nqql.bind(boundQ.qql, boundQ.params), 1000, args.iterations, args.reps),
-    compileQuery: bench(
-      () => nqql.compileQuery(boundQ.qql, boundQ.params),
+    compile: bench(
+      () => nqql.compile(boundQ.qql, boundQ.params),
       1000,
       args.iterations,
       args.reps,

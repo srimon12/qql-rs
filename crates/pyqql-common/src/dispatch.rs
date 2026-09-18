@@ -156,7 +156,6 @@ pub fn run_input(
     input: Input,
     on_error: OnError,
 ) -> PyResult<qql::executor::ExecutionReport> {
-    let stop = matches!(on_error, OnError::Stop);
     let map_err = crate::qql_py_error;
     match input {
         Input::String(s) => runtime
@@ -164,7 +163,7 @@ pub fn run_input(
             .map_err(map_err),
         Input::Stmt(s) => {
             let results = runtime
-                .block_on(executor.execute_batch_nodes(vec![s], stop))
+                .block_on(executor.execute_batch_nodes(vec![s], on_error))
                 .map_err(map_err)?;
             Ok(qql::executor::ExecutionReport::from_results(results))
         }
@@ -176,7 +175,7 @@ pub fn run_input(
         }
         Input::StmtList(stmts) => {
             let results = runtime
-                .block_on(executor.execute_batch_nodes(stmts, stop))
+                .block_on(executor.execute_batch_nodes(stmts, on_error))
                 .map_err(map_err)?;
             Ok(qql::executor::ExecutionReport::from_results(results))
         }
@@ -190,11 +189,10 @@ pub async fn run_async(
     input: Input,
     on_error: OnError,
 ) -> Result<qql::executor::ExecutionReport, QqlError> {
-    let stop = matches!(on_error, OnError::Stop);
     match input {
         Input::String(s) => executor.execute(&s, on_error).await,
         Input::Stmt(s) => {
-            let results = executor.execute_batch_nodes(vec![s], stop).await?;
+            let results = executor.execute_batch_nodes(vec![s], on_error).await?;
             Ok(qql::executor::ExecutionReport::from_results(results))
         }
         Input::StrList(strs) => {
@@ -202,7 +200,7 @@ pub async fn run_async(
             executor.execute_batch(&refs, on_error).await
         }
         Input::StmtList(stmts) => {
-            let results = executor.execute_batch_nodes(stmts, stop).await?;
+            let results = executor.execute_batch_nodes(stmts, on_error).await?;
             Ok(qql::executor::ExecutionReport::from_results(results))
         }
     }

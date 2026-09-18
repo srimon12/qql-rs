@@ -9,15 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 🌐 Website, Playground & DX
-- **Statement-Aware Playground Execution**: Multi-statement scripts are first-class — a statement rail with per-statement status, an inspector navigator, and a split Run control. `⌘↵` runs the selection, the statement under the caret, or the exact line; `⇧⌘↵` runs the whole script. Results, errors, and inline diagnostics are attributed to the statement that produced them, with a persisted stop-on-error policy ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **Configurable In-Browser Embeddings**: Choose any Transformers.js model (curated list or custom id) and a WebGPU/WASM backend, with the resolved dimension reported in the header. New sessions default to browser embeddings, so the first run works without a local embedding server ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **Playground Rebuilt as Layered Modules**: The 1.8k-line controller is now a 26-line entry over `core/` · `editor/` · `run/` · `panels/` · `dialogs/` · `shell/` · `services/`. Preference persistence, slice-run error attribution, dialog wiring, and result visibility were fixed in the process, and every website area gained an `AGENTS.md` guide ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-
-### ⚡ Performance & Internal Architecture
-- **Zero-Clone Batch Builds**: Ambient query and mutation batches move requests into the wire batch instead of cloning per member, with response normalization split into `executor/normalize.rs`. Same routes, responses, and retry semantics ([#165](https://github.com/srimon12/qql-rs/pull/165)).
-
 ## [0.4.1] - 2026-09-17
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
@@ -25,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI Script Non-Zero Exit**: `qql run` exits non-zero when any statement in a script fails, so CI/CD pipelines halt even in continue-on-error mode ([#158](https://github.com/srimon12/qql-rs/pull/158)).
 - **Strict 64-Bit Integers in JS**: Integers beyond `Number.MAX_SAFE_INTEGER` must be passed as `BigInt`; silent truncation of snowflake IDs is no longer possible ([#161](https://github.com/srimon12/qql-rs/pull/161)).
 - **Fail-Closed Converter & Planner**: Unsupported OpenAPI flags return typed `ConvertError`s instead of panicking; `SCROLL AFTER` max/UUID-max values and `CROSS RERANK` on non-`Hits` envelopes fail closed ([#150](https://github.com/srimon12/qql-rs/pull/150)).
+- **Stable `toJSON` Object Contract**: `Stmt.toJSON()` returns the BigInt-safe plain object (same as `toObject()`) on Node and WASM; `toJson()` stays the exact-text string. `JSON.stringify` throws on snowflake `BigInt` IDs by design instead of rounding or double-encoding ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Unified Batch Error Contract**: `Executor::execute_batch_nodes` and its batch internals take `OnError` instead of a `bool` flag ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Single `compile` Everywhere**: Module-level route compilation is now `compile` on Python, Node, and WASM (replacing `compile_query` / `compileQuery`); `Client.compile` and `Stmt.compile_route` are unchanged. WASM also drops `setRemoteEmbedder` (use `setHttpEmbedder`) and snake-case `inject_filter` (use `injectFilter`); `compileBytes` / `compileRouteBytes` accept `params` ([#167](https://github.com/srimon12/qql-rs/pull/167)).
 
 ### 🚀 Core Engine & Language
 - **Wire-Compatible BM25 Text Pipeline**: The document encoder is bit-for-bit compatible with Qdrant's `qdrant/bm25` across 30 languages (ASCII folding, stopword lists, custom vocabularies), so client-embedded sparse vectors are interchangeable with server-side inference ([#160](https://github.com/srimon12/qql-rs/pull/160)).
@@ -38,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured WASM Errors**: Errors thrown to JavaScript carry `.code` and `.fields` for programmatic handling ([#152](https://github.com/srimon12/qql-rs/pull/152)).
 - **Expanded Report Accessors**: `.collections()`, `.shard_keys()`, and `.quotas()` join the existing hit, point, and group accessors across every driver ([#153](https://github.com/srimon12/qql-rs/pull/153)).
 - **Edge Fail-Closed Options**: The edge backend rejects unsupported `timeout`, `consistency`, and `wait` options with typed error codes ([#151](https://github.com/srimon12/qql-rs/pull/151)).
+- **Batch Hits Shortcuts**: `execute_hits` / `executeHits` take a statement index across Python and Node, so batch results don't need manual `report.hits(N)` ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Portable Embedder Configs**: Python dict configs accept camelCase aliases (`apiKey`, `multiEndpoint`, `bm25K1`, …), matching Node ([#167](https://github.com/srimon12/qql-rs/pull/167)).
+- **Construction Errors, Lifecycle & Type Parity**: `nqql` Client errors carry `.code`; WASM gains `close()` / `isClosed`; `Executor::grpc` takes `impl Into<String>`; Node types include `bigint` IDs and `shard_key`; `.pyi` duplicate kwargs fixed ([#167](https://github.com/srimon12/qql-rs/pull/167)).
 
 ### 🌐 Website, Playground & DX
 - **`qql record` & Full Release Archives**: Zero-config Qdrant traffic capture now ships inside `qql-cli`, and releases publish both standard and `full` archives — the latter adding local ONNX inference and in-process `qdrant-edge` ([#164](https://github.com/srimon12/qql-rs/pull/164)).
@@ -49,12 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Direct Documentation Linking**: `?q=` and `?ref=` URL parameters open and run any docs example in the playground via "Try in playground ↗" ([#162](https://github.com/srimon12/qql-rs/pull/162)).
 - **Isolated Deploy CSP Headers**: Section-specific CSP headers stop policy stacking, letting the playground reach custom Qdrant and embedder endpoints ([#161](https://github.com/srimon12/qql-rs/pull/161)).
 - **Docs & Tooling Polish**: Command-copy preservation, lossless OG cards, Biome `rules.preset = "recommended"`, and resolved Astro i18n content warnings ([#147](https://github.com/srimon12/qql-rs/pull/147), [#148](https://github.com/srimon12/qql-rs/pull/148), [#162](https://github.com/srimon12/qql-rs/pull/162)).
+- **Statement-Aware Playground Execution**: Multi-statement scripts are first-class — a statement rail with per-statement status, an inspector navigator, and a split Run control. `⌘↵` runs the selection, the statement under the caret, or the exact line; `⇧⌘↵` runs the whole script. Results, errors, and inline diagnostics are attributed to the statement that produced them, with a persisted stop-on-error policy ([#166](https://github.com/srimon12/qql-rs/pull/166)).
+- **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).
+- **Configurable In-Browser Embeddings**: Choose any Transformers.js model (curated list or custom id) and a WebGPU/WASM backend, with the resolved dimension reported in the header. New sessions default to browser embeddings, so the first run works without a local embedding server ([#166](https://github.com/srimon12/qql-rs/pull/166)).
+- **Playground Rebuilt as Layered Modules**: The 1.8k-line controller is now a 26-line entry over `core/` · `editor/` · `run/` · `panels/` · `dialogs/` · `shell/` · `services/`. Preference persistence, slice-run error attribution, dialog wiring, and result visibility were fixed in the process, and every website area gained an `AGENTS.md` guide ([#166](https://github.com/srimon12/qql-rs/pull/166)).
 
 ### ⚡ Performance & Internal Architecture
 - **Single-Pass Planning Core**: Query and mutation planning share one `plan_and_project` core, removing redundant allocations and intermediate JSON clones ([#158](https://github.com/srimon12/qql-rs/pull/158), [#159](https://github.com/srimon12/qql-rs/pull/159)).
 - **Batch Embedding Walks**: Dense, sparse, and multi-vector query embeddings are batched, cutting roundtrips during hybrid search ([#154](https://github.com/srimon12/qql-rs/pull/154)).
 - **Topology & Schema Caching**: Collection topologies are cached across statements, minimizing metadata roundtrips ([#154](https://github.com/srimon12/qql-rs/pull/154)).
 - **Single HTTP Sender**: REST transport is consolidated into one HTTP sender with a unified response-envelope path ([#159](https://github.com/srimon12/qql-rs/pull/159)).
+- **Zero-Clone Batch Builds**: Ambient query and mutation batches move requests into the wire batch instead of cloning per member, with response normalization split into `executor/normalize.rs`. Same routes, responses, and retry semantics ([#165](https://github.com/srimon12/qql-rs/pull/165)).
 
 ## [0.4.0] - 2026-09-12
 

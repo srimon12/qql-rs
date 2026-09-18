@@ -61,7 +61,7 @@ client.free();
 | Export | Role |
 |--------|------|
 | `parse` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
-| `injectFilter` (`inject_filter` alias kept for back-compat) | Isolation |
+| `injectFilter` | Isolation |
 | `analyze` | tokens + AST + route(s) + explain |
 | `compile` / `explain` | Offline REST projection / plan text |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
@@ -72,7 +72,7 @@ client.free();
 |--------|------|
 | `injectFilter` | Isolation |
 | `shardKey` | Get/set routing (= QQL `SHARD`) |
-| `toJSON` / `toObject` / `compileRoute` | Serialize / project |
+| `toJson` (string) / `toJSON` (= `toObject`, `JSON.stringify` hook) / `compileRoute` | Serialize / project |
 
 ### `Client` (`client` feature)
 

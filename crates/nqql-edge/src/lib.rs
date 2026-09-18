@@ -229,7 +229,7 @@ pub fn tokenize(input: String) -> napi::Result<common::jsoutput::BigIntSafeJson>
 }
 
 #[napi(catch_unwind)]
-pub fn compile_query(
+pub fn compile(
     input: String,
     params: Unknown<'_>,
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {

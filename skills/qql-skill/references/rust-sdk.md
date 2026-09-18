@@ -18,8 +18,10 @@ serde_json = "1"
 | Feature | Description | Default |
 |---------|-------------|---------|
 | `rest` | HTTP REST client (reqwest) | yes |
-| `grpc` | gRPC client (tonic) | no |
-| `edge` | In-process execution via qdrant-edge | no |
+| `grpc` | gRPC client (tonic) | yes |
+
+In-process execution lives in the separate `qql-edge` crate — there is no
+`edge` feature on `qql`.
 
 ---
 
@@ -78,7 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Prefer `Executor::rest()` or `Executor::grpc()` over manual construction. If you need a custom HTTP client, use the four-argument constructor:
+Prefer `Executor::rest()` or `Executor::grpc()` over manual construction.
+Both take `impl Into<String>` URLs, so `&str` and `String` both work.
+If you need a custom HTTP client, use the three-argument constructor:
 
 ```rust
 use qql::executor::{Executor, OnError};
@@ -183,6 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use qql::executor::{Executor, OnError};
+use qql_core::parser::Parser;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -236,7 +241,7 @@ println!("{} {}", route.method.as_str(), route.path);
 `execute()` auto-detects semicolons -- one call to deploy a complete schema. Same-collection QUERY statements are automatically batch-grouped.
 
 ```rust
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

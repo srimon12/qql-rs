@@ -92,10 +92,10 @@ assert.strictEqual(stmtRoute.method, "POST");
 assert.strictEqual(stmtRoute.path, "/collections/docs/points/query");
 console.log("  ✓ Stmt constructor & compileRoute");
 
-const route = nqql.compileQuery(query);
+const route = nqql.compile(query);
 assert.strictEqual(route.method, "POST");
 assert.strictEqual(route.path, "/collections/docs/points/query");
-console.log("  ✓ compileQuery");
+console.log("  ✓ compile");
 
 const plan = nqql.explain("QUERY 'hello' FROM docs LIMIT 10");
 assert(plan.includes("Statement: QUERY"));

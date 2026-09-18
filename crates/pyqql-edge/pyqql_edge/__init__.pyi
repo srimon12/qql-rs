@@ -171,7 +171,7 @@ def parse(input: str) -> List[Stmt]: ...
 def parse_json(input: str) -> str: ...
 def is_valid(input: str) -> bool: ...
 def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
-def compile_query(
+def compile(
     query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None
 ) -> Dict[str, Any]: ...
 def tokenize(input: str) -> List[Dict[str, Any]]: ...
@@ -205,7 +205,8 @@ def local_executor(
     bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
-    bm25_stopwords_languages: Optional[List[str]] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords_languages: Optional[List[str]] = None,
 ) -> Client: ...
 def http_executor(
@@ -227,7 +228,8 @@ def http_executor(
     bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
-    bm25_stopwords_languages: Optional[List[str]] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords_languages: Optional[List[str]] = None,
 ) -> Client: ...
 def list_embedding_models() -> List[Dict[str, Any]]: ...
@@ -255,7 +257,8 @@ def execute(
     bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
-    bm25_stopwords_languages: Optional[List[str]] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords_languages: Optional[List[str]] = None,
     on_error: str = "stop",
 ) -> ExecutionReport: ...
@@ -283,7 +286,8 @@ async def execute_async(
     bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
-    bm25_stopwords_languages: Optional[List[str]] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords_languages: Optional[List[str]] = None,
     on_error: str = "stop",
 ) -> ExecutionReport: ...

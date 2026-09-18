@@ -5,7 +5,7 @@ use qql_core::error::QqlError;
 use qql_plan::{PlannedOperation, plan};
 
 use crate::executor::response::{BackendResponse, ExecData, score_f64};
-use crate::executor::{ExecResponse, Executor, SearchHit};
+use crate::executor::{ExecResponse, Executor, OnError, SearchHit};
 
 impl Executor {
     /// Execute one parsed statement under the configured timeout, returning a
@@ -63,7 +63,8 @@ impl Executor {
         // path (`execute_batch_nodes`).
         if matches!(op, PlannedOperation::Batch { .. }) {
             let mut results = Vec::new();
-            self.execute_batch_op(op, true, &mut results).await?;
+            self.execute_batch_op(op, OnError::Stop, &mut results)
+                .await?;
             let total = results.len();
             let ok_count = results.iter().filter(|r| r.ok).count();
             return Ok(ExecResponse {

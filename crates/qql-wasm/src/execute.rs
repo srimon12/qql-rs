@@ -6,7 +6,7 @@ use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 use super::client::Client;
-use super::functions::{compile, qql_err_to_js, to_js_value};
+use super::functions::{qql_err_to_js, to_js_value};
 use super::params::{
     WasmOnError, batch_size_from, bind_stmt_values, bind_value_params, extract_ast_stmt,
     jsvalue_to_value, maybe_bind, options_params, parse_on_error,
@@ -299,16 +299,11 @@ impl Client {
     }
 
     /// Parse and compile one statement without executing it. Optional
-    /// `params` bind before parsing (same shape as the module-level `bind`).
+    /// `params` bind before parsing (same shape as the module-level `bind`
+    /// and `compile`).
     #[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
     pub fn compile(&self, query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
-        compile(query, params)
-    }
-
-    /// Parse and compile one statement without executing it. Alias for `compile`.
-    #[wasm_bindgen(js_name = compileQuery, unchecked_return_type = "CompiledRoute")]
-    pub fn compile_query(&self, query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
-        compile(query, params)
+        super::functions::compile_query(query, params)
     }
 
     /// Parse and explain the query — no server needed.

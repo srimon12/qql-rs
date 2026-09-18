@@ -53,7 +53,7 @@ test('exports: parseJson', () => assert.strictEqual(typeof nqql.parseJson, 'func
 test('exports: isValid', () => assert.strictEqual(typeof nqql.isValid, 'function'));
 test('exports: injectFilter', () => assert.strictEqual(typeof nqql.injectFilter, 'function'));
 test('exports: tokenize', () => assert.strictEqual(typeof nqql.tokenize, 'function'));
-test('exports: compileQuery', () => assert.strictEqual(typeof nqql.compileQuery, 'function'));
+test('exports: compile', () => assert.strictEqual(typeof nqql.compile, 'function'));
 test('exports: explain', () => assert.strictEqual(typeof nqql.explain, 'function'));
 test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, 'function'));
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
@@ -63,7 +63,7 @@ test('exports: scrollCursor', () => assert.strictEqual(typeof nqql.scrollCursor,
 test('exports: scrollStream', () => assert.strictEqual(typeof nqql.scrollStream, 'function'));
 test('exports: version', () => assert.strictEqual(typeof nqql.version, 'string'));
 
-const knownKeys = ['Client','ExecutionReport','ScoredPoint','Stmt','bind','compileQuery','execute','executeHits','executeStmt',
+const knownKeys = ['Client','ExecutionReport','ScoredPoint','Stmt','bind','compile','execute','executeHits','executeStmt',
   'explain','explainStmt','httpExecutor','injectFilter','isValid','listEmbeddingModels',
   'localExecutor','parse','parseJson','scrollCursor','scrollStream','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
@@ -75,10 +75,13 @@ test('no extra exports', () => {
 const stmt = nqql.parse('SHOW COLLECTIONS')[0];
 test('Stmt instance methods: toObject', () => assert.strictEqual(typeof stmt.toObject, 'function'));
 test('Stmt instance methods: injectFilter', () => assert.strictEqual(typeof stmt.injectFilter, 'function'));
-test('Stmt.toJson and Stmt.toJSON both exist', () => {
+test('Stmt.toJson (string) and Stmt.toJSON (object hook) differ by design', () => {
   assert.strictEqual(typeof stmt.toJson, 'function');
   assert.strictEqual(typeof stmt.toJSON, 'function');
-  assert.strictEqual(stmt.toJson(), stmt.toJSON());
+  // toJson() is exact text for transport; toJSON() is the JSON.stringify
+  // hook and must return the BigInt-safe plain object, same as toObject().
+  assert.strictEqual(typeof stmt.toJson(), 'string');
+  assert.deepStrictEqual(stmt.toJSON(), stmt.toObject());
 });
 test('Stmt.shardKey property (get)', () => assert.strictEqual(stmt.shardKey, null));
 test('Stmt.shardKey setter supports DELETE PAYLOAD', () => {
@@ -236,8 +239,8 @@ test('injectFilter Stmt method in-place', () => {
 // ============================================================================
 console.log('\n========== E. Route Compilation & Model Discovery ==========');
 
-test('compileQuery returns route object', () => {
-  const route = nqql.compileQuery('QUERY TEXT "hello" FROM docs LIMIT 5');
+test('compile returns route object', () => {
+  const route = nqql.compile('QUERY TEXT "hello" FROM docs LIMIT 5');
   assert.strictEqual(route.method, 'POST');
   assert.strictEqual(route.path, '/collections/docs/points/query');
   assert.strictEqual(route.stmt_type, 'query');

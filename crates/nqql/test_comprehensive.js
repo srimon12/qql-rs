@@ -94,7 +94,7 @@ test('exports: parseJson', () => assert.strictEqual(typeof nqql.parseJson, 'func
 test('exports: isValid', () => assert.strictEqual(typeof nqql.isValid, 'function'));
 test('exports: injectFilter', () => assert.strictEqual(typeof nqql.injectFilter, 'function'));
 test('exports: tokenize', () => assert.strictEqual(typeof nqql.tokenize, 'function'));
-test('exports: compileQuery', () => assert.strictEqual(typeof nqql.compileQuery, 'function'));
+test('exports: compile', () => assert.strictEqual(typeof nqql.compile, 'function'));
 test('exports: explain', () => assert.strictEqual(typeof nqql.explain, 'function'));
 test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, 'function'));
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
@@ -104,7 +104,7 @@ test('exports: scrollCursor', () => assert.strictEqual(typeof nqql.scrollCursor,
 test('exports: scrollStream', () => assert.strictEqual(typeof nqql.scrollStream, 'function'));
 
 // Unknown exports check
-const knownKeys = ['Client','ExecutionReport','HttpEmbedder','ScoredPoint','Stmt','bind','compileQuery','execute','executeHits','executeStmt',
+const knownKeys = ['Client','ExecutionReport','HttpEmbedder','ScoredPoint','Stmt','bind','compile','execute','executeHits','executeStmt',
   'explain','explainStmt','injectFilter','isValid','parse','parseJson','scrollCursor','scrollStream','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
@@ -115,9 +115,13 @@ test('no extra exports', () => {
 const stmt = nqql.parse('SHOW COLLECTIONS')[0];
 test('Stmt instance methods: toObject', () => assert.strictEqual(typeof stmt.toObject, 'function'));
 test('Stmt instance methods: injectFilter', () => assert.strictEqual(typeof stmt.injectFilter, 'function'));
-test('Stmt.toJson and Stmt.toJSON both exist', () => {
+test('Stmt.toJson (string) and Stmt.toJSON (object hook) differ by design', () => {
   assert.strictEqual(typeof stmt.toJson, 'function');
   assert.strictEqual(typeof stmt.toJSON, 'function');
+  // toJson() is exact text for transport; toJSON() is the JSON.stringify
+  // hook and must return the BigInt-safe plain object, same as toObject().
+  assert.strictEqual(typeof stmt.toJson(), 'string');
+  assert.deepStrictEqual(stmt.toJSON(), stmt.toObject());
 });
 test('Stmt.shardKey property (get)', () => assert.strictEqual(stmt.shardKey, null));
 
@@ -625,10 +629,10 @@ test('Client with embedder (including rerank fields) constructs w/o error', () =
 });
 
 // ============================================================================
-console.log('\n========== G. compileQuery Route Contract ==========');
+console.log('\n========== G. compile Route Contract ==========');
 
-test('compileQuery returns { method, path, payload, stmt_type }', () => {
-  const route = nqql.compileQuery('QUERY TEXT "hello" FROM docs LIMIT 5');
+test('compile returns { method, path, payload, stmt_type }', () => {
+  const route = nqql.compile('QUERY TEXT "hello" FROM docs LIMIT 5');
   assert.ok(typeof route === 'object');
   assert.ok('method' in route);
   assert.ok('path' in route);
@@ -636,25 +640,25 @@ test('compileQuery returns { method, path, payload, stmt_type }', () => {
   assert.ok('stmt_type' in route);
 });
 
-test('compileQuery stmt_type is snake_case', () => {
-  const route = nqql.compileQuery('QUERY TEXT "hello" FROM docs LIMIT 5');
+test('compile stmt_type is snake_case', () => {
+  const route = nqql.compile('QUERY TEXT "hello" FROM docs LIMIT 5');
   // NOTE: it's stmt_type not stmtType
   assert.strictEqual(route.stmt_type, 'query');
   assert.strictEqual('stmtType' in route, false);
 });
 
-test('compileQuery QUERY method is POST', () => {
-  const route = nqql.compileQuery('QUERY TEXT "hello" FROM docs LIMIT 5');
+test('compile QUERY method is POST', () => {
+  const route = nqql.compile('QUERY TEXT "hello" FROM docs LIMIT 5');
   assert.strictEqual(route.method, 'POST');
 });
 
-test('compileQuery QUERY path includes /points/query', () => {
-  const route = nqql.compileQuery('QUERY TEXT "hello" FROM docs LIMIT 5');
+test('compile QUERY path includes /points/query', () => {
+  const route = nqql.compile('QUERY TEXT "hello" FROM docs LIMIT 5');
   assert.ok(route.path.includes('/points/query'));
 });
 
-test('compileQuery QUERY payload has limit', () => {
-  const route = nqql.compileQuery('QUERY TEXT "hello" FROM docs LIMIT 5');
+test('compile QUERY payload has limit', () => {
+  const route = nqql.compile('QUERY TEXT "hello" FROM docs LIMIT 5');
   assert.strictEqual(route.payload.limit, 5);
 });
 
@@ -946,8 +950,8 @@ async function runE2E() {
     assert.ok(Array.isArray(parsed));
   });
 
-  test('compileQuery for SCROLL', () => {
-    const route = nqql.compileQuery('SCROLL FROM docs LIMIT 10');
+  test('compile for SCROLL', () => {
+    const route = nqql.compile('SCROLL FROM docs LIMIT 10');
     assert.strictEqual(typeof route, 'object');
     assert.ok('stmt_type' in route);
   });

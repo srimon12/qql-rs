@@ -160,7 +160,7 @@ impl PyClient {
         query: &str,
         params: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        common::compile_query(py, query, params)
+        common::compile(py, query, params)
     }
 
     /// Bulk ingest: `rows` is a list of point dicts
@@ -275,7 +275,7 @@ fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(common::is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(common::inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(common::tokenize, m)?)?;
-    m.add_function(wrap_pyfunction!(common::compile_query, m)?)?;
+    m.add_function(wrap_pyfunction!(common::compile, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
