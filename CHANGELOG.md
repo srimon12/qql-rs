@@ -9,15 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 🌐 Website, Playground & DX
-- **Statement-Aware Playground Execution**: Multi-statement scripts are first-class — a statement rail with per-statement status, an inspector navigator, and a split Run control. `⌘↵` runs the selection, the statement under the caret, or the exact line; `⇧⌘↵` runs the whole script. Results, errors, and inline diagnostics are attributed to the statement that produced them, with a persisted stop-on-error policy ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **Configurable In-Browser Embeddings**: Choose any Transformers.js model (curated list or custom id) and a WebGPU/WASM backend, with the resolved dimension reported in the header. New sessions default to browser embeddings, so the first run works without a local embedding server ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **Playground Rebuilt as Layered Modules**: The 1.8k-line controller is now a 26-line entry over `core/` · `editor/` · `run/` · `panels/` · `dialogs/` · `shell/` · `services/`. Preference persistence, slice-run error attribution, dialog wiring, and result visibility were fixed in the process, and every website area gained an `AGENTS.md` guide ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-
-### ⚡ Performance & Internal Architecture
-- **Zero-Clone Batch Builds**: Ambient query and mutation batches move requests into the wire batch instead of cloning per member, with response normalization split into `executor/normalize.rs`. Same routes, responses, and retry semantics ([#165](https://github.com/srimon12/qql-rs/pull/165)).
-
 ## [0.4.1] - 2026-09-17
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
@@ -55,12 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Direct Documentation Linking**: `?q=` and `?ref=` URL parameters open and run any docs example in the playground via "Try in playground ↗" ([#162](https://github.com/srimon12/qql-rs/pull/162)).
 - **Isolated Deploy CSP Headers**: Section-specific CSP headers stop policy stacking, letting the playground reach custom Qdrant and embedder endpoints ([#161](https://github.com/srimon12/qql-rs/pull/161)).
 - **Docs & Tooling Polish**: Command-copy preservation, lossless OG cards, Biome `rules.preset = "recommended"`, and resolved Astro i18n content warnings ([#147](https://github.com/srimon12/qql-rs/pull/147), [#148](https://github.com/srimon12/qql-rs/pull/148), [#162](https://github.com/srimon12/qql-rs/pull/162)).
+- **Statement-Aware Playground Execution**: Multi-statement scripts are first-class — a statement rail with per-statement status, an inspector navigator, and a split Run control. `⌘↵` runs the selection, the statement under the caret, or the exact line; `⇧⌘↵` runs the whole script. Results, errors, and inline diagnostics are attributed to the statement that produced them, with a persisted stop-on-error policy ([#166](https://github.com/srimon12/qql-rs/pull/166)).
+- **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).
+- **Configurable In-Browser Embeddings**: Choose any Transformers.js model (curated list or custom id) and a WebGPU/WASM backend, with the resolved dimension reported in the header. New sessions default to browser embeddings, so the first run works without a local embedding server ([#166](https://github.com/srimon12/qql-rs/pull/166)).
+- **Playground Rebuilt as Layered Modules**: The 1.8k-line controller is now a 26-line entry over `core/` · `editor/` · `run/` · `panels/` · `dialogs/` · `shell/` · `services/`. Preference persistence, slice-run error attribution, dialog wiring, and result visibility were fixed in the process, and every website area gained an `AGENTS.md` guide ([#166](https://github.com/srimon12/qql-rs/pull/166)).
 
 ### ⚡ Performance & Internal Architecture
 - **Single-Pass Planning Core**: Query and mutation planning share one `plan_and_project` core, removing redundant allocations and intermediate JSON clones ([#158](https://github.com/srimon12/qql-rs/pull/158), [#159](https://github.com/srimon12/qql-rs/pull/159)).
 - **Batch Embedding Walks**: Dense, sparse, and multi-vector query embeddings are batched, cutting roundtrips during hybrid search ([#154](https://github.com/srimon12/qql-rs/pull/154)).
 - **Topology & Schema Caching**: Collection topologies are cached across statements, minimizing metadata roundtrips ([#154](https://github.com/srimon12/qql-rs/pull/154)).
 - **Single HTTP Sender**: REST transport is consolidated into one HTTP sender with a unified response-envelope path ([#159](https://github.com/srimon12/qql-rs/pull/159)).
+- **Zero-Clone Batch Builds**: Ambient query and mutation batches move requests into the wire batch instead of cloning per member, with response normalization split into `executor/normalize.rs`. Same routes, responses, and retry semantics ([#165](https://github.com/srimon12/qql-rs/pull/165)).
 
 ## [0.4.0] - 2026-09-12
 
