@@ -86,6 +86,23 @@ export async function start(): Promise<void> {
 	await initializeRuntime(initialDoc, editorLoading);
 }
 
+/** Trust only same-origin http(s) backlinks; docs "Try in playground" links
+ * always pass a relative docs path as `?ref=`, so this changes nothing for
+ * legitimate traffic while keeping an attacker-crafted `?ref=javascript:...`
+ * or cross-origin URL from reaching the anchor (fail-closed: hidden). */
+function safeBacklinkUrl(input: string | null): string | null {
+	if (!input) return null;
+	try {
+		const parsed = new URL(input, window.location.origin);
+		const isHttp = parsed.protocol === "http:" || parsed.protocol === "https:";
+		if (!isHttp) return null;
+		if (parsed.origin !== window.location.origin) return null;
+		return parsed.href;
+	} catch {
+		return null;
+	}
+}
+
 /** `?q=` wins over the localStorage snapshot, which wins over the default. */
 function resolveInitialDocument(workspace: HTMLElement | null): string {
 	const params = new URLSearchParams(window.location.search);
@@ -102,10 +119,11 @@ function resolveInitialDocument(workspace: HTMLElement | null): string {
 		);
 	}
 	const backlink = query<HTMLAnchorElement>("[data-docs-backlink]");
-	if (backlink && urlRef) {
-		backlink.href = urlRef;
+	const safeRef = safeBacklinkUrl(urlRef);
+	if (backlink && safeRef) {
+		backlink.href = safeRef;
 		backlink.hidden = false;
-		backlink.textContent = urlRef.includes("quickstart")
+		backlink.textContent = safeRef.includes("quickstart")
 			? "Back to Quickstart →"
 			: "Back to docs →";
 	}
