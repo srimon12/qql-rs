@@ -77,7 +77,7 @@ TARGET="${ARCH}-${OS}"
 echo "✨ Target platform: ${TARGET}"
 
 case "$TARGET" in
-  x86_64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|aarch64-unknown-linux-gnu) ;;
+  x86_64-unknown-linux-gnu|aarch64-apple-darwin|aarch64-unknown-linux-gnu) ;;
   *)
     echo "❌ Unsupported target platform: ${TARGET}"
     exit 1

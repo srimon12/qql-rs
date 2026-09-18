@@ -104,9 +104,6 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             exe: ""
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            exe: ""
           - os: macos-15
             target: aarch64-apple-darwin
             exe: ""
@@ -185,9 +182,6 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: "2_28"
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            manylinux: auto
           - os: macos-15
             target: aarch64-apple-darwin
             manylinux: auto
@@ -282,9 +276,6 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             rustflags: ""
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            rustflags: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
           - os: macos-15
             target: aarch64-apple-darwin
             rustflags: "-C link-arg=-undefined -C link-arg=dynamic_lookup"

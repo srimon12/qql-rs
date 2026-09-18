@@ -6,7 +6,9 @@
 // once blocked the playground from reaching user-configured Qdrant/embedder
 // origins (localhost, LAN, custom domains) despite `/playground/*` allowing
 // them. The invariant: every built HTML route must match exactly ONE rule
-// carrying a CSP, and the playground's CSP must keep `http:` in connect-src.
+// carrying a CSP, and the playground's CSP must keep `http:` in connect-src
+// and `blob:` in script-src (localhost Qdrant/embedder origins and the
+// Transformers.js WASM backend, respectively).
 // Usage: node scripts/check-headers.mjs (runs post-build in `pnpm check`).
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -86,6 +88,12 @@ for (const route of htmlRoutes(dist)) {
 		if (!/(^|\s)http:(\s|$)/.test(connect)) {
 			failures.push(
 				"/playground/: connect-src lost `http:` (localhost Qdrant blocked)",
+			);
+		}
+		const script = /script-src([^;]*)/.exec(policy)?.[1] ?? "";
+		if (!/(^|\s)blob:(\s|$)/.test(script)) {
+			failures.push(
+				"/playground/: script-src lost `blob:` (Transformers.js WASM backend blocked)",
 			);
 		}
 	}

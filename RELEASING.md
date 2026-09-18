@@ -23,7 +23,6 @@ are:
 
 - Linux x86-64 with glibc;
 - Linux ARM64 with glibc;
-- macOS x86-64;
 - macOS Apple Silicon;
 - Windows x86-64.
 
@@ -60,7 +59,6 @@ Packages that must each have a Trusted Publisher:
 @veristamp/nqql
 @veristamp/nqql-linux-x64-gnu
 @veristamp/nqql-linux-arm64-gnu
-@veristamp/nqql-darwin-x64
 @veristamp/nqql-darwin-arm64
 @veristamp/nqql-win32-x64-msvc
 @veristamp/nqql-edge

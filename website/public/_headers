@@ -25,7 +25,8 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://stats.veristamp.in https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' data:; font-src 'self' data:; img-src 'self' data: blob: https:; connect-src 'self' http: https: blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+  # script-src blob:: Transformers.js onnxruntime WASM backend dynamically imports blob: modules
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://stats.veristamp.in https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' data:; font-src 'self' data:; img-src 'self' data: blob: https:; connect-src 'self' http: https: blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 
 # Section policies: Cloudflare sends headers from EVERY matching rule, and
 # browsers enforce ALL received CSP headers (intersection). A CSP on `/*`
