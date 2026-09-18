@@ -4,7 +4,7 @@
  */
 import nqql from '../../crates/nqql/index.js';
 
-const { parse, isValid, explain, compileQuery, Client, HttpEmbedder, version } = nqql;
+const { parse, isValid, explain, compile, Client, HttpEmbedder, version } = nqql;
 
 const USERS = {
   alice: { tenant: 'lab-alpha', role: 'admin' },
@@ -78,7 +78,7 @@ const q19 = [
 ];
 console.log('\n── Qdrant 1.19 surface (offline) ──');
 for (const s of q19) {
-  const r = compileQuery(s);
+  const r = compile(s);
   console.log(`  valid=${isValid(s)}  ${r.method} ${r.path}`);
 }
 

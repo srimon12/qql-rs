@@ -34,8 +34,20 @@ ARTIFACTS=(
 # Codes emitted outside SCAN_ROOTS. Each entry is verified below to still be
 # emitted somewhere in the workspace, so this list cannot rot silently.
 # - QQL-BIND-ALREADY-BOUND: pyqql-common, nqql-common, qql-wasm statement bind.
+# - QQL-BIND-HEADER: qql-cli parameter header parsing in lint.
+# - QQL-FMT-NON-CANONICAL: qql-cli formatting check in lint.
+# - QQL-IDIOM-REDUNDANT-PAYLOAD: qql-cli lint idiom rule.
+# - QQL-SERIALIZE: qql-wasm response serialization.
+# - QQL-SERIALIZE-AST: nqql-common AST JSON serialization.
+# - QQL-VALIDATION-ANALYZE-BATCH: pyqql-common, nqql-common, qql-wasm analyze dispatch.
 ALLOWLIST=(
   'QQL-BIND-ALREADY-BOUND'
+  'QQL-BIND-HEADER'
+  'QQL-FMT-NON-CANONICAL'
+  'QQL-IDIOM-REDUNDANT-PAYLOAD'
+  'QQL-SERIALIZE'
+  'QQL-SERIALIZE-AST'
+  'QQL-VALIDATION-ANALYZE-BATCH'
 )
 
 fail=0

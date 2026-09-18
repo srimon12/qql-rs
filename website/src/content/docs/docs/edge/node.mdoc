@@ -113,7 +113,8 @@ const client = httpExecutor(
 | `client.compile(query, params?)` | Non-executing `{stmt_type, method, path, payload}` route (optionally binding params) |
 | `client.close()` | Flush and release edge storage. Idempotent |
 
-`execute` returns an `ExecutionReport`:
+`execute` returns an `ExecutionReport` with typed `data` per operation
+(no `result` envelope — query hits are a bare array, matching the remote SDKs):
 
 ```javascript
 {
@@ -123,12 +124,15 @@ const client = httpExecutor(
       ok: true,
       operation: "QUERY",
       message: "Found 10 hits",
-      data: { result: { points: [{ id: 1, score: 0.75, payload: { text: "hello" } }] } },
+      data: [{ id: 1, score: 0.75, payload: { text: "hello" } }],
     },
   ],
   succeeded: 1,
   failed: 0,
 }
+// FACET data: [{ value, count }]; COUNT data: { count: N };
+// SHOW COLLECTIONS data: { collections: [...] };
+// SHOW SHARD KEYS data: { shard_keys: [...] }.
 ```
 
 `Stmt` objects come from `parse()` and support `stmt.injectFilter(field, op,
@@ -140,9 +144,14 @@ supported tenant-scoping mechanism. Edge has no custom `SHARD` routing, so a
 [capabilities](/docs/edge/capabilities/).
 
 The edge `ExecutionReport` also exposes typed accessors: `report.hits(stmt)` /
-`report.points(stmt)` return `ScoredPoint` objects (`id`, `score`, `payload`,
-`text`, `collection`), `report.facet(stmt)` returns normalized
-`[{ value, count }]`, and `report.count(stmt)` returns an integer. A negative
+`report.points(stmt)` / `report.ids(stmt)` return `ScoredPoint` objects (`id`,
+`score`, `payload`, `text`, `collection`; `.get(key, default?)` is
+attribute-first, `.withoutPayload()` strips the payload),
+`report.facet(stmt)` returns normalized
+`[{ value, count }]`, `report.count(stmt)` returns an integer,
+`report.groups(stmt)` returns `[{ id, hits }]`, and
+`report.collections(stmt)` / `report.collection(stmt)` /
+`report.shardKeys(stmt)` read the inspect results. A negative
 statement index counts from the end, matching Python list semantics.
 
 ## Module-level helpers
@@ -154,7 +163,7 @@ statement index counts from the end, matching Python list semantics.
 | `isValid(query)` | Boolean parse + plan check |
 | `injectFilter(query, field, op, value)` | Return a filtered statement |
 | `tokenize(query)` | Token list `{kind, text, pos, end, len}` |
-| `compileQuery(query, params?)` | Non-executing route (optionally binding params) |
+| `compile(query, params?)` | Non-executing route (optionally binding params) |
 | `bind(query, params?, { truncateVectors? })` | Substitute `:name` (object) or `?` (array) placeholders into a string or `Stmt` |
 | `explain(query)` / `explainStmt(stmt)` | Plan rendering |
 | `listEmbeddingModels()` | Catalog of loadable ONNX models |
@@ -165,6 +174,25 @@ statement index counts from the end, matching Python list semantics.
 
 Supported injected operators: `=`, `>`, `>=`, `<`, `<=` (`!=` is rejected by
 design; wrap equality and negate instead).
+
+## Lazy scroll cursor & streams
+
+`client.scrollCursor(collection, options)` pages lazily through a collection —
+at most one page is ever buffered — and `client.scrollStream(collection,
+options)` wraps it in a pull-driven WHATWG `ReadableStream`. Module-level
+`scrollCursor` / `scrollStream` take the client first:
+
+```javascript
+for await (const point of client.scrollCursor("docs", { batchSize: 500 })) {
+  await processPoint(point);
+}
+client.scrollStream("docs", { batchSize: 500 }).pipeTo(writableStream);
+```
+
+Options: `batchSize` (default 100), `where` (QQL filter fragment), `params`
+(named bindings), `shardKey` (accepted but edge has no custom shard routing —
+a `SHARD` clause fails with `QQL-EDGE-UNSUPPORTED-SHARD`), `withPayload`
+(default true), `withVector` (default false).
 
 ## Errors
 

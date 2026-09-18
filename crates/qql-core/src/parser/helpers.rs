@@ -11,6 +11,17 @@ impl<'a> AstLowerer<'a> {
         self.decode_string(token)
     }
 
+    /// Parse an identifier like [`Self::parse_identifier`], also returning the
+    /// source span of the consumed token for error threading.
+    ///
+    /// Acceptance is identical to [`Self::parse_identifier`] (same token kinds,
+    /// same errors) — the span is storage only, never a grammar change.
+    pub fn parse_identifier_with_span(&mut self) -> Result<(String, Span), QqlError> {
+        let span = self.peek()?.span;
+        let name = self.parse_identifier()?;
+        Ok((name, span))
+    }
+
     pub fn parse_required_model_string(&mut self) -> Result<String, QqlError> {
         self.expect(TokenKind::Model)?;
         self.parse_string()

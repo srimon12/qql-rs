@@ -8,7 +8,7 @@ use qql_core::parser::Parser;
 use qql_plan::routing;
 use wasm_bindgen::prelude::*;
 
-use super::functions::{compiled_route_json, parse_comparison_op, to_js_value};
+use super::functions::{compiled_route_json, parse_comparison_op, qql_err_to_js, to_js_value};
 
 // ── Stmt class ─────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ impl Stmt {
     /// Parse a QQL string into a Stmt object for programmatic manipulation.
     #[wasm_bindgen(constructor)]
     pub fn new(input: &str) -> Result<Stmt, JsValue> {
-        let inner = Parser::parse(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let inner = Parser::parse(input).map_err(qql_err_to_js)?;
         Ok(Stmt {
             inner,
             bound: false,
@@ -33,11 +33,9 @@ impl Stmt {
     /// Inject a WHERE filter into this statement's AST (mutates in place).
     #[wasm_bindgen(js_name = injectFilter)]
     pub fn inject_filter(&mut self, field: &str, op: &str, value: JsValue) -> Result<(), JsValue> {
-        let val = super::params::jsvalue_to_value(&value)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let val = super::params::jsvalue_to_value(&value).map_err(qql_err_to_js)?;
         let cmp = parse_comparison_op(op)?;
-        ast::inject_filter(&mut self.inner, field, cmp, val)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        ast::inject_filter(&mut self.inner, field, cmp, val).map_err(qql_err_to_js)?;
         Ok(())
     }
 
@@ -60,8 +58,7 @@ impl Stmt {
 
     #[wasm_bindgen(setter, js_name = shardKey)]
     pub fn set_shard_key(&mut self, key: JsValue) -> Result<(), JsValue> {
-        let key = super::params::jsvalue_to_shard_key(&key)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let key = super::params::jsvalue_to_shard_key(&key).map_err(qql_err_to_js)?;
         if !self.inner.set_shard_key(key) {
             return Err(JsValue::from_str(
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
@@ -76,10 +73,20 @@ impl Stmt {
         self.bound
     }
 
-    /// Serialise the AST to a JSON string.
-    #[wasm_bindgen(js_name = toJSON)]
+    /// Serialise the AST to an exact-text JSON string for
+    /// transport/forwarding without JS parsing.
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).
+    ///
+    /// NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+    /// use [`to_json`](Self::to_json) for exact text.
+    #[wasm_bindgen(js_name = toJSON)]
+    pub fn to_json_object(&self) -> Result<JsValue, JsValue> {
+        to_js_value(&self.inner)
     }
 
     /// Serialise the AST to a JS object.
@@ -108,8 +115,7 @@ impl Stmt {
         let mut stmt = self.inner.clone();
         if binds_now {
             let p = params.unwrap();
-            let parsed = super::params::jsvalue_to_value(&p)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let parsed = super::params::jsvalue_to_value(&p).map_err(qql_err_to_js)?;
             super::params::bind_stmt_values(&mut stmt, &parsed)?;
         }
         Ok(Stmt {
@@ -153,21 +159,42 @@ impl Stmt {
         let mut stmt = self.inner.clone();
         if binds_now {
             let p = params.unwrap();
-            let parsed = super::params::jsvalue_to_value(&p)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let parsed = super::params::jsvalue_to_value(&p).map_err(qql_err_to_js)?;
             super::params::bind_stmt_values(&mut stmt, &parsed)?;
         }
-        let compiled =
-            routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
         let output = compiled_route_json(&compiled);
         to_js_value(&output)
     }
 
     /// Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+    /// Optionally accepts `params` to bind before compiling.
     #[wasm_bindgen(js_name = compileRouteBytes)]
-    pub fn compile_route_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
-        let compiled = routing::compile_statement(&self.inner)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    pub fn compile_route_bytes(
+        &self,
+        params: Option<JsValue>,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        let binds_now = params
+            .as_ref()
+            .map(|p| !p.is_undefined() && !p.is_null())
+            .unwrap_or(false);
+        if binds_now && self.bound {
+            return Err(JsValue::from_str(
+                &serde_json::to_string(&QqlError::validation(
+                    "QQL-BIND-ALREADY-BOUND",
+                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+                    None,
+                ))
+                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
+            ));
+        }
+        let mut stmt = self.inner.clone();
+        if binds_now {
+            let p = params.unwrap();
+            let parsed = super::params::jsvalue_to_value(&p).map_err(qql_err_to_js)?;
+            super::params::bind_stmt_values(&mut stmt, &parsed)?;
+        }
+        let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
         let output = compiled_route_json(&compiled);
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();

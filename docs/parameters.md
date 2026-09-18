@@ -1,6 +1,7 @@
 > Website rendering lives in `website/src/content/docs` (`language/`, `guides/`).
 > Operations guides live in `website/src/content/docs/docs/operations/`.
 > This `docs/` file is the source text; edit here, then sync the website copy.
+> Agent quick views live in `skills/qql-skill/references/qql-params.md`.
 
 # Parameter Binding & Prepared Statements
 

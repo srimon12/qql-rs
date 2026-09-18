@@ -23,7 +23,10 @@ async fn test_batch_query_groups_same_collection() {
          QUERY TEXT 'c' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(resp, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(resp, OnError::Continue)
+        .await
+        .unwrap();
 
     // 3 queries, 3 results, 1 batch call
     assert_eq!(results.len(), 3, "expected 3 results");
@@ -53,7 +56,10 @@ async fn test_batch_mutations_same_collection() {
          DELETE FROM docs WHERE id = 3;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
 
     assert_eq!(
         results.len(),
@@ -96,7 +102,10 @@ async fn test_delete_payload_batches_with_mutations() {
          DELETE PAYLOAD final FROM docs WHERE id = 2;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
     assert_eq!(
         results.len(),
         2,
@@ -129,7 +138,10 @@ async fn test_delete_payload_batches_with_mutations() {
          DELETE PAYLOAD draft FROM docs WHERE id = 1;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 2);
     assert!(results[0].ok, "UPSERT should succeed: {:?}", results[0]);
     assert_eq!(results[0].operation, "UPSERT");
@@ -165,7 +177,10 @@ async fn test_delete_payload_batches_with_mutations() {
          UPSERT INTO docs VALUES {id: 3, title: 'c'};",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 4);
     assert_eq!(results[0].operation, "UPSERT");
     assert_eq!(results[1].operation, "DELETE_PAYLOAD");
@@ -196,7 +211,7 @@ async fn test_grouped_offset_applied_exactly_once() {
     // so the backend never applies it. Simulate a server returning `limit`
     // groups and assert the result is exactly `user_limit` groups starting at
     // the offset — a double application would drop or duplicate groups.
-    let group = |id: &str, point: u64, score: f32| GroupedSearchResult {
+    let group = |id: &str, point: u64, score: f64| GroupedSearchResult {
         group_id: PlanGroupId::Keyword(id.into()),
         hits: vec![SearchHit {
             id: PlanPointId::Number(point),
@@ -223,7 +238,10 @@ async fn test_grouped_offset_applied_exactly_once() {
         "QUERY TEXT 'x' MODEL 'test-model' FROM docs USING dense AS DENSE GROUP BY category LIMIT 2 OFFSET 1;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 1);
     let r = &results[0];
     assert!(r.ok, "grouped query should succeed: {:?}", r);
@@ -267,7 +285,10 @@ async fn test_batch_preserves_order_mixed_query_and_mutation() {
          QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 4);
     assert_eq!(results[0].operation, "UPSERT");
@@ -286,7 +307,10 @@ async fn test_single_mutation_not_batched() {
 
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all("DELETE FROM docs WHERE id = 1;").unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 1);
     assert!(results[0].ok);
@@ -310,7 +334,10 @@ async fn test_continue_preserves_failure_position_and_batch_boundary() {
     )
     .unwrap();
 
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].operation, "DELETE");
@@ -335,7 +362,7 @@ async fn test_stop_dispatches_prior_statement_before_later_prepare_failure() {
     .unwrap();
 
     let error = executor
-        .execute_batch_nodes(stmts, true)
+        .execute_batch_nodes(stmts, OnError::Stop)
         .await
         .expect_err("the second statement should fail preparation");
 
@@ -363,7 +390,10 @@ async fn test_batch_upserts_keep_single_statement_auto_create_semantics() {
     )
     .unwrap();
 
-    let results = executor.execute_batch_nodes(stmts, true).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Stop)
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|result| result.ok));
@@ -578,7 +608,10 @@ async fn test_explicit_batch_forces_single_group_with_header_opts() {
         "SHOW COLLECTIONS; BATCH { DELETE FROM docs WHERE id = 1; DELETE FROM docs WHERE id = 2; } WAIT false; SHOW COLLECTIONS;",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
 
     // SHOW barriers flank the block, yet members stay one forced group.
     assert_eq!(results.len(), 4, "one response per statement: {results:?}");
@@ -605,7 +638,10 @@ async fn test_explicit_query_batch_carries_timeout() {
         "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; } PARAMS (timeout = 30)",
     )
     .unwrap();
-    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 2, "one response per member: {results:?}");
     assert_eq!(*batch_calls.lock().unwrap(), 1, "exactly one batch RPC");

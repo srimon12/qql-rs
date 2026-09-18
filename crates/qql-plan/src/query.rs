@@ -130,7 +130,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 )
             };
             QueryVariant::Formula(FormulaQuery {
-                formula: PlanFormula::from(expression.as_ref()),
+                formula: PlanFormula::from_expr(expression.as_ref())?,
                 defaults,
             })
         }
@@ -250,7 +250,11 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter(f))
+            .transpose()?,
         params: match query.params.as_ref() {
             Some(p) => lower_search_params(p)?,
             None => None,
@@ -276,10 +280,20 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
 /// User LIMIT and OFFSET fold into the wire `limit` + `group_offset` pair.
 pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
     let Some(group) = query.group.as_ref() else {
+        // No GROUP BY clause exists to point at, so this stays span-less by
+        // design (see the never-misattribute rule); the plan() caller only
+        // reaches here for hand-built ASTs.
         return Err(QqlError::validation(
             "QQL-PLAN-GROUP",
             "group required for groups query",
             None,
+        ));
+    };
+    if group.field.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-GROUP",
+            "group field must not be empty",
+            group.field_span,
         ));
     };
     let offset = query.page.offset.unwrap_or(0);
@@ -304,7 +318,11 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter(f))
+            .transpose()?,
         params: match query.params.as_ref() {
             Some(p) => lower_search_params(p)?,
             None => None,
@@ -890,6 +908,7 @@ mod tests {
         let stmt = Stmt::Query(Box::new(QueryStmt {
             ctes: vec![],
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Fusion {
                 method: FusionMethod::Rrf,
                 prefetch: vec![Prefetch {
@@ -928,6 +947,32 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
         assert_eq!(err.code, "QQL-VALIDATION-LIMIT-OVERFLOW");
+    }
+
+    #[test]
+    fn parsed_statements_store_collection_and_group_spans() {
+        // The parser stores the FROM name span and the GROUP BY field span on
+        // the statement: parsed queries carry Some, hand-built ones default
+        // to None (covered by the other span tests here).
+        let stmt =
+            Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs GROUP BY topic LIMIT 1;").unwrap();
+        let qql_core::ast::Stmt::Query(query) = &stmt else {
+            panic!("expected query");
+        };
+        assert!(query.collection_span.is_some());
+        let group = query.group.as_ref().expect("group must parse");
+        assert!(group.field_span.is_some());
+        // A top-level CTE member without FROM stores no collection span.
+        let stmt = Parser::parse(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' WHERE status = 'on') \
+             QUERY TEXT 'x' MODEL 'e5' FROM docs PREFETCH (a) LIMIT 1;",
+        )
+        .unwrap();
+        let qql_core::ast::Stmt::Query(query) = &stmt else {
+            panic!("expected query");
+        };
+        assert!(query.collection_span.is_some());
+        assert!(query.ctes[0].query.collection_span.is_none());
     }
 
     #[test]

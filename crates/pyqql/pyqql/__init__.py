@@ -1,5 +1,10 @@
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
 
+import re as _re
+
+# Valid bare collection identifiers (`my-collection` needs quoting).
+_COLLECTION_NAME_RE = _re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
 from ._dbapi import (
     Connection,
     Cursor,
@@ -34,7 +39,7 @@ from .pyqql import (
     Stmt,
     __version__,
     bind,
-    compile_query,
+    compile,
     explain,
     inject_filter,
     is_valid,
@@ -76,8 +81,9 @@ class Client(_Client):
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]:
-        return self.execute(query, params=params, on_error=on_error).hits(0)
+        return self.execute(query, params=params, on_error=on_error).hits(stmt)
 
     async def execute_async_hits(
         self,
@@ -85,9 +91,10 @@ class Client(_Client):
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]:
         rep = await self.execute_async(query, params=params, on_error=on_error)
-        return rep.hits(0)
+        return rep.hits(stmt)
 
     def upsert_many(
         self,
@@ -155,9 +162,7 @@ class Client(_Client):
 
 
 def _format_collection(name: str) -> str:
-    import re
-
-    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
+    if _COLLECTION_NAME_RE.match(name):
         return name
     if (name.startswith('"') and name.endswith('"')) or (
         name.startswith("'") and name.endswith("'")
@@ -366,6 +371,7 @@ def execute_hits(
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
     route_affinity: Optional[str] = None,
+    stmt: int = 0,
 ) -> List[ScoredPoint]:
     return execute(
         query,
@@ -376,7 +382,7 @@ def execute_hits(
         embedder=embedder,
         on_error=on_error,
         route_affinity=route_affinity,
-    ).hits(0)
+    ).hits(stmt)
 
 
 async def execute_async_hits(
@@ -389,6 +395,7 @@ async def execute_async_hits(
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
     route_affinity: Optional[str] = None,
+    stmt: int = 0,
 ) -> List[ScoredPoint]:
     rep = await execute_async(
         query,
@@ -400,7 +407,7 @@ async def execute_async_hits(
         on_error=on_error,
         route_affinity=route_affinity,
     )
-    return rep.hits(0)
+    return rep.hits(stmt)
 
 
 __all__ = [
@@ -432,7 +439,7 @@ __all__ = [
     "threadsafety",
     "paramstyle",
     "bind",
-    "compile_query",
+    "compile",
     "execute",
     "execute_async",
     "execute_hits",

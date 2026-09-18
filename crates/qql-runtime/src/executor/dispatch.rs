@@ -4,22 +4,8 @@ use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 use qql_plan::{PlannedOperation, plan};
 
-use crate::executor::response::{BackendResponse, ExecData};
-use crate::executor::{ExecResponse, Executor, GroupedSearchResult, SearchHit};
-
-/// Trim a grouped result set by the client-side `group_offset` (which has no
-/// wire representation) exactly once.
-fn trim_group_offset(groups: &mut Vec<GroupedSearchResult>, offset: Option<u64>) {
-    let Some(offset) = offset else {
-        return;
-    };
-    let offset = offset as usize;
-    if offset < groups.len() {
-        groups.drain(0..offset);
-    } else {
-        groups.clear();
-    }
-}
+use crate::executor::response::{BackendResponse, ExecData, score_f64};
+use crate::executor::{ExecResponse, Executor, OnError, SearchHit};
 
 impl Executor {
     /// Execute one parsed statement under the configured timeout, returning a
@@ -77,7 +63,8 @@ impl Executor {
         // path (`execute_batch_nodes`).
         if matches!(op, PlannedOperation::Batch { .. }) {
             let mut results = Vec::new();
-            self.execute_batch_op(op, true, &mut results).await?;
+            self.execute_batch_op(op, OnError::Stop, &mut results)
+                .await?;
             let total = results.len();
             let ok_count = results.iter().filter(|r| r.ok).count();
             return Ok(ExecResponse {
@@ -108,7 +95,7 @@ impl Executor {
             | PlannedOperation::DropCollection { collection }
             | PlannedOperation::CreateIndex { collection, .. }
             | PlannedOperation::DropIndex { collection, .. } => {
-                self.invalidate_collection_schema(collection);
+                self.invalidate_collection_schema(collection).await;
             }
             _ => {}
         }
@@ -116,89 +103,15 @@ impl Executor {
     }
 
     /// Decode + normalize a typed backend response into an `ExecResponse`.
-    /// Pure (no I/O): server telemetry travels on the [`BackendResponse`],
-    /// never on the error path; both `dispatch_planned` and `explain_analyze`
-    /// share this single normalization.
+    /// Pure (no I/O): shared implementation lives in
+    /// [`super::normalize::normalize_planned`](crate::executor::normalize::normalize_planned);
+    /// this wrapper keeps existing call sites (`dispatch_planned`,
+    /// `explain_analyze`, batch retries, tests) compiling unchanged.
     pub(crate) fn normalize_planned(
         op: &PlannedOperation,
-        mut response: BackendResponse,
+        response: BackendResponse,
     ) -> Result<ExecResponse, QqlError> {
-        let telemetry = response.telemetry.take();
-        let label = op.operation_label();
-        let (message, data) = match op {
-            PlannedOperation::Query { .. }
-            | PlannedOperation::Scroll { .. }
-            | PlannedOperation::GetPoints { .. } => {
-                let count = response.data.hits().map_or(0, |hits| hits.len());
-                (format!("Found {count} hits"), Some(response.data))
-            }
-            PlannedOperation::QueryGroups { request, .. } => {
-                // `group_offset` has no wire representation (it is serde-skipped
-                // and absent from the gRPC proto), so the backend never applies
-                // it: trim the returned groups client-side, exactly once.
-                if let ExecData::Groups(groups) = &mut response.data {
-                    trim_group_offset(groups, request.group_offset);
-                }
-                let count = response.data.groups().map_or(0, |groups| groups.len());
-                (format!("Found {count} group(s)"), Some(response.data))
-            }
-            PlannedOperation::Count { .. } => {
-                let count = response.data.count().unwrap_or(0);
-                (format!("Count: {count}"), Some(ExecData::Count(count)))
-            }
-            PlannedOperation::Facet { .. } => {
-                let count = response.data.facet().map_or(0, |hits| hits.len());
-                (format!("Found {count} facet hit(s)"), Some(response.data))
-            }
-            PlannedOperation::ListCollections => {
-                let count = response.data.collections().map_or(0, <[String]>::len);
-                (format!("Found {count} collection(s)"), Some(response.data))
-            }
-            PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(response.data)),
-            PlannedOperation::Upsert { request, .. } => {
-                let n = request.points.len();
-                (
-                    format!("Upserted {n} point(s)"),
-                    Some(ExecData::Mutation {
-                        affected: Some(n as u64),
-                    }),
-                )
-            }
-            PlannedOperation::Delete { .. }
-            | PlannedOperation::UpdatePayload { .. }
-            | PlannedOperation::OverwritePayload { .. }
-            | PlannedOperation::ClearPayload { .. }
-            | PlannedOperation::DeletePayload { .. }
-            | PlannedOperation::UpdateVectors { .. }
-            | PlannedOperation::DeleteVectors { .. } => (
-                format!("{label} ok"),
-                Some(ExecData::Mutation { affected: None }),
-            ),
-            PlannedOperation::ListShardKeys { .. } => {
-                ("Shard keys listed".into(), Some(response.data))
-            }
-            PlannedOperation::GetQuotas => {
-                ("Quota configuration shown".into(), Some(response.data))
-            }
-            PlannedOperation::SetQuotas { .. } => {
-                ("Quota configuration updated".into(), Some(response.data))
-            }
-            PlannedOperation::CrossRerank { .. } => {
-                return Err(QqlError::execution(
-                    "QQL-CROSS-RERANK",
-                    "CROSS RERANK must be executed client-side, not via a Qdrant route",
-                    None,
-                ));
-            }
-            _ => (format!("{label} ok"), None),
-        };
-        Ok(ExecResponse {
-            ok: true,
-            operation: label.into(),
-            message,
-            data,
-            telemetry,
-        })
+        super::normalize::normalize_planned(op, response)
     }
 
     /// Run candidate ANN stages, score (query, doc_text) with a cross-encoder, reorder.
@@ -220,33 +133,44 @@ impl Executor {
             )
         })?;
 
-        let mut by_key: HashMap<(String, qql_plan::PlanPointId), SearchHit> = HashMap::new();
-        for (collection, request) in candidates {
+        // Deduplicate candidates by (collection, id) without cloning
+        // collection names per hit: hits live in one Vec, `seen` maps to
+        // indices, and names resolve once at materialization.
+        let mut hits: Vec<SearchHit> = Vec::new();
+        let mut hit_coll: Vec<usize> = Vec::new();
+        let mut seen: HashMap<(usize, qql_plan::PlanPointId), usize> = HashMap::new();
+        for (ci, (collection, request)) in candidates.iter().enumerate() {
             let op = PlannedOperation::Query {
                 collection: collection.clone(),
                 request: request.clone(),
             };
             let response = self.dispatch_raw(&op).await?;
-            let hits = match response.data {
+            let batch = match response.data {
                 ExecData::Hits(hits) => hits,
-                ExecData::Groups(_)
-                | ExecData::Count(_)
-                | ExecData::Facet(_)
-                | ExecData::Mutation { .. }
-                | ExecData::Collections(_)
-                | ExecData::Collection(_)
-                | ExecData::ShardKeys(_)
-                | ExecData::Quotas(_) => Vec::new(),
+                // Candidates are always planned queries, so any other shape
+                // is a backend contract break — fail closed instead of
+                // silently scoring zero documents.
+                _ => {
+                    return Err(QqlError::backend(
+                        "QQL-BACKEND-ENVELOPE",
+                        format!(
+                            "CROSS RERANK candidate query on '{collection}' returned a non-hits response"
+                        ),
+                        None,
+                    ));
+                }
             };
-            for mut hit in hits {
-                hit.collection = Some(collection.clone());
-                by_key
-                    .entry((collection.clone(), hit.id.clone()))
-                    .or_insert(hit);
+            for hit in batch {
+                // `insert` needs an owned key: one id clone per hit (the
+                // per-hit collection clone is gone).
+                if seen.insert((ci, hit.id.clone()), hits.len()).is_none() {
+                    hit_coll.push(ci);
+                    hits.push(hit);
+                }
             }
         }
 
-        if by_key.is_empty() {
+        if hits.is_empty() {
             return Ok(ExecResponse {
                 ok: true,
                 operation: "CROSS_RERANK".into(),
@@ -258,21 +182,24 @@ impl Executor {
             });
         }
 
-        let mut hits: Vec<SearchHit> = by_key.into_values().collect();
-        hits.sort_by(|a, b| {
-            a.collection
-                .as_deref()
-                .unwrap_or("")
-                .cmp(b.collection.as_deref().unwrap_or(""))
-                .then_with(|| a.id.cmp(&b.id))
+        // Deterministic pre-order (collection, id) over indices: ties in
+        // rerank scores keep this order through the stable index sort below.
+        let mut order: Vec<usize> = (0..hits.len()).collect();
+        order.sort_by(|&a, &b| {
+            candidates[hit_coll[a]]
+                .0
+                .cmp(&candidates[hit_coll[b]].0)
+                .then_with(|| hits[a].id.cmp(&hits[b].id))
         });
 
-        let mut docs = Vec::with_capacity(hits.len());
-        let mut keep_idx = Vec::with_capacity(hits.len());
-        for (i, hit) in hits.iter().enumerate() {
+        // Borrow rerank texts out of the hits; only surviving documents pay
+        // for owned Strings at the `&[String]` trait boundary below.
+        let mut doc_idx: Vec<usize> = Vec::with_capacity(order.len());
+        let mut doc_refs: Vec<&str> = Vec::with_capacity(order.len());
+        for &i in &order {
             // The rerank field always comes from the payload: hits no longer
             // carry a denormalized `text` mirror.
-            let text = hit
+            let text = hits[i]
                 .payload
                 .as_ref()
                 .and_then(|p| p.get(field))
@@ -281,10 +208,10 @@ impl Executor {
             if text.is_empty() {
                 continue;
             }
-            docs.push(text.to_string());
-            keep_idx.push(i);
+            doc_idx.push(i);
+            doc_refs.push(text);
         }
-        if docs.is_empty() {
+        if doc_refs.is_empty() {
             return Err(QqlError::execution(
                 "QQL-RERANK-CROSS-FIELD",
                 format!(
@@ -295,37 +222,73 @@ impl Executor {
             ));
         }
 
+        let docs: Vec<String> = doc_refs.iter().map(|s| s.to_string()).collect();
         let scores = embedder.rerank_pairs(query, &docs, model).await?;
-        if scores.len() != docs.len() {
+        if scores.len() != doc_refs.len() {
             return Err(QqlError::execution(
                 "QQL-RERANK-CROSS",
                 format!(
                     "rerank_pairs returned {} scores for {} documents",
                     scores.len(),
-                    docs.len()
+                    doc_refs.len()
                 ),
                 None,
             ));
         }
 
-        let mut ranked: Vec<(f32, SearchHit)> = keep_idx
+        // Rank on the stored rounded value: `ranked` holds the f64 that lands
+        // on the hit, so output order always matches the visible scores
+        // (sorting the raw f32 pairs could disagree with the rounded values
+        // on near-ties). Losers are never cloned — paginate the index run
+        // and materialize only the output slice below.
+        let mut ranked: Vec<(f64, usize)> = scores
             .into_iter()
-            .zip(scores)
-            .map(|(i, score)| {
-                let mut h = hits[i].clone();
-                h.score = score;
-                (score, h)
-            })
+            .enumerate()
+            .map(|(k, s)| (score_f64(s), k))
             .collect();
-        ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        // NaN sorts last, by explicit choice: cross-encoder scores should
+        // never be NaN, but `partial_cmp` leaves NaN unordered against
+        // everything, so the old `unwrap_or(Equal)` pinned each NaN at its
+        // arrival slot and could surface it mid-ranking. Sinking NaNs keeps
+        // the ranked prefix meaningful; the stable sort preserves arrival
+        // order among NaNs (and among ties).
+        ranked.sort_by(|a, b| match (a.0.is_nan(), b.0.is_nan()) {
+            (true, true) => std::cmp::Ordering::Equal,
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (false, false) => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
+        });
 
-        let skip = offset as usize;
-        let take = limit as usize;
+        // Pagination applies after empty-field filtering: candidates lacking
+        // the rerank field are dropped before OFFSET/LIMIT, so page boundaries
+        // shift with payload quality (documented contract, not wire parity).
+        let skip = usize::try_from(offset).map_err(|_| {
+            QqlError::validation(
+                "QQL-VALIDATION-LIMIT-OVERFLOW",
+                format!("CROSS RERANK OFFSET {offset} overflows pointer width; reduce OFFSET"),
+                None,
+            )
+        })?;
+        let take = usize::try_from(limit).map_err(|_| {
+            QqlError::validation(
+                "QQL-VALIDATION-LIMIT-OVERFLOW",
+                format!("CROSS RERANK LIMIT {limit} overflows pointer width; reduce LIMIT"),
+                None,
+            )
+        })?;
         let out: Vec<SearchHit> = ranked
             .into_iter()
             .skip(skip)
             .take(take)
-            .map(|(_, h)| h)
+            .map(|(score, k)| {
+                let i = doc_idx[k];
+                let mut h = hits[i].clone();
+                // Already rounded at rank time: the sort key and the stored
+                // hit are the same value.
+                h.score = score;
+                h.collection = Some(candidates[hit_coll[i]].0.clone());
+                h
+            })
             .collect();
         let n = out.len();
         Ok(ExecResponse {

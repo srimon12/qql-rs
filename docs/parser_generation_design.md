@@ -23,7 +23,7 @@ Through recent automated generation tooling (`qql-grammar-gen`), 5 derived artif
 - `crates/qql-core/grammar/qql.generated.pest`
 - `editors/vscode/syntaxes/qql.tmLanguage.json`
 - `editors/vscode/src/keywords.generated.ts`
-- `website/src/scripts/qql-keywords.generated.ts`
+- `website/src/lib/playground/editor/qql-keywords.generated.ts`
 - `crates/qql-core/src/keywords.generated.rs` (Rust PHF map)
 
 This document evaluates the options and migration path for generating or validating the parser itself directly from `grammar.pest`.

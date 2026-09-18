@@ -24,7 +24,7 @@ class TestPackageInspection(unittest.TestCase):
             "Client",
             "Stmt",
             "bind",
-            "compile_query",
+            "compile",
             "execute",
             "execute_async",
             "explain",
@@ -51,7 +51,7 @@ class TestPackageInspection(unittest.TestCase):
 # ============================================================================
 
 class TestParseAPI(unittest.TestCase):
-    """B: Test parse, to_dict, to_json, is_valid, tokenize, compile_query."""
+    """B: Test parse, to_dict, to_json, is_valid, tokenize, compile."""
 
     def test_b1_parse_simple_query(self):
         stmts = pyqql_edge.parse('QUERY "hello" FROM docs LIMIT 5')
@@ -110,19 +110,19 @@ class TestParseAPI(unittest.TestCase):
         self.assertIsInstance(tokens, list)
         self.assertGreater(len(tokens), 0)
 
-    def test_b12_compile_query(self):
-        cq = pyqql_edge.compile_query('QUERY "hello" FROM docs LIMIT 5')
+    def test_b12_compile(self):
+        cq = pyqql_edge.compile('QUERY "hello" FROM docs LIMIT 5')
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "POST")
 
     def test_b13_client_compile_parity(self):
-        """Client.compile mirrors module-level compile_query (parity with pyqql)."""
+        """Client.compile mirrors module-level compile (parity with pyqql)."""
         executor = pyqql_edge.local_executor(
             tempfile.mkdtemp(prefix="pyqql-edge-compile-"), False
         )
         try:
             route = executor.compile('QUERY "hello" FROM docs LIMIT 5')
-            expected = pyqql_edge.compile_query('QUERY "hello" FROM docs LIMIT 5')
+            expected = pyqql_edge.compile('QUERY "hello" FROM docs LIMIT 5')
             self.assertIsInstance(route, dict)
             self.assertEqual(route, expected)
             self.assertEqual(route["stmt_type"], "query")

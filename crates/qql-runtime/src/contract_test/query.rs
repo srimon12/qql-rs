@@ -321,6 +321,32 @@ fn test_contract_all_query_variants_match_openapi_json() {
         );
     }
 
+    // BETWEEN with bound placeholders lowers exactly like the literal form.
+    {
+        let mut stmt =
+            Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE age BETWEEN :lo AND :hi;")
+                .expect("parse failed for between placeholders");
+        qql_core::params_json::bind_stmt_with_params(
+            &mut stmt,
+            &serde_json::json!({"lo": 20, "hi": 30}),
+        )
+        .expect("bind failed for between placeholders");
+        let json = try_route(&stmt).unwrap().body_json().unwrap();
+        let filter = json
+            .get("filter")
+            .unwrap_or_else(|| panic!("no filter field in body: {json}"));
+        assert_eq!(
+            filter,
+            &serde_json::json!({"must": [{"key": "age", "range": {"gte": 20, "lte": 30}}]}),
+            "bound BETWEEN placeholders must lower to the literal range shape"
+        );
+        let errors: Vec<_> = filter_validator.iter_errors(filter).collect();
+        assert!(
+            errors.is_empty(),
+            "Contract Violation: between placeholders filter failed openapi.json schema validation: {errors:?}\nFilter JSON: {filter}"
+        );
+    }
+
     let scroll_stmt = Parser::parse("SCROLL FROM docs WHERE status = 'active' LIMIT 50;").unwrap();
     let scroll_json = try_route(&scroll_stmt).unwrap().body_json().unwrap();
     validate_ref(&openapi, "ScrollRequest", &scroll_json);

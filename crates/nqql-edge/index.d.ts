@@ -2,8 +2,12 @@ export class Stmt {
   constructor(input: string);
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
+  /** Exact-text AST string for transport/forwarding (no V8 parsing). */
   toJson(): string;
-  toJSON(): string;
+  /** `JSON.stringify` hook: BigInt-safe plain object, same as `toObject()`.
+   * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+   * use `toJson()` for exact text. */
+  toJSON(): unknown;
   /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt.
    * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
@@ -19,13 +23,16 @@ export class Stmt {
 }
 
 export class ScoredPoint {
-  id: number | string;
+  id: number | string | bigint;
   score: number;
   payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
+  vector: unknown | null;
+  shard_key: string | number | bigint | null;
   [key: string]: unknown;
   get(key: string, defaultValue?: unknown): unknown;
+  withoutPayload(): ScoredPoint;
 }
 
 export interface ExecResponse {
@@ -93,10 +100,14 @@ export class ExecutionReport {
   [key: string]: unknown;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
-  ids(stmt?: number): Array<string | number>;
+  ids(stmt?: number): Array<string | number | bigint>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
-  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
+  groups(stmt?: number): Array<{ id: unknown; hits: ScoredPoint[] }>;
+  collections(stmt?: number): string[];
+  collection(stmt?: number): Record<string, unknown> | null;
+  shardKeys(stmt?: number): Array<string | number | bigint>;
+  quotas(stmt?: number): Record<string, unknown> | null;
 }
 
 export interface ExecuteOptions {
@@ -160,6 +171,24 @@ export interface LocalExecutorOptions {
   bm25B?: number;
   /** Client-side BM25 expected average document length in tokens (default 256). */
   bm25AvgLen?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english"). */
+  bm25Language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" | "multilingual". */
+  bm25Tokenizer?: string;
+  /** Lowercase before matching (default true). */
+  bm25Lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false). */
+  bm25AsciiFolding?: boolean;
+  /** Drop tokens shorter than this many chars. */
+  bm25MinTokenLen?: number;
+  /** Drop over-long tokens on the document path. */
+  bm25MaxTokenLen?: number;
+  /** Custom stopwords replacing the language default ([] disables). */
+  bm25Stopwords?: string[];
+  /** Stemmer override ("none" disables). */
+  bm25Stemmer?: string;
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
 }
 
 export interface StandaloneOptions {
@@ -196,6 +225,24 @@ export interface StandaloneOptions {
   bm25B?: number;
   /** Client-side BM25 expected average document length in tokens (default 256). */
   bm25AvgLen?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english"). */
+  bm25Language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" | "multilingual". */
+  bm25Tokenizer?: string;
+  /** Lowercase before matching (default true). */
+  bm25Lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false). */
+  bm25AsciiFolding?: boolean;
+  /** Drop tokens shorter than this many chars. */
+  bm25MinTokenLen?: number;
+  /** Drop over-long tokens on the document path. */
+  bm25MaxTokenLen?: number;
+  /** Custom stopwords replacing the language default ([] disables). */
+  bm25Stopwords?: string[];
+  /** Stemmer override ("none" disables). */
+  bm25Stemmer?: string;
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
   /** onError behaviour */
   onError?: "stop" | "continue";
   /** Parameter bindings */
@@ -220,6 +267,7 @@ export class Client {
   executeHits(
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
+    stmt?: number,
   ): Promise<ScoredPoint[]>;
   /**
    * Analyze a single query string or Stmt: static plan plus measured
@@ -287,7 +335,7 @@ export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
 
-export function compileQuery(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
+export function compile(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
 
 export function explain(query: string): string;
 
@@ -305,6 +353,7 @@ export function bind(
 export function executeHits(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & StandaloneOptions,
+  stmt?: number,
 ): Promise<ScoredPoint[]>;
 
 /**
@@ -334,9 +383,32 @@ export function httpExecutor(
   embedModel: string,
   embedDim: number,
   onDiskPayload?: boolean,
-  bm25K1?: number,
-  bm25B?: number,
-  bm25AvgLen?: number,
+  bm25Options?: {
+    bm25K1?: number;
+    bm25_k1?: number;
+    bm25B?: number;
+    bm25_b?: number;
+    bm25AvgLen?: number;
+    bm25_avg_len?: number;
+    bm25Language?: string;
+    bm25_language?: string;
+    bm25Tokenizer?: string;
+    bm25_tokenizer?: string;
+    bm25Lowercase?: boolean;
+    bm25_lowercase?: boolean;
+    bm25AsciiFolding?: boolean;
+    bm25_ascii_folding?: boolean;
+    bm25Stopwords?: string[];
+    bm25_stopwords?: string[];
+    bm25Stemmer?: string;
+    bm25_stemmer?: string;
+    bm25StopwordsLanguages?: string[];
+    bm25_stopwords_languages?: string[];
+    bm25MinTokenLen?: number;
+    bm25_min_token_len?: number;
+    bm25MaxTokenLen?: number;
+    bm25_max_token_len?: number;
+  },
 ): Client;
 
 /**

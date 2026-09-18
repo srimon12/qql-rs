@@ -7,8 +7,8 @@ pub use super::value::{bind_point_id, bind_shard_key, bind_value, resolve_param_
 
 use crate::ast::Value;
 use crate::ast::statement::{
-    PageSpec, PointEntry, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryStmt, Stmt,
-    UpsertPoint, VectorValue,
+    PageSpec, PointEntry, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryStmt, ShardKey,
+    Stmt, UpsertPoint, VectorValue,
 };
 use crate::error::{QqlError, Span};
 use alloc::format;
@@ -257,6 +257,44 @@ where
     Ok(())
 }
 
+/// Bind parameters into a required (non-optional) `ShardKey` in-place.
+///
+/// DDL keys (`CREATE`/`DROP SHARD KEY`, `WITH PARAMS shard_keys`) are required
+/// positions, so they bind through a one-slot `Option` and back — reusing
+/// [`bind_shard_key`] instead of duplicating its `Param` resolution.
+fn bind_required_shard_key<F>(
+    key: &mut ShardKey,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    let mut slot = Some(key.clone());
+    bind_shard_key(&mut slot, lookup, positional)?;
+    if let Some(bound) = slot {
+        *key = bound;
+    }
+    Ok(())
+}
+
+/// Bind parameters into an optional `WITH PARAMS shard_keys` list in-place.
+fn bind_shard_key_list<F>(
+    keys: Option<&mut Vec<ShardKey>>,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    if let Some(keys) = keys {
+        for key in keys {
+            bind_required_shard_key(key, lookup, positional)?;
+        }
+    }
+    Ok(())
+}
+
 /// Bind parameters into a parsed AST `Stmt` in-place.
 pub fn bind_stmt<F>(stmt: &mut Stmt, lookup: F, positional: &[Value]) -> Result<(), QqlError>
 where
@@ -411,6 +449,28 @@ where
                 bind_stmt(member, lookup, positional)?;
             }
             Ok(())
+        }
+        Stmt::CreateShardKey(create) => {
+            bind_required_shard_key(&mut create.shard_key, &lookup, positional)
+        }
+        Stmt::DropShardKey(drop) => {
+            bind_required_shard_key(&mut drop.shard_key, &lookup, positional)
+        }
+        Stmt::CreateCollection(create) => {
+            let keys = create
+                .config
+                .as_mut()
+                .and_then(|config| config.params.as_mut())
+                .and_then(|params| params.shard_keys.as_mut());
+            bind_shard_key_list(keys, &lookup, positional)
+        }
+        Stmt::AlterCollection(alter) => {
+            let keys = alter
+                .config
+                .as_mut()
+                .and_then(|config| config.params.as_mut())
+                .and_then(|params| params.shard_keys.as_mut());
+            bind_shard_key_list(keys, &lookup, positional)
         }
         other => Err(QqlError::validation(
             "QQL-BIND-UNSUPPORTED-STATEMENT",

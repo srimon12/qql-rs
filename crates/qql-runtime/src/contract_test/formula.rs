@@ -99,6 +99,62 @@ fn rest_grpc_formula_nary_acosh_parity() {
 }
 
 #[test]
+fn rest_grpc_formula_domain_default_parity() {
+    let stmt = Parser::parse(
+        "QUERY FORMULA ACOSH(rank) [DEFAULT = 0.0] + SQRT(score) [DEFAULT = 0.0] \
+         FROM docs LIMIT 5;",
+    )
+    .unwrap();
+    let op = plan(&stmt).unwrap();
+    let PlannedOperation::Query {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected Query");
+    };
+
+    // REST projection: asserts OpenAPI expression structure
+    let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+    let formula = &body["query"]["formula"];
+    let sum = formula["sum"].as_array().expect("sum array");
+    assert_eq!(
+        sum[0]["acosh"],
+        serde_json::json!({"max": [1.0, "rank"]}),
+        "ACOSH with default desugars to MAX clamp: {sum:?}"
+    );
+    assert_eq!(
+        sum[1]["sqrt"],
+        serde_json::json!({"max": [0.0, "$score"]}),
+        "SQRT with default desugars to MAX clamp: {sum:?}"
+    );
+
+    // gRPC parity
+    let grpc = test_api::to_query_points(request, collection).unwrap();
+    use qdrant::expression::Variant as Ev;
+    use qdrant::query::Variant as Qv;
+    let Some(Qv::Formula(formula)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref()) else {
+        panic!("expected Formula query");
+    };
+    let Some(expression) = formula.expression.as_ref() else {
+        panic!("formula missing expression");
+    };
+    let Some(Ev::Sum(sum)) = expression.variant.as_ref() else {
+        panic!("expected Sum expression, got {:?}", expression.variant);
+    };
+    let Some(Ev::Acosh(acosh)) = sum.sum[0].variant.as_ref() else {
+        panic!("expected Acosh, got {:?}", sum.sum[0].variant);
+    };
+    let Some(Ev::Max(max)) = acosh.as_ref().variant.as_ref() else {
+        panic!(
+            "expected Max inside Acosh, got {:?}",
+            acosh.as_ref().variant
+        );
+    };
+    assert_eq!(max.max.len(), 2);
+}
+
+#[test]
 fn rest_grpc_formula_case_condition_parity() {
     let stmt = Parser::parse(
         "QUERY FORMULA CASE WHEN status = 'active' THEN $score * 2 ELSE $score END \

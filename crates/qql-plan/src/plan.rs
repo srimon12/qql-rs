@@ -10,7 +10,7 @@ use crate::ddl::{
 use crate::mutation::{
     lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
     lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
-    lower_update_vector_request, lower_upsert_request,
+    lower_update_vector_request, lower_upsert_request, validate_scroll_after,
 };
 use crate::query::{lower_query_groups_request, lower_query_request};
 use crate::rerank::plan_cross_rerank;
@@ -444,8 +444,8 @@ pub enum BatchFamily {
 
 /// Grouping key for statement/operation batching (same collection + family).
 pub use crate::batch::{
-    BatchKey, batch_item_error, build_query_batch, build_update_batch, statement_batch_key,
-    verify_batch_cardinality,
+    BatchKey, batch_item_error, build_query_batch, build_update_batch, into_query_batch,
+    into_update_batch, statement_batch_key, verify_batch_cardinality,
 };
 
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
@@ -487,10 +487,13 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                     return Err(QqlError::validation(
                         "QQL-PLAN-COLLECTION",
                         "query collection name must not be empty",
-                        None,
+                        query.collection_span,
                     ));
                 }
                 QueryCollection::Inherited => {
+                    // No collection token exists to point at (the parser
+                    // rejects this shape earlier with its own span), so no
+                    // span is better than a wrong one.
                     return Err(QqlError::validation(
                         "QQL-PLAN-COLLECTION",
                         "top-level query requires an explicit collection (FROM ...)",
@@ -546,43 +549,46 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 request: lower_query_request(query)?,
             })
         }
-        Stmt::Scroll(scroll) => Ok(PlannedOperation::Scroll {
-            collection: scroll.collection.clone(),
-            request: lower_scroll_request(
-                scroll.limit,
-                scroll.filter.as_deref(),
-                scroll.after.as_ref(),
-                scroll.order_by.as_ref(),
-                scroll.shard_key.clone(),
-                scroll.with_payload.as_ref(),
-                scroll.with_vector.as_ref(),
-            ),
-        }),
+        Stmt::Scroll(scroll) => {
+            validate_scroll_after(scroll.after.as_ref())?;
+            Ok(PlannedOperation::Scroll {
+                collection: scroll.collection.clone(),
+                request: lower_scroll_request(
+                    scroll.limit,
+                    scroll.filter.as_deref(),
+                    scroll.after.as_ref(),
+                    scroll.order_by.as_ref(),
+                    scroll.shard_key.clone(),
+                    scroll.with_payload.as_ref(),
+                    scroll.with_vector.as_ref(),
+                )?,
+            })
+        }
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
-            request: lower_upsert_request(upsert),
+            request: lower_upsert_request(upsert)?,
             wait: upsert
                 .wait
                 .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty()),
         }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
-            request: lower_delete_request(delete),
+            request: lower_delete_request(delete)?,
             wait: delete.wait.unwrap_or(true),
         }),
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
-            request: lower_clear_payload_request(clear),
+            request: lower_clear_payload_request(clear)?,
             wait: clear.wait.unwrap_or(true),
         }),
         Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
             collection: del.collection.clone(),
-            request: lower_delete_payload_request(del),
+            request: lower_delete_payload_request(del)?,
             wait: del.wait.unwrap_or(true),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
-            request: lower_delete_vector_request(del_vec),
+            request: lower_delete_vector_request(del_vec)?,
             wait: del_vec.wait.unwrap_or(true),
         }),
         Stmt::UpdateVector(update) => Ok(PlannedOperation::UpdateVectors {
@@ -591,7 +597,7 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             wait: update.wait.unwrap_or(true),
         }),
         Stmt::UpdatePayload(update) => {
-            let request = lower_update_payload_request(update);
+            let request = lower_update_payload_request(update)?;
             let wait = update.wait.unwrap_or(true);
             if update.overwrite {
                 Ok(PlannedOperation::OverwritePayload {
@@ -650,7 +656,8 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             let filter = count
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
+                .map(|f| crate::filter::top_level_filter(f))
+                .transpose()?;
             Ok(PlannedOperation::Count {
                 collection,
                 request: CountRequest {
@@ -684,7 +691,8 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
             let filter = facet
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
+                .map(|f| crate::filter::top_level_filter(f))
+                .transpose()?;
             Ok(PlannedOperation::Facet {
                 collection,
                 request: FacetRequest {
@@ -916,6 +924,7 @@ mod tests {
         Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Recommend {
                 positive,
                 negative,
@@ -1016,6 +1025,7 @@ mod tests {
         let stmt = Stmt::Query(Box::new(QueryStmt {
             ctes: vec![],
             collection: QueryCollection::Inherited,
+            collection_span: None,
             expression: QueryExpr::SampleRandom,
             filter: None,
             params: None,
@@ -1031,6 +1041,10 @@ mod tests {
         }));
         let err = plan(&stmt).unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+        // No collection token exists to point at: the span stays None rather
+        // than misattributing to an unrelated token.
+        assert_eq!(err.span, None);
     }
 
     #[test]
@@ -1068,6 +1082,7 @@ mod tests {
         let stmt_empty_using = Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Rerank {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
@@ -1081,6 +1096,7 @@ mod tests {
                     source: qql_core::ast::PrefetchSource::Query(Box::new(QueryStmt {
                         ctes: Vec::new(),
                         collection: QueryCollection::Inherited,
+                        collection_span: None,
                         expression: QueryExpr::SampleRandom,
                         filter: None,
                         params: None,
@@ -1119,6 +1135,7 @@ mod tests {
         let stmt_empty_prefetch = Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
+            collection_span: None,
             expression: QueryExpr::Rerank {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
@@ -1286,6 +1303,9 @@ mod tests {
         };
         let err = crate::query::lower_query_groups_request(query).unwrap_err();
         assert_eq!(err.code, "QQL-PLAN-GROUP");
+        // No GROUP BY clause exists to point at: the span stays None rather
+        // than misattributing to an unrelated token.
+        assert_eq!(err.span, None);
     }
 
     #[test]
@@ -1357,6 +1377,30 @@ mod tests {
         let err = plan(&stmt).unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
         assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+    }
+
+    #[test]
+    fn empty_collection_name_carries_source_span() {
+        // Span threading: `FROM ''` parses (quoted empty identifier) and the
+        // plan-time empty-collection rejection points at the name token.
+        let source = "QUERY TEXT 'x' FROM '' LIMIT 1;";
+        let stmt = Parser::parse(source).expect("empty collection must parse");
+        let err = plan(&stmt).expect_err("empty collection must not plan");
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+        let start = source.find("''").expect("fixture contains ''");
+        assert_eq!(err.span, Some(qql_core::error::Span::new(start, start + 2)));
+    }
+
+    #[test]
+    fn empty_group_field_carries_source_span() {
+        // Span threading: `GROUP BY ''` parses and the plan-time empty-group
+        // rejection points at the field token.
+        let source = "QUERY TEXT 'x' FROM docs GROUP BY '' LIMIT 1;";
+        let stmt = Parser::parse(source).expect("empty group field must parse");
+        let err = plan(&stmt).expect_err("empty group field must not plan");
+        assert_eq!(err.code, "QQL-PLAN-GROUP");
+        let start = source.find("''").expect("fixture contains ''");
+        assert_eq!(err.span, Some(qql_core::error::Span::new(start, start + 2)));
     }
 
     #[test]

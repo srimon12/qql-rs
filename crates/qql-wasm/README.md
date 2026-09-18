@@ -21,7 +21,7 @@ npm install qql-wasm
 
 ```javascript
 import init, {
-  Client, Stmt, parse, isValid, inject_filter, compile, explain, analyze, tokenize,
+  Client, Stmt, parse, isValid, injectFilter, compile, explain, analyze, tokenize,
 } from "qql-wasm";
 
 await init();
@@ -61,7 +61,7 @@ client.free();
 | Export | Role |
 |--------|------|
 | `parse` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
-| `inject_filter` | Isolation |
+| `injectFilter` | Isolation |
 | `analyze` | tokens + AST + route(s) + explain |
 | `compile` / `explain` | Offline REST projection / plan text |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
@@ -72,7 +72,7 @@ client.free();
 |--------|------|
 | `injectFilter` | Isolation |
 | `shardKey` | Get/set routing (= QQL `SHARD`) |
-| `toJSON` / `toObject` / `compileRoute` | Serialize / project |
+| `toJson` (string) / `toJSON` (= `toObject`, `JSON.stringify` hook) / `compileRoute` | Serialize / project |
 
 ### `Client` (`client` feature)
 

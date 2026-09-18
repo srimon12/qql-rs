@@ -14,7 +14,7 @@ use crate::executor::response::{BackendResponse, GroupedSearchResult};
 use crate::executor::{ExecData, ExecResponse, Executor, FacetHit, OnError, SearchHit};
 use qql_plan::{PlanFacetValue, PlanGroupId, PlanVectorStruct, PlanVectorValue};
 
-fn hit(id: u64, score: f32) -> SearchHit {
+fn hit(id: u64, score: f64) -> SearchHit {
     SearchHit {
         id: qql_plan::PlanPointId::Number(id),
         score,

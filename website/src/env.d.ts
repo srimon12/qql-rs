@@ -1,4 +1,5 @@
 /// <reference types="astro/client" />
-/// <reference path="../node_modules/@astrojs/starlight/virtual.d.ts" />
-/// <reference path="../node_modules/@astrojs/starlight/virtual-internal.d.ts" />
-/// <reference path="../node_modules/@astrojs/starlight/global.d.ts" />
+// Starlight's ambient types (App.Locals.t / starlightRoute, StarlightApp) ship
+// inside the package entry, not at the pre-0.42 root paths. Importing the
+// package pulls them into every file that compiles against this project.
+import "@astrojs/starlight";

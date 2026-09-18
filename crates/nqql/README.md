@@ -15,14 +15,14 @@ Language surface tracks **Qdrant ≥ 1.19** (quotas, `memory` placement,
 npm install @veristamp/nqql
 ```
 
-Node **≥ 18**. Platforms: Linux x64 glibc, macOS x64/arm64, Windows x64.
+Node **≥ 18**. Platforms: Linux x64/arm64 glibc, macOS x64/arm64, Windows x64.
 
 ## Quick start
 
 ```javascript
 const {
   Client, HttpEmbedder, parse, isValid, injectFilter,
-  compileQuery, explain, execute, version,
+  compile, explain, execute, version,
 } = require("@veristamp/nqql");
 
 const client = new Client({
@@ -47,7 +47,7 @@ stmt.injectFilter("tenant_id", "=", "honeywell");
 stmt.shardKey = "honeywell";
 await client.execute(stmt);
 
-console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS"));
+console.log(version, isValid("SHOW COLLECTIONS"), compile("SHOW COLLECTIONS"));
 ```
 
 ## API summary
@@ -59,7 +59,7 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | `parse` / `parseJson` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `injectFilter` / `stmt.injectFilter` | Isolation |
 | `stmt.shardKey` | Same as QQL `SHARD '…'` (no `injectShardKey`) |
-| `compileQuery` / `explain` / `explainStmt` | Offline |
+| `compile` / `explain` / `explainStmt` | Offline |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
 | `execute` / `executeStmt` | Free-function execute (`options.params` same as `bind`) |
 | `executeHits` | Free-function execute returning `ScoredPoint[]` |

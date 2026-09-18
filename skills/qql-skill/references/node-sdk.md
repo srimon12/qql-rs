@@ -45,9 +45,14 @@ const client = new Client({
         model: "all-minilm:l6-v2",
         dimension: 384,
         // Local sparse BM25 document tuning (write-path only; re-ingest to apply)
-        bm25K1: 2.0,      // tf saturation (default 1.2)
+        bm25K1: 2.0,      // tf saturation (default 1.2; 0 = binary weighting)
         bm25B: 0.5,       // length normalization, [0, 1] (default 0.75)
         bm25AvgLen: 8.0,  // expected avg doc length in tokens (default 256)
+        bm25Language: "es",       // text language: stopwords/stemmer (default "english")
+        bm25Tokenizer: "whitespace", // word (default) | whitespace | prefix
+        bm25AsciiFolding: true,   // ignore accents (default false)
+        bm25Stemmer: "none",      // disable stemming (default: language stemmer)
+        bm25StopwordsLanguages: ["fr", "en"], // extra stopword lists
     },
 });
 
@@ -86,12 +91,12 @@ const result = await client.execute(stmt);
 
 `injectFilter` does not support `!=` — use equality or rewrite the query.
 
-Sparse IDF is QQL, not an inject and not a JSON corpus. `compileQuery` lowers
+Sparse IDF is QQL, not an inject and not a JSON corpus. `compile` lowers
 `idf = WHERE tenant_id = '…'` to Qdrant `params.idf.corpus` — do not build that
 object in JS.
 
 ```js
-const { bind, compileQuery } = require('@veristamp/nqql');
+const { bind, compile } = require('@veristamp/nqql');
 
 const bound = bind(`
   QUERY TEXT :q FROM sec10k USING sparse
@@ -101,7 +106,7 @@ const bound = bind(`
   LIMIT 10
 `, { q: "supply chain", tenant: "honeywell" });
 
-const route = compileQuery(bound);
+const route = compile(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```
 
@@ -194,8 +199,10 @@ console.log(stmt.shardKey);  // -> "acme"
 // Inject filter
 stmt.injectFilter("tenant_id", "=", "acme");
 
-// Serialise
-console.log(stmt.toJSON());
+// Serialise: exact-text string for transport, object for inspection.
+// (`toJSON` is the JSON.stringify hook — same BigInt-safe object as
+// `toObject()`; stringify throws on snowflake BigInts by design.)
+console.log(stmt.toJson());
 console.log(stmt.toObject());
 ```
 
@@ -215,7 +222,9 @@ shorter lists and nested shapes keep exact list semantics, and payload values
 are never repacked. Raw
 `Buffer`/`ArrayBuffer` without a float view fail closed — wrap them first
 (`new Float64Array(buf)`). Multivectors accept nested lists or the flat
-`{data: [...], dim: N}` form. Whole-point upsert params work the same way:
+`{data: [...], dim: N}` form. Snowflake u64 point IDs (and scroll cursors)
+bind as `BigInt` — exact at any magnitude; integer `number`s beyond 2^53-1
+fail closed, pass a `BigInt` instead. Whole-point upsert params work the same way:
 `UPSERT INTO c VALUES :rows` binds `{id, vector, …}` dicts (or lists of
 them) — bulk ingest as data, and prepared statements skip re-parsing
 every batch. Better: skip the loop entirely with the helper, which
@@ -311,7 +320,7 @@ const client = new Client({ url: "http://localhost:6333" });
 // 1. Typed hits: report.hits(stmt) / report.points(stmt) -> ScoredPoint[]
 const report = await client.execute("QUERY TEXT 'neural search' FROM docs LIMIT 5");
 for (const hit of report.hits()) {
-  console.log(hit.id);        // number (e.g. 42) or UUID string
+  console.log(hit.id);        // number (e.g. 42), BigInt above 2^53-1 (snowflake u64), or UUID string
   console.log(hit.score);     // number (shortest f32 round-trip)
   console.log(hit.payload);   // object (null when absent)
   console.log(hit.text);      // derived from payload.text (null when absent/non-string); the typed hit has no separate text field
@@ -359,7 +368,7 @@ console.log(grouped.ids(-1)); // last statement's hit ids
 ## 7. Free Functions & Explain
 
 ```js
-const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery, explain, bind } = require('@veristamp/nqql');
+const { parse, parseJson, isValid, injectFilter, tokenize, compile, explain, bind } = require('@veristamp/nqql');
 
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
 parse("QUERY 'x' FROM docs LIMIT 5; COUNT FROM docs");   // Script -> Stmt[]
@@ -367,10 +376,11 @@ parseJson("QUERY 'x' FROM docs LIMIT 5");                // Raw JSON string (2×
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Parse + plan gate
 injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");
 tokenize("QUERY 'x'");
-compileQuery("QUERY 'x' FROM docs LIMIT 5");                   // Route object
-compileQuery("QUERY TEXT :q FROM docs LIMIT :lim", { q: "x", lim: 5 }); // With parameter binding
+compile("QUERY 'x' FROM docs LIMIT 5");                   // Route object
+compile("QUERY TEXT :q FROM docs LIMIT :lim", { q: "x", lim: 5 }); // With parameter binding
 
-// Hierarchical ASCII tree plan
+// Hierarchical ASCII tree plan (throws on invalid QQL — unlike pyqql's
+// `explain`, which returns `{ok: false, error}` instead of raising)
 const planTree = explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10");
 console.log(planTree);
 // Query Plan
@@ -378,6 +388,11 @@ console.log(planTree);
 //     ├── Query: text('hello') via dense
 //     └── Limit: 10
 ```
+
+> **Cross-SDK parity notes.** `formatQuery` (canonical formatter) and
+> `analyze` (tokens + AST + routes + explain in one call) exist only in
+> `qql-wasm` — they target browser/edge IDE use; use `qql fmt` /
+> `qql lint` for the same offline from the CLI.
 
 ---
 

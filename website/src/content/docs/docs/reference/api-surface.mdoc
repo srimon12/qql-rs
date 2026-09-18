@@ -13,12 +13,12 @@ naming and object ownership.
 | Parse script | `Parser::parse_all` | `parse` | `parse` | `parse` |
 | Validate | `Parser::parse(_).is_ok()` | `is_valid` (parse + plan) | `isValid` (parse + plan) | `isValid` |
 | Tokenize | lexer API | `tokenize` | `tokenize` | `tokenize` |
-| Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
+| Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `injectFilter` / `Stmt.injectFilter` |
 | Explain | planner/runtime | `explain` | `explain` | `explain` / `analyze` |
 | Execution profile (client timings plus server time and usage) | `Executor::explain_analyze` | `Client.explain_analyze` | `Client.explainAnalyze` | `Client.explainAnalyze` |
 | DB-API cursor (Python) | — | `pyqql.connect` + cursor (`execute`/`executemany`/`fetch*`/`nextset`, `description`, `rowcount`) | — | — |
 | Lazy scroll cursor | manual `SCROLL ... AFTER :cursor` loop (see Rust SDK page) | `Client.scroll_cursor` (sync generator) plus `Client.scroll_cursor_async` (async generator) | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | `dx.js scrollCursor` helper over `Client.execute` (see WASM SDK page) |
-| Compile | planner/runtime | `compile_query` | `compileQuery` | `compile` |
+| Compile | planner/runtime | `compile` | `compile` | `compile` |
 | Bind parameters | `bind_named` / `bind_positional` (+ `*_readable`) | `bind`, `Stmt.bind`, `execute(…, params=)` | `bind`, `Stmt.bind`, `execute(…, { params })` | `bind`, `Stmt.bind`, `execute(…, { params })` — typed arrays convert directly |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
 | Parse to JSON string | — | `parse_json` | `parseJson` | `parseJson` |
@@ -74,10 +74,15 @@ Execution returns a stable report with aggregate `ok`, ordered per-operation
 results, and succeeded/failed counts. `on_error` / `onError` selects stop or
 continue behavior for multi-operation inputs. Python, Node, and WASM reports add
 typed accessors through `ExecutionReport` (`pyqql`, `dx-common.js`, `dx.js`):
-`hits(stmt)` / `points(stmt)` return `ScoredPoint` objects
-(`id`, `score`, `payload`, `text`, `collection`), `facet(stmt)` returns
-normalized `[{ value, count }]` hits, `count(stmt)` returns an integer, and
-`groups(stmt)` returns backend group objects (see below). Python
+`hits(stmt)` / `points(stmt)` / `ids(stmt)` return `ScoredPoint` objects
+(`id`, `score`, `payload`, `text`, `collection`; `.get(key, default?)` is
+attribute-first, `.withoutPayload()` / `.without_payload()` strips the
+payload), `facet(stmt)` returns
+normalized `[{ value, count }]` hits, `count(stmt)` returns an integer,
+`groups(stmt)` returns backend group objects (see below), and
+`collections(stmt)` / `collection(stmt)` / `shardKeys` (`shard_keys`) /
+`quotas(stmt)` read the inspect results (`SHOW COLLECTIONS`, `SHOW
+COLLECTION`, `SHOW SHARD KEYS`, quotas). Python
 `execute_hits` / `execute_async_hits`, Node `executeHits`, and WASM `dx.js`
 `executeHits(client, query, options)` skip the report
 entirely. Passing `params` as a list/array with one entry per statement binds

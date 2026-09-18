@@ -4,6 +4,8 @@ use crate::embedder::HttpEmbedder;
 use crate::executor::Executor;
 use qql_core::ast::{EmbeddingSpec, PointEntry, PointVectors, UpsertStmt, Value, VectorValue};
 use qql_core::error::QqlError;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 impl Executor {
     /// Infer implicit text embedding from the existing collection topology.
@@ -12,7 +14,7 @@ impl Executor {
     pub(crate) async fn configure_upsert_embeddings(
         &self,
         upsert: &mut UpsertStmt,
-    ) -> Result<Option<CollectionInfo>, QqlError> {
+    ) -> Result<Option<Arc<CollectionInfo>>, QqlError> {
         let needs_implicit = upsert.embedding.is_none()
             && upsert.embed.is_empty()
             && upsert.points.iter().any(|point| {
@@ -37,56 +39,69 @@ impl Executor {
         });
         let has_embedding = upsert.embedding.is_some() || !upsert.embed.is_empty();
         if !needs_implicit && !has_embedding {
-            if has_unnamed_vectors
-                && self
+            // Cache-first unnamed mapping: a hit costs no round trip; a miss
+            // probes existence and fetches only when the collection exists,
+            // so a missing collection falls through without a schema fetch.
+            if has_unnamed_vectors {
+                if let Some(info) = self.peek_cached_collection_info(&upsert.collection).await {
+                    map_unnamed_to_single_dense(upsert, &info);
+                    return Ok(Some(info));
+                }
+                if self
                     .client
                     .collection_exists(&upsert.collection)
                     .await
                     .unwrap_or(false)
-                && let Ok(info) = self.get_cached_collection_info(&upsert.collection).await
-            {
-                map_unnamed_to_single_dense(upsert, &info);
-                return Ok(Some(info));
+                    && let Ok(info) = self.get_cached_collection_info(&upsert.collection).await
+                {
+                    map_unnamed_to_single_dense(upsert, &info);
+                    return Ok(Some(info));
+                }
             }
             return Ok(None);
         }
-        if !self.client.collection_exists(&upsert.collection).await? {
-            if needs_implicit {
-                upsert.embedding = Some(EmbeddingSpec::Hybrid {
-                    dense_model: None,
-                    dense_vector: Some(crate::executor::DENSE_VECTOR_NAME.to_string()),
-                    dense_field: None,
-                    sparse_model: None,
-                    sparse_vector: Some(crate::executor::SPARSE_VECTOR_NAME.to_string()),
-                    sparse_field: None,
-                });
+        // Cache-first with the same error contract as before: the existence
+        // probe still decides missing (historical implicit defaults) versus
+        // transient (propagated); the schema fetch runs only for existing
+        // collections, and a cache hit skips both round trips.
+        let info = match self.peek_cached_collection_info(&upsert.collection).await {
+            Some(info) => info,
+            None => {
+                if !self.client.collection_exists(&upsert.collection).await? {
+                    if needs_implicit {
+                        upsert.embedding = Some(EmbeddingSpec::Hybrid {
+                            dense_model: None,
+                            dense_vector: Some(crate::executor::DENSE_VECTOR_NAME.to_string()),
+                            dense_field: None,
+                            sparse_model: None,
+                            sparse_vector: Some(crate::executor::SPARSE_VECTOR_NAME.to_string()),
+                            sparse_field: None,
+                        });
+                    }
+                    return Ok(None);
+                }
+                self.get_cached_collection_info(&upsert.collection).await?
             }
-            return Ok(None);
-        }
-
-        let info = self.get_cached_collection_info(&upsert.collection).await?;
+        };
+        // One schema pass for every name list below (infer + explicit
+        // resolution previously scanned the schema three times).
+        let targets = schema_targets(&info);
         if needs_implicit {
-            let multi_names = multivector_targets(&info);
-            let dense_all = dense_targets(&info);
             // Single-vector dense slots exclude multivector names for auto-embed.
-            let dense: Vec<String> = dense_all
-                .into_iter()
-                .filter(|name| !multi_names.iter().any(|m| m == name))
-                .collect();
-            let sparse: Vec<String> = info
-                .schema
-                .sparse_vectors
+            let dense: Vec<String> = targets
+                .dense
                 .iter()
-                .map(|vector| vector.name.clone())
+                .filter(|name| !targets.multi.contains(name))
+                .cloned()
                 .collect();
             upsert.embedding = Some(infer_embedding_spec(
                 &upsert.collection,
                 &dense,
-                &sparse,
-                &multi_names,
+                &targets.sparse,
+                &targets.multi,
             )?);
         }
-        resolve_explicit_embedding_targets(upsert, &info)?;
+        resolve_explicit_embedding_targets(upsert, &targets)?;
         Ok(Some(info))
     }
 
@@ -96,6 +111,21 @@ impl Executor {
         info: &CollectionInfo,
     ) -> Result<(), QqlError> {
         let dense_specs = &info.schema.vectors;
+        // Index once: the per-point loop below ran a linear `find` per
+        // vector, i.e. O(points × vectors × specs). First-wins insertion
+        // preserves `find` semantics for duplicate names.
+        let mut by_name: HashMap<&str, &VectorSpec> = HashMap::new();
+        for spec in dense_specs {
+            if let Some(name) = spec.name.as_deref() {
+                by_name.entry(name).or_insert(spec);
+            }
+        }
+        let default_spec = dense_specs.iter().find(|spec| spec.name.is_none());
+        // The historical `unwrap_or("")` comparison also matched an
+        // explicitly `""`-named vector against the unnamed spec.
+        if let Some(spec) = default_spec {
+            by_name.entry("").or_insert(spec);
+        }
         for point in &upsert.points {
             let PointEntry::Inline(point) = point else {
                 continue;
@@ -105,16 +135,14 @@ impl Executor {
             };
             match vectors {
                 PointVectors::Unnamed(value) => {
-                    if let Some(spec) = dense_specs.iter().find(|spec| spec.name.is_none()) {
+                    if let Some(spec) = default_spec {
                         validate_vector_value(&upsert.collection, "<default>", value, spec)?;
                     }
                 }
                 PointVectors::Named(values) => {
                     for (name, value) in values {
                         if let VectorValue::Dense(_) | VectorValue::MultiDense(_) = value
-                            && let Some(spec) = dense_specs
-                                .iter()
-                                .find(|spec| spec.name.as_deref().unwrap_or("") == name)
+                            && let Some(spec) = by_name.get(name.as_str())
                         {
                             validate_vector_value(&upsert.collection, name, value, spec)?;
                         }
@@ -258,43 +286,66 @@ pub(crate) fn map_unnamed_to_single_dense(upsert: &mut UpsertStmt, info: &Collec
     if dense.len() == 1 && !dense[0].is_empty() {
         let dense_name = &dense[0];
         for point in &mut upsert.points {
-            if let PointEntry::Inline(inline) = point
-                && let Some(PointVectors::Unnamed(vv)) = &inline.vectors
-            {
-                // Only replace named-target vectors; cloning here because a
-                // blind `take()` would drop Named vectors when the pattern
-                // fails to match after removal.
-                let vv = vv.clone();
-                inline.vectors = Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
+            let PointEntry::Inline(inline) = point else {
+                continue;
+            };
+            // Move (never clone) the vectors out: only `Unnamed` is
+            // replaced, `Named` is restored untouched. A borrow-then-clone
+            // here would deep-copy every dense vector once per point.
+            match inline.vectors.take() {
+                Some(PointVectors::Unnamed(vv)) => {
+                    inline.vectors = Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
+                }
+                taken => inline.vectors = taken,
             }
         }
     }
 }
 
 fn dense_targets(info: &CollectionInfo) -> Vec<String> {
-    let targets = if info.schema.vectors.is_empty() {
-        info.schema.dense_vectors.clone()
-    } else {
-        info.schema
-            .vectors
-            .iter()
-            .map(|vector| vector.name.clone().unwrap_or_default())
-            .collect()
-    };
-    if targets.is_empty() && info.schema.sparse_vectors.is_empty() {
-        vec![String::new()]
-    } else {
-        targets
-    }
+    schema_targets(info).dense
 }
 
-fn multivector_targets(info: &CollectionInfo) -> Vec<String> {
-    info.schema
-        .vectors
-        .iter()
-        .filter(|v| v.multivector.is_some())
-        .map(|v| v.name.clone().unwrap_or_default())
-        .collect()
+/// Named-vector inventory of a collection schema in a single pass.
+///
+/// `dense` keeps the historical fallback semantics (legacy `dense_vectors`,
+/// then `[""]` for schemaless single-vector collections); `sparse`/`multi`
+/// are straight name lists. One pass replaces the three separate scans
+/// (`dense_targets` + `multivector_targets` + sparse names) the configure
+/// path used to perform.
+struct SchemaTargets {
+    dense: Vec<String>,
+    sparse: Vec<String>,
+    multi: Vec<String>,
+}
+
+fn schema_targets(info: &CollectionInfo) -> SchemaTargets {
+    let mut dense = if info.schema.vectors.is_empty() {
+        info.schema.dense_vectors.clone()
+    } else {
+        Vec::with_capacity(info.schema.vectors.len())
+    };
+    let mut multi = Vec::new();
+    for vector in &info.schema.vectors {
+        let name = vector.name.clone().unwrap_or_default();
+        if vector.multivector.is_some() {
+            multi.push(name.clone());
+        }
+        dense.push(name);
+    }
+    if dense.is_empty() && info.schema.sparse_vectors.is_empty() {
+        dense.push(String::new());
+    }
+    SchemaTargets {
+        dense,
+        sparse: info
+            .schema
+            .sparse_vectors
+            .iter()
+            .map(|vector| vector.name.clone())
+            .collect(),
+        multi,
+    }
 }
 
 /// Infer UPSERT embedding targets from collection topology, including multivector slots.
@@ -362,15 +413,17 @@ fn infer_embedding_spec(
 
 fn resolve_explicit_embedding_targets(
     upsert: &mut UpsertStmt,
-    info: &CollectionInfo,
+    targets: &SchemaTargets,
 ) -> Result<(), QqlError> {
-    let dense = dense_targets(info);
-    let sparse = info
-        .schema
-        .sparse_vectors
-        .iter()
-        .map(|vector| vector.name.clone())
-        .collect::<Vec<_>>();
+    let dense: &[String] = &targets.dense;
+    let sparse: &[String] = &targets.sparse;
+    // Multi targets are still dense names on the schema; allow MULTI VECTOR
+    // to resolve against dense when the multivector list is empty (offline).
+    let multi: &[String] = if targets.multi.is_empty() {
+        dense
+    } else {
+        &targets.multi
+    };
 
     if let Some(spec) = &mut upsert.embedding {
         fn resolve_spec(
@@ -410,30 +463,16 @@ fn resolve_explicit_embedding_targets(
             }
             Ok(())
         }
-        let multi = multivector_targets(info);
-        // Multi targets are still dense names on the schema; allow MULTI VECTOR
-        // to resolve against dense when multivector list is empty (offline).
-        let multi_or_dense = if multi.is_empty() {
-            dense.clone()
-        } else {
-            multi
-        };
-        resolve_spec(&upsert.collection, spec, &dense, &sparse, &multi_or_dense)?;
+        resolve_spec(&upsert.collection, spec, dense, sparse, multi)?;
     }
 
-    let multi = multivector_targets(info);
-    let multi_or_dense = if multi.is_empty() {
-        dense.clone()
-    } else {
-        multi
-    };
     for directive in &upsert.embed {
         let (available, kind) = match directive.kind {
             qql_core::ast::EmbedKind::Dense { .. } | qql_core::ast::EmbedKind::Image { .. } => {
-                (&dense, "dense")
+                (dense, "dense")
             }
-            qql_core::ast::EmbedKind::Sparse { .. } => (&sparse, "sparse"),
-            qql_core::ast::EmbedKind::Multi { .. } => (&multi_or_dense, "multivector"),
+            qql_core::ast::EmbedKind::Sparse { .. } => (sparse, "sparse"),
+            qql_core::ast::EmbedKind::Multi { .. } => (multi, "multivector"),
         };
         if !available
             .iter()

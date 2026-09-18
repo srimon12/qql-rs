@@ -351,12 +351,12 @@ for (const hit of report.hits(0)) {
 ```
 
 The module exports:
-- **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)` returning `[{ id, hits }]`). Negative indexes count from the end. `report.telemetry` reads aggregated server time and usage (`{ time_s, usage }` or `null`) so browser code never hand-rolls the sum.
-- **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text` (derived from `payload.text`), `.collection`, `.vector` (dense / sparse / multi-dense / named when `WITH VECTOR`), plus `.get(key, default)`. `.shard_key` is a legacy passthrough, always null on the typed path.
+- **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)` / `.ids(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), groups (`.groups(stmt)` returning `[{ id, hits }]`), and inspect results (`.collections(stmt)` / `.collection(stmt)` / `.shardKeys(stmt)` / `.quotas(stmt)`). Negative indexes count from the end. `report.telemetry` reads aggregated server time and usage (`{ time_s, usage }` or `null`) so browser code never hand-rolls the sum.
+- **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text` (derived from `payload.text`), `.collection`, `.vector` (dense / sparse / multi-dense / named when `WITH VECTOR`), plus `.get(key, default)` (attribute-first: `id`/`score` always resolve; other keys read the payload). `.shard_key` is a legacy passthrough, always null on the typed path.
 - **`buildError`**: Unpacks JSON error strings into `Error` objects carrying `.code`, `.kind`, `.span`, plus `.fields` and `.request_id` when present.
 - **`wrapReport`**: Returns the input if already an `ExecutionReport`, else wraps the plain object.
 - **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly. Prefer this over manual `execute` plus `hits(0)` when only hits are needed.
-- **`scrollCursor(client, collection, options)`**: Lazy async generator over `SCROLL ... AFTER :cursor` (at most one page buffered). Same options shape as Node (`batchSize`, `where`, `params`, `withPayload`, `withVector`, `shardKey`).
+- **`scrollCursor(client, collection, options)`** / **`scrollStream(client, collection, options)`**: Lazy async generator over `SCROLL ... AFTER :cursor` (at most one page buffered) and its pull-driven WHATWG `ReadableStream` wrapper. Same options shape as Node (`batchSize`, `where`, `params`, `withPayload`, `withVector`, `shardKey`).
 
 ```javascript
 import init, { Client } from "qql-wasm";
@@ -377,6 +377,28 @@ const analysis = await client.explainAnalyze("QUERY 'x' FROM docs USING dense LI
 console.log(analysis.plan, analysis.phases, analysis.server_time_s, analysis.usage);
 ```
 
+### Large point IDs arrive as `BigInt`
+
+Qdrant point IDs are 64-bit integers and real collections use the full range
+(snowflake IDs like `1479834607549681654` exceed `Number.MAX_SAFE_INTEGER`).
+The binding keeps every integer exact: values a JS `Number` holds exactly
+(counts, small IDs, small payloads) arrive as numbers, anything larger arrives
+as a `BigInt` — never a silently rounded `Number`:
+
+```javascript
+const hits = await executeHits(client, "QUERY 'x' FROM docs USING dense LIMIT 5");
+console.log(typeof hits[0].id); // 'number' for small IDs, 'bigint' for snowflakes
+
+// BigInts round-trip exactly: pass them straight back as params or cursors.
+await client.execute("SCROLL FROM docs AFTER :cursor LIMIT 100", {
+  params: { cursor: hits.at(-1).id },
+});
+```
+
+`report.count()` narrows counts to `Number` (exact in practice). For integers
+above 2⁵³−1 passed *in* as params, use `BigInt` — unsafe `number`s fail
+closed instead of rounding.
+
 ## Memory
 
 Every `Client` and `Stmt` owns WASM allocations. Call `free()` when a handle is
@@ -389,7 +411,7 @@ releases it automatically.
 | `init` / `initSync` | initialized WASM module | One-time module initialization |
 | `parse`, `isValid`, `tokenize` | AST values, boolean, token list | Strict local parser primitives |
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
-| `compile` / `compileQuery`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers (`compileQuery` is an alias of `compile`) |
+| `compile`, `explain`, `injectFilter` | route, text, rewritten statement | One-shot offline planning helpers (`explain` throws a coded JSON `Error` on invalid source) |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
 | `bind(query, params?, { truncateVectors })` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline; `params` optional — omitted returns the query unchanged |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
@@ -404,7 +426,7 @@ releases it automatically.
 | `Client.explainAnalyze` | plan plus measured timings | Static plan, client phases, and server telemetry for one statement |
 | `setEmbedder`, `setHttpEmbedder`, `setHttpMultiEmbedder`, `setHttpImageEmbedder`, `setHttpReranker`, `hasEmbedder` | configured client | Resolve text, multi, image, and rerank input from JavaScript or HTTP (see the embedder ladder in the API surface reference) |
 | `Client.setRemoteEmbedder` | configured client | Alias for `setHttpEmbedder` |
-| `dx.js ExecutionReport` | typed accessors plus `telemetry` | `hits` / `points` / `ids` / `facet` / `count` / `groups` (negative index counts from the end; `groups` returns `[{ id, hits }]`), `telemetry`, `wrapReport`, `executeHits`, `scrollCursor` |
+| `dx.js ExecutionReport` | typed accessors plus `telemetry` | `hits` / `points` / `ids` / `facet` / `count` / `groups` / `collections` / `collection` / `shardKeys` / `quotas` (negative index counts from the end; `groups` returns `[{ id, hits }]`), `telemetry`, `wrapReport`, `executeHits`, `scrollCursor`, `scrollStream` |
 | `setRouteAffinity`, `routeAffinity` | configured client, key | Pin reads via `X-Qdrant-Route-Affinity` (Qdrant 1.19+) |
 | `free()` / `[Symbol.dispose]` | released WASM allocation | Dispose `Client` and `Stmt` handles |
 

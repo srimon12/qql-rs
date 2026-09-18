@@ -277,8 +277,11 @@ REST and gRPC failures now map to specific codes:
 | `QQL-BACKEND-COLLECTION-NOT-FOUND` | Missing collection (HTTP 404, gRPC `NotFound`) |
 | `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
 | `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building, retry the query |
+| `QQL-BACKEND-READ` | A Qdrant response body could not be read (connection cut mid-stream) |
 | `QQL-BACKEND-STRICT-MODE` | Strict-mode or quota rejection |
 | `QQL-BACKEND-HTTP` | Other rejected REST requests, for example HTTP 400 on a batch |
+| `QQL-TRANSPORT-BUILD` | The HTTP client could not be built (invalid timeout or TLS config) |
+| `QQL-TRANSPORT-REQUEST` | The HTTP request failed in flight (connection error or timeout; the message carries the request id) |
 
 `QQL-BACKEND` and `QQL-GRPC` remain for unclassified failures.
 
@@ -433,7 +436,7 @@ No migration needed. These additions replace common workarounds.
 - **Execution profiling** with `Executor::explain_analyze` /
   `Client.explain_analyze` / `Client.explainAnalyze`, returning the static plan
   plus measured client phases and server telemetry.
-- **WASM `dx.js`**: `@veristamp/qql-wasm` now includes the typed wrapper module
+- **WASM `dx.js`**: `qql-wasm` now includes the typed wrapper module
   matching `@veristamp/nqql`: `ExecutionReport`, `ScoredPoint`, `buildError`,
   `wrapReport`, `executeHits`, and `scrollCursor` are available for browser and
   Edge runtimes with full TypeScript typings.

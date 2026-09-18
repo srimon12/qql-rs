@@ -23,13 +23,6 @@ fn point_id_object<'py>(py: Python<'py>, id: &PlanPointId) -> PyResult<Bound<'py
     }
 }
 
-/// f32 → Python float via the shortest round-trip decimal, matching the
-/// JSON/pythonize score rendering the SDKs used before native classes
-/// (`0.95f32` becomes `0.95`, not `0.949999988079071`).
-fn score_to_f64(score: f32) -> f64 {
-    score.to_string().parse().unwrap_or(score as f64)
-}
-
 /// Extracted text is the payload's `text` field (the typed hit has no
 /// dedicated field). Non-string payload `text` values yield `None`.
 fn payload_text(payload: &Option<HashMap<String, serde_json::Value>>) -> Option<&str> {
@@ -58,10 +51,11 @@ impl PyScoredPoint {
         point_id_object(py, &self.inner.id)
     }
 
-    /// Similarity or rerank score.
+    /// Similarity or rerank score (already rounded once at ingestion via
+    /// `qql::executor::score_f64`; stored as the shortest round-trip f64).
     #[getter]
     fn score(&self) -> f64 {
-        score_to_f64(self.inner.score)
+        self.inner.score
     }
 
     /// Point payload, or `None` when not requested.
@@ -152,7 +146,7 @@ impl PyScoredPoint {
         format!(
             "ScoredPoint(id={}, score={}, text={:?}, collection={:?})",
             self.inner.id,
-            score_to_f64(self.inner.score),
+            self.inner.score,
             payload_text(&self.inner.payload),
             self.inner.collection
         )
@@ -515,7 +509,7 @@ fn hit_from_python(value: &Bound<'_, PyAny>) -> PyResult<SearchHit> {
         .transpose()?;
     Ok(SearchHit {
         id,
-        score: score as f32,
+        score,
         payload,
         collection,
         vector,

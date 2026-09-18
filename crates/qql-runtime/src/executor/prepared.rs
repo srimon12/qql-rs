@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use qql_core::ast::{self, Stmt, Value};
 use qql_core::error::QqlError;
@@ -21,7 +22,7 @@ pub struct PreparedStatement {
     /// Collection schema fetched once at [`Executor::prepare`] for templates
     /// with point placeholders, reused by every point-splice execution
     /// instead of re-fetching per call.
-    pub(crate) upsert_schema: Option<CollectionInfo>,
+    pub(crate) upsert_schema: Option<Arc<CollectionInfo>>,
 }
 
 impl PreparedStatement {
@@ -189,25 +190,42 @@ impl Executor {
         self.ensure_open()?;
         let (named_params, positional_count) = qql_core::params::collect_statement_params(&stmt);
         let has_point_params = qql_core::params::stmt_has_point_params(&stmt);
-        let planned = match self.prepare_statement(stmt.clone()).await {
-            Ok(prep) => plan_template(&prep).ok(),
-            Err(_) => None,
+        // Borrow probe first: a template that cannot plan needs no expensive
+        // preparation (schema I/O, embeddings, backend-mutating auto-create)
+        // and no whole-`Stmt` clone. Only clone + prepare when the probe says
+        // the template is plannable; outcomes match the old always-prepare
+        // probe in every case (`None` whenever either stage fails).
+        let planned = if plan_template(&stmt).is_ok() {
+            match self.prepare_statement(stmt.clone()).await {
+                Ok(prep) => plan_template(&prep).ok(),
+                Err(_) => None,
+            }
+        } else {
+            None
         };
         // Point-placeholder templates resolve bound points against this
         // schema on every execution instead of re-fetching per call. Fetched
         // once here; `None` (missing collection) disables the fast path and
-        // every execution takes the checking slow path instead.
+        // every execution takes the checking slow path instead. Cache-first:
+        // a hit costs no round trip; a miss probes existence (one GET) and
+        // fetches schema only when the collection exists, so a missing
+        // collection never pays for a fetch.
         let upsert_schema = if has_point_params {
-            if let Stmt::Upsert(upsert) = &stmt
-                && self
+            if let Stmt::Upsert(upsert) = &stmt {
+                if let Some(info) = self.peek_cached_collection_info(&upsert.collection).await {
+                    Some(info)
+                } else if self
                     .client
                     .collection_exists(&upsert.collection)
                     .await
                     .unwrap_or(false)
-            {
-                self.get_cached_collection_info(&upsert.collection)
-                    .await
-                    .ok()
+                {
+                    self.get_cached_collection_info(&upsert.collection)
+                        .await
+                        .ok()
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -291,6 +309,13 @@ impl Executor {
             );
             return self.dispatch_planned(&op).await;
         }
+        // Load-bearing clone: `prepared` is a reusable template behind a `&`
+        // receiver (callers execute it repeatedly with different params, and
+        // `upsert_many` reuses one template across chunks), while `bind_stmt`
+        // binds in place (`&mut Stmt`). The working copy must not alias the
+        // template — binding the template itself would corrupt every later
+        // execution. There is no owned single-use overload: the `&` contract
+        // is what the CLI and all multi-exec callers share.
         let mut stmt = prepared.stmt.clone();
         qql_core::params::bind_stmt(&mut stmt, |k| params.get(k).cloned(), &[])?;
         self.execute_node(stmt).await
@@ -376,6 +401,9 @@ impl Executor {
             });
             return self.dispatch_planned(&op).await;
         }
+        // Load-bearing clone: same reusable-template contract as
+        // `execute_prepared` — `bind_stmt` mutates in place, so the per-exec
+        // working copy must not alias `prepared.stmt`.
         let mut stmt = prepared.stmt.clone();
         qql_core::params::bind_stmt(&mut stmt, |_| None, params)?;
         self.execute_node(stmt).await
@@ -389,6 +417,10 @@ impl Executor {
         lookup: &impl Fn(&str) -> Option<Value>,
         positional: &[Value],
     ) -> Result<ExecResponse, QqlError> {
+        // Load-bearing clone: the point-splice template is shared across all
+        // `upsert_many` chunks (and across repeated `execute_prepared` calls),
+        // while the splice rebuilds the point vec in place. Each execution
+        // binds a fresh copy; the template keeps its placeholders.
         let mut stmt = prepared.stmt.clone();
         qql_core::params::bind_stmt(&mut stmt, lookup, positional)?;
         let Stmt::Upsert(mut upsert) = stmt else {
@@ -414,7 +446,7 @@ impl Executor {
             crate::executor::dml::upsert::map_unnamed_to_single_dense(&mut upsert, info);
             self.validate_embedded_upsert(&upsert, info)?;
         }
-        let request = qql_plan::mutation::lower_upsert_request(&upsert);
+        let request = qql_plan::mutation::lower_upsert_request(&upsert)?;
         let wait = upsert
             .wait
             .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty());
@@ -424,5 +456,49 @@ impl Executor {
             wait,
         };
         self.dispatch_planned(&op).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql_core::parser::Parser;
+
+    /// The per-exec `prepared.stmt.clone()` is load-bearing, not waste:
+    /// `bind_stmt` binds in place, and the template behind `&PreparedStatement`
+    /// must survive repeated executions with different params. Binding two
+    /// clones must yield two correct statements while the template keeps its
+    /// placeholders — binding the template itself would corrupt the second
+    /// execution. This pins the `&`-receiver + clone contract against a
+    /// future "bind in place on the template" restructure.
+    #[test]
+    fn template_survives_repeated_cloned_binds() {
+        let stmt = Parser::parse("QUERY [0.1] FROM docs WHERE x = :x").unwrap();
+        let (named_params, positional_count) = qql_core::params::collect_statement_params(&stmt);
+        let template = PreparedStatement {
+            sql: "QUERY [0.1] FROM docs WHERE x = :x".to_string(),
+            stmt,
+            planned: None,
+            named_params,
+            positional_count,
+            has_point_params: false,
+            upsert_schema: None,
+        };
+        let bind = |v: i64| {
+            let mut work = template.stmt.clone();
+            qql_core::params::bind_stmt(&mut work, |k| (k == "x").then_some(Value::Int(v)), &[])
+                .unwrap();
+            work
+        };
+        assert_eq!(
+            qql_core::fmt::format_stmt(&bind(1)),
+            "QUERY [0.1] FROM docs WHERE x = 1"
+        );
+        assert_eq!(
+            qql_core::fmt::format_stmt(&bind(2)),
+            "QUERY [0.1] FROM docs WHERE x = 2"
+        );
+        // Template untouched: still carries the unbound placeholder.
+        assert!(qql_plan::ensure_no_unbound_params(&template.stmt).is_err());
     }
 }

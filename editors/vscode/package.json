@@ -2,7 +2,7 @@
   "name": "qql-lang",
   "displayName": "QQL \u2014 Qdrant Query Language",
   "description": "Syntax highlighting, linting, and autocompletion for QQL 1.7 \u2014 Qdrant Query Language",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "srimon12",
   "license": "MIT",
   "icon": "icon.png",
@@ -391,7 +391,7 @@
     "check": "npm run typecheck && npm run lint",
     "fix": "npm run lint:fix && npm run typecheck",
     "test": "node --test \"test/*.test.js\"",
-    "build:wasm": "wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ./wasm",
+    "build:wasm": "wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm",
     "package": "npx @vscode/vsce package",
     "publish": "npx @vscode/vsce publish"
   },

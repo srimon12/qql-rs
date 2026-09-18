@@ -1,60 +1,175 @@
-<dialog class="app-dialog" id="settings-dialog" aria-labelledby="settings-title" data-app-dialog>
+---
+import {
+	BROWSER_MODELS,
+	DEFAULT_QDRANT_URL,
+	LIVE_EMBED_URL,
+} from "../../lib/playground/core/types";
+---
+
+<dialog class="app-dialog app-dialog--wide" id="settings-dialog" aria-labelledby="settings-title" data-app-dialog>
   <form class="flex max-h-[90vh] flex-col" data-settings-form>
-    <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-5 py-4">
+    <!-- Header -->
+    <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-6 py-4">
       <div class="min-w-0">
-        <p class="mono-label m-0">Runtime</p>
-        <h2 id="settings-title" class="m-0 mt-1 text-lg font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">Connection and embeddings</h2>
-        <p class="m-0 mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]">Stored only in this browser. QQL is sent directly to your configured Qdrant endpoint.</p>
+        <div class="flex items-center gap-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--sl-color-accent-high)]">
+          <span class="size-1.5 rounded-full bg-[var(--sl-color-accent)]" aria-hidden="true"></span>
+          <span>Runtime Environment</span>
+        </div>
+        <h2 id="settings-title" class="m-0 mt-1 text-base font-semibold tracking-[-0.01em] text-[var(--sl-color-white)]">
+          Database &amp; Embeddings Setup
+        </h2>
+        <p class="m-0 mt-1 text-xs text-[var(--sl-color-gray-3)] leading-relaxed">
+          Configure connection endpoints and vector inference. Credentials remain strictly local in your browser.
+        </p>
       </div>
       <button class="app-icon-btn" type="button" data-close-dialog aria-label="Close settings">×</button>
     </header>
 
-    <div class="grid gap-4 overflow-y-auto px-5 py-4">
-      <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-        <span>Qdrant REST URL</span>
-        <input class="app-input" name="qdrantUrl" type="url" required placeholder="http://localhost:6333" />
-      </label>
-      <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-        <span>Qdrant API key <small class="font-normal text-[var(--sl-color-gray-3)]">optional</small></span>
-        <input class="app-input" name="qdrantKey" type="password" autocomplete="off" />
-      </label>
-      <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-        <span>Embedding provider</span>
-        <select class="app-select" name="embedProvider">
-          <option value="browser">In-browser MiniLM</option>
-          <option value="http">OpenAI-compatible HTTP</option>
-          <option value="none">None: raw vectors only</option>
-        </select>
-      </label>
-      <fieldset class="grid gap-3 rounded-lg border border-[var(--sl-color-gray-5)] p-3" data-http-embed-fields>
-        <legend class="px-1 text-xs font-medium text-[var(--sl-color-gray-2)]">HTTP embedder</legend>
-        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <span>Endpoint</span>
-          <input class="app-input" name="embedUrl" type="url" placeholder="http://localhost:11434/v1/embeddings" />
-        </label>
-        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <span>Model</span>
-          <input class="app-input" name="embedModel" type="text" />
-        </label>
-        <div class="grid gap-3 sm:grid-cols-2">
-          <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-            <span>Dimension</span>
-            <input class="app-input" name="embedDim" type="number" min="1" step="1" />
+    <!-- Dialog Content Body: 2 Dedicated Sections -->
+    <div class="grid gap-5 overflow-y-auto p-6">
+      <!-- Section 1: Qdrant Vector Database -->
+      <section class="rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-4 shadow-2xs">
+        <div class="flex items-center justify-between border-b border-[var(--sl-color-gray-5)] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="flex size-6 items-center justify-center rounded-md bg-[var(--sl-color-bg)] font-mono text-xs font-bold text-[var(--sl-color-accent-high)]">
+              ⛁
+            </span>
+            <h3 class="m-0 font-mono text-xs font-semibold text-[var(--sl-color-white)] uppercase tracking-wider">
+              1. Qdrant Vector Database
+            </h3>
+          </div>
+          <span class="font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]" data-connection-full></span>
+        </div>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+          <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)] sm:col-span-2">
+            <span class="flex items-center justify-between">
+              <span>Qdrant REST URL</span>
+              <span class="font-mono text-[0.65rem] text-[var(--sl-color-gray-4)]">Default: {DEFAULT_QDRANT_URL}</span>
+            </span>
+            <input class="app-input font-mono text-xs" name="qdrantUrl" type="url" required placeholder={DEFAULT_QDRANT_URL} />
           </label>
-          <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-            <span>API key <small class="font-normal text-[var(--sl-color-gray-3)]">optional</small></span>
-            <input class="app-input [-webkit-text-security:disc]" name="embedKey" type="text" autocomplete="off" spellcheck="false" />
+
+          <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)] sm:col-span-2">
+            <span>API Key <small class="font-normal text-[var(--sl-color-gray-3)]">(optional for local Qdrant)</small></span>
+            <input class="app-input font-mono text-xs" name="qdrantKey" type="password" autocomplete="off" placeholder="Bearer api-key..." />
           </label>
         </div>
-      </fieldset>
+
+        <!-- Connection Test Ping Row -->
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="size-2 rounded-full bg-[var(--sl-color-gray-4)] transition-colors" data-embed-probe-dot></span>
+            <span class="font-mono text-xs text-[var(--sl-color-gray-3)]" data-embed-probe>Click test to ping endpoint…</span>
+          </div>
+          <button class="app-action h-7 px-3 text-xs font-medium" type="button" data-test-connection>
+            Test Connection
+          </button>
+        </div>
+      </section>
+
+      <!-- Section 2: Embeddings Engine -->
+      <section class="rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-4 shadow-2xs">
+        <div class="flex items-center justify-between border-b border-[var(--sl-color-gray-5)] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="flex size-6 items-center justify-center rounded-md bg-[var(--sl-color-bg)] font-mono text-xs font-bold text-[var(--sl-color-accent-high)]">
+              ✦
+            </span>
+            <h3 class="m-0 font-mono text-xs font-semibold text-[var(--sl-color-white)] uppercase tracking-wider">
+              2. Vector Embeddings Resolver
+            </h3>
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-3">
+          <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+            <span>Embedding Provider</span>
+            <select class="app-select font-mono text-xs" name="embedProvider" data-embed-provider>
+              <option value="browser">In-browser Transformers.js (zero configuration)</option>
+              <option value="http">OpenAI-compatible HTTP (Ollama / LocalAI / OpenAI)</option>
+              <option value="none">None: Raw vectors only (no text embedding)</option>
+            </select>
+          </label>
+
+          <!-- Browser (Transformers.js) -->
+          <fieldset class="grid gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3.5" data-browser-embed-fields>
+            <legend class="px-1 font-mono text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--sl-color-accent-high)]">
+              In-browser model
+            </legend>
+
+            <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+              <span class="flex items-center justify-between gap-3">
+                <span>Model ID</span>
+                <span class="font-mono text-[0.65rem] text-[var(--sl-color-gray-4)]">Hugging Face repo, e.g. Xenova/bge-small-en-v1.5</span>
+              </span>
+              <input class="app-input font-mono text-xs" name="embedBrowserModel" type="text" list="browser-model-options" autocomplete="off" spellcheck="false" data-browser-model-input />
+            </label>
+            <datalist id="browser-model-options">
+              {BROWSER_MODELS.map((model) => (
+                <option value={model.id}>{model.label} · {model.dims}d · {model.note}</option>
+              ))}
+            </datalist>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+                <span>Inference backend</span>
+                <select class="app-select font-mono text-xs" name="embedBrowserDevice">
+                  <option value="auto">Auto: WebGPU, else WASM</option>
+                  <option value="webgpu">WebGPU only</option>
+                  <option value="wasm">WASM only (CPU)</option>
+                </select>
+              </label>
+              <div class="grid content-start gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+                <span>Resolved dimensions</span>
+                <span class="flex min-h-10 items-center rounded-md border border-dashed border-[var(--sl-color-gray-5)] px-3 font-mono text-[0.72rem] text-[var(--sl-color-gray-3)]" data-browser-model-dims>Reported after the first embedding</span>
+              </div>
+            </div>
+
+            <p class="m-0 text-[0.6875rem] leading-5 text-[var(--sl-color-gray-3)]">
+              The weights download from the Hugging Face CDN on first use (tens of MB) and stay cached in this browser. The collection's vector size must match the model.
+            </p>
+          </fieldset>
+
+          <!-- HTTP (OpenAI-compatible) -->
+          <fieldset class="grid gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3.5" data-http-embed-fields>
+            <legend class="px-1 font-mono text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--sl-color-accent-high)]">
+              HTTP Embedder Config
+            </legend>
+            <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+              <span>Endpoint</span>
+              <input class="app-input font-mono text-xs" name="embedUrl" type="url" placeholder={LIVE_EMBED_URL} />
+            </label>
+            <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+              <span>Model Name</span>
+              <input class="app-input font-mono text-xs" name="embedModel" type="text" placeholder="bge-small-en-v1.5" />
+            </label>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+                <span>Vector Dimension</span>
+                <input class="app-input font-mono text-xs" name="embedDim" type="number" min="1" step="1" placeholder="384" />
+              </label>
+              <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+                <span>API Key <small class="font-normal text-[var(--sl-color-gray-3)]">(optional)</small></span>
+                <input class="app-input font-mono text-xs [-webkit-text-security:disc]" name="embedKey" type="text" autocomplete="off" spellcheck="false" />
+              </label>
+            </div>
+          </fieldset>
+
+          <p class="m-0 font-mono text-[0.6875rem] text-[var(--sl-color-gray-3)]" data-embed-status>
+            Browser model loads only when execution needs text embeddings.
+          </p>
+        </div>
+      </section>
     </div>
 
-    <footer class="flex flex-col items-stretch justify-between gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-3 sm:flex-row sm:items-center">
-      <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
-      <div class="flex shrink-0 justify-end gap-2">
-        <button class="app-action app-action--lg" type="button" data-test-connection>Test connection</button>
-        <button class="app-action app-action--lg app-action--primary" type="submit">Save connection</button>
-      </div>
+    <!-- Footer -->
+    <footer class="flex items-center justify-between border-t border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-6 py-3.5">
+      <button class="app-action px-3 py-1.5 text-xs" type="button" data-close-dialog>
+        Cancel
+      </button>
+      <button class="app-action app-action--primary px-4 py-1.5 text-xs font-semibold" type="submit">
+        Save &amp; Reconnect
+      </button>
     </footer>
   </form>
 </dialog>

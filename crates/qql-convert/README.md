@@ -54,7 +54,7 @@ qql convert --collection docs capture.jsonl
 ```
 
 Pair with the recorder for zero-code-change capture (see the
-[`qql-cli` recorder](https://github.com/srimon12/qql-rs/blob/main/crates/qql-cli/README.md#recorder-qql-record-opt-in)):
+[`qql-cli` recorder](https://github.com/srimon12/qql-rs/blob/main/crates/qql-cli/README.md#recorder-qql-record-built-in)):
 
 ```bash
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 \
@@ -124,7 +124,7 @@ re-parse.
 
 ## Docs
 
-- [qql-cli recorder + CLI](https://github.com/srimon12/qql-rs/blob/main/crates/qql-cli/README.md#recorder-qql-record-opt-in)
+- [qql-cli recorder + CLI](https://github.com/srimon12/qql-rs/blob/main/crates/qql-cli/README.md#recorder-qql-record-built-in)
 - [Convert + migration guide](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/convert-migration.md)
 - [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)
 - [docs.rs](https://docs.rs/qql-convert)

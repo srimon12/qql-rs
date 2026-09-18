@@ -22,12 +22,21 @@ pub struct PyHttpEmbedder {
     pub bm25_k1: Option<f64>,
     pub bm25_b: Option<f64>,
     pub bm25_avg_len: Option<f64>,
+    pub bm25_language: Option<String>,
+    pub bm25_tokenizer: Option<String>,
+    pub bm25_lowercase: Option<bool>,
+    pub bm25_ascii_folding: Option<bool>,
+    pub bm25_stopwords: Option<Vec<String>>,
+    pub bm25_stemmer: Option<String>,
+    pub bm25_stopwords_languages: Option<Vec<String>>,
+    pub bm25_min_token_len: Option<usize>,
+    pub bm25_max_token_len: Option<usize>,
 }
 
 #[pymethods]
 impl PyHttpEmbedder {
     #[new]
-    #[pyo3(signature = (endpoint, model, dimension, api_key=None, multi_endpoint=None, multi_api_key=None, multi_model=None, multi_dimension=None, image_endpoint=None, image_api_key=None, image_model=None, image_dimension=None, rerank_endpoint=None, rerank_api_key=None, rerank_model=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None))]
+    #[pyo3(signature = (endpoint, model, dimension, api_key=None, multi_endpoint=None, multi_api_key=None, multi_model=None, multi_dimension=None, image_endpoint=None, image_api_key=None, image_model=None, image_dimension=None, rerank_endpoint=None, rerank_api_key=None, rerank_model=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_stopwords=None, bm25_stemmer=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords_languages=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         endpoint: &str,
@@ -48,6 +57,15 @@ impl PyHttpEmbedder {
         bm25_k1: Option<f64>,
         bm25_b: Option<f64>,
         bm25_avg_len: Option<f64>,
+        bm25_language: Option<String>,
+        bm25_tokenizer: Option<String>,
+        bm25_lowercase: Option<bool>,
+        bm25_ascii_folding: Option<bool>,
+        bm25_stopwords: Option<Vec<String>>,
+        bm25_stemmer: Option<String>,
+        bm25_min_token_len: Option<usize>,
+        bm25_max_token_len: Option<usize>,
+        bm25_stopwords_languages: Option<Vec<String>>,
     ) -> PyResult<Self> {
         if endpoint.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -64,7 +82,20 @@ impl PyHttpEmbedder {
                 "embedding dimension must be positive",
             ));
         }
-        validate_bm25(bm25_k1, bm25_b, bm25_avg_len)?;
+        validate_bm25_text(
+            bm25_k1,
+            bm25_b,
+            bm25_avg_len,
+            bm25_language.as_deref(),
+            bm25_tokenizer.as_deref(),
+            bm25_lowercase,
+            bm25_ascii_folding,
+            bm25_stopwords.clone(),
+            bm25_stemmer.as_deref(),
+            bm25_min_token_len,
+            bm25_max_token_len,
+            bm25_stopwords_languages.clone(),
+        )?;
         Ok(PyHttpEmbedder {
             endpoint: endpoint.to_string(),
             api_key: api_key.unwrap_or_default(),
@@ -84,16 +115,54 @@ impl PyHttpEmbedder {
             bm25_k1,
             bm25_b,
             bm25_avg_len,
+            bm25_language,
+            bm25_tokenizer,
+            bm25_lowercase,
+            bm25_ascii_folding,
+            bm25_stopwords,
+            bm25_stemmer,
+            bm25_min_token_len,
+            bm25_max_token_len,
+            bm25_stopwords_languages,
         })
     }
 }
 
 /// Validate client-side BM25 overrides eagerly so bad values raise
 /// `ValueError` at `HttpEmbedder(...)` construction (`QQL-VALIDATION-CONFIG`).
-fn validate_bm25(k1: Option<f64>, b: Option<f64>, avg_len: Option<f64>) -> PyResult<()> {
-    qql::embedder::Bm25Params::resolve(k1, b, avg_len)
-        .map(|_| ())
-        .map_err(pyqql_common::qql_py_value_error)
+/// Single choke point: the same [`qql::embedder::Bm25TextConfig::resolve`]
+/// the Rust core uses, so Python accepts exactly what the engine accepts.
+#[allow(clippy::too_many_arguments)]
+fn validate_bm25_text(
+    k1: Option<f64>,
+    b: Option<f64>,
+    avg_len: Option<f64>,
+    language: Option<&str>,
+    tokenizer: Option<&str>,
+    lowercase: Option<bool>,
+    ascii_folding: Option<bool>,
+    stopwords: Option<Vec<String>>,
+    stemmer: Option<&str>,
+    min_token_len: Option<usize>,
+    max_token_len: Option<usize>,
+    stopwords_languages: Option<Vec<String>>,
+) -> PyResult<()> {
+    qql::embedder::Bm25TextConfig::resolve(
+        k1,
+        b,
+        avg_len,
+        language,
+        tokenizer,
+        lowercase,
+        ascii_folding,
+        stopwords,
+        stemmer,
+        min_token_len,
+        max_token_len,
+        stopwords_languages,
+    )
+    .map(|_| ())
+    .map_err(pyqql_common::qql_py_value_error)
 }
 
 /// Full embedder configuration shared by the class and dict paths.
@@ -117,6 +186,15 @@ pub struct ParsedEmbedderConfig {
     pub bm25_k1: Option<f64>,
     pub bm25_b: Option<f64>,
     pub bm25_avg_len: Option<f64>,
+    pub bm25_language: Option<String>,
+    pub bm25_tokenizer: Option<String>,
+    pub bm25_lowercase: Option<bool>,
+    pub bm25_ascii_folding: Option<bool>,
+    pub bm25_stopwords: Option<Vec<String>>,
+    pub bm25_stemmer: Option<String>,
+    pub bm25_stopwords_languages: Option<Vec<String>>,
+    pub bm25_min_token_len: Option<usize>,
+    pub bm25_max_token_len: Option<usize>,
 }
 
 fn opt_string_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
@@ -155,9 +233,50 @@ fn opt_f64_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
     Ok(Some(value.extract::<f64>()?))
 }
 
+/// Optional bool key: missing/`None` → unset; anything non-bool is a
+/// `TypeError` from PyO3's extractor.
+fn opt_bool_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+    let Some(value) = dict.get_item(key)? else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(value.extract::<bool>()?))
+}
+
+/// Optional usize key: missing/`None` → unset; anything non-integer is a
+/// `TypeError` from PyO3's extractor.
+fn opt_usize_opt_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<usize>> {
+    let Some(value) = dict.get_item(key)? else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(value.extract::<usize>()?))
+}
+
+/// Optional string-list key (e.g. custom stopwords): missing/`None` → unset.
+fn opt_string_list_key(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Vec<String>>> {
+    let Some(value) = dict.get_item(key)? else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(value.extract::<Vec<String>>()?))
+}
+
 pub fn extract_embedder_config(
     embedder: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<ParsedEmbedderConfig> {
+    // Dict keys accept camelCase or snake_case (`apiKey`/`api_key`,
+    // `multiEndpoint`/`multi_endpoint`, `bm25K1`/`bm25_k1`, …) with camelCase
+    // winning on conflicts — the same convention as `nqql`'s `HttpEmbedder`,
+    // so embedder configs port between the Python and Node SDKs unchanged.
+    // `None` values fall through to the other spelling; single-word keys
+    // (`endpoint`, `model`, `dimension`) are identical in both cases.
     let mut out = ParsedEmbedderConfig::default();
 
     if let Some(emb) = embedder {
@@ -180,7 +299,50 @@ pub fn extract_embedder_config(
             out.bm25_k1 = py_emb.bm25_k1;
             out.bm25_b = py_emb.bm25_b;
             out.bm25_avg_len = py_emb.bm25_avg_len;
+            out.bm25_language = py_emb.bm25_language.clone();
+            out.bm25_tokenizer = py_emb.bm25_tokenizer.clone();
+            out.bm25_lowercase = py_emb.bm25_lowercase;
+            out.bm25_ascii_folding = py_emb.bm25_ascii_folding;
+            out.bm25_stopwords = py_emb.bm25_stopwords.clone();
+            out.bm25_stopwords_languages = py_emb.bm25_stopwords_languages.clone();
+            out.bm25_stemmer = py_emb.bm25_stemmer.clone();
+            out.bm25_min_token_len = py_emb.bm25_min_token_len;
+            out.bm25_max_token_len = py_emb.bm25_max_token_len;
         } else if let Ok(dict) = emb.cast::<PyDict>() {
+            // Normalize camelCase aliases onto their snake_case keys before
+            // reading (camelCase wins; `None` falls through to snake_case).
+            for (camel, snake) in [
+                ("apiKey", "api_key"),
+                ("multiEndpoint", "multi_endpoint"),
+                ("multiApiKey", "multi_api_key"),
+                ("multiModel", "multi_model"),
+                ("multiDimension", "multi_dimension"),
+                ("imageEndpoint", "image_endpoint"),
+                ("imageApiKey", "image_api_key"),
+                ("imageModel", "image_model"),
+                ("imageDimension", "image_dimension"),
+                ("rerankEndpoint", "rerank_endpoint"),
+                ("rerankApiKey", "rerank_api_key"),
+                ("rerankModel", "rerank_model"),
+                ("bm25K1", "bm25_k1"),
+                ("bm25B", "bm25_b"),
+                ("bm25AvgLen", "bm25_avg_len"),
+                ("bm25Language", "bm25_language"),
+                ("bm25Tokenizer", "bm25_tokenizer"),
+                ("bm25Lowercase", "bm25_lowercase"),
+                ("bm25AsciiFolding", "bm25_ascii_folding"),
+                ("bm25Stopwords", "bm25_stopwords"),
+                ("bm25StopwordsLanguages", "bm25_stopwords_languages"),
+                ("bm25Stemmer", "bm25_stemmer"),
+                ("bm25MinTokenLen", "bm25_min_token_len"),
+                ("bm25MaxTokenLen", "bm25_max_token_len"),
+            ] {
+                if let Some(value) = dict.get_item(camel)?
+                    && !value.is_none()
+                {
+                    dict.set_item(snake, value)?;
+                }
+            }
             out.endpoint = Some(
                 dict.get_item("endpoint")?
                     .ok_or_else(|| {
@@ -247,6 +409,15 @@ pub fn extract_embedder_config(
             out.bm25_k1 = opt_f64_key(dict, "bm25_k1")?;
             out.bm25_b = opt_f64_key(dict, "bm25_b")?;
             out.bm25_avg_len = opt_f64_key(dict, "bm25_avg_len")?;
+            out.bm25_language = opt_string_key(dict, "bm25_language")?;
+            out.bm25_tokenizer = opt_string_key(dict, "bm25_tokenizer")?;
+            out.bm25_lowercase = opt_bool_key(dict, "bm25_lowercase")?;
+            out.bm25_ascii_folding = opt_bool_key(dict, "bm25_ascii_folding")?;
+            out.bm25_stopwords = opt_string_list_key(dict, "bm25_stopwords")?;
+            out.bm25_stopwords_languages = opt_string_list_key(dict, "bm25_stopwords_languages")?;
+            out.bm25_stemmer = opt_string_key(dict, "bm25_stemmer")?;
+            out.bm25_min_token_len = opt_usize_opt_key(dict, "bm25_min_token_len")?;
+            out.bm25_max_token_len = opt_usize_opt_key(dict, "bm25_max_token_len")?;
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(
                 "embedder must be an HttpEmbedder or dict",
@@ -294,10 +465,32 @@ pub fn create_executor(
     }
 
     // Validate client-side BM25 params once (ValueError before any network).
-    validate_bm25(parsed.bm25_k1, parsed.bm25_b, parsed.bm25_avg_len)?;
+    validate_bm25_text(
+        parsed.bm25_k1,
+        parsed.bm25_b,
+        parsed.bm25_avg_len,
+        parsed.bm25_language.as_deref(),
+        parsed.bm25_tokenizer.as_deref(),
+        parsed.bm25_lowercase,
+        parsed.bm25_ascii_folding,
+        parsed.bm25_stopwords.clone(),
+        parsed.bm25_stemmer.as_deref(),
+        parsed.bm25_min_token_len,
+        parsed.bm25_max_token_len,
+        parsed.bm25_stopwords_languages.clone(),
+    )?;
     config.bm25_k1 = parsed.bm25_k1;
     config.bm25_b = parsed.bm25_b;
     config.bm25_avg_len = parsed.bm25_avg_len;
+    config.bm25_language = parsed.bm25_language;
+    config.bm25_tokenizer = parsed.bm25_tokenizer;
+    config.bm25_lowercase = parsed.bm25_lowercase;
+    config.bm25_ascii_folding = parsed.bm25_ascii_folding;
+    config.bm25_stopwords = parsed.bm25_stopwords;
+    config.bm25_stopwords_languages = parsed.bm25_stopwords_languages;
+    config.bm25_stemmer = parsed.bm25_stemmer;
+    config.bm25_min_token_len = parsed.bm25_min_token_len;
+    config.bm25_max_token_len = parsed.bm25_max_token_len;
 
     let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
         #[cfg(feature = "grpc")]
@@ -354,6 +547,15 @@ pub fn create_executor(
                     bm25_k1: config.bm25_k1,
                     bm25_b: config.bm25_b,
                     bm25_avg_len: config.bm25_avg_len,
+                    bm25_language: config.bm25_language.clone(),
+                    bm25_tokenizer: config.bm25_tokenizer.clone(),
+                    bm25_lowercase: config.bm25_lowercase,
+                    bm25_ascii_folding: config.bm25_ascii_folding,
+                    bm25_stopwords: config.bm25_stopwords.clone(),
+                    bm25_stopwords_languages: config.bm25_stopwords_languages.clone(),
+                    bm25_stemmer: config.bm25_stemmer.clone(),
+                    bm25_min_token_len: config.bm25_min_token_len,
+                    bm25_max_token_len: config.bm25_max_token_len,
                 })
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)

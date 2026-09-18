@@ -18,6 +18,7 @@ use qql_core::parser::Parser;
 use qql_plan::routing;
 
 pub mod execute;
+pub mod jsoutput;
 pub mod jsparams;
 
 /// Serialize a [`QqlError`] to JSON so the JS wrapper can extract structured

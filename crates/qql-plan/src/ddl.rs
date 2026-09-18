@@ -7,11 +7,13 @@ use qql_core::ast::{
     AlterCollectionStmt, CollectionConfig, CreateCollectionStmt, CreateIndexStmt,
     MultivectorComparator, Value, VectorsConfig,
 };
-use qql_core::error::QqlError;
+use qql_core::error::{QqlError, Span};
 
 pub use crate::ddl_rest::{
-    CreateCollectionDeferredParams, CreateCollectionRestBody, CreateIndexRestBody,
-    create_collection_deferred_params_rest, create_collection_rest_body, create_index_rest_body,
+    CreateCollectionDeferredParams, CreateCollectionRestBody, CreateIndexRestBody, RestDdlStep,
+    create_collection_deferred_params_rest, create_collection_rest_body,
+    create_collection_rest_steps, create_index_op, create_index_rest_body, drop_index_op,
+    update_collection_op,
 };
 
 /// Lower `CREATE COLLECTION` to the transport-neutral create request.
@@ -135,9 +137,13 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
             "tokenizer" => {
                 let raw = index_str(key, value)?;
                 options.tokenizer = Some(TextTokenizer::parse(raw).ok_or_else(|| {
-                    index_option_error(format!(
-                        "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
-                    ))
+                    QqlError::validation(
+                        "QQL-PLAN-INDEX-OPTION",
+                        format!(
+                            "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
+                        ),
+                        value.param_span(),
+                    )
                 })?);
             }
             "stemmer" => options.stemmer = Some(StemmingAlgorithm::parse(index_str(key, value)?)),
@@ -147,15 +153,20 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
             "memory" => {
                 let raw = index_str(key, value)?;
                 options.memory = Some(MemoryPlacement::parse(raw).ok_or_else(|| {
-                    index_option_error(format!(
-                        "unsupported memory placement '{raw}'. Expected: cold, cached, pinned"
-                    ))
+                    QqlError::validation(
+                        "QQL-PLAN-INDEX-OPTION",
+                        format!(
+                            "unsupported memory placement '{raw}'. Expected: cold, cached, pinned"
+                        ),
+                        value.param_span(),
+                    )
                 })?);
             }
             other => {
-                return Err(index_option_error(format!(
-                    "unknown index option '{other}'"
-                )));
+                return Err(index_option_error(
+                    format!("unknown index option '{other}'"),
+                    value.param_span(),
+                ));
             }
         }
     }
@@ -167,30 +178,43 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
     })
 }
 
-fn index_option_error(message: impl Into<alloc::borrow::Cow<'static, str>>) -> QqlError {
-    QqlError::validation("QQL-PLAN-INDEX-OPTION", message, None)
+fn index_option_error(
+    message: impl Into<alloc::borrow::Cow<'static, str>>,
+    span: Option<Span>,
+) -> QqlError {
+    QqlError::validation("QQL-PLAN-INDEX-OPTION", message, span)
 }
 
 fn index_bool(key: &str, value: &Value) -> Result<bool, QqlError> {
     match value {
         Value::Bool(value) => Ok(*value),
-        _ => Err(index_option_error(format!("{key} must be true or false"))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be true or false"),
+            value.param_span(),
+        )),
     }
 }
 
 fn index_u64(key: &str, value: &Value) -> Result<u64, QqlError> {
     match value {
         Value::Int(value) if *value >= 0 => Ok(*value as u64),
-        _ => Err(index_option_error(format!(
-            "{key} must be a non-negative integer"
-        ))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be a non-negative integer"),
+            value.param_span(),
+        )),
     }
 }
 
 fn index_str<'a>(key: &str, value: &'a Value) -> Result<&'a str, QqlError> {
     match value {
         Value::Str(value) => Ok(value),
-        _ => Err(index_option_error(format!("{key} must be a string"))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be a string"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -200,14 +224,18 @@ fn index_str_list(key: &str, value: &Value) -> Result<Vec<String>, QqlError> {
             .iter()
             .map(|item| match item {
                 Value::Str(item) => Ok(item.clone()),
-                _ => Err(index_option_error(format!(
-                    "{key} must be a list of strings"
-                ))),
+                _ => Err(QqlError::validation(
+                    "QQL-PLAN-INDEX-OPTION",
+                    format!("{key} must be a list of strings"),
+                    item.param_span(),
+                )),
             })
             .collect(),
-        _ => Err(index_option_error(format!(
-            "{key} must be a list of strings"
-        ))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!("{key} must be a list of strings"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -220,7 +248,7 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
             custom: index_str_list(key, value)?,
         }),
         Value::Str(language) => Ok(StopwordsSet {
-            languages: vec![check_stopword_language(language)?],
+            languages: vec![check_stopword_language(language, value.param_span())?],
             custom: Vec::new(),
         }),
         Value::Dict(entries) => {
@@ -231,19 +259,24 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
                     let items = match entry_value {
                         Value::List(items) => items,
                         _ => {
-                            return Err(index_option_error(
+                            return Err(QqlError::validation(
+                                "QQL-PLAN-INDEX-OPTION",
                                 "stopwords languages must be a list of strings",
+                                entry_value.param_span(),
                             ));
                         }
                     };
                     for item in items {
                         match item {
                             Value::Str(language) => {
-                                languages.push(check_stopword_language(language)?);
+                                languages
+                                    .push(check_stopword_language(language, item.param_span())?);
                             }
                             _ => {
-                                return Err(index_option_error(
+                                return Err(QqlError::validation(
+                                    "QQL-PLAN-INDEX-OPTION",
                                     "stopwords languages must be a list of strings",
+                                    item.param_span(),
                                 ));
                             }
                         }
@@ -255,43 +288,55 @@ fn lower_stopwords(key: &str, value: &Value) -> Result<StopwordsSet, QqlError> {
                                 match item {
                                     Value::Str(word) => custom.push(word.clone()),
                                     _ => {
-                                        return Err(index_option_error(
+                                        return Err(QqlError::validation(
+                                            "QQL-PLAN-INDEX-OPTION",
                                             "stopwords custom must be a list of strings",
+                                            item.param_span(),
                                         ));
                                     }
                                 }
                             }
                         }
                         _ => {
-                            return Err(index_option_error(
+                            return Err(QqlError::validation(
+                                "QQL-PLAN-INDEX-OPTION",
                                 "stopwords custom must be a list of strings",
+                                entry_value.param_span(),
                             ));
                         }
                     }
                 } else {
-                    return Err(index_option_error(format!(
-                        "unknown stopwords set key '{entry_key}'. Expected: languages, custom"
-                    )));
+                    return Err(index_option_error(
+                        format!(
+                            "unknown stopwords set key '{entry_key}'. Expected: languages, custom"
+                        ),
+                        entry_value.param_span(),
+                    ));
                 }
             }
             Ok(StopwordsSet { languages, custom })
         }
-        _ => Err(index_option_error(format!(
-            "{key} must be a list of strings, a language name, or {{languages: […], custom: […]}}"
-        ))),
+        _ => Err(QqlError::validation(
+            "QQL-PLAN-INDEX-OPTION",
+            format!(
+                "{key} must be a list of strings, a language name, or {{languages: […], custom: […]}}"
+            ),
+            value.param_span(),
+        )),
     }
 }
 
 /// Validate a stopword language against the OpenAPI `Language` enum
 /// (case-insensitive); returns the canonical lowercase name.
-fn check_stopword_language(raw: &str) -> Result<String, QqlError> {
+fn check_stopword_language(raw: &str, span: Option<Span>) -> Result<String, QqlError> {
     let lower = raw.to_ascii_lowercase();
     if STOPWORD_LANGUAGES.contains(&lower.as_str()) {
         Ok(lower)
     } else {
-        Err(index_option_error(format!(
-            "unknown stopwords language '{raw}'"
-        )))
+        Err(index_option_error(
+            format!("unknown stopwords language '{raw}'"),
+            span,
+        ))
     }
 }
 
@@ -386,9 +431,11 @@ fn fill_update_collection_config(
     }
     // The update wire shape has no WAL field; the parser rejects
     // `ALTER … WITH WAL`, so a hand-built AST reaching here fails closed.
-    if config.wal.is_some() {
+    if let Some(pairs) = config.wal.as_deref() {
+        let span = pairs.first().and_then(|(_, value)| value.param_span());
         return Err(collection_config_error(
             "WITH WAL is supported only for CREATE COLLECTION",
+            span,
         ));
     }
 
@@ -549,8 +596,11 @@ fn lower_sharding_method(method: &str) -> ShardingMethod {
     }
 }
 
-fn collection_config_error(message: impl Into<alloc::borrow::Cow<'static, str>>) -> QqlError {
-    QqlError::validation("QQL-PLAN-COLLECTION-CONFIG", message, None)
+fn collection_config_error(
+    message: impl Into<alloc::borrow::Cow<'static, str>>,
+    span: Option<Span>,
+) -> QqlError {
+    QqlError::validation("QQL-PLAN-COLLECTION-CONFIG", message, span)
 }
 
 /// Find a raw config pair by key (case-insensitive).
@@ -567,9 +617,11 @@ fn config_pair_u64(pairs: &[(String, Value)], key: &str) -> Result<Option<u64>, 
         None => Ok(None),
         Some(Value::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
         Some(Value::Float(n)) if *n >= 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
-        Some(_) => Err(collection_config_error(format!(
-            "{key} must be a non-negative integer"
-        ))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be a non-negative integer"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -579,9 +631,11 @@ fn config_pair_positive_u64(pairs: &[(String, Value)], key: &str) -> Result<Opti
         None => Ok(None),
         Some(Value::Int(n)) if *n > 0 => Ok(Some(*n as u64)),
         Some(Value::Float(n)) if *n > 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
-        Some(_) => Err(collection_config_error(format!(
-            "{key} must be a positive integer"
-        ))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be a positive integer"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -590,9 +644,11 @@ fn config_pair_bool(pairs: &[(String, Value)], key: &str) -> Result<Option<bool>
     match config_pair(pairs, key) {
         None => Ok(None),
         Some(Value::Bool(b)) => Ok(Some(*b)),
-        Some(_) => Err(collection_config_error(format!(
-            "{key} must be true or false"
-        ))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be true or false"),
+            value.param_span(),
+        )),
     }
 }
 
@@ -602,20 +658,27 @@ fn config_pair_f64(pairs: &[(String, Value)], key: &str) -> Result<Option<f64>, 
         None => Ok(None),
         Some(Value::Int(n)) => Ok(Some(*n as f64)),
         Some(Value::Float(n)) if n.is_finite() => Ok(Some(*n)),
-        Some(_) => Err(collection_config_error(format!("{key} must be a number"))),
+        Some(value) => Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            format!("{key} must be a number"),
+            value.param_span(),
+        )),
     }
 }
 
 /// Lower `WITH WAL (…)` pairs to the OpenAPI `WalConfigDiff` shape.
 fn lower_wal_config(pairs: &[(String, Value)]) -> Result<WalConfig, QqlError> {
-    for (key, _) in pairs {
+    for (key, value) in pairs {
         if !(key.eq_ignore_ascii_case("wal_capacity_mb")
             || key.eq_ignore_ascii_case("wal_segments_ahead")
             || key.eq_ignore_ascii_case("wal_retain_closed"))
         {
-            return Err(collection_config_error(format!(
-                "unknown WAL parameter '{key}'. Expected: wal_capacity_mb, wal_segments_ahead, wal_retain_closed"
-            )));
+            return Err(collection_config_error(
+                format!(
+                    "unknown WAL parameter '{key}'. Expected: wal_capacity_mb, wal_segments_ahead, wal_retain_closed"
+                ),
+                value.param_span(),
+            ));
         }
     }
     // OpenAPI minimums: capacity ≥ 1, the rest ≥ 0.
@@ -628,11 +691,12 @@ fn lower_wal_config(pairs: &[(String, Value)]) -> Result<WalConfig, QqlError> {
 
 /// Lower `WITH STRICT_MODE (…)` pairs to the OpenAPI `StrictModeConfig` shape.
 fn lower_strict_mode_config(pairs: &[(String, Value)]) -> Result<StrictModeConfig, QqlError> {
-    for (key, _) in pairs {
+    for (key, value) in pairs {
         if !is_strict_mode_key(key) {
-            return Err(collection_config_error(format!(
-                "unknown STRICT_MODE parameter '{key}'"
-            )));
+            return Err(collection_config_error(
+                format!("unknown STRICT_MODE parameter '{key}'"),
+                value.param_span(),
+            ));
         }
     }
     let mut config = StrictModeConfig {
@@ -676,8 +740,10 @@ fn lower_strict_mode_config(pairs: &[(String, Value)]) -> Result<StrictModeConfi
                 config.max_resident_memory_percent = Some(*n as u64);
             }
             _ => {
-                return Err(collection_config_error(
+                return Err(QqlError::validation(
+                    "QQL-PLAN-COLLECTION-CONFIG",
                     "max_resident_memory_percent must be an integer in [1, 100]",
+                    value.param_span(),
                 ));
             }
         }
@@ -688,29 +754,36 @@ fn lower_strict_mode_config(pairs: &[(String, Value)]) -> Result<StrictModeConfi
 /// Lower a `multivector_config` strict-mode value (`{name: {max_vectors}}`).
 fn lower_strict_multivector_config(value: &Value) -> Result<StrictModeMultivectorConfig, QqlError> {
     let Value::Dict(entries) = value else {
-        return Err(collection_config_error(
+        return Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
             "multivector_config must be an object",
+            value.param_span(),
         ));
     };
     let mut vectors = BTreeMap::new();
     for (name, caps) in entries {
         let Value::Dict(fields) = caps else {
-            return Err(collection_config_error(format!(
-                "multivector_config '{name}' must be an object"
-            )));
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION-CONFIG",
+                format!("multivector_config '{name}' must be an object"),
+                caps.param_span(),
+            ));
         };
         let mut entry = StrictModeMultivector::default();
         for (key, val) in fields {
             if !key.eq_ignore_ascii_case("max_vectors") {
-                return Err(collection_config_error(format!(
-                    "unknown multivector_config key '{key}'. Expected: max_vectors"
-                )));
+                return Err(collection_config_error(
+                    format!("unknown multivector_config key '{key}'. Expected: max_vectors"),
+                    val.param_span(),
+                ));
             }
             match val {
                 Value::Int(n) if *n >= 1 => entry.max_vectors = Some(*n as u64),
                 _ => {
-                    return Err(collection_config_error(
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION-CONFIG",
                         "max_vectors must be a positive integer",
+                        val.param_span(),
                     ));
                 }
             }
@@ -723,27 +796,36 @@ fn lower_strict_multivector_config(value: &Value) -> Result<StrictModeMultivecto
 /// Lower a `sparse_config` strict-mode value (`{name: {max_length}}`).
 fn lower_strict_sparse_config(value: &Value) -> Result<StrictModeSparseConfig, QqlError> {
     let Value::Dict(entries) = value else {
-        return Err(collection_config_error("sparse_config must be an object"));
+        return Err(QqlError::validation(
+            "QQL-PLAN-COLLECTION-CONFIG",
+            "sparse_config must be an object",
+            value.param_span(),
+        ));
     };
     let mut vectors = BTreeMap::new();
     for (name, caps) in entries {
         let Value::Dict(fields) = caps else {
-            return Err(collection_config_error(format!(
-                "sparse_config '{name}' must be an object"
-            )));
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION-CONFIG",
+                format!("sparse_config '{name}' must be an object"),
+                caps.param_span(),
+            ));
         };
         let mut entry = StrictModeSparse::default();
         for (key, val) in fields {
             if !key.eq_ignore_ascii_case("max_length") {
-                return Err(collection_config_error(format!(
-                    "unknown sparse_config key '{key}'. Expected: max_length"
-                )));
+                return Err(collection_config_error(
+                    format!("unknown sparse_config key '{key}'. Expected: max_length"),
+                    val.param_span(),
+                ));
             }
             match val {
                 Value::Int(n) if *n >= 1 => entry.max_length = Some(*n as u64),
                 _ => {
-                    return Err(collection_config_error(
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION-CONFIG",
                         "max_length must be a positive integer",
+                        val.param_span(),
                     ));
                 }
             }
@@ -969,7 +1051,7 @@ pub(crate) fn lower_set_quota(
                     return Err(QqlError::validation(
                         "QQL-PLAN-QUOTA",
                         "enabled must be true or false",
-                        None,
+                        value.param_span(),
                     ));
                 }
             },
@@ -985,7 +1067,7 @@ pub(crate) fn lower_set_quota(
                     format!(
                         "unknown quota parameter '{key}'. Expected: enabled, max_resident_memory_percent, max_disk_usage_percent, release_margin_percent"
                     ),
-                    None,
+                    value.param_span(),
                 ));
             }
         }
@@ -1018,7 +1100,7 @@ fn apply_quota_percent(
             return Err(QqlError::validation(
                 "QQL-PLAN-QUOTA",
                 format!("{key} must be an integer in [{min}, {max}] or null"),
-                None,
+                value.param_span(),
             ));
         }
     }
@@ -1188,6 +1270,72 @@ mod tests {
         };
         let err = lower_create_index(&ci).unwrap_err();
         assert_eq!(err.code, "QQL-PLAN-INDEX-TYPE");
+    }
+
+    #[test]
+    fn index_option_errors_carry_value_spans() {
+        // One rule for all paths: every index-option error threads the
+        // offending value's span. Scalar literals store no span, so only
+        // located placeholders can point — including on the unknown-option
+        // paths that previously hardcoded None.
+        let span = qql_core::error::Span::new(10, 15);
+        let located = qql_core::ast::CreateIndexStmt {
+            collection: "docs".into(),
+            field: "body".into(),
+            field_type: "keyword".into(),
+            options: alloc::vec![(
+                "is_tenant".to_string(),
+                qql_core::ast::Value::param_with_span("flag", span),
+            )],
+            wait: None,
+        };
+        let err = lower_create_index(&located).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-INDEX-OPTION");
+        assert_eq!(err.span, Some(span));
+
+        let unknown = qql_core::ast::CreateIndexStmt {
+            collection: "docs".into(),
+            field: "body".into(),
+            field_type: "keyword".into(),
+            options: alloc::vec![(
+                "bogus".to_string(),
+                qql_core::ast::Value::param_with_span("v", span),
+            )],
+            wait: None,
+        };
+        let err = lower_create_index(&unknown).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-INDEX-OPTION");
+        assert_eq!(err.span, Some(span));
+    }
+
+    #[test]
+    fn collection_config_errors_carry_value_spans() {
+        // Same rule for collection config: unknown keys thread the value
+        // span instead of hardcoding None. The parser rejects these first,
+        // so only hand-built ASTs reach this path.
+        let span = qql_core::error::Span::new(3, 8);
+        let located = qql_core::ast::AlterCollectionStmt {
+            collection: "docs".into(),
+            config: Some(Box::new(qql_core::ast::CollectionConfig {
+                vectors: None,
+                hnsw: None,
+                optimizers: None,
+                params: None,
+                quantization: None,
+                quantization_update: None,
+                wal: None,
+                strict_mode: Some(alloc::vec![(
+                    "bogus".to_string(),
+                    qql_core::ast::Value::param_with_span("v", span),
+                )]),
+                metadata: None,
+                vector_diffs: alloc::vec![],
+                sparse_vector_diffs: alloc::vec![],
+            })),
+        };
+        let err = lower_alter_collection(&located).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION-CONFIG");
+        assert_eq!(err.span, Some(span));
     }
 
     #[test]

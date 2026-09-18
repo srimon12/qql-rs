@@ -80,9 +80,16 @@ impl PyClient {
     ///
     /// Supports all QQL retrieval, mutation, DDL, and aggregation operations
     /// (`QUERY`, `SCROLL`, `COUNT`, `FACET`, `UPSERT`, `UPDATE`, `DELETE`, etc.).
-    /// Queries include point payloads by default (`WITH PAYLOAD true`).
+    /// Point payloads are included by default (pass `WITH PAYLOAD false` to strip them).
     /// Lists of same-collection QUERY statements are automatically batched into
     /// a single network call.
+    ///
+    /// Note on Formula Queries (vs Qdrant SDK):
+    /// In QQL, custom formula scoring uses declarative query strings:
+    /// `client.execute("QUERY FORMULA score * 0.8 + views * 0.2 FROM docs LIMIT 10")`
+    /// Do not wrap QQL strings in `qdrant_client.models.FormulaQuery`, which expects an
+    /// object tree of Expression classes rather than query text. Run them directly here.
+    /// Always prefer bare `score` over `$score` to prevent shell variable expansion.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute<'py>(
         &self,
@@ -155,7 +162,7 @@ impl PyClient {
         query: &str,
         params: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        common::compile_query(py, query, params)
+        common::compile(py, query, params)
     }
 
     /// Bulk ingest: `rows` is a list of point dicts
@@ -208,7 +215,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(common::is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(common::inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(common::tokenize, m)?)?;
-    m.add_function(wrap_pyfunction!(common::compile_query, m)?)?;
+    m.add_function(wrap_pyfunction!(common::compile, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

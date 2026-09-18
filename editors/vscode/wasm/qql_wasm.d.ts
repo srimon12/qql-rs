@@ -111,12 +111,16 @@ export class Client {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Parse and compile one statement without executing it. Alias for `compile`.
+     * Close the client (no-op: browser `fetch` holds no connections).
+     *
+     * Exists for cross-SDK portability so generic `client.close()` cleanup
+     * code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
      */
-    compileQuery(query: string, params?: any | null): CompiledRoute;
+    close(): void;
     /**
      * Parse and compile one statement without executing it. Optional
-     * `params` bind before parsing (same shape as the module-level `bind`).
+     * `params` bind before parsing (same shape as the module-level `bind`
+     * and `compile`).
      */
     compile(query: string, params?: any | null): CompiledRoute;
     /**
@@ -154,10 +158,20 @@ export class Client {
      * encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
      * documents upserted after the call are encoded; query weights stay unit
      * and server-side inference is untouched. Invalid values throw
-     * (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+     * (`QQL-VALIDATION-CONFIG`): `k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`,
      * all finite.
      */
     setBm25Params(k1: number, b: number, avg_len: number): void;
+    /**
+     * Set client-side BM25 text processing for the built-in local sparse
+     * encoder: language (`"spanish"`, `"es"`, …; `null` keeps current),
+     * tokenizer (`"word"`, `"whitespace"`, `"prefix"`), lowercasing,
+     * ASCII folding, stemmer (`"none"` disables, a language name overrides),
+     * custom stopwords (replaces the language default; `[]` disables), and
+     * token length limits. All `null` keeps the current value; anything
+     * invalid throws (`QQL-VALIDATION-CONFIG`).
+     */
+    setBm25Text(language?: string | null, tokenizer?: string | null, lowercase?: boolean | null, ascii_folding?: boolean | null, stemmer?: string | null, stopwords?: string[] | null, min_token_len?: number | null, max_token_len?: number | null, stopwords_languages?: string[] | null): void;
     /**
      * Set a JS embedder: `async (texts: string[]) => number[][]`.
      * Called with the full batch — do not loop one-by-one inside the callback
@@ -191,10 +205,6 @@ export class Client {
      */
     setHttpReranker(endpoint: string, model: string, api_key?: string | null): void;
     /**
-     * Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
-     */
-    setRemoteEmbedder(endpoint: string, model: string, dimension: number, api_key?: string | null): void;
-    /**
      * Set Qdrant 1.19 read affinity. Pins reads to a stable replica via the
      * `X-Qdrant-Route-Affinity` header. Pass `null`/`""` to clear.
      */
@@ -208,6 +218,11 @@ export class Client {
      * multivector form — the same inputs as `bind`.
      */
     upsertMany(collection: string, rows: any, options?: any | null): Promise<ExecutionReport>;
+    /**
+     * Whether the client is closed (always `false`: [`close`](Self::close)
+     * is a no-op).
+     */
+    readonly isClosed: boolean;
     /**
      * Current read-affinity key, or `null` when unset.
      */
@@ -223,8 +238,9 @@ export class Stmt {
     bind(params?: any | null): Stmt;
     /**
      * Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+     * Optionally accepts `params` to bind before compiling.
      */
-    compileRouteBytes(): Uint8Array;
+    compileRouteBytes(params?: any | null): Uint8Array;
     /**
      * Compile this Stmt AST directly into a Qdrant REST route object.
      * Optionally accepts `params` to bind before compiling.
@@ -243,9 +259,17 @@ export class Stmt {
      */
     constructor(input: string);
     /**
-     * Serialise the AST to a JSON string.
+     * `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).
+     *
+     * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+     * use [`to_json`](Self::to_json) for exact text.
      */
-    toJSON(): string;
+    toJSON(): any;
+    /**
+     * Serialise the AST to an exact-text JSON string for
+     * transport/forwarding without JS parsing.
+     */
+    toJson(): string;
     /**
      * Serialise the AST to a JS object.
      */
@@ -286,18 +310,15 @@ export function bind(query: string, params?: Record<string, unknown> | unknown[]
  * Compile one QQL statement into a JavaScript route object. Optional
  * `params` (object for `:name`, array for `?`) bind before parsing —
  * parity with `Client.compile(query, params)` on the Python and Node SDKs.
+ * (`compile` is the only module-level name — JS convention.)
  */
 export function compile(query: string, params?: any | null): CompiledRoute;
 
 /**
  * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
+ * Optionally accepts `params` to bind before compiling.
  */
-export function compileBytes(query: string): Uint8Array;
-
-/**
- * Compile one QQL statement into a JavaScript route object. Alias for `compile`.
- */
-export function compileQuery(query: string, params?: any | null): CompiledRoute;
+export function compileBytes(query: string, params?: any | null): Uint8Array;
 
 export function explain(query: string): string;
 
@@ -308,7 +329,11 @@ export function explainBytes(query: string): Uint8Array;
  */
 export function formatQuery(input: string): string;
 
-export function inject_filter(query: string, field: string, op: string, value: any): any;
+/**
+ * Inject a WHERE filter into a query string (`injectFilter` is the only
+ * export — JS convention is camelCase).
+ */
+export function injectFilter(query: string, field: string, op: string, value: any): any;
 
 export function isValid(input: string): boolean;
 

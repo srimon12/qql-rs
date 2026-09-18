@@ -204,9 +204,17 @@ impl<'a> AstLowerer<'a> {
                 return Err(id_operator_error(operator.span));
             }
             self.advance()?;
+            let low_start = self.peek()?.span;
             let low = self.parse_literal()?;
+            let low_span = Span::new(low_start.start, self.prev_span().end);
             self.expect(TokenKind::And)?;
+            let high_start = self.peek()?.span;
             let high = self.parse_literal()?;
+            let high_span = Span::new(high_start.start, self.prev_span().end);
+            // `BETWEEN` lowers to a range (`gte`/`lte`), so its bounds take
+            // the same restriction as the inequality operators below.
+            reject_non_range_bound(&low, low_span)?;
+            reject_non_range_bound(&high, high_span)?;
             return Ok(FilterExpr::Between { field, low, high });
         }
 
@@ -379,8 +387,20 @@ impl<'a> AstLowerer<'a> {
                 | TokenKind::Lte
         ) {
             let (comparison, negate) = self.parse_comparison_operator()?;
-            let value_span = self.peek()?.span;
+            let value_start = self.peek()?.span;
             let value = self.parse_value()?;
+            let value_span = Span::new(value_start.start, self.prev_span().end);
+            // Inequality operators lower to typed range bounds (number,
+            // string, datetime); bool/null/array/object have no range
+            // semantics and fail closed here, not at the backend. `=`/`!=`
+            // keep accepting any value (exact `match`), and placeholders
+            // keep working — they are validated when bound.
+            if matches!(
+                comparison,
+                ComparisonOp::Gt | ComparisonOp::Gte | ComparisonOp::Lt | ComparisonOp::Lte
+            ) {
+                reject_non_range_bound(&value, value_span)?;
+            }
             let expression = if point_id {
                 if comparison != ComparisonOp::Eq {
                     return Err(id_operator_error(operator.span));
@@ -513,6 +533,33 @@ fn id_operator_error(span: Span) -> QqlError {
         "point ID predicates support only =, !=, IN, and NOT IN",
         Some(span),
     )
+}
+
+/// Fail closed on bool/null/array/object inequality bounds.
+///
+/// `>`/`>=`/`<`/`<=` (and `BETWEEN`) lower to typed range bounds, so only
+/// numbers, strings (including datetimes), and `:param` / `?` placeholders
+/// are accepted. Reuses the filter-clause family code: like the other
+/// `QQL-PARSE-FILTER` errors in this function, the clause itself is
+/// malformed — no new code needed.
+fn reject_non_range_bound(value: &Value, span: Span) -> Result<(), QqlError> {
+    let kind = match value {
+        Value::Bool(_) => Some("boolean"),
+        Value::Null => Some("null"),
+        Value::List(_) | Value::F32Array(_) => Some("array"),
+        Value::Dict(_) => Some("object"),
+        _ => None,
+    };
+    match kind {
+        Some(kind) => Err(QqlError::parse(
+            "QQL-PARSE-FILTER",
+            alloc::format!(
+                "range comparison requires a number, string, datetime, or parameter bound, got {kind}"
+            ),
+            span,
+        )),
+        None => Ok(()),
+    }
 }
 
 fn geo_error(message: impl Into<alloc::borrow::Cow<'static, str>>, span: Span) -> QqlError {

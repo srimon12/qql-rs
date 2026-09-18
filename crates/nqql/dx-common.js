@@ -11,16 +11,25 @@
  */
 
 /**
- * Install the `toJSON` alias and error-mapping wrappers on the native Stmt
+ * Install the `toJSON` hook and error-mapping wrappers on the native Stmt
  * prototype so method errors surface with `.code` / `.kind` / `.span`.
+ *
+ * `toJSON` is the `JSON.stringify` hook: it MUST return a plain object, not
+ * a string. It aliases the BigInt-safe `toObject()` (snowflake u64 point IDs
+ * as `BigInt`, safe ints as `Number`). `toJson()` stays the exact-text
+ * string form for transport/forwarding without V8 parsing.
+ *
+ * NOTE: `JSON.stringify` throws on `BigInt` — that is correct, it signals
+ * precision loss instead of silently rounding snowflake IDs or
+ * double-encoding (`JSON.parse(JSON.stringify(stmt))` would round every u64
+ * through f64). Use `stmt.toJson()` for exact text; never `JSON.stringify`
+ * on statements carrying snowflake IDs.
  */
 function installStmtToJSON(Stmt) {
   if (!Stmt || !Stmt.prototype) return;
-  if (!Stmt.prototype.toJSON) {
-    Stmt.prototype.toJSON = function () {
-      return this.toJson();
-    };
-  }
+  Stmt.prototype.toJSON = function () {
+    return this.toObject();
+  };
   const origBind = Stmt.prototype.bind;
   if (origBind && !origBind._wrapped) {
     Stmt.prototype.bind = function (params) {
@@ -133,10 +142,34 @@ class ScoredPoint {
   }
 
   get(key, defaultValue = null) {
+    // Attribute fields first (mirrors pyqql `ScoredPoint.get`): `id` and
+    // `score` always resolve; nullable attributes fall back to `defaultValue`
+    // when unset. Everything else reads through to the payload.
+    if (key === 'id' || key === 'score') {
+      return this[key];
+    }
+    if (
+      key === 'payload' ||
+      key === 'text' ||
+      key === 'collection' ||
+      key === 'vector' ||
+      key === 'shard_key'
+    ) {
+      const value = this[key];
+      return value === null || value === undefined ? defaultValue : value;
+    }
     if (this.payload && typeof this.payload === 'object' && key in this.payload) {
       return this.payload[key];
     }
     return defaultValue;
+  }
+
+  /**
+   * Return a copy with `payload` stripped (`scrollCursor({ withPayload: false })`
+   * uses this; mirrors pyqql `ScoredPoint.without_payload()`).
+   */
+  withoutPayload() {
+    return new ScoredPoint({ ...this, payload: null });
   }
 }
 
@@ -183,8 +216,10 @@ class ExecutionReport {
     const res = this.#resultAt(stmt);
     const data = res?.data;
     // Count / mutation payloads are `{count: n}`; status-only mutations
-    // serialize `null`.
+    // serialize `null`. Counts are u64 so they cross as BigInt — safe to
+    // narrow here, collection sizes never approach MAX_SAFE_INTEGER.
     if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+    if (typeof data.count === 'bigint') return Number(data.count);
     return typeof data.count === 'number' ? data.count : 0;
   }
 
@@ -192,7 +227,60 @@ class ExecutionReport {
     const res = this.#resultAt(stmt);
     if (!res || res.operation !== 'QUERY_GROUPS') return [];
     const groups = res.data?.groups;
-    return Array.isArray(groups) ? groups : [];
+    if (!Array.isArray(groups)) return [];
+    return groups.map((group) => ({
+      ...group,
+      hits: Array.isArray(group?.hits)
+        ? group.hits.map((hit) => new ScoredPoint(hit))
+        : [],
+    }));
+  }
+
+  /**
+   * `SHOW COLLECTIONS` names for statement `stmt` (mirrors pyqql
+   * `ExecutionReport.collections()`).
+   */
+  collections(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || res.operation !== 'SHOW_COLLECTIONS') return [];
+    const names = res.data?.collections;
+    return Array.isArray(names) ? names : [];
+  }
+
+  /**
+   * `SHOW COLLECTION` metadata as an object, or `null` (mirrors pyqql
+   * `ExecutionReport.collection()`).
+   */
+  collection(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || res.operation !== 'SHOW_COLLECTION') return null;
+    const data = res.data;
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  }
+
+  /**
+   * `SHOW SHARD KEYS` keys (`string | number | bigint`; numeric keys above
+   * MAX_SAFE_INTEGER cross as BigInt) for statement `stmt`
+   * (mirrors pyqql `ExecutionReport.shard_keys()`).
+   */
+  shardKeys(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || res.operation !== 'SHOW_SHARD_KEYS') return [];
+    const keys = res.data?.shard_keys;
+    return Array.isArray(keys) ? keys : [];
+  }
+
+  /**
+   * `SHOW QUOTAS` / `SET QUOTA` configuration as an object, or `null`
+   * (mirrors pyqql `ExecutionReport.quotas()`).
+   */
+  quotas(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || (res.operation !== 'SHOW_QUOTAS' && res.operation !== 'SET_QUOTA')) {
+      return null;
+    }
+    const data = res.data;
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
   }
 }
 

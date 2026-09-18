@@ -33,6 +33,8 @@ mod rerank;
 /// Optional REST route projection and the offline `compile_statement` entry point.
 pub mod routing;
 pub mod semantic;
+/// AST → plan and plan → wire conversions for [`semantic`] primitives.
+mod semantic_conv;
 /// Wire and plan-IR request types shared by the REST projection and gRPC conversion.
 pub mod types;
 mod validate;
@@ -41,8 +43,9 @@ pub use batch::BatchGrouper;
 pub use formula_types::{FormulaDefault, PlanDecayKind, PlanFormula};
 pub use plan::{
     BatchFamily, BatchKey, PlannedOperation, RestProjectionError, batch_item_error,
-    build_query_batch, build_update_batch, ensure_no_unbound_params, parse_and_plan, plan,
-    plan_template, statement_batch_key, to_rest_route, try_route, verify_batch_cardinality,
+    build_query_batch, build_update_batch, ensure_no_unbound_params, into_query_batch,
+    into_update_batch, parse_and_plan, plan, plan_template, statement_batch_key, to_rest_route,
+    try_route, verify_batch_cardinality,
 };
 pub use routing::{CompiledStatement, compile_statement};
 pub use semantic::{

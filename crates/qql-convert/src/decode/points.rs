@@ -37,6 +37,7 @@ pub(crate) fn point_request(body: &Value, ctx: DecodeCtx<'_>) -> Result<QueryStm
     Ok(QueryStmt {
         ctes: Vec::new(),
         collection: QueryCollection::Explicit(ctx.collection.to_string()),
+        collection_span: None,
         expression: QueryExpr::Points { ids },
         filter: None,
         params: None,

@@ -2,6 +2,8 @@
 
 Pure QQL files grouped by task. Each file parses with current QQL. Copy the block you need. Language rules live in `../references/`. SDK wiring lives in the per-SDK references.
 
+Template files declare `:name` / `?` placeholders (notably `projections.qql`): they parse clean but need `--param` / `--params-file` (or a `-- qql-params: {...}` header) to pass `qql lint` bind checks — see `../references/cli.md`.
+
 | File | Covers |
 |------|--------|
 | `hybrid-fusion.qql` | Multi-stage hybrid, tiered CTEs, per-prefetch filters, RAG grouping, hybrid plus formula |

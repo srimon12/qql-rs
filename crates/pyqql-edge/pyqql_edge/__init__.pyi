@@ -84,6 +84,10 @@ class ExecutionReport:
 class Stmt:
     # NOTE: Stmt has no constructor — instances come from `parse()`.
     @property
+    def bound(self) -> bool:
+        """Whether parameters have already been bound (re-binding raises `QQL-BIND-ALREADY-BOUND`)."""
+        ...
+    @property
     def shard_key(self) -> Optional[Union[str, int]]:
         """Keyword keys read as `str`, numeric keys as `int` (`None` when unset)."""
         ...
@@ -167,7 +171,7 @@ def parse(input: str) -> List[Stmt]: ...
 def parse_json(input: str) -> str: ...
 def is_valid(input: str) -> bool: ...
 def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
-def compile_query(
+def compile(
     query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None
 ) -> Dict[str, Any]: ...
 def tokenize(input: str) -> List[Dict[str, Any]]: ...
@@ -193,6 +197,17 @@ def local_executor(
     bm25_k1: Optional[float] = None,
     bm25_b: Optional[float] = None,
     bm25_avg_len: Optional[float] = None,
+    bm25_language: Optional[str] = None,
+    bm25_tokenizer: Optional[str] = None,
+    bm25_lowercase: Optional[bool] = None,
+    bm25_ascii_folding: Optional[bool] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords: Optional[List[str]] = None,
+    bm25_stemmer: Optional[str] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords_languages: Optional[List[str]] = None,
 ) -> Client: ...
 def http_executor(
     data_dir: str,
@@ -205,6 +220,17 @@ def http_executor(
     bm25_k1: Optional[float] = None,
     bm25_b: Optional[float] = None,
     bm25_avg_len: Optional[float] = None,
+    bm25_language: Optional[str] = None,
+    bm25_tokenizer: Optional[str] = None,
+    bm25_lowercase: Optional[bool] = None,
+    bm25_ascii_folding: Optional[bool] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords: Optional[List[str]] = None,
+    bm25_stemmer: Optional[str] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords_languages: Optional[List[str]] = None,
 ) -> Client: ...
 def list_embedding_models() -> List[Dict[str, Any]]: ...
 def execute(
@@ -223,6 +249,17 @@ def execute(
     bm25_k1: Optional[float] = None,
     bm25_b: Optional[float] = None,
     bm25_avg_len: Optional[float] = None,
+    bm25_language: Optional[str] = None,
+    bm25_tokenizer: Optional[str] = None,
+    bm25_lowercase: Optional[bool] = None,
+    bm25_ascii_folding: Optional[bool] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords: Optional[List[str]] = None,
+    bm25_stemmer: Optional[str] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords_languages: Optional[List[str]] = None,
     on_error: str = "stop",
 ) -> ExecutionReport: ...
 async def execute_async(
@@ -241,6 +278,17 @@ async def execute_async(
     bm25_k1: Optional[float] = None,
     bm25_b: Optional[float] = None,
     bm25_avg_len: Optional[float] = None,
+    bm25_language: Optional[str] = None,
+    bm25_tokenizer: Optional[str] = None,
+    bm25_lowercase: Optional[bool] = None,
+    bm25_ascii_folding: Optional[bool] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords: Optional[List[str]] = None,
+    bm25_stemmer: Optional[str] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords_languages: Optional[List[str]] = None,
     on_error: str = "stop",
 ) -> ExecutionReport: ...
 def execute_hits(

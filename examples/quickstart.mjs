@@ -29,7 +29,7 @@ stmt.injectFilter('tenant_id', '=', 'acme');
 stmt.shardKey = 'acme';
 
 // 3. Bind + compile offline — the exact REST route, no I/O.
-const route = sdk.compileQuery(
+const route = sdk.compile(
   'QUERY TEXT :q FROM docs WHERE tenant_id = :t LIMIT :lim',
   { q: 'vector databases', t: 'acme', lim: 10 },
 );

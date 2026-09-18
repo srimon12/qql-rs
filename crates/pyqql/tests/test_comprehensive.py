@@ -11,7 +11,7 @@ Covers:
   F. HttpEmbedder
   G. Full E2E pipeline against live Qdrant
   H. Script-level execute
-  I. compile_query route contract
+  I. compile route contract
   J. Edge cases
 """
 
@@ -55,7 +55,7 @@ class TestPackageInspection(unittest.TestCase):
             "is_valid",
             "inject_filter",
             "tokenize",
-            "compile_query",
+            "compile",
             "explain",
             "execute",
             "execute_async",
@@ -90,8 +90,8 @@ class TestPackageInspection(unittest.TestCase):
     def test_a7_tokenize_is_function(self):
         self.assertTrue(callable(pyqql.tokenize))
 
-    def test_a8_compile_query_is_function(self):
-        self.assertTrue(callable(pyqql.compile_query))
+    def test_a8_compile_is_function(self):
+        self.assertTrue(callable(pyqql.compile))
 
     def test_a9_explain_is_function(self):
         self.assertTrue(callable(pyqql.explain))
@@ -106,7 +106,7 @@ class TestPackageInspection(unittest.TestCase):
 # ============================================================================
 
 class TestParseAPI(unittest.TestCase):
-    """B: Test parse, to_dict, to_json, is_valid, tokenize, compile_query."""
+    """B: Test parse, to_dict, to_json, is_valid, tokenize, compile."""
 
     def test_b1_parse_simple_query(self):
         stmts = pyqql.parse('QUERY "hello" FROM docs LIMIT 5')
@@ -197,11 +197,11 @@ class TestParseAPI(unittest.TestCase):
         for key in ("kind", "text", "pos"):
             self.assertIn(key, t, f"Token missing key: {key}")
 
-    def test_b13_compile_query_returns_route_dict(self):
-        cq = pyqql.compile_query('QUERY "hello" FROM docs LIMIT 5')
+    def test_b13_compile_returns_route_dict(self):
+        cq = pyqql.compile('QUERY "hello" FROM docs LIMIT 5')
         self.assertIsInstance(cq, dict)
         for key in ("method", "path", "payload"):
-            self.assertIn(key, cq, f"compile_query missing key: {key}")
+            self.assertIn(key, cq, f"compile missing key: {key}")
         self.assertEqual(cq["method"], "POST")
         self.assertIn("/collections/docs", cq["path"])
         self.assertIsInstance(cq["payload"], dict)
@@ -251,9 +251,9 @@ class TestErrorHandling(unittest.TestCase):
         self.assertFalse(result["results"][0]["ok"])
         self.assertEqual(result["results"][0]["operation"], "PARSE")
 
-    def test_c6_compile_query_empty_string(self):
+    def test_c6_compile_empty_string(self):
         with self.assertRaises(SyntaxError):
-            pyqql.compile_query("")
+            pyqql.compile("")
 
     def test_c7_inject_filter_empty_string(self):
         with self.assertRaises(SyntaxError):
@@ -635,8 +635,8 @@ class TestE2EPipeline(unittest.TestCase):
         self.assertNotIn(tmp_coll, names2)
 
     def test_g6_upsert_compiles_correct_route(self):
-        """UPSERT compile_query produces correct Qdrant route structure."""
-        cq = pyqql.compile_query(
+        """UPSERT compile produces correct Qdrant route structure."""
+        cq = pyqql.compile(
             'UPSERT INTO test VALUES {"id":"x","vector":[1.0,2.0],"key":"val"}'
         )
         self.assertEqual(cq["method"], "PUT")
@@ -646,8 +646,8 @@ class TestE2EPipeline(unittest.TestCase):
         self.assertEqual(pt["payload"]["key"], "val")
 
     def test_g7_delete_compiles_correct_route(self):
-        """DELETE compile_query produces correct Qdrant route structure."""
-        cq = pyqql.compile_query('DELETE FROM test WHERE id = "doc-1"')
+        """DELETE compile produces correct Qdrant route structure."""
+        cq = pyqql.compile('DELETE FROM test WHERE id = "doc-1"')
         self.assertIn("method", cq)
         self.assertIn("path", cq)
 
@@ -714,64 +714,64 @@ class TestScriptExecute(unittest.TestCase):
 
 
 # ============================================================================
-# Category I: compile_query route contract
+# Category I: compile route contract
 # ============================================================================
 
 class TestCompileQueryRoute(unittest.TestCase):
-    """I: Verify compile_query produces correct route dicts."""
+    """I: Verify compile produces correct route dicts."""
 
     def test_i1_query_route_structure(self):
-        cq = pyqql.compile_query('QUERY "test" FROM docs LIMIT 10')
+        cq = pyqql.compile('QUERY "test" FROM docs LIMIT 10')
         self.assertIsInstance(cq, dict)
         self.assertIn("method", cq)
         self.assertIn("path", cq)
         self.assertIn("payload", cq)
 
     def test_i2_route_method_is_post(self):
-        cq = pyqql.compile_query('QUERY "test" FROM docs LIMIT 10')
+        cq = pyqql.compile('QUERY "test" FROM docs LIMIT 10')
         self.assertEqual(cq["method"], "POST")
 
     def test_i3_route_path_contains_collection(self):
-        cq = pyqql.compile_query('QUERY "test" FROM mycoll LIMIT 10')
+        cq = pyqql.compile('QUERY "test" FROM mycoll LIMIT 10')
         self.assertIn("mycoll", cq["path"])
 
     def test_i4_route_payload_has_limit(self):
-        cq = pyqql.compile_query('QUERY "test" FROM docs LIMIT 10')
+        cq = pyqql.compile('QUERY "test" FROM docs LIMIT 10')
         self.assertIn("limit", cq["payload"])
         self.assertEqual(cq["payload"]["limit"], 10)
 
     def test_i5_count_compiles(self):
-        cq = pyqql.compile_query("COUNT FROM docs")
+        cq = pyqql.compile("COUNT FROM docs")
         self.assertIsInstance(cq, dict)
         self.assertIn("method", cq)
         self.assertIn("path", cq)
 
     def test_i6_upsert_compiles_with_correct_method(self):
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             'UPSERT INTO test VALUES {"id":"x","vector":[1.0,2.0],"k":"v"}'
         )
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "PUT")
 
     def test_i7_delete_compiles_with_correct_method(self):
-        cq = pyqql.compile_query('DELETE FROM test WHERE id = "doc-1"')
+        cq = pyqql.compile('DELETE FROM test WHERE id = "doc-1"')
         self.assertIsInstance(cq, dict)
         self.assertIn("method", cq)
 
     def test_i8_create_collection_compiles(self):
-        cq = pyqql.compile_query("CREATE COLLECTION mytest")
+        cq = pyqql.compile("CREATE COLLECTION mytest")
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "PUT")
         self.assertIn("/collections/mytest", cq["path"])
 
     def test_i9_drop_collection_compiles(self):
-        cq = pyqql.compile_query("DROP COLLECTION mytest")
+        cq = pyqql.compile("DROP COLLECTION mytest")
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "DELETE")
         self.assertIn("/collections/mytest", cq["path"])
 
     def test_i10_show_collections_compiles(self):
-        cq = pyqql.compile_query("SHOW COLLECTIONS")
+        cq = pyqql.compile("SHOW COLLECTIONS")
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "GET")
         self.assertEqual(cq["path"], "/collections")
@@ -910,7 +910,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j19_upsert_payload_fields_are_top_level(self):
         """Payload fields in UPSERT JSON go directly under point payload."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             'UPSERT INTO test VALUES {"id":"x","vector":[1.0],"myfield":"myval","count":42}'
         )
         pt = cq["payload"]["points"][0]
@@ -919,7 +919,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j20_upsert_payload_key_is_nested(self):
         """A key literally named 'payload' in VALUES becomes nested."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             'UPSERT INTO test VALUES {"id":"x","vector":[1.0],"payload":{"nested":"yes"}}'
         )
         pt = cq["payload"]["points"][0]
@@ -928,7 +928,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j21_upsert_no_vector_compiles(self):
         """UPSERT without vector field still compiles."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             'UPSERT INTO test VALUES {"id":"x","text":"just metadata"}'
         )
         self.assertIn("points", cq["payload"])
@@ -936,7 +936,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j22_numeric_id_upsert(self):
         """UPSERT with numeric id compiles."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             'UPSERT INTO test VALUES {"id":42,"vector":[0.1,0.2]}'
         )
         pt = cq["payload"]["points"][0]
@@ -952,7 +952,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j24_delete_payload_compile(self):
         """DELETE PAYLOAD statement compiles to /points/payload/delete route."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             "DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived' SHARD 'tenant_1'"
         )
         self.assertEqual(cq["method"], "POST")
@@ -961,7 +961,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j25_count_exact_compile(self):
         """COUNT statement with exact = true compiles exact flag."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             "COUNT FROM docs WHERE active = true WITH (exact = true)"
         )
         self.assertEqual(cq["method"], "POST")
@@ -969,7 +969,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_j26_group_by_offset_compile(self):
         """GROUP BY statement with OFFSET computes effective limit (limit + offset)."""
-        cq = pyqql.compile_query(
+        cq = pyqql.compile(
             "QUERY TEXT 'search' FROM docs GROUP BY category LIMIT 10 OFFSET 5"
         )
         self.assertEqual(cq["method"], "POST")

@@ -16,7 +16,7 @@ Cluster features (custom `SHARD`, `GROUP BY … LOOKUP FROM`, **`SHOW QUOTAS` /
 npm install @veristamp/nqql-edge
 ```
 
-Node ≥ 18. Platforms: Linux x64, macOS arm64, Windows x64 (not macOS Intel).
+Node ≥ 18. Platforms: Linux x64, Linux arm64, macOS arm64, Windows x64 (not macOS Intel).
 
 ## Quick start
 
@@ -69,7 +69,7 @@ overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
 | `injectFilter` | Isolation |
 | `stmt.shardKey` | AST property; edge **rejects** SHARD at execute |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
-| `compileQuery` / `explain` / `execute` | Plan / run (`options.params` same as `bind`) |
+| `compile` / `explain` / `execute` | Plan / run (`options.params` same as `bind`) |
 | `Client.scrollCursor` / `scrollCursor`, `Client.scrollStream` / `scrollStream` | Lazy async scroll iteration + pull-driven WHATWG stream |
 
 Quotas and custom sharding require remote Qdrant; `GROUP BY` runs offline

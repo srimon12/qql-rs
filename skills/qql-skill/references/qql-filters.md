@@ -1,6 +1,8 @@
 # QQL filter reference
 
-All 20 `FilterExpr` forms. Filters scope retrieval, counting, faceting, scrolling, and mutation selectors. Routing stays out of filters. `SHARD` is a sibling of `WHERE`, never nested inside it.
+> Agent-oriented view — canonical language source is `docs/filters.md` (website syncs from `docs/`).
+
+All 23 `FilterExpr` forms. Filters scope retrieval, counting, faceting, scrolling, and mutation selectors. Routing stays out of filters. `SHARD` is a sibling of `WHERE`, never nested inside it.
 
 ## Comparison and range
 
@@ -142,4 +144,4 @@ Key decisions:
 
 ## Full predicate list
 
-For completeness, the 20 wire-backed forms are point ID, compare, between, in, is null, is empty, match text, match any, match phrase, match prefix, match tokens, match except, min should, and, or, not, nested, has vector, slice, values count, geo bbox, geo radius, geo polygon. The last three geo shapes count as three forms. `NOT IN` lowers through the same `In` shape with negation. All 20 validate against the OpenAPI `Filter` schema in contract tests.
+For completeness, the 23 wire-backed forms are point ID, compare, between, in, is null, is empty, match text, match any, match phrase, match prefix, match tokens, match except, min should, and, or, not, nested, has vector, slice, values count, geo bbox, geo radius, geo polygon. The last three geo shapes count as three forms. `NOT IN` lowers through the same `In` shape with negation. All 23 validate against the OpenAPI `Filter` schema in contract tests.

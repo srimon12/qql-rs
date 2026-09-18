@@ -93,9 +93,9 @@ builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
 
 ### Crate Division Boundaries
 
-* **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`, `std`. Uses owned `String` types throughout — no lifetime parameters on input.
+* **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`, `std`. The AST owns `String` types; `Lexer`/`Parser`/`Token`/`ParamPlan` borrow the input.
 
-* **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` and `RequestBody` are REST-specific. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
+* **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` is the REST-specific projection: typed `*Request` structs lower to `Route.body: Option<serde_json::Value>` via `serialize_body`. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 
 * **`qql-embed`**: Shared embedding layer. Wide host-agnostic `Embedder` trait (dense/sparse/multi/image/rerank plus batch variants; reject-by-default for opt-in modalities). Local BM25 is wire-compatible with Qdrant's `qdrant/bm25` (murmur3-32 token IDs, word tokenizer, English stopwords + snowball stemming; queries embed unit weights, documents tf saturation) except murmur3-collision counting, which has no cross-impl contract. `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags) and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense, batch dense by model). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). Unknown names with an already-declared `AS` kind are kept for offline / empty mock schemas. No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
 
@@ -105,14 +105,13 @@ builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
 
 * **`qql-cli`**: CLI binary. Uses the executor via REST/adapter construction.
 
-* **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `qql_plan::routing::compile_statement`), and `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
-* **Binding dedup (anti-drift)**: server/edge pairs share a common crate — `pyqql-common` (PyO3: `Stmt`, parser functions, error mapping, `prepare_input`/`run_input`/`run_async` dispatch) and `nqql-common` (NAPI logic without `#[napi]` macros; the SDK crates keep thin `#[napi]` wrappers). All SDKs route parameter binding through `qql_core::params_json` (the single batch contract: `plan_statement_params` + `bind_stmt_with_params` / `bind_str_with_params`) and operator parsing through `ComparisonOp::parse_inject_op`. The JS wrapper layer (`dx-common.js`, `test_dx.js`) and Python shared files (`_errors.py`, `test_dx.py`) are byte-identical copies across the two SDKs of each language, enforced by a CI diff check — edit both copies or neither.
+* **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile` (via `qql_plan::routing::compile_statement`), and `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
+* **Binding dedup (anti-drift)**: server/edge pairs share a common crate — `pyqql-common` (PyO3: `Stmt`, parser functions, error mapping, `prepare_input`/`run_input`/`run_async` dispatch) and `nqql-common` (NAPI logic without `#[napi]` macros; the SDK crates keep thin `#[napi]` wrappers). All SDKs route parameter binding through `qql_core::params_json` (the single batch contract: `plan_statement_params` + `plan_value_params` twins, `bind_stmt_with_params` / `bind_str_with_params` over JSON) and the text API in `qql_core::params::{bind_named, bind_positional, bind_stmt}`, with operator parsing through `ComparisonOp::parse_inject_op`. The JS wrapper layer (`dx-common.js`, `test_dx.js`) and Python shared files (`_errors.py`, `test_dx.py`) are byte-identical copies across the two SDKs of each language, enforced by a CI diff check — edit both copies or neither.
 
 ### Permanently Removed Abstractions
 
 The following old abstractions have been permanently removed — do NOT reintroduce them:
 
-- `offline.rs` / `CompiledQuery` — replaced by `qql_plan::plan::plan()` + `PlannedOperation`
 - `filter_conv/` (in `qql-runtime`) — replaced by `qql_plan::filter::lower_filter()`. Unrelated and current: `qql-edge/src/backend/filter_converter.rs` (edge-local proto conversion) and `qql-core/src/parser/query/pipeline.rs` (query USING/prefetch wiring).
 - `pipeline/` module (in `qql-runtime`) — replaced by `qql_plan::types`
 - `QdrantCoreOps` / `QdrantAdminOps` dual-trait — merged into single `QdrantOps`
@@ -127,7 +126,7 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `CompiledQuery` / `offline.rs` — eliminated; the deprecated panicking `routing::route()` wrapper is removed — `routing::try_route()` (fallible) and `compile_statement` supersede it around `plan()` + `to_rest_route()`
 - `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest survives only as a test-only harness in `qql-conformance` (dev-dependency that compiles `language/v1/grammar.pest` and gates the fixture corpus), never in `qql-core`. `qql-grammar-gen` instead derives keyword tables, TextMate/TS artifacts, and the generated pest copy from `grammar.pest`
 - `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
-- `CollectionSchema` (client.rs) — removed duplicate; backend schema is the only source
+- `CollectionSchema` (qql-runtime `backend.rs` is canonical) — removed duplicate; backend schema is the only source
 - `QdrantOps::execute_planned_typed` and the JSON-returning `QdrantOps::execute_planned` — replaced by the single typed `execute_planned -> BackendResponse`. `BackendResponse::from_envelope` is gone; the old shared envelope parser (`envelope.rs` / `parse_backend_response`) is gone too, replaced by the strict per-operation parser in `crate::rest_response`. Unrelated and current: `ServerTelemetry::from_envelope[_opt]` (telemetry-only extraction, also mirrored in `qql-wasm/src/telemetry.rs`).
 - `ExecData::Raw` / `as_raw()` — removed; every response shape has a typed variant (`Hits`, `Groups`, `Count`, `Facet`, `Mutation`, `Collections`, `Collection`, `ShardKeys`, `Quotas`) and no JSON passthrough remains
 
@@ -145,7 +144,7 @@ CrossRerank
 
 ```rust
 pub enum ErrorKind { Lex, Parse, Validation, Execution, Transport, Backend }
-pub struct QqlError { kind: ErrorKind, code: &'static str, message: String, span: Option<Span> }
+pub struct QqlError { kind: ErrorKind, code: Cow<'static, str>, message: Cow<'static, str>, span: Option<Span>, fields: Vec<ErrorField>, source: Option<Box<QqlError>> }
 pub struct Span { start: usize, end: usize }
 ```
 
@@ -171,8 +170,8 @@ pub trait QdrantOps: Send + Sync {
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<BackendResponse, QqlError>;
 
     // Batch methods: one typed response per item, in order
-    async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest) -> Result<Vec<BackendResponse>, QqlError>;
-    async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest) -> Result<Vec<BackendResponse>, QqlError>;
+    async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest, timeout: Option<u64>, consistency: Option<ReadConsistencyParam>) -> Result<Vec<BackendResponse>, QqlError>;
+    async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest, wait: bool) -> Result<Vec<BackendResponse>, QqlError>;
 
     // Extension hooks (default: reject — only capable backends override)
     async fn change_aliases(&self, actions: &[AliasAction]) -> Result<(), QqlError>;
@@ -180,9 +179,9 @@ pub trait QdrantOps: Send + Sync {
 }
 ```
 
-Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON, and the strict per-operation parser (`crate::rest_response::parse_planned`) decodes the OpenAPI response shape into `BackendResponse`, failing `QQL-BACKEND-ENVELOPE` on any missing or mistyped field. gRPC and edge convert proto / `qdrant-edge` values straight into typed `BackendResponse` for every operation — reads, mutations, and DDL alike; no JSON response builders or `TODO(R2/R3)` fallback arms remain.
+Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed plan `*Request` structs directly to protobuf. For REST, `execute_route` serializes the typed plan struct as JSON via `serialize_body`, and the strict per-operation parser (`crate::rest_response::parse_planned`) decodes the OpenAPI response shape into `BackendResponse`, failing `QQL-BACKEND-ENVELOPE` on any missing or mistyped field. gRPC and edge convert proto / `qdrant-edge` values straight into typed `BackendResponse` for every operation — reads, mutations, and DDL alike; no JSON response builders or `TODO(R2/R3)` fallback arms remain.
 
-### Statement → Endpoint Matrix (27 REST routes: 26 statements + 1 helper)
+### Statement → Endpoint Matrix (27 REST routes + 1 helper)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -215,7 +214,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `BATCH {` mutations `}` | `/points/batch` | POST |
 | *(helper, no QQL statement)* `change_aliases` | `/collections/aliases` | POST |
 
-`QUERY CROSS RERANK` is client-side (no Qdrant route). Shard-key ops execute via `execute_planned`.
+`QUERY CROSS RERANK` is client-side (no Qdrant route). Shard-key ops execute via `execute_planned`. `OVERWRITE` (payload replace) has no single REST route — it only executes inside `BATCH`. `BATCH` is one statement kind projecting to two routes. DML endpoints below are shown short: the full paths are prefixed with `/collections/{c}` (e.g. `/collections/{c}/points/query`). Mutations and `CREATE INDEX` take effect-control as a `?wait=` query param, not a body field.
 
 ### gRPC Stack
 
@@ -241,11 +240,11 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 
 All generated route payloads are validated directly against Qdrant's official
 `crates/qql-runtime/openapi.json` specification in
-`crates/qql-runtime/src/contract_test.rs`:
+`crates/qql-runtime/src/contract_test/`:
 
-1. **`Query` Schema Validation**: All Qdrant-backed query expression variants (the 12 wire `Query` shapes; `CrossRerank` is client-side and asserted separately) against `# /components/schemas/Query`.
-2. **`Filter` Schema Validation**: All 20 `FilterExpr` variants (including `MatchPrefix`, `Slice`, `HasVector`, and the three geo predicates) against `# /components/schemas/Filter`.
-3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`, plus Facet/DDL/parity coverage in the same suite.
+1. **`Query` Schema Validation**: All Qdrant-backed query expression variants (the 12 wire `Query` shapes; `CrossRerank` is client-side and asserted separately — it plans but `to_rest_route` rejects it) against `# /components/schemas/Query`, plus `QueryRequest` / `QueryGroupsRequest` / `Document` / `Image` shapes and the query-param (not body) placement of `timeout` / `consistency`.
+2. **`Filter` Schema Validation**: All 23 `FilterExpr` variants (including `MatchPrefix`, `MatchTokens`, `MatchExcept`, `MinShould`, `Slice`, `HasVector`, and the three geo predicates) against `# /components/schemas/Filter` — 20 via QQL surface in `query.rs` plus a `MATCH EXCEPT` surface case in `parity.rs` (`match_except_filter_contract_matches_openapi`); `MatchTokens` and standalone `MinShould` ride the skill examples but have no dedicated contract case yet.
+3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`, plus Facet (`FacetRequest` / `FacetValueHit` + gRPC `Points.Facet`), DDL (`CreateCollection` / `UpdateCollection` / `CreateFieldIndex` + gRPC IR parity), formula and embedding REST/gRPC parity, numeric-vs-keyword shard-key parity, and batch item error shapes in the same suite.
 
 ---
 
@@ -253,7 +252,7 @@ All generated route payloads are validated directly against Qdrant's official
 
 1. **Size Constraints**: Target <400 lines per file where possible. Split large files into modules.
 2. **Error Propagation**: Dispatch directly; bubble up downstream errors. No pre-emptive checks.
-3. **No JSON-as-IR**: `RequestBody` and `BackendResponse`/`ExecData` are typed, and `ExecData` is closed — no `Raw(Value)` passthrough. JSON only at the REST boundary (request and response). The gRPC path converts typed plan structs (query inputs, point IDs, DDL request configs, `PlanFormula` trees) directly to protobuf. gRPC and edge never build a response JSON envelope: every response maps proto / `qdrant-edge` values directly into a typed `ExecData` variant.
+3. **No JSON-as-IR**: `PlannedOperation`'s typed `*Request` structs and `BackendResponse`/`ExecData` are typed, and `ExecData` is closed — no `Raw(Value)` passthrough. JSON only at the REST boundary (request and response). The gRPC path converts typed plan structs (query inputs, point IDs, DDL request configs, `PlanFormula` trees) directly to protobuf. gRPC and edge never build a response JSON envelope: every response maps proto / `qdrant-edge` values directly into a typed `ExecData` variant.
 4. **No duplicate planners**: `qql_plan::plan::plan()` is the single fallible planner. `routing::try_route()` is the fallible REST projection; the deprecated `route()` wrapper is removed. DDL goes through the same planner.
 5. **No glue code**: Each layer has one responsibility. No wrappers around wrappers.
 

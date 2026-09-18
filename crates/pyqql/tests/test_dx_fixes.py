@@ -72,9 +72,9 @@ class TestBindingContract(unittest.TestCase):
         self.assertEqual(str(explicit), str(implicit))
         params = {"v": [[0.1, 0.2], [0.3, 0.4]]}
         self.assertEqual(str(explicit.bind(params)), str(implicit.bind(params)))
-        # compile_query accepts the explicit spelling too (it failed to parse
+        # compile accepts the explicit spelling too (it failed to parse
         # before the fix).
-        route = pyqql.compile_query("QUERY VECTOR :v FROM docs USING dense", params)
+        route = pyqql.compile("QUERY VECTOR :v FROM docs USING dense", params)
         self.assertEqual(route["method"], "POST")
 
     def test_rebinding_a_bound_stmt_raises(self):
@@ -190,6 +190,14 @@ class TestVerdictRoundTwo(unittest.TestCase):
         bound = stmt.bind({"rank": 5})
         self.assertIn("GAUSS_DECAY(rank", str(bound))
 
+    def test_bare_score_in_formula_parses_and_compiles(self):
+        stmt = pyqql.parse(
+            "QUERY FORMULA score * 0.8 + views * 0.2 DEFAULTS (score = 0.0, views = 0) FROM docs"
+        )[0]
+        route = stmt.compile_route()
+        self.assertEqual(route["method"], "POST")
+        self.assertIn("$score", str(route))
+
 
 class TestBm25EmbedderParams(unittest.TestCase):
     """Client-side BM25 document params on the remote SDK's HttpEmbedder.
@@ -211,15 +219,37 @@ class TestBm25EmbedderParams(unittest.TestCase):
             bm25_avg_len=8.0,
         )
         self.assertIsNotNone(emb)
+        # k1 = 0 (binary weighting) matches Qdrant's validator.
+        emb = pyqql.HttpEmbedder(self.ENDPOINT, "unused-dense", 3, bm25_k1=0.0)
+        self.assertIsNotNone(emb)
+        # Full text processing: language, tokenizer, folding, stemmer,
+        # stopwords, and length limits ride the same constructor.
+        emb = pyqql.HttpEmbedder(
+            self.ENDPOINT,
+            "unused-dense",
+            3,
+            bm25_language="es",
+            bm25_tokenizer="whitespace",
+            bm25_lowercase=False,
+            bm25_ascii_folding=True,
+            bm25_stopwords=["el"],
+            bm25_stemmer="none",
+            bm25_min_token_len=2,
+            bm25_max_token_len=9,
+            bm25_stopwords_languages=["fr"],
+        )
+        self.assertIsNotNone(emb)
 
     def test_http_embedder_rejects_invalid_bm25_params(self):
         for kwargs in (
-            {"bm25_k1": 0.0},
             {"bm25_k1": -1.0},
             {"bm25_b": -0.1},
             {"bm25_b": 1.5},
             {"bm25_avg_len": 0.0},
             {"bm25_b": float("nan")},
+            {"bm25_language": "klingon"},
+            {"bm25_tokenizer": "ngram"},
+            {"bm25_stemmer": "yoda"},
         ):
             with self.assertRaises(ValueError) as ctx:
                 pyqql.HttpEmbedder(self.ENDPOINT, "unused-dense", 3, **kwargs)
@@ -247,6 +277,14 @@ class TestBm25EmbedderParams(unittest.TestCase):
                 "bm25_k1": 2.0,
                 "bm25_b": 0.5,
                 "bm25_avg_len": 8.0,
+                "bm25_language": "es",
+                "bm25_tokenizer": "whitespace",
+                "bm25_lowercase": False,
+                "bm25_ascii_folding": True,
+                "bm25_stopwords": ["el"],
+                "bm25_stemmer": "none",
+                "bm25_min_token_len": 2,
+                "bm25_max_token_len": 9,
             }
         )
         client.close()

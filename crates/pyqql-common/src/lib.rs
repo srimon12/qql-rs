@@ -458,6 +458,8 @@ pub struct PyStmt {
     /// Whether parameters have already been bound into this statement.
     /// Binding again — or passing params to `execute` / `compile_route` —
     /// would be silently ignored, so both raise `QQL-BIND-ALREADY-BOUND`.
+    /// Read-only (mirrors `nqql` / `qql-wasm` `Stmt.bound`).
+    #[pyo3(get)]
     pub bound: bool,
 }
 
@@ -576,7 +578,7 @@ impl PyStmt {
     }
 }
 
-/// Shared route JSON shape for `compile_route` / `compile_query`.
+/// Shared route JSON shape for `compile_route` / `compile`.
 pub fn compiled_route_json(compiled: &qql_plan::routing::CompiledStatement) -> serde_json::Value {
     let (method, path, payload) = match &compiled.route {
         Some(route) => {
@@ -690,10 +692,10 @@ pub fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, Py
 }
 
 /// Compile a QQL query to its transport route (non-executing), optionally
-/// binding `params` first (parity with `nqql.compileQuery`).
+/// binding `params` first (parity with `Client.compile`).
 #[pyfunction]
 #[pyo3(signature = (input, params=None))]
-pub fn compile_query<'py>(
+pub fn compile<'py>(
     py: Python<'py>,
     input: &str,
     params: Option<&Bound<'py, PyAny>>,

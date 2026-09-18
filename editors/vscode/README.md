@@ -37,7 +37,7 @@ Highlights and completions cover the full QQL 1.7 surface, including:
 
 ### Syntax Highlighting
 
-The generated TextMate grammar highlights QQL keywords, constants, strings, numbers, comments, parameter placeholders (`:name`, `?`), comparison operators, formula variables (`$score`), and dotted paths (`field.nested`, `items[].name`).
+The generated TextMate grammar highlights QQL keywords, constants, strings, numbers, comments, parameter placeholders (`:name`, `?`), comparison operators, formula variables (`score`, `$score`), and dotted paths (`field.nested`, `items[].name`).
 
 Also injects into Markdown fenced blocks:
 
@@ -218,7 +218,7 @@ VSIX binaries are **not** committed to the repo. Build one locally or download f
 code --install-extension qql-lang-*.vsix --force
 ```
 
-Extension packaging version is in `package.json` (**0.4.0**). It ships the QQL **1.7** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect an older parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with the grammar via `qql-grammar-gen generate` without a WASM rebuild, and `npm test` holds the bundle against the full language corpus (canonical formats + invalid-case codes from `language/v1/fixtures`), so staleness fails CI instead of shipping.
+Extension packaging version is in `package.json` (**0.4.1**). It ships the QQL **1.7** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect an older parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with the grammar via `qql-grammar-gen generate` without a WASM rebuild, and `npm test` holds the bundle against the full language corpus (canonical formats + invalid-case codes from `language/v1/fixtures`), so staleness fails CI instead of shipping.
 
 ### Build from source
 

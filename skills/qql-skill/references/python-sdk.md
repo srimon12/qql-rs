@@ -46,11 +46,11 @@ result = client.execute(stmt)
 ```
 
 Sparse IDF is **not** `inject_filter` and not a JSON corpus object. Write it in
-QQL. `compile_query` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
+QQL. `compile` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
 `params.idf.corpus` filter JSON — hosts do not build that dict.
 
 ```python
-from pyqql import bind, compile_query
+from pyqql import bind, compile
 
 # Isolation + routing + tenant-local BM25 stats (three different layers)
 qql = """
@@ -61,7 +61,7 @@ PARAMS (idf = WHERE tenant_id = :tenant)
 LIMIT 10
 """
 bound = bind(qql, {"q": "supply chain", "tenant": "honeywell"})
-route = compile_query(bound)
+route = compile(bound)
 # route["payload"]["params"]["idf"] ==
 #   {"corpus": {"must": [{"key": "tenant_id", "match": {"value": "honeywell"}}]}}
 ```
@@ -83,7 +83,7 @@ Client(
 - `url`: Qdrant REST (or gRPC) endpoint
 - `api_key`: Optional API key for authenticated Qdrant instances (sent as `api-key` header)
 - `use_grpc`: Set `True` to use gRPC transport (requires `--features grpc` build)
-- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys. Sparse document encoding is always local (HTTP serves dense/multi/image/rerank only), so the dict/class also accepts `bm25_k1`, `bm25_b`, `bm25_avg_len` for the local BM25 encoder (write-path only; defaults 1.2 / 0.75 / 256; invalid values raise `QQL-VALIDATION-CONFIG`).
+- `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys. Sparse document encoding is always local (HTTP serves dense/multi/image/rerank only), so the dict/class also accepts `bm25_k1`, `bm25_b`, `bm25_avg_len` plus text processing (`bm25_language`, `bm25_tokenizer`, `bm25_lowercase`, `bm25_ascii_folding`, `bm25_stopwords`, `bm25_stemmer`, `bm25_stopwords_languages`, `bm25_min_token_len`, `bm25_max_token_len`) for the local BM25 encoder (write-path only; defaults 1.2 / 0.75 / 256, English, word tokenizer; invalid values raise `QQL-VALIDATION-CONFIG`).
 - `route_affinity`: Optional Qdrant 1.19 read-affinity key, pinning reads to a
   stable replica. Sent as `X-Qdrant-Route-Affinity` (REST) / gRPC metadata
   `x-qdrant-route-affinity`. Empty string is treated as unset. Readable via
@@ -110,9 +110,14 @@ client = Client("http://localhost:6333", embedder={
     "api_key": "",
     "model": "all-minilm:l6-v2",
     "dimension": 384,
-    "bm25_k1": 2.0,       # tf saturation (default 1.2)
+    "bm25_k1": 2.0,       # tf saturation (default 1.2; 0 = binary weighting)
     "bm25_b": 0.5,        # length normalization, [0, 1] (default 0.75)
     "bm25_avg_len": 8.0,  # expected avg doc length in tokens (default 256)
+    "bm25_language": "es",      # text language: stopwords/stemmer (default "english")
+    "bm25_tokenizer": "whitespace",  # word (default) | whitespace | prefix
+    "bm25_ascii_folding": True, # ignore accents (default False)
+    "bm25_stemmer": "none",     # disable stemming (default: language stemmer)
+    "bm25_stopwords_languages": ["fr"],  # extra stopword lists (replaces default set)
 })
 
 # With read affinity (Qdrant 1.19+)
@@ -179,8 +184,9 @@ ast_json = parse_json("QUERY 'a' FROM docs LIMIT 5")  # JSON string of the AST a
 `execute()` accepts four input types. Lists and semicolon-delimited scripts are
 automatically batched. Pass `on_error="continue"` to collect per-statement
 failures; the default is `"stop"`.
-Every input form returns an `ExecutionReport` dict with `ok`, ordered
-`results`, `succeeded`, and `failed` fields.
+Every input form returns a native typed `ExecutionReport` (PyO3 class with
+dict-style `[]` / `.get()` access and report-level `ok` / `results` /
+`succeeded` / `failed` / `telemetry` — see §8).
 
 Typed exceptions: every error is a `pyqql.QqlError` subclass carrying
 `.code` / `.kind` / `.span` — catch `QqlSyntaxError`, `QqlValidationError`,
@@ -279,6 +285,9 @@ stmt.inject_filter("tenant_id", "=", "acme")
 # Serialise to JSON string or Python dict
 print(stmt.to_json())
 print(stmt.to_dict())
+
+# `inject_filter` takes equality and range ops (`=`, `>`, `>=`, `<`, `<=`,
+# case-insensitive); `!=` is rejected — use equality or rewrite the query.
 ```
 
 ---
@@ -492,9 +501,11 @@ stmts = pyqql.parse("QUERY 'a' FROM docs; COUNT FROM docs") # Parse a script
 ok = pyqql.is_valid("QUERY 'x' FROM docs LIMIT 5")          # Validate without returning the AST
 tokenized = pyqql.tokenize("QUERY 'x' FROM docs LIMIT 5")   # Lex into tokens
 result = pyqql.inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter
-route = pyqql.compile_query("QUERY 'x' FROM docs LIMIT 5")  # Lower to REST route (no execute)
+route = pyqql.compile("QUERY 'x' FROM docs LIMIT 5")  # Lower to REST route (no execute)
 
-# Hierarchical ASCII tree plan
+# Hierarchical ASCII tree plan. Unlike `nqql` / `qql-wasm` `explain`
+# (which throw on invalid QQL), this never raises: bad input yields
+# `{"ok": False, "query": ..., "error": ...}`.
 plan_dict = pyqql.explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10")
 print(plan_dict["plan"])
 # Query Plan
@@ -505,6 +516,8 @@ print(plan_dict["plan"])
 # Standalone parameter binding
 bound = pyqql.bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "test", "lim": 10})
 ```
+
+Note: `from pyqql import compile` shadows Python's builtin `compile` — prefer `pyqql.compile(...)` or alias on import (`from pyqql import compile as qql_compile`).
 
 ---
 
@@ -558,3 +571,27 @@ print(report["phases"])          # {"parse_ms": ..., "dispatch_ms": ..., ...}
 print(report["server_time_s"])   # seconds Qdrant spent, when reported
 print(report["results"][0]["telemetry"])  # {"time_s": ..., "usage": {...} | None}
 ```
+
+---
+
+## 13. Formula Queries & Qdrant SDK Interop
+
+In QQL, formula queries are declarative SQL-like strings executed directly via `client.execute()`:
+
+```python
+report = client.execute("""
+    WITH candidates AS (
+        QUERY TEXT 'distributed systems' FROM docs USING dense LIMIT 100
+    )
+    QUERY FORMULA score * 0.8 + LOG(citation_count + 1.0) * 0.2
+    DEFAULTS (score = 0.0, citation_count = 0)
+    FROM docs
+    PREFETCH (candidates)
+    LIMIT 10;
+""")
+```
+
+### Critical Guidance on `qdrant_client.models.FormulaQuery`
+- **Do not wrap QQL strings in `models.FormulaQuery`**: The official Qdrant Python SDK (`qdrant-client`) provides a class named `models.FormulaQuery`. However, it expects an object tree of `Expression` classes (e.g. `models.SumExpression(...)`), **not a query string**. Passing a QQL string to `models.FormulaQuery` triggers a 400 Bad Request: `"Invalid payload variable"`.
+- **Use `Client.execute()` natively**: `pyqql.Client.execute()` parses, plans, and converts formula expressions directly into Qdrant's wire format without manual expression trees.
+- **Prefer bare `score` over `$score`**: While `$score` is valid QQL, POSIX shells (bash, zsh) replace `$score` inside double quotes with an empty string `""`. Bare `score` is canonical, shell-safe, and automatically mapped to wire `"$score"`.

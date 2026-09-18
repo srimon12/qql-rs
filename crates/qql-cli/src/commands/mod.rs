@@ -6,6 +6,8 @@ mod doctor;
 mod dump_migrate;
 mod edge;
 mod lint;
+mod lint_fix;
+mod lint_report;
 mod run;
 mod runtime;
 mod setup;

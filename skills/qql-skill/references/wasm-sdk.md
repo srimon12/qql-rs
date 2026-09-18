@@ -98,13 +98,14 @@ wire-compatible BM25. Tune the **document** side before upserting:
 
 ```js
 client.setBm25Params(2.0, 0.5, 8.0); // k1, b, avg_len — throws on invalid values
+client.setBm25Text('es', 'whitespace', null, true, null, null, null, null, null); // language, tokenizer, …
 ```
 
 Defaults are Qdrant's `1.2 / 0.75 / 256`. Client-side, write-path only: query
 weights stay unit, server-side inference is untouched, and vectors already
 written keep their weights — re-ingest to apply. Invalid values throw the
-`QQL-VALIDATION-CONFIG` error (`k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`, all
-finite).
+`QQL-VALIDATION-CONFIG` error (`k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`, all
+finite; unknown language/tokenizer names too).
 
 ### JS Function Embedder
 
@@ -202,6 +203,23 @@ config). A missing or mistyped field fails the statement with
 fallback shapes. Server telemetry (`time`, `usage`) remains optional and
 lenient: absent or misshapen telemetry never fails a successful response.
 
+Integers cross losslessly: values a JS `Number` holds exactly (counts,
+spans, limits, small IDs and payloads) arrive as numbers, exactly as before;
+anything larger arrives as a `BigInt`, never a rounded `Number`. Qdrant
+snowflake point IDs exceed `MAX_SAFE_INTEGER`, so this is exactness, not
+pedantry:
+
+```js
+const hits = report.hits(0);
+typeof hits[0].id; // 'bigint' for snowflakes — e.g. 1479834607549681654n
+typeof hits[0].id; // 'number' for small sequential IDs — e.g. 691
+report.count(0);   // dx.js narrows counts to Number (exact in practice)
+// Pass BigInts straight back: params and cursor round-trip exactly.
+await client.execute("SCROLL FROM docs AFTER :cursor LIMIT 100", {
+    params: { cursor: hits.at(-1).id },
+});
+```
+
 ---
 
 ## 3b. Bulk ingest
@@ -249,8 +267,10 @@ console.log(stmt.shardKey);  // -> "acme"
 // Numeric partitions stay numeric (read back as BigInt):
 // stmt.shardKey = 101;
 
-// Serialise to JSON
-const json = stmt.toJSON();
+// Serialise: exact-text string for transport, object for inspection.
+// (`toJSON` is the JSON.stringify hook — same BigInt-safe object as
+// `toObject()`; stringify throws on snowflake BigInts by design.)
+const json = stmt.toJson();
 const obj = stmt.toObject();
 ```
 
@@ -301,7 +321,7 @@ const route = compile(bound);
 Validate and inject filters in the browser -- no server round-trip needed.
 
 ```js
-import init, { parse, isValid, inject_filter } from 'qql-wasm';
+import init, { parse, isValid, injectFilter } from 'qql-wasm';
 await init();
 
 // Validate user input instantly
@@ -310,10 +330,10 @@ if (!isValid("QUERY 'machine learning' FROM papers LIMIT 20")) {
 }
 
 // Inject tenant filter into a raw query string
-const safe = inject_filter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
+const safe = injectFilter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
 ```
 
-Note: `inject_filter` does not support `!=`. Use equality and wrap with `NOT`, or rewrite the query.
+Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or rewrite the query.
 
 ---
 
@@ -396,7 +416,7 @@ console.log(planTree);
 ## 9. Free Functions
 
 ```js
-import init, { parse, parseJson, isValid, inject_filter,
+import init, { parse, parseJson, isValid, injectFilter,
               tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
@@ -404,9 +424,9 @@ parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an arra
 parseJson("QUERY 'x' FROM docs LIMIT 5");              // Raw JSON string, no object allocation
 parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statement
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
-inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
+injectFilter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
-compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
+compile("QUERY 'x' FROM docs LIMIT 5");             // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
 bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter
@@ -420,7 +440,8 @@ For rich client responses and error handling matching `nqql` / `pyqql`, import f
 
 ```js
 import init, { Client } from 'qql-wasm';
-import { ExecutionReport, ScoredPoint, buildError, executeHits } from 'qql-wasm/dx';
+import { ExecutionReport, ScoredPoint, buildError, executeHits,
+         scrollCursor, scrollStream } from 'qql-wasm/dx';
 await init();
 
 const client = new Client('http://localhost:6333');
@@ -436,5 +457,12 @@ if (report.ok) {
 
 // One-shot reads without manual wrapping:
 const hits = await executeHits(client, "QUERY 'health' FROM docs LIMIT 5");
+
+// Lazy SCROLL paging / streaming (module functions taking the client first —
+// the wasm-bindgen Client class cannot grow JS-side methods like nqql's wrapper):
+for await (const point of scrollCursor(client, "docs", { batchSize: 500 })) {
+    await processPoint(point);
+}
+const stream = scrollStream(client, "docs", { batchSize: 500 }); // WHATWG ReadableStream
 ```
 

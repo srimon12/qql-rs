@@ -319,7 +319,6 @@ fn test_bm25_params_avg_len_only_shifts_docs_off_the_average() {
 #[test]
 fn test_bm25_params_validation_fail_closed() {
     let rejected = [
-        (0.0, 0.75, 256.0),
         (-1.0, 0.75, 256.0),
         (f64::NAN, 0.75, 256.0),
         (f64::INFINITY, 0.75, 256.0),
@@ -341,8 +340,14 @@ fn test_bm25_params_validation_fail_closed() {
         assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "({k1}, {b}, {avg_len})");
     }
 
-    // Valid boundaries: b = 0 / 1 are accepted, any positive finite k1/avg_len.
-    for (k1, b, avg_len) in [(0.0001, 0.0, 0.5), (100.0, 1.0, 1e9), (1.2, 0.75, 256.0)] {
+    // Valid boundaries: b = 0 / 1 are accepted, k1 = 0 is accepted like
+    // Qdrant's validator (binary weighting), any positive finite avg_len.
+    for (k1, b, avg_len) in [
+        (0.0, 0.75, 256.0),
+        (0.0001, 0.0, 0.5),
+        (100.0, 1.0, 1e9),
+        (1.2, 0.75, 256.0),
+    ] {
         sparse::Bm25Params::new(k1, b, avg_len)
             .unwrap_or_else(|e| panic!("({k1}, {b}, {avg_len}) must be valid: {e}"));
     }
@@ -355,7 +360,8 @@ fn test_bm25_params_resolve_applies_per_field_overrides() {
     assert_eq!(params.b(), sparse::DEFAULT_B);
     assert_eq!(params.avg_len(), 8.0);
 
-    let err = sparse::Bm25Params::resolve(Some(-1.0), None, None).expect_err("k1 <= 0 rejected");
+    let err =
+        sparse::Bm25Params::resolve(Some(-1.0), None, None).expect_err("negative k1 rejected");
     assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
     let err = sparse::Bm25Params::resolve(None, Some(2.0), None).expect_err("b > 1 rejected");
     assert_eq!(err.code, "QQL-VALIDATION-CONFIG");

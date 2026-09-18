@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.98"
 authors = ["Srimon Danguria <srimon12mckv@gmail.com>"]
@@ -29,20 +29,20 @@ repository = "https://github.com/srimon12/qql-rs"
 homepage = "https://github.com/srimon12/qql-rs"
 
 [workspace.lints.rust]
-# Public API is the product for the six published crates; undocumented public
+# Public API is the product for the seven published crates; undocumented public
 # items surface as rustdoc warnings (see docs/rust API pass). Generated files
 # opt out locally via `#![allow(missing_docs)]`.
 missing_docs = "warn"
 
 [workspace.dependencies]
-qql-convert = { version = "0.4.0", path = "crates/qql-convert" }
-qql-core = { version = "0.4.0", path = "crates/qql-core" }
-qql-plan = { version = "0.4.0", path = "crates/qql-plan" }
-qql-embed = { version = "0.4.0", path = "crates/qql-embed" }
-qql = { version = "0.4.0", path = "crates/qql-runtime", default-features = false }
-qql-edge = { version = "0.4.0", path = "crates/qql-edge", default-features = false }
-pyqql-common = { version = "0.4.0", path = "crates/pyqql-common" }
-nqql-common = { version = "0.4.0", path = "crates/nqql-common" }
+qql-convert = { version = "0.4.1", path = "crates/qql-convert" }
+qql-core = { version = "0.4.1", path = "crates/qql-core" }
+qql-plan = { version = "0.4.1", path = "crates/qql-plan" }
+qql-embed = { version = "0.4.1", path = "crates/qql-embed" }
+qql = { version = "0.4.1", path = "crates/qql-runtime", default-features = false }
+qql-edge = { version = "0.4.1", path = "crates/qql-edge", default-features = false }
+pyqql-common = { version = "0.4.1", path = "crates/pyqql-common" }
+nqql-common = { version = "0.4.1", path = "crates/nqql-common" }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

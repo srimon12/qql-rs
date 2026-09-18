@@ -96,7 +96,15 @@ pub(crate) fn query_interface(
                 rrf: Some(rrf),
             });
         }
-        other => unreachable!("known key {other}"),
+        // Drift guard: `kind` comes from the fixed `known` key table above,
+        // so every member is covered. Fail closed (never panic) if the key
+        // table and this match ever drift apart.
+        other => {
+            return Err(invalid(
+                path,
+                format!("unsupported query interface variant '{other}'"),
+            ));
+        }
     };
     Ok(Interface {
         expression,

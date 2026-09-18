@@ -36,6 +36,27 @@ if not report["ok"]:
 print(report["succeeded"], report["failed"])
 ```
 
+## Formula queries vs Qdrant SDK FormulaQuery
+
+In QQL, custom formula scoring uses declarative, readable query strings executed directly via `client.execute()`:
+
+```python
+report = client.execute("""
+    QUERY FORMULA score * 0.8 + LOG(views + 1.0) * 0.2
+    DEFAULTS (score = 0.0, views = 0)
+    FROM articles
+    LIMIT 10
+""")
+```
+
+{% aside type="caution" title="Do not wrap QQL strings in models.FormulaQuery" %}
+The official Qdrant Python SDK (`qdrant-client`) provides a class named `models.FormulaQuery`. However, it expects an object tree of `Expression` classes (`models.SumExpression(...)`), **not a query string**. Passing a QQL formula string into `models.FormulaQuery` fails with:
+```text
+400 Bad Request: "failed to parse variable ID ...: Invalid payload variable"
+```
+Execute QQL formula queries natively using `pyqql.Client.execute()`. Always use bare `score` instead of `$score` to avoid shell variable interpolation in terminal or script workflows.
+{% /aside %}
+
 ## Parameter binding & prepared queries
 
 Pass `params` as a dictionary for named placeholders (`:name`) or a list for positional placeholders (`?`):
@@ -62,8 +83,10 @@ bound_qql = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}
 ```
 
 Parse once, then reuse the statement. `stmt.bind(params)` returns a new bound
-`Stmt`, and `stmt.compile_route(params=...)` lowers the bound statement to its
-Qdrant route without re-parsing:
+`Stmt` (`stmt.bound` reports whether params were already bound — binding again
+raises `QQL-BIND-ALREADY-BOUND`), `stmt.compile_route(params=...)` lowers the
+bound statement to its Qdrant route without re-parsing, and `stmt.explain()`
+returns this statement's `{ok, query, plan}` dict:
 
 ```python
 stmt = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
@@ -140,12 +163,12 @@ statement and both accept matrix params (ColBERT multi-vectors) since 0.4.0,
 but the implicit form is the canonical, documented shape and reads the same
 across `QUERY`, `HYBRID`, and `RERANK` inputs.
 
-`compile_query(query, params=...)` and `Client.compile(query, params=...)`
+`compile(query, params=...)` and `Client.compile(query, params=...)`
 compile a template to its route in one step, and `is_valid` runs the full
 parse + plan gate:
 
 ```python
-route = compile_query("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+route = compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
 print(client.compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}))
 ```
 
@@ -324,11 +347,13 @@ substitute `!=` for an exclusion rule; model that rule in the source query.
 ## Plan before you send traffic
 
 ```python
-from pyqql import compile_query, explain, tokenize
+from pyqql import compile, explain, tokenize
 
-route = compile_query(query)
+route = compile(query)
 print(route["method"], route["path"])
-print(explain(query))
+print(explain(query))  # {ok, query, plan} — or {ok: False, query, error} on
+                       # invalid source (never raises for a parse failure;
+                       # Node/WASM `explain` throws a coded Error instead)
 print(tokenize(query))
 ```
 
@@ -348,12 +373,13 @@ print(tokenize(query))
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
 | `parse_json(source)` | JSON string of the AST array | Forward a parse over HTTP/IPC without Python object overhead |
-| `Stmt.bind(params)` | bound `Stmt` | Substitute `:name` / `?` parameters into a prepared statement |
+| `Stmt.bind(params)` | bound `Stmt` | Substitute `:name` / `?` parameters into a prepared statement (`stmt.bound` reports whether binding already happened; re-binding raises `QQL-BIND-ALREADY-BOUND`) |
 | `Stmt.compile_route(params=...)` | route dictionary | Compile a prepared statement to its Qdrant route without re-parsing |
+| `Stmt.explain()` | `{ok, query, plan}` dictionary | Per-statement plan without raising |
 | `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
 | `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
 | `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools (`is_valid` runs parse + plan) |
-| `compile_query(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
+| `compile(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
 | `bind(query, params, *, truncate_vectors=False)` | bound string or `Stmt` | Substitute `:name` / `?` parameters; `Stmt` + `truncate_vectors=True` returns a readable string |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
 | `HttpEmbedder` | embedder object | Supply remote dense, multi, image, and rerank endpoints (sparse resolves to local BM25; see the embedder ladder in the API surface reference) |

@@ -1,5 +1,7 @@
 # QQL query reference
 
+> Agent-oriented view — canonical language source is `docs/syntax.md` (website syncs from `docs/`).
+
 All `QUERY` forms. Each section names the problem, the QQL shape, and the key decisions. Companion runnable files live in `examples/`.
 
 Clause order is enforced. `SHARD` sits after `WHERE` and before `PARAMS`. `LIMIT` and `OFFSET` close the statement. See `SKILL.md` for the full order template.

@@ -12,31 +12,18 @@ class Client {
         wasm.__wbg_client_free(ptr, 0);
     }
     /**
-     * Parse and compile one statement without executing it. Alias for `compile`.
-     * @param {string} query
-     * @param {any | null} [params]
-     * @returns {CompiledRoute}
+     * Close the client (no-op: browser `fetch` holds no connections).
+     *
+     * Exists for cross-SDK portability so generic `client.close()` cleanup
+     * code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
      */
-    compileQuery(query, params) {
-        try {
-            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-            const len0 = WASM_VECTOR_LEN;
-            wasm.client_compileQuery(retptr, this.__wbg_ptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
-            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
-            if (r2) {
-                throw takeObject(r1);
-            }
-            return takeObject(r0);
-        } finally {
-            wasm.__wbindgen_add_to_stack_pointer(16);
-        }
+    close() {
+        wasm.client_close(this.__wbg_ptr);
     }
     /**
      * Parse and compile one statement without executing it. Optional
-     * `params` bind before parsing (same shape as the module-level `bind`).
+     * `params` bind before parsing (same shape as the module-level `bind`
+     * and `compile`).
      * @param {string} query
      * @param {any | null} [params]
      * @returns {CompiledRoute}
@@ -138,6 +125,15 @@ class Client {
         return ret !== 0;
     }
     /**
+     * Whether the client is closed (always `false`: [`close`](Self::close)
+     * is a no-op).
+     * @returns {boolean}
+     */
+    get isClosed() {
+        const ret = wasm.client_isClosed(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @param {string | null} [url]
      * @param {string | null} [api_key]
      */
@@ -176,7 +172,7 @@ class Client {
      * encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
      * documents upserted after the call are encoded; query weights stay unit
      * and server-side inference is untouched. Invalid values throw
-     * (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+     * (`QQL-VALIDATION-CONFIG`): `k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`,
      * all finite.
      * @param {number} k1
      * @param {number} b
@@ -186,6 +182,47 @@ class Client {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             wasm.client_setBm25Params(retptr, this.__wbg_ptr, k1, b, avg_len);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Set client-side BM25 text processing for the built-in local sparse
+     * encoder: language (`"spanish"`, `"es"`, …; `null` keeps current),
+     * tokenizer (`"word"`, `"whitespace"`, `"prefix"`), lowercasing,
+     * ASCII folding, stemmer (`"none"` disables, a language name overrides),
+     * custom stopwords (replaces the language default; `[]` disables), and
+     * token length limits. All `null` keeps the current value; anything
+     * invalid throws (`QQL-VALIDATION-CONFIG`).
+     * @param {string | null} [language]
+     * @param {string | null} [tokenizer]
+     * @param {boolean | null} [lowercase]
+     * @param {boolean | null} [ascii_folding]
+     * @param {string | null} [stemmer]
+     * @param {string[] | null} [stopwords]
+     * @param {number | null} [min_token_len]
+     * @param {number | null} [max_token_len]
+     * @param {string[] | null} [stopwords_languages]
+     */
+    setBm25Text(language, tokenizer, lowercase, ascii_folding, stemmer, stopwords, min_token_len, max_token_len, stopwords_languages) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            var ptr0 = isLikeNone(language) ? 0 : passStringToWasm0(language, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len0 = WASM_VECTOR_LEN;
+            var ptr1 = isLikeNone(tokenizer) ? 0 : passStringToWasm0(tokenizer, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len1 = WASM_VECTOR_LEN;
+            var ptr2 = isLikeNone(stemmer) ? 0 : passStringToWasm0(stemmer, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len2 = WASM_VECTOR_LEN;
+            var ptr3 = isLikeNone(stopwords) ? 0 : passArrayJsValueToWasm0(stopwords, wasm.__wbindgen_export);
+            var len3 = WASM_VECTOR_LEN;
+            var ptr4 = isLikeNone(stopwords_languages) ? 0 : passArrayJsValueToWasm0(stopwords_languages, wasm.__wbindgen_export);
+            var len4 = WASM_VECTOR_LEN;
+            wasm.client_setBm25Text(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(lowercase) ? 0xFFFFFF : lowercase ? 1 : 0, isLikeNone(ascii_folding) ? 0xFFFFFF : ascii_folding ? 1 : 0, ptr2, len2, ptr3, len3, isLikeNone(min_token_len) ? Number.MAX_SAFE_INTEGER : (min_token_len) >>> 0, isLikeNone(max_token_len) ? Number.MAX_SAFE_INTEGER : (max_token_len) >>> 0, ptr4, len4);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -318,32 +355,6 @@ class Client {
         }
     }
     /**
-     * Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
-     * @param {string} endpoint
-     * @param {string} model
-     * @param {number} dimension
-     * @param {string | null} [api_key]
-     */
-    setRemoteEmbedder(endpoint, model, dimension, api_key) {
-        try {
-            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passStringToWasm0(endpoint, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-            const len1 = WASM_VECTOR_LEN;
-            var ptr2 = isLikeNone(api_key) ? 0 : passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-            var len2 = WASM_VECTOR_LEN;
-            wasm.client_setRemoteEmbedder(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, dimension, ptr2, len2);
-            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-            if (r1) {
-                throw takeObject(r0);
-            }
-        } finally {
-            wasm.__wbindgen_add_to_stack_pointer(16);
-        }
-    }
-    /**
      * Set Qdrant 1.19 read affinity. Pins reads to a stable replica via the
      * `X-Qdrant-Route-Affinity` header. Pass `null`/`""` to clear.
      * @param {string | null} [affinity]
@@ -422,12 +433,14 @@ class Stmt {
     }
     /**
      * Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+     * Optionally accepts `params` to bind before compiling.
+     * @param {any | null} [params]
      * @returns {Uint8Array}
      */
-    compileRouteBytes() {
+    compileRouteBytes(params) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.stmt_compileRouteBytes(retptr, this.__wbg_ptr);
+            wasm.stmt_compileRouteBytes(retptr, this.__wbg_ptr, isLikeNone(params) ? 0 : addHeapObject(params));
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -556,15 +569,38 @@ class Stmt {
         return takeObject(ret);
     }
     /**
-     * Serialise the AST to a JSON string.
-     * @returns {string}
+     * `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).
+     *
+     * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+     * use [`to_json`](Self::to_json) for exact text.
+     * @returns {any}
      */
     toJSON() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.stmt_toJSON(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Serialise the AST to an exact-text JSON string for
+     * transport/forwarding without JS parsing.
+     * @returns {string}
+     */
+    toJson() {
         let deferred2_0;
         let deferred2_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.stmt_toJSON(retptr, this.__wbg_ptr);
+            wasm.stmt_toJson(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -710,6 +746,7 @@ exports.bind = bind;
  * Compile one QQL statement into a JavaScript route object. Optional
  * `params` (object for `:name`, array for `?`) bind before parsing —
  * parity with `Client.compile(query, params)` on the Python and Node SDKs.
+ * (`compile` is the only module-level name — JS convention.)
  * @param {string} query
  * @param {any | null} [params]
  * @returns {CompiledRoute}
@@ -735,15 +772,17 @@ exports.compile = compile;
 
 /**
  * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
+ * Optionally accepts `params` to bind before compiling.
  * @param {string} query
+ * @param {any | null} [params]
  * @returns {Uint8Array}
  */
-function compileBytes(query) {
+function compileBytes(query, params) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.compileBytes(retptr, ptr0, len0);
+        wasm.compileBytes(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -756,31 +795,6 @@ function compileBytes(query) {
     }
 }
 exports.compileBytes = compileBytes;
-
-/**
- * Compile one QQL statement into a JavaScript route object. Alias for `compile`.
- * @param {string} query
- * @param {any | null} [params]
- * @returns {CompiledRoute}
- */
-function compileQuery(query, params) {
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.compileQuery(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
-        if (r2) {
-            throw takeObject(r1);
-        }
-        return takeObject(r0);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-    }
-}
-exports.compileQuery = compileQuery;
 
 /**
  * @param {string} query
@@ -871,13 +885,15 @@ function formatQuery(input) {
 exports.formatQuery = formatQuery;
 
 /**
+ * Inject a WHERE filter into a query string (`injectFilter` is the only
+ * export — JS convention is camelCase).
  * @param {string} query
  * @param {string} field
  * @param {string} op
  * @param {any} value
  * @returns {any}
  */
-function inject_filter(query, field, op, value) {
+function injectFilter(query, field, op, value) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
@@ -886,7 +902,7 @@ function inject_filter(query, field, op, value) {
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passStringToWasm0(op, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len2 = WASM_VECTOR_LEN;
-        wasm.inject_filter(retptr, ptr0, len0, ptr1, len1, ptr2, len2, addHeapObject(value));
+        wasm.injectFilter(retptr, ptr0, len0, ptr1, len1, ptr2, len2, addHeapObject(value));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -898,7 +914,7 @@ function inject_filter(query, field, op, value) {
         wasm.__wbindgen_add_to_stack_pointer(16);
     }
 }
-exports.inject_filter = inject_filter;
+exports.injectFilter = injectFilter;
 
 /**
  * @param {string} input
@@ -1111,7 +1127,7 @@ function __wbg_get_imports() {
             const ret = Object.entries(getObject(arg0));
             return addHeapObject(ret);
         },
-        __wbg_fetch_8d9b732df7467c44: function(arg0) {
+        __wbg_fetch_9b478faef8cda538: function(arg0) {
             const ret = fetch(getObject(arg0));
             return addHeapObject(ret);
         },
@@ -1303,10 +1319,6 @@ function __wbg_get_imports() {
             const ret = new URL(getStringFromWasm0(arg0, arg1));
             return addHeapObject(ret);
         }, arguments); },
-        __wbg_new_8d36e20aa758e411: function() {
-            const ret = new Map();
-            return addHeapObject(ret);
-        },
         __wbg_new_bebc3f4757acf305: function() {
             const ret = new Object();
             return addHeapObject(ret);
@@ -1330,7 +1342,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_268(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_265(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1340,6 +1352,10 @@ function __wbg_get_imports() {
             } finally {
                 state0.a = 0;
             }
+        },
+        __wbg_new_with_length_6a9fc3631737ef8c: function(arg0) {
+            const ret = new Array(arg0 >>> 0);
+            return addHeapObject(ret);
         },
         __wbg_new_with_str_3827d1a2319e0426: function() { return handleError(function (arg0, arg1) {
             const ret = new Request(getStringFromWasm0(arg0, arg1));
@@ -1401,9 +1417,6 @@ function __wbg_get_imports() {
         __wbg_set_13d25b81ab403f5e: function(arg0, arg1, arg2) {
             getObject(arg0)[arg1 >>> 0] = takeObject(arg2);
         },
-        __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
-            getObject(arg0)[takeObject(arg1)] = takeObject(arg2);
-        },
         __wbg_set_7923e5ea63b41e6b: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
             getObject(arg0).set(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
         }, arguments); },
@@ -1411,10 +1424,6 @@ function __wbg_get_imports() {
             const ret = Reflect.set(getObject(arg0), getObject(arg1), getObject(arg2));
             return ret;
         }, arguments); },
-        __wbg_set_bf6dde4923b9b059: function(arg0, arg1, arg2) {
-            const ret = getObject(arg0).set(getObject(arg1), getObject(arg2));
-            return addHeapObject(ret);
-        },
         __wbg_set_body_f39cee72c74a5b02: function(arg0, arg1) {
             getObject(arg0).body = getObject(arg1);
         },
@@ -1479,8 +1488,8 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 37, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_264);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 36, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_261);
             return addHeapObject(ret);
         },
         __wbindgen_generic_0000000000000002: function(arg0) {
@@ -1517,14 +1526,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_268(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_268(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_265(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_265(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
-function __wasm_bindgen_func_elem_264(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_261(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_264(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_261(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1764,6 +1773,16 @@ function makeMutClosure(arg0, arg1, f) {
     };
     CLOSURE_DTORS.register(real, state, state);
     return real;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    const mem = getDataViewMemory0();
+    for (let i = 0; i < array.length; i++) {
+        mem.setUint32(ptr + 4 * i, addHeapObject(array[i]), true);
+    }
+    WASM_VECTOR_LEN = array.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

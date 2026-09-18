@@ -148,11 +148,25 @@ jobs:
       - name: qql (default = rest + grpc)
         run: cargo check --locked -p qql --all-features
 
+      # Test-gated code (e.g. executor_test modules importing rest-only
+      # HttpEmbedder) must also compile per combo — check alone misses it.
+      - name: qql tests (no transports)
+        run: cargo test --locked -p qql --no-default-features
+
+      - name: qql tests (rest only)
+        run: cargo test --locked -p qql --no-default-features --features rest
+
+      - name: qql tests (grpc only)
+        run: cargo test --locked -p qql --no-default-features --features grpc
+
       - name: qql-cli (rest only)
         run: cargo check --locked -p qql-cli --no-default-features --features rest
 
       - name: qql-cli (grpc only)
         run: cargo check --locked -p qql-cli --no-default-features --features grpc
+
+      - name: qql-cli (full)
+        run: cargo check --locked -p qql-cli --features full
 
       - name: qql-core feature combinations
         run: |
@@ -363,7 +377,9 @@ jobs:
             "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
             "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
             "crates/pyqql/pyqql/_errors.py crates/pyqql-edge/pyqql_edge/_errors.py" \
-            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py"; do
+            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py" \
+            "scripts/install.sh website/public/install.sh" \
+            "scripts/install.ps1 website/public/install.ps1"; do
             set -- $pair
             if ! diff -q "$1" "$2" >/dev/null; then
               echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"

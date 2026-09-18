@@ -5,6 +5,12 @@ use crate::sparse::{self, Bm25Params, SparseVector};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Send/Sync bound helper for `Embedder` implementations on native targets.
+///
+/// Kept as a twin of `QdrantOpsBound` in `qql-runtime` (not shared): sharing
+/// would couple the crates backwards (`qql-embed` must stay dependency-free
+/// of the runtime) or mistype the bound (`QdrantOps: EmbedderBound` reads as
+/// an is-a relationship that does not exist). One shim per trait, each
+/// documenting its own target split.
 pub trait EmbedderBound: Send + Sync {}
 #[cfg(not(target_arch = "wasm32"))]
 impl<T: Send + Sync> EmbedderBound for T {}
@@ -17,12 +23,15 @@ impl<T> EmbedderBound for T {}
 
 /// Host-agnostic embedding backend.
 ///
-/// Dense calls should batch when possible (`embed_dense_batch` → one HTTP
-/// request or one ONNX batch). Sparse is role-split: [`Self::embed_sparse_query`]
-/// (unit weights) for search text and [`Self::embed_sparse_document`]
-/// (BM25 tf saturation) for ingestion text, both defaulting to local
-/// wire-compatible BM25. Multivector (ColBERT-style) uses
-/// [`Self::embed_multi`] → `Vec<Vec<f32>>`.
+/// Calls should batch when possible (`*_batch` → one HTTP request or one ONNX
+/// batch): `resolve_embeddings` batches dense, sparse-query, multi, and image
+/// jobs alike (grouped by model, one `*_batch` call per model), so remote
+/// backends must override the batch variants for real batching instead of
+/// relying on the sequential single-call defaults. Sparse is role-split:
+/// [`Self::embed_sparse_query`] (unit weights) for search text and
+/// [`Self::embed_sparse_document`] (BM25 tf saturation) for ingestion text,
+/// both defaulting to local wire-compatible BM25. Multivector (ColBERT-style)
+/// uses [`Self::embed_multi`] → `Vec<Vec<f32>>`.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {
@@ -32,24 +41,25 @@ pub trait Embedder: EmbedderBound {
     /// Sparse embedding for **query** text: unique terms with unit weights,
     /// matching Qdrant's `qdrant/bm25` query embedding.
     ///
-    /// Default implementation uses local wire-compatible BM25 when `model` is
-    /// empty or `"default"`. Non-default sparse models are rejected — override
-    /// this method to provide model-aware sparse inference.
+    /// Default implementation uses the local pipeline from
+    /// [`Self::bm25_text_config`] when `model` is empty or `"default"`.
+    /// Non-default sparse models are rejected — override this method to
+    /// provide model-aware sparse inference.
     async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(sparse_model_unsupported_error(model));
         }
-        Ok(sparse::embed_query(text))
+        self.bm25_text_config().pipeline().embed_query(text)
     }
 
     /// Sparse embedding for **document** text at ingestion: BM25
     /// term-frequency saturation, matching Qdrant's `qdrant/bm25` document
     /// embedding.
     ///
-    /// Default implementation uses local wire-compatible BM25 when `model` is
-    /// empty or `"default"`, honoring [`Self::bm25_params`]. Non-default sparse
-    /// models are rejected — override this method to provide model-aware sparse
-    /// inference.
+    /// Default implementation uses the local pipeline from
+    /// [`Self::bm25_text_config`] when `model` is empty or `"default"`,
+    /// honoring its [`Bm25Params`]. Non-default sparse models are rejected —
+    /// override this method to provide model-aware sparse inference.
     async fn embed_sparse_document(
         &self,
         text: &str,
@@ -58,10 +68,7 @@ pub trait Embedder: EmbedderBound {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(sparse_model_unsupported_error(model));
         }
-        Ok(sparse::embed_document_with_params(
-            text,
-            &self.bm25_params(),
-        ))
+        self.bm25_text_config().pipeline().embed_document(text)
     }
 
     /// Batch document-side sparse embedding. Default loops
@@ -140,6 +147,22 @@ pub trait Embedder: EmbedderBound {
     /// the change — re-ingest to apply.
     fn bm25_params(&self) -> Bm25Params {
         Bm25Params::default()
+    }
+
+    /// Full local BM25 text configuration (pipeline + hyperparameters) used
+    /// by the default [`Self::embed_sparse_document`] /
+    /// [`Self::embed_sparse_query`] implementations.
+    ///
+    /// Default wraps [`Self::bm25_params`] with Qdrant's text defaults (word
+    /// tokenizer, English, lowercase on, folding off, language
+    /// stopwords/stemmer), so overriding only `bm25_params` keeps working
+    /// unchanged. Override this instead to change tokenization, language,
+    /// folding, stopwords, stemming, or token length limits.
+    fn bm25_text_config(&self) -> crate::Bm25TextConfig {
+        crate::Bm25TextConfig {
+            params: self.bm25_params(),
+            ..crate::Bm25TextConfig::default()
+        }
     }
 
     /// Multivector (ColBERT) per-token dimension when known without inference.
@@ -326,7 +349,9 @@ pub struct JointEmbeddingOutput {
     pub multi: Option<Vec<Vec<f32>>>,
 }
 
-/// Local sparse-only helper (no dense model).
+/// Local sparse-only helper (no dense model). Default English pipeline
+/// only — hosts needing other languages use [`Bm25TextConfig`](crate::Bm25TextConfig)
+/// / [`Bm25Pipeline`](crate::Bm25Pipeline) directly.
 pub struct SparseEmbedder;
 
 impl SparseEmbedder {

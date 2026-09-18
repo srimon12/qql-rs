@@ -85,7 +85,7 @@ QUERY RERANK TEXT '\${2:search}' MODEL '\${4:reranker}'
   },
   {
     label: "QUERY FORMULA",
-    insertText: `QUERY FORMULA \${1:\\$score * 2 + 0.3 * popularity}
+    insertText: `QUERY FORMULA \${1:score * 2 + 0.3 * popularity}
   DEFAULTS (\${2:score} = \${3:0.0})
   FROM \${4:collection}
   LIMIT \${5:10};`,

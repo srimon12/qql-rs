@@ -23,7 +23,7 @@ use qql_plan::{
 
 use crate::backend::CollectionInfo;
 use crate::executor::response::{
-    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit,
+    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_from_wire,
 };
 use crate::executor::telemetry::ServerTelemetry;
 
@@ -40,20 +40,20 @@ pub(crate) fn parse_planned(
     let telemetry = ServerTelemetry::from_envelope_opt(&envelope);
     let data = match op {
         PlannedOperation::Query { .. } | PlannedOperation::Scroll { .. } => {
-            ExecData::Hits(parse_points(&envelope)?)
+            ExecData::Hits(parse_points(envelope)?)
         }
-        PlannedOperation::GetPoints { .. } => ExecData::Hits(parse_bare_records(&envelope)?),
-        PlannedOperation::QueryGroups { .. } => ExecData::Groups(parse_groups(&envelope)?),
-        PlannedOperation::Count { .. } => ExecData::Count(parse_count(&envelope)?),
-        PlannedOperation::Facet { .. } => ExecData::Facet(parse_facet(&envelope)?),
+        PlannedOperation::GetPoints { .. } => ExecData::Hits(parse_bare_records(envelope)?),
+        PlannedOperation::QueryGroups { .. } => ExecData::Groups(parse_groups(envelope)?),
+        PlannedOperation::Count { .. } => ExecData::Count(parse_count(envelope)?),
+        PlannedOperation::Facet { .. } => ExecData::Facet(parse_facet(envelope)?),
         PlannedOperation::ListCollections => {
-            ExecData::Collections(parse_collection_names(&envelope)?)
+            ExecData::Collections(parse_collection_names(envelope)?)
         }
         PlannedOperation::GetCollection { .. } => {
-            ExecData::Collection(parse_collection_info(&envelope)?)
+            ExecData::Collection(parse_collection_info(envelope)?)
         }
-        PlannedOperation::ListShardKeys { .. } => ExecData::ShardKeys(parse_shard_keys(&envelope)?),
-        PlannedOperation::GetQuotas => ExecData::Quotas(parse_quotas(&envelope)?),
+        PlannedOperation::ListShardKeys { .. } => ExecData::ShardKeys(parse_shard_keys(envelope)?),
+        PlannedOperation::GetQuotas => ExecData::Quotas(parse_quotas(envelope)?),
         PlannedOperation::SetQuotas { request } => {
             // `PUT /quotas` answers a boolean status; the typed result is the
             // replacement config the caller sent.
@@ -103,27 +103,48 @@ pub(crate) fn parse_planned(
 
 /// Parse one `/points/query/batch` result array: each OpenAPI `QueryResponse`
 /// item carries its points at the item's top level (`{"points": […]}`).
-pub(crate) fn parse_query_batch(envelope: &Value) -> Result<Vec<BackendResponse>, QqlError> {
-    let items = envelope
-        .get("result")
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("query batch response is missing result as an array"))?;
+///
+/// Takes the `result` array value itself (the transport envelope is validated
+/// and unwrapped by the caller), consuming items without cloning.
+pub(crate) fn parse_query_batch(result: Value) -> Result<Vec<BackendResponse>, QqlError> {
+    let items = match result {
+        Value::Array(items) => items,
+        _ => {
+            return Err(envelope_err(
+                "query batch response is missing result as an array",
+            ));
+        }
+    };
     items
-        .iter()
+        .into_iter()
         .map(|item| {
-            ensure_batch_item_ok(item)?;
-            let points = item
-                .get("points")
-                .and_then(Value::as_array)
-                .ok_or_else(|| envelope_err("query batch item is missing points as an array"))?;
+            ensure_batch_item_ok(&item)?;
+            // Telemetry reads borrowed fields; the points below move out.
+            let telemetry = ServerTelemetry::from_envelope_opt(&item);
+            let mut map = match item {
+                Value::Object(map) => map,
+                _ => {
+                    return Err(envelope_err(
+                        "query batch item is missing points as an array",
+                    ));
+                }
+            };
+            let points = match map.remove("points") {
+                Some(Value::Array(points)) => points,
+                _ => {
+                    return Err(envelope_err(
+                        "query batch item is missing points as an array",
+                    ));
+                }
+            };
             let hits = points
-                .iter()
+                .into_iter()
                 .map(parse_hit)
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(BackendResponse {
                 data: ExecData::Hits(hits),
                 // Telemetry only (lenient); the hits above are strict.
-                telemetry: ServerTelemetry::from_envelope_opt(item),
+                telemetry,
             })
         })
         .collect()
@@ -131,15 +152,19 @@ pub(crate) fn parse_query_batch(envelope: &Value) -> Result<Vec<BackendResponse>
 
 /// Parse one `/points/batch` result array. Per-item `UpdateResult`s are
 /// status-only: the executor derives upsert counts from the request.
-pub(crate) fn parse_update_batch(envelope: &Value) -> Result<Vec<BackendResponse>, QqlError> {
-    let items = envelope
-        .get("result")
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("update batch response is missing result as an array"))?;
+pub(crate) fn parse_update_batch(result: Value) -> Result<Vec<BackendResponse>, QqlError> {
+    let items = match result {
+        Value::Array(items) => items,
+        _ => {
+            return Err(envelope_err(
+                "update batch response is missing result as an array",
+            ));
+        }
+    };
     items
-        .iter()
+        .into_iter()
         .map(|item| {
-            ensure_batch_item_ok(item)?;
+            ensure_batch_item_ok(&item)?;
             Ok(BackendResponse {
                 data: ExecData::Mutation { affected: None },
                 telemetry: None,
@@ -149,30 +174,78 @@ pub(crate) fn parse_update_batch(envelope: &Value) -> Result<Vec<BackendResponse
 }
 
 /// Parse `GET /collections` (`result.collections[*].name`).
-pub(crate) fn parse_collection_names(envelope: &Value) -> Result<Vec<String>, QqlError> {
-    let collections = envelope
-        .get("result")
-        .and_then(|result| result.get("collections"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("list collections response is missing result.collections"))?;
+pub(crate) fn parse_collection_names(envelope: Value) -> Result<Vec<String>, QqlError> {
+    let missing = || envelope_err("list collections response is missing result.collections");
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => return Err(missing()),
+    };
+    let mut result = match envelope.remove("result") {
+        Some(Value::Object(map)) => map,
+        _ => return Err(missing()),
+    };
+    let collections = match result.remove("collections") {
+        Some(Value::Array(items)) => items,
+        _ => return Err(missing()),
+    };
     collections
-        .iter()
-        .map(|entry| {
-            entry
-                .get("name")
-                .and_then(Value::as_str)
-                .map(String::from)
-                .ok_or_else(|| envelope_err("collection entry is missing a string name"))
+        .into_iter()
+        .map(|entry| match entry {
+            Value::Object(mut map) => match map.remove("name") {
+                Some(Value::String(name)) => Ok(name),
+                _ => Err(envelope_err("collection entry is missing a string name")),
+            },
+            _ => Err(envelope_err("collection entry is missing a string name")),
         })
         .collect()
 }
 
+/// Parse `GET /collections/{name}` as an existence probe: any well-formed
+/// collection-info envelope (a `result` object with a string `status`, the
+/// same signal [`parse_collection_info`] reads) means the collection exists.
+/// Fails closed (`QQL-BACKEND-ENVELOPE`) on a missing or mistyped shape
+/// instead of sniffing for `status`/`exists` keys. The 404 → `Ok(false)` arm
+/// stays with the caller, keyed on the transport error message.
+pub(crate) fn parse_collection_exists(envelope: Value) -> Result<bool, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => {
+            return Err(envelope_err(
+                "get collection response is missing a result object with a string status",
+            ));
+        }
+    };
+    let result = match envelope.remove("result") {
+        Some(Value::Object(result)) => result,
+        _ => {
+            return Err(envelope_err(
+                "get collection response is missing a result object with a string status",
+            ));
+        }
+    };
+    match result.get("status").and_then(Value::as_str) {
+        Some(_) => Ok(true),
+        None => Err(envelope_err("collection info is missing a string status")),
+    }
+}
+
 /// Parse `GET /collections/{name}` (`result` → [`CollectionInfo`]).
-pub(crate) fn parse_collection_info(envelope: &Value) -> Result<CollectionInfo, QqlError> {
-    let result = envelope
-        .get("result")
-        .filter(|value| value.is_object())
-        .ok_or_else(|| envelope_err("get collection response is missing a result object"))?;
+pub(crate) fn parse_collection_info(envelope: Value) -> Result<CollectionInfo, QqlError> {
+    let result = match envelope {
+        Value::Object(mut map) => match map.remove("result") {
+            Some(Value::Object(result)) => result,
+            _ => {
+                return Err(envelope_err(
+                    "get collection response is missing a result object",
+                ));
+            }
+        },
+        _ => {
+            return Err(envelope_err(
+                "get collection response is missing a result object",
+            ));
+        }
+    };
     let status = result
         .get("status")
         .and_then(Value::as_str)
@@ -182,6 +255,8 @@ pub(crate) fn parse_collection_info(envelope: &Value) -> Result<CollectionInfo, 
         .get("segments_count")
         .and_then(Value::as_u64)
         .ok_or_else(|| envelope_err("collection info is missing an unsigned segments_count"))?;
+    // Re-wrap for the shared schema reader (borrows; no field clones).
+    let result = Value::Object(result);
     Ok(CollectionInfo {
         status,
         // `points_count` is nullable in the OpenAPI schema; an unreported
@@ -194,75 +269,99 @@ pub(crate) fn parse_collection_info(envelope: &Value) -> Result<CollectionInfo, 
         // null both read as "not reported".
         indexed_vectors_count: result.get("indexed_vectors_count").and_then(Value::as_u64),
         segments_count,
-        schema: crate::backend::schema_from_rest_result(result),
+        schema: crate::backend::schema_from_rest_result(&result),
     })
 }
 
 /// Parse a query / scroll response (`result.points` → scored hits).
-fn parse_points(envelope: &Value) -> Result<Vec<SearchHit>, QqlError> {
-    let points = envelope
-        .get("result")
-        .and_then(|result| result.get("points"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("query/scroll response is missing result.points"))?;
-    points.iter().map(parse_hit).collect()
+fn parse_points(envelope: Value) -> Result<Vec<SearchHit>, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => {
+            return Err(envelope_err(
+                "query/scroll response is missing result.points",
+            ));
+        }
+    };
+    let mut result = match envelope.remove("result") {
+        Some(Value::Object(map)) => map,
+        _ => {
+            return Err(envelope_err(
+                "query/scroll response is missing result.points",
+            ));
+        }
+    };
+    match result.remove("points") {
+        Some(Value::Array(points)) => points.into_iter().map(parse_hit).collect(),
+        _ => Err(envelope_err(
+            "query/scroll response is missing result.points",
+        )),
+    }
 }
 
 /// Parse a get-points response: `result` is a bare array of point records.
-fn parse_bare_records(envelope: &Value) -> Result<Vec<SearchHit>, QqlError> {
-    let records = envelope
-        .get("result")
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("get points response is missing result as an array"))?;
-    records.iter().map(parse_hit).collect()
+fn parse_bare_records(envelope: Value) -> Result<Vec<SearchHit>, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => {
+            return Err(envelope_err(
+                "get points response is missing result as an array",
+            ));
+        }
+    };
+    match envelope.remove("result") {
+        Some(Value::Array(records)) => records.into_iter().map(parse_hit).collect(),
+        _ => Err(envelope_err(
+            "get points response is missing result as an array",
+        )),
+    }
 }
 
 /// Parse one OpenAPI `ScoredPoint` / `Record` into a [`SearchHit`]. `score`
 /// defaults to `0.0` for unscored retrieve/scroll records, matching the typed
-/// gRPC/edge paths.
-fn parse_hit(value: &Value) -> Result<SearchHit, QqlError> {
-    let record = value
-        .as_object()
-        .ok_or_else(|| envelope_err("point record is not an object"))?;
+/// gRPC/edge paths. Takes the record by value: ids, payload maps, and vectors
+/// move out instead of cloning per field.
+fn parse_hit(value: Value) -> Result<SearchHit, QqlError> {
+    let mut record = match value {
+        Value::Object(map) => map,
+        _ => return Err(envelope_err("point record is not an object")),
+    };
     let id = parse_point_id(
         record
-            .get("id")
+            .remove("id")
             .ok_or_else(|| envelope_err("point record is missing id"))?,
     )?;
-    let score = match record.get("score") {
+    let score = match record.remove("score") {
         None | Some(Value::Null) => 0.0,
-        Some(Value::Number(number)) => number
-            .as_f64()
-            .ok_or_else(|| envelope_err("point score is not a finite number"))?
-            as f32,
+        Some(Value::Number(number)) => score_from_wire(
+            number
+                .as_f64()
+                .ok_or_else(|| envelope_err("point score is not a finite number"))?,
+        ),
         Some(other) => {
             return Err(envelope_err(format!(
                 "point score must be a number, got {other}"
             )));
         }
     };
-    let payload = match record.get("payload") {
+    let payload = match record.remove("payload") {
         None | Some(Value::Null) => None,
-        Some(Value::Object(map)) => Some(
-            map.iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect::<HashMap<_, _>>(),
-        ),
+        Some(Value::Object(map)) => Some(map.into_iter().collect::<HashMap<_, _>>()),
         Some(other) => {
             return Err(envelope_err(format!(
                 "point payload must be an object or null, got {other}"
             )));
         }
     };
-    let vector = match record.get("vector") {
+    let vector = match record.remove("vector") {
         None | Some(Value::Null) => None,
-        Some(vector) => Some(
-            serde_json::from_value::<PlanVectorStruct>(vector.clone()).map_err(|error| {
+        Some(vector) => Some(serde_json::from_value::<PlanVectorStruct>(vector).map_err(
+            |error| {
                 envelope_err(format!(
                     "point vector does not match VectorStructOutput: {error}"
                 ))
-            })?,
-        ),
+            },
+        )?),
     };
     Ok(SearchHit {
         id,
@@ -273,13 +372,13 @@ fn parse_hit(value: &Value) -> Result<SearchHit, QqlError> {
     })
 }
 
-fn parse_point_id(value: &Value) -> Result<PlanPointId, QqlError> {
+fn parse_point_id(value: Value) -> Result<PlanPointId, QqlError> {
     match value {
         Value::Number(number) => number
             .as_u64()
             .map(PlanPointId::Number)
             .ok_or_else(|| envelope_err(format!("point id {number} is not an unsigned integer"))),
-        Value::String(id) => Ok(PlanPointId::String(id.clone())),
+        Value::String(id) => Ok(PlanPointId::String(id)),
         other => Err(envelope_err(format!(
             "point id must be a string or unsigned integer, got {other}"
         ))),
@@ -287,36 +386,58 @@ fn parse_point_id(value: &Value) -> Result<PlanPointId, QqlError> {
 }
 
 /// Parse a grouped query response (`result.groups`).
-fn parse_groups(envelope: &Value) -> Result<Vec<GroupedSearchResult>, QqlError> {
-    let groups = envelope
-        .get("result")
-        .and_then(|result| result.get("groups"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("grouped query response is missing result.groups"))?;
-    groups
-        .iter()
-        .map(|group| {
-            let group_id = serde_json::from_value::<PlanGroupId>(
-                group
-                    .get("id")
-                    .cloned()
-                    .ok_or_else(|| envelope_err("group is missing id"))?,
-            )
-            .map_err(|error| envelope_err(format!("group id does not match GroupId: {error}")))?;
-            let hits = group
-                .get("hits")
-                .and_then(Value::as_array)
-                .ok_or_else(|| envelope_err("group is missing hits as an array"))?
-                .iter()
-                .map(parse_hit)
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(GroupedSearchResult { group_id, hits })
-        })
-        .collect()
+fn parse_groups(envelope: Value) -> Result<Vec<GroupedSearchResult>, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => {
+            return Err(envelope_err(
+                "grouped query response is missing result.groups",
+            ));
+        }
+    };
+    let mut result = match envelope.remove("result") {
+        Some(Value::Object(map)) => map,
+        _ => {
+            return Err(envelope_err(
+                "grouped query response is missing result.groups",
+            ));
+        }
+    };
+    match result.remove("groups") {
+        Some(Value::Array(groups)) => groups
+            .into_iter()
+            .map(|group| {
+                let mut group = match group {
+                    Value::Object(map) => map,
+                    _ => return Err(envelope_err("group is missing id")),
+                };
+                let group_id = serde_json::from_value::<PlanGroupId>(
+                    group
+                        .remove("id")
+                        .ok_or_else(|| envelope_err("group is missing id"))?,
+                )
+                .map_err(|error| {
+                    envelope_err(format!("group id does not match GroupId: {error}"))
+                })?;
+                let hits = match group.remove("hits") {
+                    Some(Value::Array(hits)) => hits,
+                    _ => return Err(envelope_err("group is missing hits as an array")),
+                };
+                let hits = hits
+                    .into_iter()
+                    .map(parse_hit)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(GroupedSearchResult { group_id, hits })
+            })
+            .collect(),
+        _ => Err(envelope_err(
+            "grouped query response is missing result.groups",
+        )),
+    }
 }
 
 /// Parse a count response (`result.count`).
-fn parse_count(envelope: &Value) -> Result<u64, QqlError> {
+fn parse_count(envelope: Value) -> Result<u64, QqlError> {
     envelope
         .get("result")
         .and_then(|result| result.get("count"))
@@ -325,47 +446,75 @@ fn parse_count(envelope: &Value) -> Result<u64, QqlError> {
 }
 
 /// Parse a facet response (`result.hits[*]` with strict `{value, count}`).
-fn parse_facet(envelope: &Value) -> Result<Vec<FacetHit>, QqlError> {
-    let hits = envelope
-        .get("result")
-        .and_then(|result| result.get("hits"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| envelope_err("facet response is missing result.hits"))?;
-    hits.iter()
-        .map(|hit| {
-            let value = serde_json::from_value::<PlanFacetValue>(
-                hit.get("value")
-                    .cloned()
-                    .ok_or_else(|| envelope_err("facet hit is missing value"))?,
-            )
-            .map_err(|error| {
-                envelope_err(format!("facet value does not match FacetValue: {error}"))
-            })?;
-            let count = hit
-                .get("count")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| envelope_err("facet hit is missing an unsigned count"))?;
-            Ok(FacetHit { value, count })
-        })
-        .collect()
+fn parse_facet(envelope: Value) -> Result<Vec<FacetHit>, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => return Err(envelope_err("facet response is missing result.hits")),
+    };
+    let mut result = match envelope.remove("result") {
+        Some(Value::Object(map)) => map,
+        _ => return Err(envelope_err("facet response is missing result.hits")),
+    };
+    match result.remove("hits") {
+        Some(Value::Array(hits)) => hits
+            .into_iter()
+            .map(|hit| {
+                let mut hit = match hit {
+                    Value::Object(map) => map,
+                    _ => return Err(envelope_err("facet hit is missing value")),
+                };
+                let value = serde_json::from_value::<PlanFacetValue>(
+                    hit.remove("value")
+                        .ok_or_else(|| envelope_err("facet hit is missing value"))?,
+                )
+                .map_err(|error| {
+                    envelope_err(format!("facet value does not match FacetValue: {error}"))
+                })?;
+                let count = match hit.remove("count") {
+                    Some(Value::Number(count)) => count
+                        .as_u64()
+                        .ok_or_else(|| envelope_err("facet hit is missing an unsigned count"))?,
+                    _ => {
+                        return Err(envelope_err("facet hit is missing an unsigned count"));
+                    }
+                };
+                Ok(FacetHit { value, count })
+            })
+            .collect(),
+        _ => Err(envelope_err("facet response is missing result.hits")),
+    }
 }
 
 /// Parse `GET /collections/{name}/shards` (`result.shard_keys`, nullable when
 /// the collection does not use custom sharding).
-fn parse_shard_keys(envelope: &Value) -> Result<Vec<PlanShardKey>, QqlError> {
-    match envelope
-        .get("result")
-        .and_then(|result| result.get("shard_keys"))
-    {
+///
+/// Lenient shape (unchanged): a missing/null `result` or `shard_keys` reads as
+/// no custom sharding; only a present-but-mistyped value fails.
+fn parse_shard_keys(envelope: Value) -> Result<Vec<PlanShardKey>, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => return Ok(Vec::new()),
+    };
+    let mut result = match envelope.remove("result") {
+        Some(Value::Object(map)) => map,
+        _ => return Ok(Vec::new()),
+    };
+    match result.remove("shard_keys") {
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(Value::Array(entries)) => entries
-            .iter()
+            .into_iter()
             .map(|entry| {
+                let mut entry = match entry {
+                    Value::Object(map) => map,
+                    _ => {
+                        return Err(envelope_err("shard key entry is missing key"));
+                    }
+                };
                 let key = entry
-                    .get("key")
+                    .remove("key")
                     .ok_or_else(|| envelope_err("shard key entry is missing key"))?;
                 match key {
-                    Value::String(keyword) => Ok(PlanShardKey::Keyword(keyword.clone())),
+                    Value::String(keyword) => Ok(PlanShardKey::Keyword(keyword)),
                     Value::Number(number) => {
                         number.as_u64().map(PlanShardKey::Number).ok_or_else(|| {
                             envelope_err(format!("shard key {number} is not an unsigned integer"))
@@ -384,13 +533,20 @@ fn parse_shard_keys(envelope: &Value) -> Result<Vec<PlanShardKey>, QqlError> {
 }
 
 /// Parse `GET /quotas` (`result.config` → [`QuotaConfig`](qql_plan::QuotaConfig)).
-fn parse_quotas(envelope: &Value) -> Result<qql_plan::QuotaConfig, QqlError> {
-    let config = envelope
-        .get("result")
-        .and_then(|result| result.get("config"))
-        .ok_or_else(|| envelope_err("get quotas response is missing result.config"))?;
-    serde_json::from_value(config.clone())
-        .map_err(|error| envelope_err(format!("quota config is invalid: {error}")))
+fn parse_quotas(envelope: Value) -> Result<qql_plan::QuotaConfig, QqlError> {
+    let mut envelope = match envelope {
+        Value::Object(map) => map,
+        _ => return Err(envelope_err("get quotas response is missing result.config")),
+    };
+    let mut result = match envelope.remove("result") {
+        Some(Value::Object(map)) => map,
+        _ => return Err(envelope_err("get quotas response is missing result.config")),
+    };
+    match result.remove("config") {
+        Some(config) => serde_json::from_value(config)
+            .map_err(|error| envelope_err(format!("quota config is invalid: {error}"))),
+        None => Err(envelope_err("get quotas response is missing result.config")),
+    }
 }
 
 /// Qdrant batch endpoints answer per item; a 200 response can still carry
@@ -429,7 +585,7 @@ mod tests {
         let hits = response.data.hits().expect("hits");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, PlanPointId::Number(7));
-        assert!((hits[0].score - 0.75).abs() < f32::EPSILON);
+        assert_eq!(hits[0].score, 0.75);
         assert_eq!(
             hits[0].vector,
             Some(PlanVectorStruct::Single(qql_plan::PlanVectorValue::Dense(
@@ -437,6 +593,22 @@ mod tests {
             )))
         );
         assert_eq!(response.telemetry.unwrap().time_s, Some(0.125));
+    }
+
+    #[test]
+    fn parse_hit_rounds_score_once_to_shortest_f64() {
+        // `0.95` arrives as a JSON decimal; ingestion stores the shortest
+        // round-trip f64 exactly — no epsilon needed, and the serialized
+        // report emits the same decimal.
+        let response = parse_planned(
+            &planned("SCROLL FROM docs LIMIT 1"),
+            json!({"result": {"points": [{"id": 1, "score": 0.95}]}, "status": "ok"}),
+        )
+        .expect("strict parse");
+        let hits = response.data.hits().expect("hits");
+        assert_eq!(hits[0].score, 0.95f64);
+        let value = serde_json::to_value(&hits[0]).expect("hit serializes");
+        assert_eq!(value["score"], json!(0.95));
     }
 
     #[test]
@@ -595,6 +767,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_collection_exists_strictly() {
+        let info = json!({
+            "result": {"status": "green", "segments_count": 2},
+            "status": "ok",
+        });
+        assert!(parse_collection_exists(info).expect("exists"));
+
+        // Missing result, missing status, and non-object envelopes fail
+        // closed instead of reading as absent.
+        for bad in [
+            json!({"result": {}, "status": "ok"}),
+            json!({"result": {"exists": true}, "status": "ok"}),
+            json!({"status": "ok"}),
+            json!("ok"),
+        ] {
+            let err = parse_collection_exists(bad).unwrap_err();
+            assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+        }
+    }
+
+    #[test]
     fn parses_set_quotas_result_and_query_batch_items() {
         let op = planned("SET QUOTA (enabled = true)");
         let response = parse_planned(&op, json!({"result": true, "status": "ok"})).unwrap();
@@ -603,24 +796,18 @@ mod tests {
         let err = parse_planned(&op, json!({"result": {"ok": true}, "status": "ok"})).unwrap_err();
         assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
 
-        let items = parse_query_batch(&json!({
-            "result": [
-                {"points": [{"id": 1, "score": 0.9}, {"id": 2, "score": 0.8}]},
-                {"points": [{"id": 3, "score": 0.7}]},
-            ],
-            "status": "ok",
-        }))
+        let items = parse_query_batch(json!([
+            {"points": [{"id": 1, "score": 0.9}, {"id": 2, "score": 0.8}]},
+            {"points": [{"id": 3, "score": 0.7}]},
+        ]))
         .unwrap();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].data.hits().unwrap().len(), 2);
         assert_eq!(items[1].data.hits().unwrap()[0].id, PlanPointId::Number(3));
 
         // Per-item failures surface as a batch error.
-        let err = parse_query_batch(&json!({
-            "result": [{"status": "error", "error": "point 42 not found"}],
-            "status": "ok",
-        }))
-        .unwrap_err();
+        let err = parse_query_batch(json!([{"status": "error", "error": "point 42 not found"}]))
+            .unwrap_err();
         assert_eq!(err.code, "QQL-BACKEND-BATCH");
     }
 }

@@ -27,42 +27,76 @@ fn local_executor_options_with_sparse_model() {
 #[test]
 fn standalone_local_opts_camel_case_sparse_model() {
     let opts = serde_json::json!({ "sparseModel": "bge-m3" });
-    let lo = standalone_local_opts(Some(&opts));
+    let lo = standalone_local_opts(Some(&opts)).expect("valid standalone opts");
     assert_eq!(lo.sparse_model.as_deref(), Some("bge-m3"));
 }
 
 #[test]
 fn standalone_local_opts_snake_case_sparse_model() {
     let opts = serde_json::json!({ "sparse_model": "splade" });
-    let lo = standalone_local_opts(Some(&opts));
+    let lo = standalone_local_opts(Some(&opts)).expect("valid standalone opts");
     assert_eq!(lo.sparse_model.as_deref(), Some("splade"));
 }
 
 #[test]
 fn standalone_local_opts_no_sparse_model_is_none() {
     let opts = serde_json::json!({});
-    let lo = standalone_local_opts(Some(&opts));
+    let lo = standalone_local_opts(Some(&opts)).expect("valid standalone opts");
     assert!(lo.sparse_model.is_none());
 }
 
 #[test]
 fn standalone_local_opts_forwards_bm25_params() {
     let camel = serde_json::json!({ "bm25K1": 2.0, "bm25B": 0.5, "bm25AvgLen": 8 });
-    let lo = standalone_local_opts(Some(&camel));
+    let lo = standalone_local_opts(Some(&camel)).expect("valid standalone opts");
     assert_eq!(lo.bm25_k1, Some(2.0));
     assert_eq!(lo.bm25_b, Some(0.5));
     assert_eq!(lo.bm25_avg_len, Some(8.0));
 
     let snake = serde_json::json!({ "bm25_k1": 1.5, "bm25_b": 0.25, "bm25_avg_len": 16 });
-    let lo = standalone_local_opts(Some(&snake));
+    let lo = standalone_local_opts(Some(&snake)).expect("valid standalone opts");
     assert_eq!(lo.bm25_k1, Some(1.5));
     assert_eq!(lo.bm25_b, Some(0.25));
     assert_eq!(lo.bm25_avg_len, Some(16.0));
 
+    let text = serde_json::json!({
+        "bm25Language": "es",
+        "bm25Tokenizer": "whitespace",
+        "bm25Lowercase": false,
+        "bm25AsciiFolding": true,
+        "bm25MinTokenLen": 2,
+        "bm25MaxTokenLen": 9,
+    });
+    let lo = standalone_local_opts(Some(&text)).expect("valid standalone opts");
+    assert_eq!(lo.bm25_language.as_deref(), Some("es"));
+    assert_eq!(lo.bm25_tokenizer.as_deref(), Some("whitespace"));
+    assert_eq!(lo.bm25_lowercase, Some(false));
+    assert_eq!(lo.bm25_ascii_folding, Some(true));
+    assert_eq!(lo.bm25_min_token_len, Some(2.0));
+    assert_eq!(lo.bm25_max_token_len, Some(9.0));
+
     // Malformed values must not silently fall back to defaults.
     let bad = serde_json::json!({ "bm25K1": "nope" });
-    let lo = standalone_local_opts(Some(&bad));
+    let lo = standalone_local_opts(Some(&bad)).expect("valid standalone opts");
     assert!(lo.bm25_k1.expect("Some(NaN)").is_nan());
+}
+
+#[test]
+fn standalone_local_opts_rejects_wrong_typed_text_knobs() {
+    for bad in [
+        serde_json::json!({ "bm25Language": 42 }),
+        serde_json::json!({ "bm25_language": ["es"] }),
+        serde_json::json!({ "bm25Lowercase": "yes" }),
+        serde_json::json!({ "bm25AsciiFolding": 1 }),
+    ] {
+        let err = standalone_local_opts(Some(&bad))
+            .err()
+            .expect("wrong type must fail closed");
+        assert!(
+            err.reason.contains("QQL-VALIDATION-CONFIG"),
+            "wrong type must fail closed: {err:?}"
+        );
+    }
 }
 
 #[test]
@@ -226,9 +260,7 @@ fn http_executor_native_symbol_constructs_client() {
         "mock".to_string(),
         4,
         Some(false),
-        None,
-        None,
-        None,
+        Some(serde_json::json!({ "bm25Language": "es", "bm25AvgLen": 8 })),
     )
     .expect("http_executor must construct a client");
 
@@ -274,15 +306,22 @@ fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
         "embedDim": 4,
     });
 
+    // No `params` key in the bag, so `params: None` — exactly what the
+    // napi `FromNapiValue` impl produces for a params-less options object.
+    let options = common::execute::ExecOptionsInput {
+        raw: options,
+        params: None,
+    };
+
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
     let report = runtime.block_on(async {
-        let raw = execute_stmt(&stmt, Some(options))
+        execute_stmt(&stmt, Some(options))
             .await
-            .expect("execute_stmt with embedUrl");
-        serde_json::from_str::<serde_json::Value>(&raw).expect("report is JSON")
+            .expect("execute_stmt with embedUrl")
+            .0
     });
 
     assert!(

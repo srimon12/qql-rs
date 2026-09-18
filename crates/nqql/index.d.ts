@@ -3,8 +3,12 @@ export class Stmt {
   constructor(input: string);
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
+  /** Exact-text AST string for transport/forwarding (no V8 parsing). */
   toJson(): string;
-  toJSON(): string;
+  /** `JSON.stringify` hook: BigInt-safe plain object, same as `toObject()`.
+   * NOTE: `JSON.stringify` throws on `BigInt` (snowflake IDs) by design —
+   * use `toJson()` for exact text. */
+  toJSON(): unknown;
   /** Canonical, re-parseable QQL (mirrors Python `str(stmt)`). */
   toString(): string;
   /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
@@ -13,6 +17,8 @@ export class Stmt {
    * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
+  /** Tree-formatted plan explanation for this statement (mirrors free `explainStmt`). */
+  explain(): string;
   /** QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
    * Reads back `string` (keyword) or `bigint` (numeric); set with
    * `string | number | bigint | null` (numbers must be exact integers). */
@@ -20,12 +26,15 @@ export class Stmt {
 }
 
 export class ScoredPoint {
-  id: string | number;
+  id: string | number | bigint;
   score: number;
   payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
+  vector: unknown | null;
+  shard_key: string | number | bigint | null;
   get(key: string, defaultValue?: unknown): unknown;
+  withoutPayload(): ScoredPoint;
   [key: string]: unknown;
 }
 
@@ -93,10 +102,14 @@ export class ExecutionReport {
   telemetry?: ServerTelemetry | null;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
-  ids(stmt?: number): Array<string | number>;
+  ids(stmt?: number): Array<string | number | bigint>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
-  groups(stmt?: number): Array<{ id: unknown; hits: Array<Record<string, unknown>> }>;
+  groups(stmt?: number): Array<{ id: unknown; hits: ScoredPoint[] }>;
+  collections(stmt?: number): string[];
+  collection(stmt?: number): Record<string, unknown> | null;
+  shardKeys(stmt?: number): Array<string | number | bigint>;
+  quotas(stmt?: number): Record<string, unknown> | null;
 }
 
 export interface ExecuteOptions {
@@ -167,6 +180,33 @@ export interface HttpEmbedderOptions {
   /** Client-side BM25 expected average document length in tokens (default 256) */
   bm25AvgLen?: number;
   bm25_avg_len?: number;
+  /** BM25 text-processing language, e.g. "spanish" (default "english") */
+  bm25Language?: string;
+  bm25_language?: string;
+  /** BM25 tokenizer: "word" | "whitespace" | "prefix" (default "word") */
+  bm25Tokenizer?: string;
+  bm25_tokenizer?: string;
+  /** Lowercase before matching (default true) */
+  bm25Lowercase?: boolean;
+  bm25_lowercase?: boolean;
+  /** Lucene ASCII folding before lowercasing (default false) */
+  bm25AsciiFolding?: boolean;
+  bm25_ascii_folding?: boolean;
+  /** Custom stopwords replacing the language default ([] disables) */
+  bm25Stopwords?: string[];
+  bm25_stopwords?: string[];
+  /** Additional language stopword lists merged with bm25Stopwords. */
+  bm25StopwordsLanguages?: string[];
+  bm25_stopwords_languages?: string[];
+  /** Stemmer override ("none" disables; a language name overrides) */
+  bm25Stemmer?: string;
+  bm25_stemmer?: string;
+  /** Drop tokens shorter than this many chars */
+  bm25MinTokenLen?: number;
+  bm25_min_token_len?: number;
+  /** Drop over-long tokens on the document path */
+  bm25MaxTokenLen?: number;
+  bm25_max_token_len?: number;
 }
 
 export class HttpEmbedder {
@@ -182,6 +222,7 @@ export class Client {
   executeHits(
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
+    stmt?: number,
   ): Promise<ScoredPoint[]>;
   /**
    * Analyze a single query string or Stmt: static plan plus measured
@@ -236,7 +277,7 @@ export function injectFilter(
 export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
-export function compileQuery(
+export function compile(
   query: string,
   params?: Record<string, unknown> | unknown[],
 ): CompiledRoute;
@@ -256,6 +297,7 @@ export function execute(
 export function executeHits(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & ClientOptions,
+  stmt?: number,
 ): Promise<ScoredPoint[]>;
 export function executeStmt(
   stmt: Stmt,

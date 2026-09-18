@@ -101,7 +101,7 @@ class TestParser(unittest.TestCase):
         self.assertFalse(pyqql_edge.is_valid("SELECT * FROM docs"))
 
     def test_compile(self):
-        result = pyqql_edge.compile_query("QUERY 'hello' FROM docs LIMIT 10")
+        result = pyqql_edge.compile("QUERY 'hello' FROM docs LIMIT 10")
         self.assertIsInstance(result, dict)
         self.assertEqual(result["method"], "POST")
 

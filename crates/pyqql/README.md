@@ -53,7 +53,7 @@ client.execute(stmt)
 | `parse` / `parse_json` / `is_valid` / `tokenize` | Frontend — `is_valid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `inject_filter(query\|Stmt, field, op, value)` | Host isolation (AST) |
 | `Stmt.shard_key` | Same field as QQL `SHARD '…'` (get/set; no `inject_shard_key`) |
-| `compile_query` / `explain` | Offline plan / REST projection |
+| `compile` / `explain` | Offline plan / REST projection |
 | `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
 | `execute` / `execute_async` | One-shot free functions (`params=` same as `bind`) |
 | `execute_hits` / `execute_async_hits` | One-shot free functions returning `List[ScoredPoint]` |
@@ -130,6 +130,24 @@ pyqql.execute("SHOW COLLECTIONS", url="http://localhost:6333", route_affinity="s
 ```
 
 `on_error="stop"` (default) or `"continue"`.
+
+## Formula queries vs Qdrant SDK FormulaQuery
+
+In QQL, custom formula scoring is declarative SQL-like syntax executed directly:
+
+```python
+report = client.execute("""
+    QUERY FORMULA score * 0.8 + LOG(views + 1.0) * 0.2
+    DEFAULTS (score = 0.0, views = 0)
+    FROM articles
+    LIMIT 10
+""")
+```
+
+> **Important**: Do not wrap QQL strings in `qdrant_client.models.FormulaQuery`!
+> In the official Qdrant Python SDK, `FormulaQuery` expects an object tree of `Expression` classes (e.g. `models.SumExpression(...)`), not query text. Pass formula queries directly to `client.execute()`.
+>
+> **Shell quoting**: Prefer bare `score` instead of `$score`. While `$score` works inside Python strings, POSIX shells (bash, zsh) interpolate `$score` into `""` when run via CLI or shell scripts. Bare `score` is shell-safe across all environments.
 
 ## Docs
 

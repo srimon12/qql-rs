@@ -16,6 +16,8 @@
 //! Canonical formatting runs last via `qql_core::fmt`.
 
 use super::convert::source_is_canonical;
+use super::lint_fix::apply_fixes;
+use super::lint_report::print_report_text;
 use qql_core::ast::{PayloadSelector, PrefetchSource, QueryExpr, QueryStmt, Stmt};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
@@ -58,9 +60,17 @@ fn lint_json(ok: bool, files: Vec<FileLintReport>, content: Option<String>) -> S
         .expect("lint report serializes")
 }
 
+/// The ONE lint exit rule, shared by every input mode (files, stdin, inline
+/// string) with or without `--fix`: a lint unit is clean iff it reports zero
+/// diagnostics. Fixability only controls whether `--fix` rewrites the input;
+/// a remaining diagnostic — fixable or not — still fails the run.
+fn lint_clean(diags: &[LintDiagnostic]) -> bool {
+    diags.is_empty()
+}
+
 /// A lexed token reduced to its kind and byte span (lifetime-free).
 #[derive(Debug, Clone, Copy)]
-struct Tok {
+pub(crate) struct Tok {
     kind: TokenKind,
     start: usize,
     end: usize,
@@ -122,27 +132,9 @@ fn hint_for(code: &str) -> Option<&'static str> {
     }
 }
 
-fn render_codeframe(source: &str, line_no: usize, col_no: usize, span_len: usize) -> String {
-    let lines: Vec<&str> = source.lines().collect();
-    if line_no == 0 || line_no > lines.len() {
-        return String::new();
-    }
-    let target_line = lines[line_no - 1];
-    let gutter = format!("{:>4} | ", line_no);
-    let pad = " ".repeat(gutter.len() + col_no.saturating_sub(1));
-    let underline_len = span_len.max(1).min(
-        target_line
-            .len()
-            .saturating_sub(col_no.saturating_sub(1))
-            .max(1),
-    );
-    let underline = "^".repeat(underline_len);
-    format!("{}{}\n{}{}", gutter, target_line, pad, underline)
-}
-
 /// Lex the source into kind/span pairs. Returns `None` when lexing fails, in
 /// which case no token-based diagnostic or fix is attempted.
-fn lex_kinds(source: &str) -> Option<Vec<Tok>> {
+pub(crate) fn lex_kinds(source: &str) -> Option<Vec<Tok>> {
     let mut lexer = Lexer::new(source);
     let mut toks = Vec::new();
     loop {
@@ -177,7 +169,12 @@ fn gap_is_blank(source: &str, a: usize, b: usize) -> bool {
 /// Byte spans of explicit `WITH PAYLOAD true` clauses fully inside `[rs, re)`.
 /// Matching on lexer tokens (not text) keeps string literals such as
 /// `'WITH PAYLOAD TRUE'` and comments out of reach.
-fn payload_true_runs(source: &str, toks: &[Tok], rs: usize, re: usize) -> Vec<(usize, usize)> {
+pub(crate) fn payload_true_runs(
+    source: &str,
+    toks: &[Tok],
+    rs: usize,
+    re: usize,
+) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i + 2 < toks.len() {
@@ -223,7 +220,7 @@ fn wait_runs(source: &str, toks: &[Tok], rs: usize, re: usize) -> Vec<(usize, us
 /// The `WAIT` clauses in the semicolon-delimited segment around a byte offset
 /// (the duplicate-clause error points just past the offending clause, so the
 /// segment still contains both copies).
-fn wait_runs_around(source: &str, toks: &[Tok], err_pos: usize) -> Vec<(usize, usize)> {
+pub(crate) fn wait_runs_around(source: &str, toks: &[Tok], err_pos: usize) -> Vec<(usize, usize)> {
     let mut seg_start = 0;
     let mut seg_end = source.len();
     for t in toks {
@@ -245,7 +242,7 @@ fn wait_runs_around(source: &str, toks: &[Tok], err_pos: usize) -> Vec<(usize, u
 /// own output counted last to match source order; plus SCROLL's selector.
 /// GROUP LOOKUP payload is deliberately excluded: omitted there lowers to a
 /// bare collection name, a different wire shape than explicit `true`.
-fn count_redundant_payload(stmt: &Stmt) -> usize {
+pub(crate) fn count_redundant_payload(stmt: &Stmt) -> usize {
     match stmt {
         Stmt::Query(q) => count_query_payload(q),
         Stmt::Scroll(s) => usize::from(s.with_payload == Some(PayloadSelector::All)),
@@ -479,135 +476,6 @@ fn collect_source_diagnostics(
     (diagnostics, formatted_candidate)
 }
 
-/// Retreat an excision start over spaces/tabs (never newlines) so the fix
-/// does not leave double spaces behind.
-fn excise_start(source: &str, s: usize) -> usize {
-    let bytes = source.as_bytes();
-    let mut i = s.min(bytes.len());
-    while i > 0 && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t') {
-        i -= 1;
-    }
-    i
-}
-
-fn apply_fixes(source: &str) -> (String, usize) {
-    // Fixpoint: excision can unblock formatting and formatting can unblock
-    // excision (e.g. a comment between WITH and PAYLOAD that fmt relocates).
-    // Excision strictly shrinks the source and fmt is idempotent, so this
-    // converges; the cap is a backstop.
-    let mut current = source.to_string();
-    let mut fixes = 0;
-    for _ in 0..4 {
-        let (next, n) = apply_fixes_once(&current);
-        fixes += n;
-        if next == current {
-            break;
-        }
-        current = next;
-    }
-    (current, fixes)
-}
-
-fn apply_fixes_once(source: &str) -> (String, usize) {
-    let recovered = Parser::parse_all_recovering(source);
-    let Some(toks) = lex_kinds(source) else {
-        return (source.to_string(), 0);
-    };
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-
-    // Redundant payload: excise the clause runs inside statements whose AST
-    // claims them (never inside string literals or comments — the lexer
-    // guarantees token spans are real code).
-    for (stmt, span) in &recovered.statements {
-        let expected = count_redundant_payload(stmt);
-        if expected == 0 {
-            continue;
-        }
-        for (rs, re) in payload_true_runs(source, &toks, span.start, span.end)
-            .into_iter()
-            .take(expected)
-        {
-            ranges.push((excise_start(source, rs), re));
-        }
-    }
-
-    // Duplicate WAIT: the statement failed to parse, so scope by the parser's
-    // error span instead — the semicolon-delimited segment around it — and
-    // keep the trailing clause, matching the diagnostic hint.
-    for err in &recovered.errors {
-        if err.code != "QQL-PARSE-DUPLICATE-CLAUSE" {
-            continue;
-        }
-        let err_pos = err.span.map(|s| s.start).unwrap_or(0);
-        let runs = wait_runs_around(source, &toks, err_pos);
-        if runs.len() > 1 {
-            for (rs, re) in runs.iter().take(runs.len() - 1) {
-                ranges.push((excise_start(source, *rs), *re));
-            }
-        }
-    }
-
-    ranges.sort_unstable();
-    ranges.dedup();
-    let mut fixes = ranges.len();
-    let mut out = source.to_string();
-    for (rs, re) in ranges.into_iter().rev() {
-        if rs < re && re <= out.len() && out.is_char_boundary(rs) && out.is_char_boundary(re) {
-            out.replace_range(rs..re, "");
-        } else {
-            fixes = fixes.saturating_sub(1);
-        }
-    }
-
-    if let Ok(formatted) = qql_core::fmt::format(&out) {
-        if !source_is_canonical(&out, &formatted) {
-            fixes += 1;
-        }
-        (formatted, fixes)
-    } else {
-        (out, fixes)
-    }
-}
-
-fn print_report_text(report: &FileLintReport, source: &str, after_fix: bool) {
-    use std::io::Write;
-    let mut stderr = std::io::stderr().lock();
-    if report.diagnostics.is_empty() {
-        if report.fixed {
-            let _ = writeln!(stderr, "\x1b[32m✓\x1b[0m {}: fixed", report.file);
-        } else {
-            let _ = writeln!(stderr, "\x1b[32m✓\x1b[0m {}: clean", report.file);
-        }
-        return;
-    }
-    for diag in &report.diagnostics {
-        let level = if diag.fixable && after_fix {
-            "\x1b[32mfixed\x1b[0m"
-        } else if diag.fixable {
-            "\x1b[33mwarning\x1b[0m"
-        } else {
-            "\x1b[31merror\x1b[0m"
-        };
-        let _ = writeln!(
-            stderr,
-            "{}[{}]: {}\n  --> {}:{}:{}",
-            level, diag.code, diag.message, report.file, diag.line, diag.column
-        );
-        let frame = render_codeframe(
-            source,
-            diag.line,
-            diag.column,
-            diag.span_end.saturating_sub(diag.span_start),
-        );
-        if !frame.is_empty() {
-            let _ = writeln!(stderr, "{}\n", frame);
-        }
-        if let Some(hint) = &diag.hint {
-            let _ = writeln!(stderr, "  = hint: {}\n", hint);
-        }
-    }
-}
-
 pub fn handle_lint(
     target: Option<&str>,
     check: bool,
@@ -684,11 +552,11 @@ pub fn handle_lint(
                     .map_err(|e| format!("failed to write '{}': {}", display_name, e))?;
                 total_fixed += fix_count;
             }
-            // Re-lint after fixes
+            // Re-lint after fixes; the exit rule counts every remaining
+            // diagnostic (see `lint_clean`), not just the unfixable ones.
             let (diags, _) = collect_source_diagnostics(&fixed_content, display_name, cli_params);
-            let unfixable_count = diags.iter().filter(|d| !d.fixable).count();
-            total_errors += unfixable_count;
-            let valid = unfixable_count == 0;
+            total_errors += diags.len();
+            let valid = lint_clean(&diags);
             if !json {
                 print_report_text(
                     &FileLintReport {
@@ -711,7 +579,7 @@ pub fn handle_lint(
             let (diags, _) = collect_source_diagnostics(&content, display_name, cli_params);
             let err_count = diags.len();
             total_errors += err_count;
-            let valid = err_count == 0;
+            let valid = lint_clean(&diags);
             if !json {
                 print_report_text(
                     &FileLintReport {
@@ -777,12 +645,12 @@ fn lint_stdin(
 
     if fix {
         let (fixed_content, _) = apply_fixes(&buf);
-        // Re-lint what was actually produced: remaining unfixable errors fail.
+        // Re-lint what was actually produced: any remaining diagnostic fails
+        // (see `lint_clean`), not just the unfixable ones.
         let (diags, _) = collect_source_diagnostics(&fixed_content, "<stdin>", cli_params);
-        let unfixable = diags.iter().filter(|d| !d.fixable).count();
         let report = FileLintReport {
             file: "<stdin>".to_string(),
-            valid: unfixable == 0,
+            valid: lint_clean(&diags),
             fixed: fixed_content != buf,
             diagnostics: diags,
         };
@@ -802,7 +670,7 @@ fn lint_stdin(
     }
 
     let (diags, _) = collect_source_diagnostics(&buf, "<stdin>", cli_params);
-    let valid = diags.is_empty();
+    let valid = lint_clean(&diags);
     if json {
         println!(
             "{}",
@@ -849,10 +717,9 @@ fn lint_string(
     if fix {
         let (fixed_content, _) = apply_fixes(query);
         let (diags, _) = collect_source_diagnostics(&fixed_content, "<query>", cli_params);
-        let unfixable = diags.iter().filter(|d| !d.fixable).count();
         let report = FileLintReport {
             file: "<query>".to_string(),
-            valid: unfixable == 0,
+            valid: lint_clean(&diags),
             fixed: fixed_content != query,
             diagnostics: diags,
         };
@@ -872,7 +739,7 @@ fn lint_string(
     }
 
     let (diags, _) = collect_source_diagnostics(query, "<query>", cli_params);
-    let valid = diags.is_empty();
+    let valid = lint_clean(&diags);
     if json {
         println!(
             "{}",

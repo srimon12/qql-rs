@@ -17,6 +17,9 @@ pub(crate) mod batch;
 pub mod ddl;
 pub(crate) mod dispatch;
 pub(crate) mod dml;
+/// Corpus-true BM25 `avg_len` estimation from sampled payloads.
+pub mod estimate;
+pub(crate) mod normalize;
 pub(crate) mod prepared;
 pub(crate) mod response;
 /// Phase-1 telemetry types: client phase timings plus server `time`/`usage`.
@@ -26,7 +29,7 @@ pub use prepared::PreparedStatement;
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub use response::{
     AnalyzeReport, BackendResponse, ExecData, ExecResponse, ExecutionReport, FacetHit,
-    GroupedSearchResult, OnError, SearchHit,
+    GroupedSearchResult, OnError, SearchHit, score_f64,
 };
 pub use telemetry::{
     HardwareUsage, InferenceUsage, ModelUsage, PhaseTimings, ServerTelemetry, ServerUsage,
@@ -47,6 +50,10 @@ pub const RERANK_VECTOR_SIZE: u64 = 96;
 /// Default inference mode (`local` fastembed; `remote` uses HTTP endpoints).
 pub const INFERENCE_MODE_DEFAULT: &str = "local";
 
+/// Cached schema entry: `Arc`-shared collection info plus the derived
+/// topology names, so cache hits cost refcount bumps instead of clones.
+pub(crate) type SchemaCacheEntry = (Arc<CollectionInfo>, Arc<qql_embed::TopologyNames>);
+
 /// The QQL executor: prepare (schema `USING` resolution + embeddings) → `plan()`
 /// → batch classification → dispatch over a `QdrantOps` backend.
 pub struct Executor {
@@ -56,9 +63,12 @@ pub struct Executor {
     /// Collection topology (dense / sparse / multivector names). Invalidated
     /// after DDL so `USING` routing does not `GET /collections/{name}` per query.
     /// Repeated SQL templates belong on [`Executor::prepare`], not here.
-    pub(crate) schema_cache: std::sync::RwLock<
-        HashMap<String, (CollectionInfo, std::sync::Arc<qql_embed::TopologyNames>)>,
-    >,
+    ///
+    /// Async lock: every critical section is a map lookup plus `Arc` clones
+    /// (no I/O under the lock), so holders never stall the worker thread.
+    /// Infos are `Arc`-shared so cache hits cost a refcount bump instead of a
+    /// full `CollectionInfo` clone per operation.
+    pub(crate) schema_cache: tokio::sync::RwLock<HashMap<String, SchemaCacheEntry>>,
     /// Set by [`Executor::close`]; every execution entry point fails after it.
     closed: std::sync::atomic::AtomicBool,
     close_lock: tokio::sync::Mutex<()>,
@@ -76,9 +86,10 @@ impl Executor {
 
     /// Create an executor connected to Qdrant over gRPC.
     #[cfg(feature = "grpc")]
-    pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
+    pub fn grpc(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
+        let url = url.into();
         Ok(Self::new(
-            Box::new(crate::grpc::GrpcQdrant::from_url(url, api_key)?),
+            Box::new(crate::grpc::GrpcQdrant::from_url(&url, api_key)?),
             None,
         ))
     }
@@ -89,7 +100,7 @@ impl Executor {
             client,
             config,
             embedder: None,
-            schema_cache: std::sync::RwLock::new(HashMap::new()),
+            schema_cache: tokio::sync::RwLock::new(HashMap::new()),
             closed: std::sync::atomic::AtomicBool::new(false),
             close_lock: tokio::sync::Mutex::new(()),
         }
@@ -105,7 +116,7 @@ impl Executor {
             client,
             config,
             embedder,
-            schema_cache: std::sync::RwLock::new(HashMap::new()),
+            schema_cache: tokio::sync::RwLock::new(HashMap::new()),
             closed: std::sync::atomic::AtomicBool::new(false),
             close_lock: tokio::sync::Mutex::new(()),
         }
@@ -142,9 +153,7 @@ impl Executor {
         if self.closed.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
-        if let Ok(mut cache) = self.schema_cache.write() {
-            cache.clear();
-        }
+        self.schema_cache.write().await.clear();
         Ok(())
     }
 
@@ -193,10 +202,9 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let stop_on_error = matches!(on_error, OnError::Stop);
         let statements = match parser::Parser::parse_all(query) {
             Ok(statements) => statements,
-            Err(error) if stop_on_error => return Err(error),
+            Err(error) if matches!(on_error, OnError::Stop) => return Err(error),
             Err(error) => {
                 return Ok(ExecutionReport::from_results(vec![ExecResponse {
                     ok: false,
@@ -214,7 +222,7 @@ impl Executor {
                 None,
             ));
         }
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -230,8 +238,7 @@ impl Executor {
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |k| params.get(k).cloned(), &[])?;
         }
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -244,20 +251,19 @@ impl Executor {
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
         let mut statements = parser::Parser::parse_all(query)?;
+        // Index once: the bind closure runs per placeholder, so a linear
+        // `find` per lookup would be O(placeholders × params) with a full
+        // `Value` clone on every hit. The map borrows `params`; only the
+        // per-lookup clone into the AST remains (required by the owned-
+        // `Value` bind contract).
+        let lookup_map: HashMap<&str, &Value> = params
+            .iter()
+            .map(|(name, value)| (name.as_ref(), value))
+            .collect();
         for stmt in &mut statements {
-            qql_core::params::bind_stmt(
-                stmt,
-                |k| {
-                    params
-                        .iter()
-                        .find(|(name, _)| name.as_ref() == k)
-                        .map(|(_, v)| v.clone())
-                },
-                &[],
-            )?;
+            qql_core::params::bind_stmt(stmt, |k| lookup_map.get(k).map(|v| (*v).clone()), &[])?;
         }
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -273,8 +279,7 @@ impl Executor {
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |_| None, params)?;
         }
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        let results = self.execute_batch_nodes(statements, on_error).await?;
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -353,21 +358,61 @@ impl Executor {
                     let mut main_dense_vec = None;
                     let mut main_sparse_vec = None;
 
+                    // First-spec-wins creation covers one dense name, one
+                    // sparse name, and one sizing model: every other spec must
+                    // agree (or leave its target unset for inference).
+                    // Otherwise the created schema would silently drop their
+                    // vectors and the backend would fail opaquely later.
                     for (model, has_dense, has_sparse, dense_vec, sparse_vec) in specs {
                         if has_dense {
                             aggregated_dense = true;
-                            if main_dense_vec.is_none() {
-                                main_dense_vec = dense_vec;
+                            match (main_dense_vec, dense_vec) {
+                                (None, name) => main_dense_vec = name,
+                                (Some(first), Some(name)) if first != name => {
+                                    return Err(QqlError::execution(
+                                        "QQL-EMBEDDING-TOPOLOGY",
+                                        format!(
+                                            "cannot auto-create collection '{}': conflicting dense vector names '{first}' vs '{name}'; create the collection explicitly",
+                                            u.collection
+                                        ),
+                                        None,
+                                    ));
+                                }
+                                _ => {}
                             }
                         }
                         if has_sparse {
                             aggregated_sparse = true;
-                            if main_sparse_vec.is_none() {
-                                main_sparse_vec = sparse_vec;
+                            match (main_sparse_vec, sparse_vec) {
+                                (None, name) => main_sparse_vec = name,
+                                (Some(first), Some(name)) if first != name => {
+                                    return Err(QqlError::execution(
+                                        "QQL-EMBEDDING-TOPOLOGY",
+                                        format!(
+                                            "cannot auto-create collection '{}': conflicting sparse vector names '{first}' vs '{name}'; create the collection explicitly",
+                                            u.collection
+                                        ),
+                                        None,
+                                    ));
+                                }
+                                _ => {}
                             }
                         }
-                        if main_model.is_none() && model.is_some() {
-                            main_model = model;
+                        if let Some(model) = model {
+                            match main_model {
+                                None => main_model = Some(model),
+                                Some(first) if first != model => {
+                                    return Err(QqlError::execution(
+                                        "QQL-EMBEDDING-TOPOLOGY",
+                                        format!(
+                                            "cannot auto-create collection '{}': conflicting embedding models '{first}' vs '{model}'; create the collection explicitly",
+                                            u.collection
+                                        ),
+                                        None,
+                                    ));
+                                }
+                                _ => {}
+                            }
                         }
                     }
 

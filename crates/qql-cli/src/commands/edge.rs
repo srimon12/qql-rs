@@ -22,8 +22,22 @@ pub fn handle_configure_edge(
                 .into(),
         );
     }
-    // Fail closed at save time: k1 > 0, b in [0, 1], avg_len > 0, all finite.
-    qql::embedder::Bm25Params::resolve(config.bm25_k1, config.bm25_b, config.bm25_avg_len)?;
+    // Fail closed at save time: numeric ranges plus language/tokenizer/
+    // stemmer names, via the engine's own resolver.
+    qql::embedder::Bm25TextConfig::resolve(
+        config.bm25_k1,
+        config.bm25_b,
+        config.bm25_avg_len,
+        config.bm25_language.as_deref(),
+        config.bm25_tokenizer.as_deref(),
+        config.bm25_lowercase,
+        config.bm25_ascii_folding,
+        config.bm25_stopwords.clone(),
+        config.bm25_stemmer.as_deref(),
+        config.bm25_min_token_len,
+        config.bm25_max_token_len,
+        config.bm25_stopwords_languages.clone(),
+    )?;
     let path = crate::config::EdgeConfig::write_object(&merged)?;
     println!("Saved edge configuration to {}", path.display());
     println!("Use it with: qql --edge run \"SHOW COLLECTIONS\"");

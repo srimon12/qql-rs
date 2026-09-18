@@ -8,6 +8,8 @@ use gloo_net::http::Request;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
+use super::functions::qql_err_to_js;
+
 enum EmbedMode {
     None,
     /// JS function: `async (texts: string[]) => number[][]` (already batched).
@@ -42,10 +44,10 @@ pub struct Client {
     rerank_endpoint: Option<String>,
     rerank_api_key: Option<String>,
     rerank_model: Option<String>,
-    /// Client-side BM25 document parameters for the built-in local sparse
+    /// Client-side BM25 text configuration for the built-in local sparse
     /// encoder (used for `TEXT` upserts / sparse `TEXT` inputs; write-path
     /// only). Defaults to the Qdrant `qdrant/bm25` values.
-    pub(crate) bm25: qql_embed::Bm25Params,
+    pub(crate) bm25: qql_embed::Bm25TextConfig,
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -73,7 +75,7 @@ impl Client {
             rerank_endpoint: None,
             rerank_api_key: None,
             rerank_model: None,
-            bm25: qql_embed::Bm25Params::default(),
+            bm25: qql_embed::Bm25TextConfig::default(),
         }
     }
 
@@ -90,23 +92,73 @@ impl Client {
         self.route_affinity.clone()
     }
 
+    /// Close the client (no-op: browser `fetch` holds no connections).
+    ///
+    /// Exists for cross-SDK portability so generic `client.close()` cleanup
+    /// code ports unchanged between `nqql` / `pyqql` and `qql-wasm`.
+    #[wasm_bindgen(js_name = close)]
+    pub fn close(&self) {}
+
+    /// Whether the client is closed (always `false`: [`close`](Self::close)
+    /// is a no-op).
+    #[wasm_bindgen(getter, js_name = isClosed)]
+    pub fn is_closed(&self) -> bool {
+        false
+    }
+
     /// Set client-side BM25 document parameters for the built-in local sparse
     /// encoder (`k1`, `b`, `avg_len`). **Write-path only**: shapes how
     /// documents upserted after the call are encoded; query weights stay unit
     /// and server-side inference is untouched. Invalid values throw
-    /// (`QQL-VALIDATION-CONFIG`): `k1 > 0`, `b` in `[0, 1]`, `avg_len > 0`,
+    /// (`QQL-VALIDATION-CONFIG`): `k1 >= 0`, `b` in `[0, 1]`, `avg_len > 0`,
     /// all finite.
     #[wasm_bindgen(js_name = setBm25Params)]
     pub fn set_bm25_params(&mut self, k1: f64, b: f64, avg_len: f64) -> Result<(), JsValue> {
-        let params = qql_embed::Bm25Params::new(k1, b, avg_len)
-            .map_err(|e| JsValue::from_str(&format!("{}: {}", e.code, e.message)))?;
-        self.bm25 = params;
+        let params = qql_embed::Bm25Params::new(k1, b, avg_len).map_err(qql_err_to_js)?;
+        self.bm25.params = params;
         Ok(())
     }
 
-    /// Current BM25 document parameters (used by the local sparse encoder).
-    pub(crate) fn bm25_params(&self) -> &qql_embed::Bm25Params {
-        &self.bm25
+    /// Set client-side BM25 text processing for the built-in local sparse
+    /// encoder: language (`"spanish"`, `"es"`, …; `null` keeps current),
+    /// tokenizer (`"word"`, `"whitespace"`, `"prefix"`), lowercasing,
+    /// ASCII folding, stemmer (`"none"` disables, a language name overrides),
+    /// custom stopwords (replaces the language default; `[]` disables), and
+    /// token length limits. All `null` keeps the current value; anything
+    /// invalid throws (`QQL-VALIDATION-CONFIG`).
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = setBm25Text)]
+    pub fn set_bm25_text(
+        &mut self,
+        language: Option<String>,
+        tokenizer: Option<String>,
+        lowercase: Option<bool>,
+        ascii_folding: Option<bool>,
+        stemmer: Option<String>,
+        stopwords: Option<Vec<String>>,
+        min_token_len: Option<usize>,
+        max_token_len: Option<usize>,
+        stopwords_languages: Option<Vec<String>>,
+    ) -> Result<(), JsValue> {
+        // Incremental update: `null` keeps the current value (seeded inside
+        // `with_text_options`), so consecutive calls compose instead of
+        // resetting untouched knobs to defaults.
+        let resolved = self
+            .bm25
+            .with_text_options(
+                language.as_deref(),
+                tokenizer.as_deref(),
+                lowercase,
+                ascii_folding,
+                stopwords,
+                stemmer.as_deref(),
+                min_token_len,
+                max_token_len,
+                stopwords_languages,
+            )
+            .map_err(qql_err_to_js)?;
+        self.bm25 = resolved;
+        Ok(())
     }
 
     // ── Embedder configuration ──────────────────────────────────
@@ -160,18 +212,6 @@ impl Client {
         self.embed_model = model;
         self.embed_dim = dimension;
         Ok(())
-    }
-
-    /// Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
-    #[wasm_bindgen(js_name = setRemoteEmbedder)]
-    pub fn set_remote_embedder(
-        &mut self,
-        endpoint: String,
-        model: String,
-        dimension: u32,
-        api_key: Option<String>,
-    ) -> Result<(), JsValue> {
-        self.set_http_embedder(endpoint, model, dimension, api_key)
     }
 
     /// OpenAI-compatible multi/ColBERT endpoint (nested `[[...]]` bags).
@@ -698,16 +738,9 @@ impl Client {
         }
         qql_embed::resolve_embeddings(stmt, self)
             .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(qql_err_to_js)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) async fn resolve_stmt_embeddings(
-        &self,
-        _stmt: &mut qql_core::ast::Stmt,
-    ) -> Result<(), JsValue> {
-        Ok(())
-    }
     /// Fetch collection topology and resolve `USING` vector kinds.
     #[cfg(target_arch = "wasm32")]
     pub(crate) async fn resolve_stmt_vector_kinds(
@@ -725,16 +758,7 @@ impl Client {
         }
         let collection = collection.clone();
         let topology = self.fetch_vector_topology(&collection).await?;
-        qql_embed::resolve_query_vector_kinds(&collection, query, &topology)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) async fn resolve_stmt_vector_kinds(
-        &self,
-        _stmt: &mut qql_core::ast::Stmt,
-    ) -> Result<(), JsValue> {
-        Ok(())
+        qql_embed::resolve_query_vector_kinds(&collection, query, &topology).map_err(qql_err_to_js)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -762,6 +786,7 @@ impl Client {
             })?;
         Ok(vector_names_from_collection_result(result))
     }
+
     pub(crate) async fn send_json(
         &self,
         method: &str,
@@ -770,35 +795,140 @@ impl Client {
     ) -> Result<serde_json::Value, JsValue> {
         let body_str = body
             .as_ref()
-            .map(|b| serde_json::to_string(b).map_err(|e| JsValue::from_str(&e.to_string())))
+            .map(|b| {
+                serde_json::to_string(b).map_err(|e| {
+                    qql_err_to_js(qql_core::error::QqlError::execution(
+                        "QQL-PLAN-SERIALIZE",
+                        format!("plan IR REST request body serialization failed: {e}"),
+                        None,
+                    ))
+                })
+            })
             .transpose()?;
 
         let rb = self.request(method, path);
         let resp = if let Some(s) = body_str {
             rb.body(s)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
+                .map_err(|e| {
+                    qql_err_to_js(qql_core::error::QqlError::transport(
+                        "QQL-TRANSPORT-REQUEST",
+                        format!("failed to set request body: {e}"),
+                        None,
+                    ))
+                })?
                 .send()
                 .await
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
+                .map_err(|e| {
+                    qql_err_to_js(qql_core::error::QqlError::transport(
+                        "QQL-TRANSPORT-REQUEST",
+                        format!("HTTP request failed: {e}"),
+                        None,
+                    ))
+                })?
         } else {
-            rb.send()
-                .await
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
+            rb.send().await.map_err(|e| {
+                qql_err_to_js(qql_core::error::QqlError::transport(
+                    "QQL-TRANSPORT-REQUEST",
+                    format!("HTTP request failed: {e}"),
+                    None,
+                ))
+            })?
         };
 
         let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let text = resp.text().await.map_err(|e| {
+            qql_err_to_js(qql_core::error::QqlError::backend(
+                "QQL-BACKEND-READ",
+                format!("failed to read response body: {e}"),
+                None,
+            ))
+        })?;
 
         if status >= 400 {
-            return Err(JsValue::from_str(&format!(
-                "Qdrant returned {}: {}",
-                status, text
-            )));
+            let code = classify_backend_error_code(status, &text);
+            return Err(qql_err_to_js(
+                qql_core::error::QqlError::backend(
+                    code,
+                    format!("Qdrant returned {status}: {text}"),
+                    None,
+                )
+                .with_status(status),
+            ));
         }
 
-        serde_json::from_str(&text).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::from_str(&text).map_err(|e| {
+            qql_err_to_js(qql_core::error::QqlError::backend(
+                "QQL-BACKEND-ENVELOPE",
+                format!("failed to parse backend JSON response: {e}"),
+                None,
+            ))
+        })
+    }
+}
+
+fn classify_backend_error_code(status: u16, message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if status == 401
+        || status == 403
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("api key")
+        || lower.contains("bearer")
+    {
+        "QQL-BACKEND-AUTH"
+    } else if status == 404 || lower.contains("not found") {
+        "QQL-BACKEND-COLLECTION-NOT-FOUND"
+    } else if (lower.contains("index")
+        && (lower.contains("not exist")
+            || lower.contains("appropriate")
+            || lower.contains("not ready")
+            || lower.contains("missing")
+            || lower.contains("indexing")
+            || lower.contains("failed")))
+        || lower.contains("no appropriate index")
+    {
+        "QQL-BACKEND-INDEX-NOT-READY"
+    } else if lower.contains("dimension")
+        || lower.contains("vector size")
+        || lower.contains("dimensions")
+    {
+        "QQL-BACKEND-DIMENSION-MISMATCH"
+    } else {
+        "QQL-BACKEND-HTTP"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_backend_error_code() {
+        assert_eq!(classify_backend_error_code(401, ""), "QQL-BACKEND-AUTH");
+        assert_eq!(classify_backend_error_code(403, ""), "QQL-BACKEND-AUTH");
+        assert_eq!(
+            classify_backend_error_code(400, "invalid api key"),
+            "QQL-BACKEND-AUTH"
+        );
+        assert_eq!(
+            classify_backend_error_code(404, ""),
+            "QQL-BACKEND-COLLECTION-NOT-FOUND"
+        );
+        assert_eq!(
+            classify_backend_error_code(500, "collection 'docs' not found"),
+            "QQL-BACKEND-COLLECTION-NOT-FOUND"
+        );
+        assert_eq!(
+            classify_backend_error_code(400, "vector size mismatch: expected 128, got 256"),
+            "QQL-BACKEND-DIMENSION-MISMATCH"
+        );
+        assert_eq!(
+            classify_backend_error_code(400, "no appropriate index for field"),
+            "QQL-BACKEND-INDEX-NOT-READY"
+        );
+        assert_eq!(
+            classify_backend_error_code(500, "internal server error"),
+            "QQL-BACKEND-HTTP"
+        );
     }
 }

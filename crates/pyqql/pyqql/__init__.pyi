@@ -120,6 +120,10 @@ class ExecutionReport:
 class Stmt:
     # NOTE: Stmt has no constructor — instances come from `parse()`.
     @property
+    def bound(self) -> bool:
+        """Whether parameters have already been bound (re-binding raises `QQL-BIND-ALREADY-BOUND`)."""
+        ...
+    @property
     def shard_key(self) -> Optional[Union[str, int]]:
         """Keyword keys read as `str`, numeric keys as `int` (`None` when unset)."""
         ...
@@ -159,6 +163,15 @@ class HttpEmbedder:
         bm25_k1: Optional[float] = None,
         bm25_b: Optional[float] = None,
         bm25_avg_len: Optional[float] = None,
+        bm25_language: Optional[str] = None,
+        bm25_tokenizer: Optional[str] = None,
+        bm25_lowercase: Optional[bool] = None,
+        bm25_ascii_folding: Optional[bool] = None,
+        bm25_stopwords: Optional[List[str]] = None,
+        bm25_stemmer: Optional[str] = None,
+        bm25_min_token_len: Optional[int] = None,
+        bm25_max_token_len: Optional[int] = None,
+        bm25_stopwords_languages: Optional[List[str]] = None,
     ) -> None: ...
 
 class Client:
@@ -178,7 +191,19 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
-    ) -> ExecutionReport: ...
+    ) -> ExecutionReport:
+        """Execute QQL query strings or Stmt objects directly against Qdrant.
+
+        Supports search, hybrid fusion, and formula queries:
+            client.execute("QUERY FORMULA score * 0.8 + views * 0.2 FROM docs LIMIT 10")
+
+        Note:
+            Do not pass QQL formula strings into `qdrant_client.models.FormulaQuery`!
+            In Qdrant SDK, `FormulaQuery` expects an object tree of Expression classes,
+            not query text. Use `Client.execute()` to run QQL formulas natively.
+            Prefer bare `score` over `$score` to avoid shell variable interpolation.
+        """
+        ...
     async def execute_async(
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],
@@ -192,6 +217,7 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]: ...
     async def execute_async_hits(
         self,
@@ -199,6 +225,7 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]: ...
     def explain(self, query: Union[str, Stmt]) -> Dict[str, Any]: ...
     def explain_analyze(
@@ -251,7 +278,7 @@ def parse(input: str) -> List[Stmt]: ...
 def parse_json(input: str) -> str: ...
 def is_valid(input: str) -> bool: ...
 def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
-def compile_query(query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None) -> Dict[str, Any]: ...
+def compile(query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None) -> Dict[str, Any]: ...
 def tokenize(input: str) -> List[Dict[str, Any]]: ...
 def inject_filter(query: Union[str, Stmt], field: str, op: str, value: Any) -> Stmt: ...
 def bind(
@@ -292,6 +319,7 @@ def execute_hits(
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
     route_affinity: Optional[str] = None,
+    stmt: int = 0,
 ) -> List[ScoredPoint]: ...
 async def execute_async_hits(
     query: Query,
@@ -303,4 +331,5 @@ async def execute_async_hits(
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
     route_affinity: Optional[str] = None,
+    stmt: int = 0,
 ) -> List[ScoredPoint]: ...

@@ -127,7 +127,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
                 depth -= 1;
                 if depth < 0 {
                     return Err(QqlError::parse(
-                        "QQL-PARSE",
+                        "QQL-PARSE-DELIMITER",
                         format!(
                             "unexpected '{}' at position {} (unmatched closing delimiter)",
                             tok.text, tok.span.start,
@@ -141,7 +141,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
     }
     if depth > 0 {
         return Err(QqlError::parse(
-            "QQL-PARSE",
+            "QQL-PARSE-DELIMITER",
             format!("unexpected end of input: {} unclosed delimiter(s)", depth),
             qql_core::error::Span::new(0, cleaned.len()),
         ));
@@ -175,7 +175,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
 
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     let data = std::fs::read_to_string(path)
-        .map_err(|e| QqlError::execution("QQL-CLI", format!("cannot read file: {e}"), None))?;
+        .map_err(|e| QqlError::execution("QQL-CLI-IO", format!("cannot read file: {e}"), None))?;
     split_statements(&data)
 }
 

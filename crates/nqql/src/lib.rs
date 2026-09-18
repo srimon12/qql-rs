@@ -50,8 +50,12 @@ impl Stmt {
     }
 
     #[napi(catch_unwind)]
-    pub fn to_object(&self) -> napi::Result<serde_json::Value> {
-        serde_json::to_value(&self.inner).map_err(common::serde_napi_err)
+    pub fn to_object(&self) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+        // BigInt-safe: snowflake u64 IDs cross as `BigInt`, safe ints as
+        // `Number` — never a rounded f64 (see `nqql-common/src/jsoutput.rs`).
+        serde_json::to_value(&self.inner)
+            .map(common::jsoutput::BigIntSafeJson)
+            .map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
@@ -140,16 +144,28 @@ impl Stmt {
         common::stmt_readable(&self.inner)
     }
 
+    /// Tree-formatted plan explanation for this statement (mirrors the free
+    /// `explainStmt` and `qql-wasm`'s `Stmt.explain`).
+    #[napi(catch_unwind)]
+    pub fn explain(&self) -> String {
+        common::explain_stmt(&self.inner)
+    }
+
     /// Compile this Stmt AST directly into its transport route without re-parsing.
     /// Optionally accepts `params` to bind before compiling.
     #[napi(catch_unwind)]
-    pub fn compile_route(&self, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+    pub fn compile_route(
+        &self,
+        params: Unknown<'_>,
+    ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
         let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
         let binds_now = params.is_some();
         if binds_now && self.bound {
             return Err(common::to_napi_err(common::already_bound_error()));
         }
-        common::stmt_compile_route_value(&self.inner, params.as_ref()).map_err(common::to_napi_err)
+        common::stmt_compile_route_value(&self.inner, params.as_ref())
+            .map(common::jsoutput::BigIntSafeJson)
+            .map_err(common::to_napi_err)
     }
 }
 
@@ -184,19 +200,28 @@ pub fn inject_filter(
     field: String,
     op: String,
     value: serde_json::Value,
-) -> napi::Result<serde_json::Value> {
-    common::inject_filter(&query, &field, &op, value).map_err(common::to_napi_err)
+) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+    common::inject_filter(&query, &field, &op, value)
+        .map(common::jsoutput::BigIntSafeJson)
+        .map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
-pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
-    common::tokenize(&input).map_err(common::to_napi_err)
+pub fn tokenize(input: String) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+    common::tokenize(&input)
+        .map(common::jsoutput::BigIntSafeJson)
+        .map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
-pub fn compile_query(input: String, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+pub fn compile(
+    input: String,
+    params: Unknown<'_>,
+) -> napi::Result<common::jsoutput::BigIntSafeJson> {
     let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
-    common::compile_query_value(&input, params.as_ref()).map_err(common::to_napi_err)
+    common::compile_query_value(&input, params.as_ref())
+        .map(common::jsoutput::BigIntSafeJson)
+        .map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
@@ -244,6 +269,36 @@ pub fn bind(
         }
         None => Ok(query),
     }
+}
+
+/// Read an optional embedder value by camelCase/snake_case keys. Missing or
+/// `null` keeps the default (`None`); a present-but-wrong-typed value fails
+/// closed with `QQL-VALIDATION-CONFIG` instead of silently keeping it.
+fn bm25_opt<T>(
+    emb: &serde_json::Value,
+    camel: &str,
+    snake: &str,
+    expected: &str,
+    convert: impl Fn(&serde_json::Value) -> Option<T>,
+) -> napi::Result<Option<T>> {
+    let key = if emb.get(camel).is_some() {
+        camel
+    } else {
+        snake
+    };
+    let Some(value) = emb.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    convert(value).map(Some).ok_or_else(|| {
+        common::to_napi_err(qql::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
+            format!("embedder.{key} must be {expected}"),
+            None,
+        ))
+    })
 }
 
 fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {
@@ -345,20 +400,77 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             .and_then(|v| v.as_str())
             .map(String::from);
         // Client-side BM25 document parameters for the local sparse path.
-        // Raw `serde_json::Number` access: invalid types are left to the
-        // native HttpEmbedderOptions validator (`QQL-VALIDATION-CONFIG`).
-        config.bm25_k1 = emb
-            .get("bm25K1")
-            .or_else(|| emb.get("bm25_k1"))
-            .and_then(|v| v.as_f64());
-        config.bm25_b = emb
-            .get("bm25B")
-            .or_else(|| emb.get("bm25_b"))
-            .and_then(|v| v.as_f64());
-        config.bm25_avg_len = emb
-            .get("bm25AvgLen")
-            .or_else(|| emb.get("bm25_avg_len"))
-            .and_then(|v| v.as_f64());
+        // Present-but-wrong-typed values fail closed here with
+        // `QQL-VALIDATION-CONFIG`; only missing/`null` keep defaults (a
+        // silent `None` would never reach the native validator).
+        config.bm25_k1 = bm25_opt(emb, "bm25K1", "bm25_k1", "a number", |v| v.as_f64())?;
+        config.bm25_b = bm25_opt(emb, "bm25B", "bm25_b", "a number", |v| v.as_f64())?;
+        config.bm25_avg_len = bm25_opt(emb, "bm25AvgLen", "bm25_avg_len", "a number", |v| {
+            v.as_f64()
+        })?;
+        config.bm25_language = bm25_opt(emb, "bm25Language", "bm25_language", "a string", |v| {
+            v.as_str().map(String::from)
+        })?;
+        config.bm25_tokenizer =
+            bm25_opt(emb, "bm25Tokenizer", "bm25_tokenizer", "a string", |v| {
+                v.as_str().map(String::from)
+            })?;
+        config.bm25_lowercase =
+            bm25_opt(emb, "bm25Lowercase", "bm25_lowercase", "a boolean", |v| {
+                v.as_bool()
+            })?;
+        config.bm25_ascii_folding = bm25_opt(
+            emb,
+            "bm25AsciiFolding",
+            "bm25_ascii_folding",
+            "a boolean",
+            |v| v.as_bool(),
+        )?;
+        config.bm25_stopwords = bm25_opt(
+            emb,
+            "bm25Stopwords",
+            "bm25_stopwords",
+            "an array of strings",
+            |v| {
+                v.as_array().and_then(|items| {
+                    items
+                        .iter()
+                        .map(|item| item.as_str().map(String::from))
+                        .collect::<Option<Vec<_>>>()
+                })
+            },
+        )?;
+        config.bm25_stopwords_languages = bm25_opt(
+            emb,
+            "bm25StopwordsLanguages",
+            "bm25_stopwords_languages",
+            "an array of strings",
+            |v| {
+                v.as_array().and_then(|items| {
+                    items
+                        .iter()
+                        .map(|item| item.as_str().map(String::from))
+                        .collect::<Option<Vec<_>>>()
+                })
+            },
+        )?;
+        config.bm25_stemmer = bm25_opt(emb, "bm25Stemmer", "bm25_stemmer", "a string", |v| {
+            v.as_str().map(String::from)
+        })?;
+        config.bm25_min_token_len = bm25_opt(
+            emb,
+            "bm25MinTokenLen",
+            "bm25_min_token_len",
+            "a non-negative integer",
+            |v| v.as_u64().and_then(|n| usize::try_from(n).ok()),
+        )?;
+        config.bm25_max_token_len = bm25_opt(
+            emb,
+            "bm25MaxTokenLen",
+            "bm25_max_token_len",
+            "a non-negative integer",
+            |v| v.as_u64().and_then(|n| usize::try_from(n).ok()),
+        )?;
     }
 
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
@@ -416,6 +528,15 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     bm25_k1: config.bm25_k1,
                     bm25_b: config.bm25_b,
                     bm25_avg_len: config.bm25_avg_len,
+                    bm25_language: config.bm25_language.clone(),
+                    bm25_tokenizer: config.bm25_tokenizer.clone(),
+                    bm25_lowercase: config.bm25_lowercase,
+                    bm25_ascii_folding: config.bm25_ascii_folding,
+                    bm25_stopwords: config.bm25_stopwords.clone(),
+                    bm25_stopwords_languages: config.bm25_stopwords_languages.clone(),
+                    bm25_stemmer: config.bm25_stemmer.clone(),
+                    bm25_min_token_len: config.bm25_min_token_len,
+                    bm25_max_token_len: config.bm25_max_token_len,
                 })
                 .map_err(common::to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
@@ -470,8 +591,9 @@ impl JsClient {
 
     /// Execute a QQL query string, a Stmt, or an array of either.
     /// Multi-statement strings (semicolons) and arrays are auto-batched.
-    /// Returns a stable ExecutionReport JSON string for the JavaScript wrapper
-    /// to deserialize into an object.
+    /// Returns the ExecutionReport as a live JS object for the JavaScript
+    /// wrapper: safe integers cross as `Number`, snowflake u64 IDs as
+    /// `BigInt` (a JSON string would round them through `JSON.parse`).
     #[napi(
         catch_unwind,
         ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
@@ -479,12 +601,15 @@ impl JsClient {
     pub async fn execute(
         &self,
         query: serde_json::Value,
-        options: Option<serde_json::Value>,
-    ) -> napi::Result<String> {
-        let report = common::execute::execute_dispatch(&self.inner, query, options.as_ref())
+        options: Option<common::execute::ExecOptionsInput>,
+    ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+        let report = common::execute::execute_dispatch_typed(&self.inner, query, on_error, params)
             .await
             .map_err(common::to_napi_err)?;
-        serde_json::to_string(&report).map_err(common::serde_napi_err)
+        serde_json::to_value(&report)
+            .map(common::jsoutput::BigIntSafeJson)
+            .map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
@@ -494,8 +619,8 @@ impl JsClient {
 
     /// Analyze a single query string or Stmt: static plan plus measured
     /// execution (phase timings, server time, hardware/inference usage).
-    /// Returns a stable AnalyzeReport JSON string for the JavaScript wrapper
-    /// to deserialize into an object. Batches fail closed.
+    /// Returns the AnalyzeReport as a live JS object (BigInt-safe like
+    /// `execute`). Batches fail closed.
     #[napi(
         catch_unwind,
         ts_args_type = "query: string | Stmt, options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
@@ -503,13 +628,16 @@ impl JsClient {
     pub async fn explain_analyze(
         &self,
         query: serde_json::Value,
-        options: Option<serde_json::Value>,
-    ) -> napi::Result<String> {
+        options: Option<common::execute::ExecOptionsInput>,
+    ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
         let report =
-            common::execute::explain_analyze_dispatch(&self.inner, query, options.as_ref())
+            common::execute::explain_analyze_dispatch_typed(&self.inner, query, on_error, params)
                 .await
                 .map_err(common::to_napi_err)?;
-        serde_json::to_string(&report).map_err(common::serde_napi_err)
+        serde_json::to_value(&report)
+            .map(common::jsoutput::BigIntSafeJson)
+            .map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
@@ -519,9 +647,15 @@ impl JsClient {
 
     /// Compile a QQL query to its transport route (non-executing).
     #[napi(catch_unwind)]
-    pub fn compile(&self, query: String, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+    pub fn compile(
+        &self,
+        query: String,
+        params: Unknown<'_>,
+    ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
         let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
-        common::compile_query_value(&query, params.as_ref()).map_err(common::to_napi_err)
+        common::compile_query_value(&query, params.as_ref())
+            .map(common::jsoutput::BigIntSafeJson)
+            .map_err(common::to_napi_err)
     }
 
     /// Bulk ingest: `rows` is an array of point objects
@@ -531,7 +665,8 @@ impl JsClient {
     /// `Float32Array`/`Float64Array` and integer typed arrays to plain arrays
     /// before this serde boundary, so direct native callers should pass plain
     /// arrays (or bind typed arrays on the sync `Stmt.bind` surface instead,
-    /// then execute the bound statement). Returns a stable ExecutionReport JSON string.
+    /// then execute the bound statement). Returns the ExecutionReport as a
+    /// live JS object (BigInt-safe like `execute`).
     #[napi(
         catch_unwind,
         ts_args_type = "collection: string, rows: Record<string, any>[], options?: { onError?: 'stop' | 'continue', batchSize?: number }"
@@ -541,7 +676,7 @@ impl JsClient {
         collection: String,
         rows: serde_json::Value,
         options: Option<serde_json::Value>,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
         let rows = common::value_from_json(rows).map_err(common::to_napi_err)?;
         let batch_size =
             common::execute::batch_size_from(options.as_ref()).map_err(common::to_napi_err)?;
@@ -555,7 +690,9 @@ impl JsClient {
         )
         .await
         .map_err(common::to_napi_err)?;
-        serde_json::to_string(&report).map_err(common::serde_napi_err)
+        serde_json::to_value(&report)
+            .map(common::jsoutput::BigIntSafeJson)
+            .map_err(common::serde_napi_err)
     }
 
     /// Close the client and release underlying connections.
@@ -567,19 +704,20 @@ impl JsClient {
 
 /// Execute a pre-parsed Stmt directly via a new temporary client.
 #[napi(catch_unwind, ts_args_type = "stmt: Stmt, options?: object")]
-pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
-    let client = JsClient::new(options.clone())?;
+pub async fn execute_stmt(
+    stmt: &Stmt,
+    options: Option<common::execute::ExecOptionsInput>,
+) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+    let raw = options.as_ref().map(|o| o.raw.clone());
+    let params = options.as_ref().and_then(|o| o.params.as_ref());
+    let client = JsClient::new(raw)?;
     let resp = common::execute::run_then_close(&client.inner, async {
         let mut inner = stmt.inner.clone();
-        if let Some(p) = options
-            .as_ref()
-            .and_then(|o| o.get("params"))
-            .filter(|p| !p.is_null())
-        {
-            let plan = qql_core::params_json::plan_statement_params(p, 1)?;
-            qql_core::params_json::bind_stmt_with_params(
+        if let Some(p) = params {
+            let plan = qql_core::params_json::plan_value_params(p, 1)?;
+            qql_core::params_json::bind_stmt_with_values(
                 &mut inner,
-                qql_core::params_json::param_for(&plan, 0),
+                qql_core::params_json::param_value_for(&plan, 0),
             )?;
         }
         client.inner.execute_node(inner).await
@@ -587,7 +725,9 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
     .await
     .map_err(common::to_napi_err)?;
     let report = qql::executor::ExecutionReport::single(resp);
-    serde_json::to_string(&report).map_err(common::serde_napi_err)
+    serde_json::to_value(&report)
+        .map(common::jsoutput::BigIntSafeJson)
+        .map_err(common::serde_napi_err)
 }
 
 #[napi(
@@ -596,14 +736,18 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
 )]
 pub async fn execute(
     query: serde_json::Value,
-    options: Option<serde_json::Value>,
-) -> napi::Result<String> {
-    let client = JsClient::new(options.clone())?;
+    options: Option<common::execute::ExecOptionsInput>,
+) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+    let raw = options.as_ref().map(|o| o.raw.clone());
+    let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+    let client = JsClient::new(raw)?;
     let report = common::execute::run_then_close(
         &client.inner,
-        common::execute::execute_dispatch(&client.inner, query, options.as_ref()),
+        common::execute::execute_dispatch_typed(&client.inner, query, on_error, params),
     )
     .await
     .map_err(common::to_napi_err)?;
-    serde_json::to_string(&report).map_err(common::serde_napi_err)
+    serde_json::to_value(&report)
+        .map(common::jsoutput::BigIntSafeJson)
+        .map_err(common::serde_napi_err)
 }

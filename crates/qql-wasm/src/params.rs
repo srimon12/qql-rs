@@ -10,6 +10,8 @@ use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 use wasm_bindgen::prelude::*;
 
+use super::functions::qql_err_to_js;
+
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WasmOnError {
@@ -53,9 +55,7 @@ pub(crate) fn options_params(options: Option<&JsValue>) -> Result<Option<Value>,
     if value.is_undefined() || value.is_null() {
         return Ok(None);
     }
-    jsvalue_to_value(&value)
-        .map(Some)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    jsvalue_to_value(&value).map(Some).map_err(qql_err_to_js)
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -77,13 +77,12 @@ pub(crate) fn bind_value_params(
     truncate_vectors: bool,
 ) -> Result<String, JsValue> {
     qql_core::params_json::bind_str_with_values(query, params, truncate_vectors)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        .map_err(qql_err_to_js)
 }
 
 /// Map a params binding into a statement AST via the shared typed contract.
 pub(crate) fn bind_stmt_values(stmt: &mut ast::Stmt, params: &Value) -> Result<(), JsValue> {
-    qql_core::params_json::bind_stmt_with_values(stmt, params)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    qql_core::params_json::bind_stmt_with_values(stmt, params).map_err(qql_err_to_js)
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -150,9 +149,11 @@ pub(crate) fn jsvalue_to_shard_key(v: &JsValue) -> Result<Option<ast::ShardKey>,
 /// Scalars dispatch on `typeof` first so they never pay for typed-array
 /// probing. `Float32Array` / `Float64Array` bind as packed `F32Array` in one
 /// copy; `Int32Array` / `Uint32Array` bind as integer lists (sparse
-/// `indices`). Raw `ArrayBuffer` / views without a float dtype and `BigInt`
-/// fail closed with wrap-first guidance — the serde layer would otherwise
-/// reject them as non-JSON values.
+/// `indices`). `BigInt` binds exactly (`Int` when it fits `i64`, else `UInt`
+/// up to `u64::MAX`) so snowflake point IDs round-trip; anything larger fails
+/// closed. Raw `ArrayBuffer` / views without a float dtype fail closed with
+/// wrap-first guidance — the serde layer would otherwise reject them as
+/// non-JSON values.
 pub(crate) fn jsvalue_to_value(v: &JsValue) -> Result<Value, QqlError> {
     if v.is_null() || v.is_undefined() {
         return Ok(Value::Null);
@@ -171,6 +172,18 @@ pub(crate) fn jsvalue_to_value(v: &JsValue) -> Result<Value, QqlError> {
             return Ok(Value::Int(n as i64));
         }
         return Ok(Value::Float(n));
+    }
+    if let Ok(big) = v.clone().dyn_into::<js_sys::BigInt>() {
+        // Exact integers of any size (scroll cursors carry snowflake u64
+        // point IDs back through params); the value is checked, never
+        // rounded — same convention as `jsvalue_to_shard_key` and nqql.
+        if let Ok(n) = i64::try_from(big.clone()) {
+            return Ok(Value::Int(n));
+        }
+        if let Ok(n) = u64::try_from(big) {
+            return Ok(Value::UInt(n));
+        }
+        return Err(invalid_params("BigInt parameter does not fit in u64"));
     }
     jsvalue_object_to_value(v)
 }
@@ -237,7 +250,7 @@ fn jsvalue_object_to_value(v: &JsValue) -> Result<Value, QqlError> {
         }
         return Ok(Value::List(items));
     }
-    if v.is_function() || v.is_symbol() || v.is_bigint() {
+    if v.is_function() || v.is_symbol() {
         return Err(invalid_params(
             "unsupported value type for parameter binding (expected bool, int, float, str, list, dict, Float32Array, or Float64Array)",
         ));

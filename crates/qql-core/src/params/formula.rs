@@ -43,11 +43,11 @@ where
         }
         FormulaExpr::Neg { operand }
         | FormulaExpr::Abs { x: operand }
-        | FormulaExpr::Sqrt { x: operand }
-        | FormulaExpr::Log { x: operand }
-        | FormulaExpr::Ln { x: operand }
+        | FormulaExpr::Sqrt { x: operand, .. }
+        | FormulaExpr::Log { x: operand, .. }
+        | FormulaExpr::Ln { x: operand, .. }
         | FormulaExpr::Exp { x: operand }
-        | FormulaExpr::Acosh { x: operand } => {
+        | FormulaExpr::Acosh { x: operand, .. } => {
             bind_formula(operand, lookup, positional, bind_filter_fn)?;
         }
         FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
@@ -95,84 +95,5 @@ pub fn value_to_formula_constant(val: Value, span: Option<Span>) -> Result<Formu
             format!("formula parameter cannot be bound to value: {:?}", val),
             span,
         )),
-    }
-}
-
-/// Validate that a formula expression contains no unbound parameters.
-pub fn validate_no_unbound_formula(
-    expr: &FormulaExpr,
-    validate_filter_fn: &impl Fn(&FilterExpr) -> Result<(), QqlError>,
-    validate_value_fn: &impl Fn(&Value) -> Result<(), QqlError>,
-) -> Result<(), QqlError> {
-    match expr {
-        FormulaExpr::Variable { name } => {
-            if let Some(param_name) = name.strip_prefix(':') {
-                return Err(QqlError::validation(
-                    "QQL-BIND-MISSING-PARAM",
-                    format!("missing value for named parameter ':{}'", param_name),
-                    None,
-                ));
-            } else if let Some(idx_str) = name.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-MISSING-PARAM",
-                        format!("missing value for positional parameter '?{}'", idx),
-                        None,
-                    ));
-                } else {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-INVALID-PARAMS",
-                        format!("invalid positional parameter index '?{}'", idx_str),
-                        None,
-                    ));
-                }
-            }
-            Ok(())
-        }
-        FormulaExpr::Sum { left, right }
-        | FormulaExpr::Sub { left, right }
-        | FormulaExpr::Mul { left, right }
-        | FormulaExpr::Div { left, right, .. }
-        | FormulaExpr::Pow {
-            base: left,
-            exponent: right,
-        } => {
-            validate_no_unbound_formula(left, validate_filter_fn, validate_value_fn)?;
-            validate_no_unbound_formula(right, validate_filter_fn, validate_value_fn)
-        }
-        FormulaExpr::Neg { operand }
-        | FormulaExpr::Abs { x: operand }
-        | FormulaExpr::Sqrt { x: operand }
-        | FormulaExpr::Log { x: operand }
-        | FormulaExpr::Ln { x: operand }
-        | FormulaExpr::Exp { x: operand }
-        | FormulaExpr::Acosh { x: operand } => {
-            validate_no_unbound_formula(operand, validate_filter_fn, validate_value_fn)
-        }
-        FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
-            for arg in args {
-                validate_no_unbound_formula(arg, validate_filter_fn, validate_value_fn)?;
-            }
-            Ok(())
-        }
-        FormulaExpr::Decay { x, target, .. } => {
-            validate_no_unbound_formula(x, validate_filter_fn, validate_value_fn)?;
-            if let Some(t) = target {
-                validate_no_unbound_formula(t, validate_filter_fn, validate_value_fn)?;
-            }
-            Ok(())
-        }
-        FormulaExpr::Case { cond, then_, else_ } => {
-            validate_filter_fn(cond)?;
-            validate_no_unbound_formula(then_, validate_filter_fn, validate_value_fn)?;
-            validate_no_unbound_formula(else_, validate_filter_fn, validate_value_fn)
-        }
-        FormulaExpr::MatchCondition { values, .. } => {
-            for v in values {
-                validate_value_fn(v)?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
     }
 }

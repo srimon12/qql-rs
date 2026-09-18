@@ -91,6 +91,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-SAMPLE` | `SAMPLE` requires `RANDOM` |
 | `QQL-PARSE-SELECTOR` | A selector list cannot be empty |
 | `QQL-PARSE-SEPARATOR` | Multiple statements must be separated by a semicolon |
+| `QQL-PARSE-DELIMITER` | Unmatched closing delimiter, or unclosed bracket/paren/brace in a script |
 | `QQL-PARSE-STATEMENT-LIMIT` | A script may contain at most 256 statements |
 | `QQL-PARSE-ALTER-CONFIG` | `ALTER COLLECTION` requires at least one `WITH` clause |
 | `QQL-PARSE-SEARCH-PARAMS` | `PARAMS` requires at least one search parameter |
@@ -120,9 +121,11 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
 | `QQL-VALIDATION-ID-PREDICATE` | A point ID predicate uses an operator other than `=`, `!=`, `IN`, or `NOT IN` |
 | `QQL-VALIDATION-EMPTY-SCRIPT` | Nothing to execute — the query is empty, whitespace-only, or the statement list is empty |
+| `QQL-VALIDATION-FIELD` | An executor helper needs a non-empty payload field path |
 | `QQL-VALIDATION-POINT-ID` | A value used as a point ID is neither an unsigned integer nor a string |
 | `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
 | `QQL-VALIDATION-ALIASES` | Collection aliases are not supported on this backend |
+| `QQL-VALIDATION-COLLECTION` | An executor helper needs a non-empty collection name |
 | `QQL-VALIDATION-CONFIG` | Invalid collection configuration block or edge executor option value |
 | `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
 | `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
@@ -147,6 +150,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-BATCH-MIXED` | `BATCH` members mix collections or query/mutation families |
 | `QQL-VALIDATION-BATCH-PARAMS` | `PARAMS` timeout/consistency placed on a member instead of the `BATCH` header (or vice versa) |
 | `QQL-VALIDATION-BATCH-WAIT` | `WAIT` placed on a member instead of the `BATCH` header, or on a query batch |
+| `QQL-VALIDATION-ANALYZE-BATCH` | `EXPLAIN ANALYZE` does not support `BATCH` scripts; analyze single statements individually |
 | `QQL-VALIDATION-MIN-SHOULD` | `MIN SHOULD` count must be `>= 1` |
 
 ## Planning
@@ -164,6 +168,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-BATCH-CARDINALITY` | A batch RPC returned a different item count than the operations sent |
 | `QQL-BATCH-INVARIANT` | A mutation batch mixed collections or contained a non-mutation operation |
 | `QQL-CONFIG` | Local client config (`~/.qql/config.json`) is missing, unreadable, or unparsable |
+| `QQL-CLI-IO` | A script file could not be read from disk |
 | `QQL-PLAN-CROSS-RERANK-CANDIDATE` | A `CROSS RERANK` prefetch must plan as a search query |
 | `QQL-PLAN-CROSS-RERANK-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-CROSS-RERANK-MODEL` | `CROSS RERANK MODEL` must not be empty |
@@ -177,12 +182,14 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
+| `QQL-PLAN-RANGE-TYPE` | A range bound resolved to a non-scalar value; expected a number, string, or datetime |
 | `QQL-PLAN-RECOMMEND-AVERAGE` | `average_vector` examples must share one vector shape |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-SERIALIZE` | A plan IR request body failed JSON serialization (a `Serialize` regression) |
+| `QQL-PLAN-SCROLL-AFTER` | A `SCROLL ... AFTER` cursor has no next page (already the maximum point ID or UUID) |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-REST-BATCH` | `BATCH` runs through the batch RPCs, not a single REST route |
@@ -196,6 +203,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
 | `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service (upstream serves quota usage on the internal cluster port only, with no setter RPC); use REST (`SHOW QUOTAS` / `SET QUOTA`) |
+| `QQL-GRPC-RANGE-TYPE` | A string or datetime range bound has no `double` field in the bundled Qdrant proto; use the REST path for non-numeric bounds |
 | `QQL-GRPC-NO-RESULT` | A `collection_info` gRPC response is missing its `result` field |
 | `QQL-GRPC-RRF-K` | An `rrf_k` value exceeds the bundled Qdrant proto `uint32` range |
 | `QQL-GRPC-RRF-WEIGHT` | An `rrf_weights` value is not exactly representable as gRPC `f32` |
@@ -210,9 +218,12 @@ The same structured fields are projected differently by each host binding.
 | `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
 | `QQL-BACKEND-JSON` | A Qdrant response body failed JSON parsing |
 | `QQL-BACKEND-OPTIMIZE` | The backend has no in-process optimizer to run (only qdrant-edge does) |
+| `QQL-BACKEND-READ` | A Qdrant response body could not be read (connection cut mid-stream) |
 | `QQL-BACKEND-STRICT-MODE` | The request violates the collection's strict-mode / quota limits |
 | `QQL-TIMEOUT` | Batch execution exceeded its deadline |
 | `QQL-TRANSPORT` | HTTP client, request, or body failure (carries the request id) |
+| `QQL-TRANSPORT-BUILD` | The HTTP client could not be built (invalid timeout or TLS config) |
+| `QQL-TRANSPORT-REQUEST` | The HTTP request failed in flight (connection error or timeout; the message carries the request id) |
 
 ## Value conversion
 
@@ -220,6 +231,8 @@ The same structured fields are projected differently by each host binding.
 |---|---|
 | `QQL-JSON-NONFINITE` | A non-finite float cannot be serialized to JSON |
 | `QQL-JSON-NUMBER` | A value cannot be represented as a JSON number |
+| `QQL-SERIALIZE` | Response data failed JSON serialization for the host environment |
+| `QQL-SERIALIZE-AST` | AST failed JSON serialization during bindings export |
 
 ## Binding
 
@@ -241,6 +254,7 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
 | `QQL-BIND-UNSUPPORTED-STATEMENT` | Parameter binding attempted on an unsupported statement type (e.g. DDL) |
 | `QQL-BIND-ALREADY-BOUND` | New params were passed to an already-bound `Stmt` — they would be silently ignored |
+| `QQL-BIND-HEADER` | The leading `-- qql-params: {...}` header is malformed, not single-line JSON, or outside the first 10 lines |
 
 ## Execution
 
@@ -256,6 +270,7 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | Code | Meaning |
 |---|---|
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
+| `QQL-EMBEDDING-UNAVAILABLE` | No embedder is configured or reachable for text/image embedding |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
 | `QQL-EMBEDDING` | The requested dense model is unavailable on this embedder (omit `MODEL` or use `'default'`) |
 | `QQL-EMBEDDING-DIM` | `embedding_dimension` must be configured when creating collections with `USING MODEL` in local inference mode |
@@ -263,6 +278,15 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-EMBEDDING-MODEL` | The requested embedding model is not available from the configured embedder |
 | `QQL-EMBEDDING-MULTI` | Multivector embedding is unavailable (no multi path configured) |
 | `QQL-EMBEDDING-SPARSE` | Sparse embedding is unavailable on this embedder (non-default `MODEL` with local BM25) |
+
+## Lint & formatting
+
+Codes emitted by `qql lint` and `qql fmt` for static code quality and idiom checks.
+
+| Code | Meaning |
+|---|---|
+| `QQL-FMT-NON-CANONICAL` | The file requires formatting to match canonical QQL style (`qql fmt --check`) |
+| `QQL-IDIOM-REDUNDANT-PAYLOAD` | Redundant `WITH PAYLOAD true` clause; payloads are returned by default in QQL |
 
 ## Request correlation
 
@@ -311,11 +335,13 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS`; qdrant-edge has no params setter |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION`; qdrant-edge has no quantization setter |
 | `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR (<name>)` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`); qdrant-edge exposes `set_vector_hnsw_config` only |
+| `QQL-EDGE-UNSUPPORTED-WAIT` | `WAIT false` on mutation batches; qdrant-edge applies every write synchronously |
 | `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE (<name>)`; qdrant-edge has no sparse vector config setter |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` (replication, fan-out, payload memory) |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys qdrant-edge excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-CROSS-RERANK` | `QUERY CROSS RERANK` needs a pair-scoring embedder; use the remote runtime |
 | `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
@@ -388,11 +414,13 @@ QQL-BACKEND-HTTP
 QQL-BACKEND-INDEX-NOT-READY
 QQL-BACKEND-JSON
 QQL-BACKEND-OPTIMIZE
+QQL-BACKEND-READ
 QQL-BACKEND-STRICT-MODE
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
 QQL-BIND-BATCH-LENGTH
 QQL-BIND-DUPLICATE-PARAM
+QQL-BIND-HEADER
 QQL-BIND-INVALID-PARAMS
 QQL-BIND-MISSING-PARAM
 QQL-BIND-MISSING-POSITIONAL
@@ -402,6 +430,7 @@ QQL-BIND-TYPE-MISMATCH
 QQL-BIND-UNBOUND-PARAM
 QQL-BIND-UNSUPPORTED-STATEMENT
 QQL-BIND-UNUSED-PARAMS
+QQL-CLI-IO
 QQL-CLIENT-CLOSED
 QQL-CONFIG
 QQL-CROSS-RERANK
@@ -442,6 +471,7 @@ QQL-EDGE-UNSUPPORTED-ALTER-PARAMS
 QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION
 QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS
 QQL-EDGE-UNSUPPORTED-CONSISTENCY
+QQL-EDGE-UNSUPPORTED-CROSS-RERANK
 QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION
 QQL-EDGE-UNSUPPORTED-GROUP-LOOKUP
 QQL-EDGE-UNSUPPORTED-METADATA
@@ -456,6 +486,7 @@ QQL-EDGE-UNSUPPORTED-SPARSE-DIFF
 QQL-EDGE-UNSUPPORTED-STRICT-MODE
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-UNSUPPORTED-VECTOR-DIFF
+QQL-EDGE-UNSUPPORTED-WAIT
 QQL-EDGE-UNSUPPORTED-WAL
 QQL-EDGE-UPSERT-MODE-ONLY
 QQL-EDGE-VECTOR
@@ -468,6 +499,8 @@ QQL-EMBEDDING-MULTI
 QQL-EMBEDDING-SPARSE
 QQL-EMBEDDING-TARGET
 QQL-EMBEDDING-TOPOLOGY
+QQL-EMBEDDING-UNAVAILABLE
+QQL-FMT-NON-CANONICAL
 QQL-GRPC
 QQL-GRPC-BATCH
 QQL-GRPC-DDL-RANGE
@@ -478,9 +511,11 @@ QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
 QQL-GRPC-NO-RESULT
 QQL-GRPC-QUOTA
+QQL-GRPC-RANGE-TYPE
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
 QQL-GRPC-SCROLL-LIMIT
+QQL-IDIOM-REDUNDANT-PAYLOAD
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER
 QQL-LEX-CHAR
@@ -493,6 +528,7 @@ QQL-PARSE-CLAUSE-ORDER
 QQL-PARSE-COMPARISON
 QQL-PARSE-COUNT-CONFIG
 QQL-PARSE-CROSS-RERANK
+QQL-PARSE-DELIMITER
 QQL-PARSE-DUPLICATE-CLAUSE
 QQL-PARSE-DUPLICATE-CTE
 QQL-PARSE-DUPLICATE-KEY
@@ -556,11 +592,13 @@ QQL-PLAN-INDEX-TYPE
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-QUOTA
+QQL-PLAN-RANGE-TYPE
 QQL-PLAN-RECOMMEND-AVERAGE
 QQL-PLAN-RERANK-PREFETCH
 QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
+QQL-PLAN-SCROLL-AFTER
 QQL-PLAN-SERIALIZE
 QQL-PLAN-SHARD-KEY
 QQL-PLAN-UNSUPPORTED-PREFETCH
@@ -571,24 +609,31 @@ QQL-RERANK-CROSS-FIELD
 QQL-REST-BATCH
 QQL-REST-CLIENT-SIDE
 QQL-REST-OVERWRITE-BATCH-ONLY
+QQL-SERIALIZE
+QQL-SERIALIZE-AST
 QQL-SNAPSHOT-IO
 QQL-SNAPSHOT-SHARD
 QQL-SNAPSHOT-URL
 QQL-TIMEOUT
 QQL-TRANSPORT
+QQL-TRANSPORT-BUILD
+QQL-TRANSPORT-REQUEST
 QQL-UNKNOWN-VECTOR
 QQL-VALIDATION-ACORN-SELECTIVITY
 QQL-VALIDATION-ALIASES
+QQL-VALIDATION-ANALYZE-BATCH
 QQL-VALIDATION-BATCH-EMPTY
 QQL-VALIDATION-BATCH-MEMBER
 QQL-VALIDATION-BATCH-MIXED
 QQL-VALIDATION-BATCH-PARAMS
 QQL-VALIDATION-BATCH-WAIT
+QQL-VALIDATION-COLLECTION
 QQL-VALIDATION-CONFIG
 QQL-VALIDATION-CONSISTENCY
 QQL-VALIDATION-CREATE-MODEL
 QQL-VALIDATION-CROSS-RERANK-PREFETCH
 QQL-VALIDATION-EMPTY-SCRIPT
+QQL-VALIDATION-FIELD
 QQL-VALIDATION-FILTER-INJECT
 QQL-VALIDATION-FROM
 QQL-VALIDATION-FUSION

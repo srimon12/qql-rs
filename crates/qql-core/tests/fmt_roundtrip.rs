@@ -4,6 +4,7 @@
 //! 1. `parse(format(fixture))` produces the identical AST as `parse(fixture)`.
 //! 2. `format(format(fixture)) == format(fixture)` (idempotent / stable).
 
+use qql_core::ast::{PrefetchSource, QueryExpr, QueryStmt, Stmt};
 use qql_core::fmt;
 use qql_core::parser::Parser;
 
@@ -36,17 +37,72 @@ fn every_valid_fixture_round_trips() {
     let corpus = fixtures();
     assert!(!corpus.is_empty(), "fixture corpus should not be empty");
     for (name, source) in &corpus {
-        let expected = Parser::parse_all(source)
+        let mut expected = Parser::parse_all(source)
             .unwrap_or_else(|e| panic!("fixture {} failed to parse: {e}", name));
         let formatted = fmt::format(source)
             .unwrap_or_else(|e| panic!("fixture {} failed to format: {e}", name));
-        let reparsed = Parser::parse_all(&formatted).unwrap_or_else(|e| {
+        let mut reparsed = Parser::parse_all(&formatted).unwrap_or_else(|e| {
             panic!(
                 "formatted {} failed to re-parse: {e}\n---\n{}",
                 name, formatted
             )
         });
+        // Source locations shift whenever the formatter rewrites preceding
+        // text, so they are not part of round-trip semantics: strip them
+        // before comparing (mirrors `transform`'s CTE/prefetch recursion).
+        for stmts in [&mut expected, &mut reparsed] {
+            for stmt in stmts {
+                strip_spans(stmt);
+            }
+        }
         assert_eq!(reparsed, expected, "AST mismatch for {name}");
+    }
+}
+
+/// Clear stored source spans recursively (see `strip_spans` rationale above).
+fn strip_spans(stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Query(q) => strip_query_spans(q),
+        Stmt::Batch(batch) => {
+            for member in &mut batch.statements {
+                strip_spans(member);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn strip_query_spans(q: &mut QueryStmt) {
+    q.collection_span = None;
+    if let Some(group) = q.group.as_mut() {
+        group.field_span = None;
+    }
+    for cte in &mut q.ctes {
+        strip_query_spans(&mut cte.query);
+    }
+    // Mirrors `transform`'s prefetch recursion; deliberately exhaustive so a
+    // new prefetch-carrying variant fails to compile here until covered.
+    let prefetch = match &mut q.expression {
+        QueryExpr::Nearest { prefetch, .. }
+        | QueryExpr::Recommend { prefetch, .. }
+        | QueryExpr::Context { prefetch, .. }
+        | QueryExpr::Discover { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. }
+        | QueryExpr::RelevanceFeedback { prefetch, .. }
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => Some(prefetch),
+        QueryExpr::Points { .. }
+        | QueryExpr::OrderBy { .. }
+        | QueryExpr::SampleRandom
+        | QueryExpr::Hybrid { .. } => None,
+    };
+    if let Some(prefetches) = prefetch {
+        for stage in prefetches {
+            if let PrefetchSource::Query(nested) = &mut stage.source {
+                strip_query_spans(nested);
+            }
+        }
     }
 }
 

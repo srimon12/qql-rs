@@ -19,7 +19,7 @@ use qql_plan::{
 };
 
 use crate::executor::response::{
-    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit,
+    BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_f64,
 };
 use crate::executor::telemetry::{
     HardwareUsage, InferenceUsage, ModelUsage, ServerTelemetry, ServerUsage,
@@ -34,12 +34,13 @@ fn envelope_err(message: impl Into<String>) -> QqlError {
 
 /// Proto `PointId` → typed plan id. A missing id or an optionless `PointId`
 /// is a backend contract violation, not a fabricated `<missing-id>` string.
-pub(crate) fn point_id_to_plan(id: Option<&qdrant::PointId>) -> Result<PlanPointId, QqlError> {
+/// Takes ownership: UUID strings move out instead of cloning.
+pub(crate) fn point_id_to_plan(id: Option<qdrant::PointId>) -> Result<PlanPointId, QqlError> {
     use qdrant::point_id::PointIdOptions;
     let point_id = id.ok_or_else(|| envelope_err("point is missing its id"))?;
-    match &point_id.point_id_options {
-        Some(PointIdOptions::Num(n)) => Ok(PlanPointId::Number(*n)),
-        Some(PointIdOptions::Uuid(s)) => Ok(PlanPointId::String(s.clone())),
+    match point_id.point_id_options {
+        Some(PointIdOptions::Num(n)) => Ok(PlanPointId::Number(n)),
+        Some(PointIdOptions::Uuid(s)) => Ok(PlanPointId::String(s)),
         None => Err(envelope_err("point id carries neither num nor uuid")),
     }
 }
@@ -72,36 +73,36 @@ fn payload_to_typed(
     }
 }
 
-/// One proto `VectorOutput` → typed vector value.
-fn vector_output_to_plan(vo: &qdrant::VectorOutput) -> Result<PlanVectorValue, QqlError> {
+/// One proto `VectorOutput` → typed vector value. Takes ownership: dense
+/// payloads and sparse index/value vectors move out instead of cloning.
+fn vector_output_to_plan(vo: qdrant::VectorOutput) -> Result<PlanVectorValue, QqlError> {
     use qdrant::vector_output;
-    match &vo.vector {
-        Some(vector_output::Vector::Dense(dense)) => Ok(PlanVectorValue::Dense(dense.data.clone())),
+    match vo.vector {
+        Some(vector_output::Vector::Dense(dense)) => Ok(PlanVectorValue::Dense(dense.data)),
         Some(vector_output::Vector::Sparse(sparse)) => Ok(PlanVectorValue::Sparse {
-            indices: sparse.indices.clone(),
-            values: sparse.values.clone(),
+            indices: sparse.indices,
+            values: sparse.values,
         }),
         Some(vector_output::Vector::MultiDense(multi)) => Ok(PlanVectorValue::MultiDense(
-            multi.vectors.iter().map(|d| d.data.clone()).collect(),
+            multi.vectors.into_iter().map(|d| d.data).collect(),
         )),
         None => Err(envelope_err("vector output carries no vector")),
     }
 }
 
-/// Proto `VectorsOutput` → typed [`PlanVectorStruct`] (single or named set).
-pub(crate) fn vectors_output_to_typed(
-    vectors: &qdrant::VectorsOutput,
-) -> Result<PlanVectorStruct, QqlError> {
+/// Proto `VectorsOutput` → typed [`PlanVectorStruct`] (single or named set),
+/// moving vector payloads out of the owned proto message.
+fn vectors_output_to_owned(vectors: qdrant::VectorsOutput) -> Result<PlanVectorStruct, QqlError> {
     use qdrant::vectors_output::VectorsOptions;
-    match &vectors.vectors_options {
+    match vectors.vectors_options {
         Some(VectorsOptions::Vector(vo)) => {
             Ok(PlanVectorStruct::Single(vector_output_to_plan(vo)?))
         }
         Some(VectorsOptions::Vectors(named)) => {
             let entries = named
                 .vectors
-                .iter()
-                .map(|(name, vo)| Ok((name.clone(), vector_output_to_plan(vo)?)))
+                .into_iter()
+                .map(|(name, vo)| Ok((name, vector_output_to_plan(vo)?)))
                 .collect::<Result<BTreeMap<_, _>, QqlError>>()?;
             Ok(PlanVectorStruct::Named(entries))
         }
@@ -109,50 +110,64 @@ pub(crate) fn vectors_output_to_typed(
     }
 }
 
+/// Borrowed entry point for [`vectors_output_to_owned`] (parity tests only —
+/// gated accordingly; production paths move owned messages through
+/// [`vector_to_typed`]).
+#[cfg(test)]
+pub(crate) fn vectors_output_to_typed(
+    vectors: &qdrant::VectorsOutput,
+) -> Result<PlanVectorStruct, QqlError> {
+    vectors_output_to_owned(vectors.clone())
+}
+
 fn vector_to_typed(
-    vectors: &Option<qdrant::VectorsOutput>,
+    vectors: Option<qdrant::VectorsOutput>,
 ) -> Result<Option<PlanVectorStruct>, QqlError> {
-    vectors.as_ref().map(vectors_output_to_typed).transpose()
+    vectors.map(vectors_output_to_owned).transpose()
 }
 
 /// Proto `ScoredPoint` → [`SearchHit`]. `version`, `shard_key` and
-/// `order_value` are absent from the hit IR.
-pub(crate) fn scored_point_to_hit(p: qdrant::ScoredPoint) -> Result<SearchHit, QqlError> {
+/// `order_value` are absent from the hit IR. The proto `float` score rounds
+/// once through [`score_f64`], matching the REST ingestion path.
+pub(crate) fn scored_point_to_hit(mut p: qdrant::ScoredPoint) -> Result<SearchHit, QqlError> {
     Ok(SearchHit {
-        id: point_id_to_plan(p.id.as_ref())?,
-        score: p.score,
+        id: point_id_to_plan(p.id.take())?,
+        score: score_f64(p.score),
         payload: payload_to_typed(p.payload),
         collection: None,
-        vector: vector_to_typed(&p.vectors)?,
+        vector: vector_to_typed(p.vectors.take())?,
     })
 }
 
 /// Proto `RetrievedPoint` → [`SearchHit`] with an unscored `0.0` score.
-pub(crate) fn retrieved_point_to_hit(p: qdrant::RetrievedPoint) -> Result<SearchHit, QqlError> {
+pub(crate) fn retrieved_point_to_hit(mut p: qdrant::RetrievedPoint) -> Result<SearchHit, QqlError> {
     Ok(SearchHit {
-        id: point_id_to_plan(p.id.as_ref())?,
+        id: point_id_to_plan(p.id.take())?,
         score: 0.0,
         payload: payload_to_typed(p.payload),
         collection: None,
-        vector: vector_to_typed(&p.vectors)?,
+        vector: vector_to_typed(p.vectors.take())?,
     })
 }
 
-/// Proto `GroupId` → typed group key.
-fn group_id_to_plan(id: &qdrant::GroupId) -> Result<PlanGroupId, QqlError> {
-    match &id.kind {
-        Some(qdrant::group_id::Kind::UnsignedValue(n)) => Ok(PlanGroupId::Unsigned(*n)),
-        Some(qdrant::group_id::Kind::IntegerValue(i)) => Ok(PlanGroupId::Signed(*i)),
-        Some(qdrant::group_id::Kind::StringValue(s)) => Ok(PlanGroupId::Keyword(s.clone())),
+/// Proto `GroupId` → typed group key. Takes ownership: keyword strings move
+/// out instead of cloning.
+fn group_id_to_plan(id: qdrant::GroupId) -> Result<PlanGroupId, QqlError> {
+    match id.kind {
+        Some(qdrant::group_id::Kind::UnsignedValue(n)) => Ok(PlanGroupId::Unsigned(n)),
+        Some(qdrant::group_id::Kind::IntegerValue(i)) => Ok(PlanGroupId::Signed(i)),
+        Some(qdrant::group_id::Kind::StringValue(s)) => Ok(PlanGroupId::Keyword(s)),
         None => Err(envelope_err("group id carries no value")),
     }
 }
 
 /// Proto `PointGroup` → typed [`GroupedSearchResult`]. `lookup` has no typed
 /// IR field and is dropped.
-pub(crate) fn point_group_to_typed(g: qdrant::PointGroup) -> Result<GroupedSearchResult, QqlError> {
+pub(crate) fn point_group_to_typed(
+    mut g: qdrant::PointGroup,
+) -> Result<GroupedSearchResult, QqlError> {
     let id =
-        g.id.as_ref()
+        g.id.take()
             .ok_or_else(|| envelope_err("group is missing its id"))?;
     Ok(GroupedSearchResult {
         group_id: group_id_to_plan(id)?,

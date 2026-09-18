@@ -12,7 +12,7 @@ use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 use super::client::Client;
-use super::functions::to_js_value;
+use super::functions::{qql_err_to_js, to_js_value};
 use super::params::{bind_stmt_values, bind_value_params, extract_ast_stmt, options_params};
 use super::response::wasm_success_response;
 use super::telemetry::telemetry_from_envelope;
@@ -50,15 +50,14 @@ impl Client {
         }
         if let Some(mut stmt) = extract_ast_stmt(&query) {
             if let Some(ref p) = params {
-                let plan = qql_core::params_json::plan_value_params(p, 1)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let plan = qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
                 bind_stmt_values(&mut stmt, qql_core::params_json::param_value_for(&plan, 0))?;
             }
             return self.analyze_stmt(stmt, 0.0, total_start).await;
         }
         if let Some(s) = query.as_string() {
             let parse_start = now_ms();
-            let mut stmts = Parser::parse_all(&s).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let mut stmts = Parser::parse_all(&s).map_err(qql_err_to_js)?;
             if stmts.is_empty() {
                 let err = QqlError::validation(
                     "QQL-VALIDATION-EMPTY-SCRIPT",
@@ -82,14 +81,12 @@ impl Client {
             let mut stmt = stmts.pop().expect("single stmt");
             let parse_ms = now_ms() - parse_start;
             if let Some(ref p) = params {
-                let plan = qql_core::params_json::plan_value_params(p, 1)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let plan = qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
                 let bound_str =
                     bind_value_params(&s, qql_core::params_json::param_value_for(&plan, 0), false)?;
                 // Re-parse the bound source so text embeddings and vector roles
                 // resolve from concrete values, matching `execute`.
-                let mut bound_stmts =
-                    Parser::parse_all(&bound_str).map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let mut bound_stmts = Parser::parse_all(&bound_str).map_err(qql_err_to_js)?;
                 stmt = bound_stmts.pop().expect("single bound stmt");
             }
             return self.analyze_stmt(stmt, parse_ms, total_start).await;
@@ -108,20 +105,11 @@ impl Client {
         let mut prepared = stmt.clone();
         self.resolve_stmt_vector_kinds(&mut prepared).await?;
         self.resolve_stmt_embeddings(&mut prepared).await?;
-        let planned = qql_plan::plan(&prepared).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let planned = qql_plan::plan(&prepared).map_err(qql_err_to_js)?;
         let prepare_plan_ms = now_ms() - prepare_start;
         let dispatch_start = now_ms();
-        let route = qql_plan::to_rest_route(&planned).map_err(|err| match err {
-            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => {
-                JsValue::from_str(&format!("{stmt_type} has no single Qdrant REST route"))
-            }
-            qql_plan::RestProjectionError::SerializeFailed { message } => {
-                JsValue::from_str(&format!("plan IR serialization failed: {message}"))
-            }
-            qql_plan::RestProjectionError::OverwriteRequiresBatch => JsValue::from_str(
-                "OVERWRITE has no single REST route: POST /points/payload is merge-only; use a BATCH block",
-            ),
-        })?;
+        let route =
+            qql_plan::to_rest_route(&planned).map_err(|err| qql_err_to_js(err.to_qql_error()))?;
         let envelope = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;

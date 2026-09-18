@@ -37,6 +37,10 @@ pub enum EdgeUnsupported {
     Timeout,
     /// `PARAMS (consistency = …)`.
     Consistency,
+    /// `WAIT false` on mutation batches (no async acknowledgement path).
+    Wait,
+    /// `QUERY CROSS RERANK` via direct backend execution.
+    CrossRerank,
     /// `SHOW QUOTAS` / `SET QUOTA`.
     Quota,
     /// `RECOMMEND … STRATEGY average_vector`.
@@ -69,6 +73,8 @@ impl EdgeUnsupported {
             Self::OptimizerKey => "QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY",
             Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
             Self::Consistency => "QQL-EDGE-UNSUPPORTED-CONSISTENCY",
+            Self::Wait => "QQL-EDGE-UNSUPPORTED-WAIT",
+            Self::CrossRerank => "QQL-EDGE-UNSUPPORTED-CROSS-RERANK",
             Self::Quota => "QQL-EDGE-UNSUPPORTED-QUOTA",
             Self::RecommendAverageVector => "QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY",
             Self::PointReferenceQuery => "QQL-EDGE-UNSUPPORTED-POINT-REF",
@@ -100,6 +106,8 @@ impl EdgeUnsupported {
             }
             Self::Timeout => "PARAMS (timeout = …)",
             Self::Consistency => "PARAMS (consistency = …)",
+            Self::Wait => "WAIT false on mutation batches",
+            Self::CrossRerank => "QUERY CROSS RERANK",
             Self::Quota => "SHOW QUOTAS / SET QUOTA",
             Self::RecommendAverageVector => {
                 "RECOMMEND STRATEGY average_vector (QQL default when STRATEGY is omitted)"
@@ -151,6 +159,12 @@ impl EdgeUnsupported {
             Self::Consistency => {
                 "qdrant-edge is a single-node engine with no replica consistency levels"
             }
+            Self::Wait => {
+                "qql-edge applies every write synchronously before returning; it has no async acknowledgement path to return before apply"
+            }
+            Self::CrossRerank => {
+                "reranking runs client-side in the executor over scored pairs; direct backend execution has no cross-encoder path"
+            }
             Self::Quota => {
                 "qdrant-edge has no quotas API; Qdrant serves quotas only from the cluster REST /quotas endpoint"
             }
@@ -177,6 +191,9 @@ impl EdgeUnsupported {
     pub fn remote_hint(self) -> Option<&'static str> {
         match self {
             Self::CollectionParams | Self::PointReferenceQuery => None,
+            Self::CrossRerank => {
+                Some("Run CROSS RERANK through the Executor, which scores pairs client-side")
+            }
             Self::RecommendAverageVector => Some(
                 "Use STRATEGY best_score or sum_scores offline, or remote Qdrant for average_vector",
             ),
@@ -304,6 +321,8 @@ mod tests {
 
     #[test]
     fn catalog_codes_are_stable_and_unique_for_primary_features() {
+        // Exhaustive: adding a variant without extending this list fails
+        // compilation, so new codes always get the uniqueness assertion.
         let features = [
             EdgeUnsupported::GroupLookup,
             EdgeUnsupported::ShardRouting,
@@ -315,9 +334,18 @@ mod tests {
             EdgeUnsupported::AlterSparseVectorDiff,
             EdgeUnsupported::CollectionParams,
             EdgeUnsupported::OptimizerKey,
-            EdgeUnsupported::RecommendAverageVector,
+            EdgeUnsupported::Timeout,
+            EdgeUnsupported::Consistency,
+            EdgeUnsupported::Wait,
+            EdgeUnsupported::CrossRerank,
             EdgeUnsupported::Quota,
+            EdgeUnsupported::RecommendAverageVector,
+            EdgeUnsupported::FormulaNary,
             EdgeUnsupported::PointReferenceQuery,
+            EdgeUnsupported::Route { path_hint: "test" },
+            EdgeUnsupported::Wal,
+            EdgeUnsupported::StrictMode,
+            EdgeUnsupported::Metadata,
         ];
         let mut codes = std::collections::BTreeSet::new();
         for f in features {
@@ -339,11 +367,20 @@ mod tests {
                 "{msg}"
             );
             if f.remote_hint().is_some() {
-                assert!(
-                    msg.to_ascii_lowercase().contains("remote")
-                        || msg.to_ascii_lowercase().contains("best_score"),
-                    "expected remediation in: {msg}"
-                );
+                // CrossRerank remediates through the client-side Executor,
+                // not remote Qdrant, so its message names the Executor.
+                if matches!(f, EdgeUnsupported::CrossRerank) {
+                    assert!(
+                        msg.to_ascii_lowercase().contains("executor"),
+                        "expected executor remediation in: {msg}"
+                    );
+                } else {
+                    assert!(
+                        msg.to_ascii_lowercase().contains("remote")
+                            || msg.to_ascii_lowercase().contains("best_score"),
+                        "expected remediation in: {msg}"
+                    );
+                }
             }
         }
     }

@@ -159,14 +159,37 @@ fn rest_grpc_relevance_feedback_parity() {
 
 #[test]
 fn match_except_filter_contract_matches_openapi() {
-    // `MatchValue::Except` has no QQL surface syntax (there is no
-    // `MATCH EXCEPT` keyword in `qql-core`), so it is covered at the
-    // typed level: serialize the plan type and validate the REST shape.
+    // `MATCH EXCEPT` is QQL surface syntax (`qql-core` parses it to
+    // `FilterExpr::MatchExcept`), so it is covered both ways: first the
+    // end-to-end lowered route body, then the typed plan shape directly.
     // The gRPC half is covered by
     // `grpc_exact_list_match_is_homogeneous_and_fallible`.
     let Some(openapi) = openapi_or_skip() else {
         return;
     };
+
+    // 1. QQL surface: parse → route → OpenAPI Filter.
+    let stmt =
+        Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE tags MATCH EXCEPT ('a', 'b');")
+            .expect("MATCH EXCEPT parses");
+    let body = to_rest_route(&plan(&stmt).expect("MATCH EXCEPT plans"))
+        .expect("MATCH EXCEPT routes")
+        .body_json()
+        .expect("MATCH EXCEPT has a body");
+    let filter = body.get("filter").expect("route body carries a filter");
+    let norm_filter = if filter.get("must").is_none()
+        && filter.get("should").is_none()
+        && filter.get("must_not").is_none()
+    {
+        serde_json::json!({ "must": [filter] })
+    } else {
+        filter.clone()
+    };
+    assert_eq!(
+        norm_filter["must"][0]["match"]["except"],
+        serde_json::json!(["a", "b"])
+    );
+    validate_ref(&openapi, "Filter", &norm_filter);
     use qql_plan::{FieldCondition, FilterClause, MatchValue};
     let clause = FilterClause::Field(Box::new(FieldCondition {
         key: "tag".into(),
@@ -179,6 +202,60 @@ fn match_except_filter_contract_matches_openapi() {
         "must": [serde_json::to_value(&clause).expect("except clause serializes")],
     });
     validate_ref(&openapi, "Filter", &filter);
+}
+
+#[test]
+fn grpc_range_rejects_non_numeric_bounds() {
+    // The bundled proto's `Range` carries doubles only. Numeric bounds
+    // convert; string and datetime bounds error (`QQL-GRPC-RANGE-TYPE`)
+    // instead of lowering to a silent `None` — an empty range that matches
+    // wrong rows. REST keeps carrying them as strings.
+    let stmt =
+        Parser::parse("QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE age >= 21 LIMIT 5;")
+            .unwrap();
+    let op = plan(&stmt).unwrap();
+    let PlannedOperation::Query {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected Query");
+    };
+    let qp = test_api::to_query_points(request, collection).unwrap();
+    let range = qp
+        .filter
+        .expect("filter converts")
+        .must
+        .swap_remove(0)
+        .condition_one_of
+        .and_then(|c| match c {
+            qdrant::condition::ConditionOneOf::Field(f) => f.range,
+            _ => None,
+        })
+        .expect("numeric bound converts to a proto range");
+    assert_eq!(range.gte, Some(21.0));
+
+    for sql in [
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE created_at >= '2024-01-01T00:00:00Z' LIMIT 5;",
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE name > 'm' LIMIT 5;",
+    ] {
+        let stmt = Parser::parse(sql).unwrap();
+        let op = plan(&stmt).unwrap();
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        assert!(
+            body["filter"]["must"][0]["range"].is_object(),
+            "REST keeps the string bound: {body}"
+        );
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+        let err = test_api::to_query_points(request, collection).unwrap_err();
+        assert_eq!(err.code, "QQL-GRPC-RANGE-TYPE");
+    }
 }
 
 #[test]

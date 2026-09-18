@@ -72,10 +72,23 @@ class HttpEmbedder {
     if (apiKey !== undefined && typeof apiKey !== 'string') {
       throw new TypeError('HttpEmbedder apiKey must be a string');
     }
-    for (const key of ['multiApiKey', 'imageApiKey']) {
-      const value = options[key] ?? options[key === 'multiApiKey' ? 'multi_api_key' : 'image_api_key'];
+    // Optional endpoint/model/apiKey fields: type-checked here like pyqql's
+    // HttpEmbedder extractor (non-strings raise instead of failing later at
+    // the native layer). Empty strings stay unset, matching pyqql's filter.
+    for (const [camel, snake] of [
+      ['multiEndpoint', 'multi_endpoint'],
+      ['multiApiKey', 'multi_api_key'],
+      ['multiModel', 'multi_model'],
+      ['imageEndpoint', 'image_endpoint'],
+      ['imageApiKey', 'image_api_key'],
+      ['imageModel', 'image_model'],
+      ['rerankEndpoint', 'rerank_endpoint'],
+      ['rerankApiKey', 'rerank_api_key'],
+      ['rerankModel', 'rerank_model'],
+    ]) {
+      const value = options[camel] ?? options[snake];
       if (value !== undefined && typeof value !== 'string') {
-        throw new TypeError(`HttpEmbedder ${key} must be a string`);
+        throw new TypeError(`HttpEmbedder ${camel} must be a string`);
       }
     }
     for (const key of ['multiDimension', 'imageDimension']) {
@@ -96,6 +109,53 @@ class HttpEmbedder {
         throw new TypeError(`HttpEmbedder ${camel} must be a number`);
       }
     }
+    // BM25 text processing: names validated fail-closed natively.
+    for (const [camel, snake] of [
+      ['bm25Language', 'bm25_language'],
+      ['bm25Tokenizer', 'bm25_tokenizer'],
+      ['bm25Stemmer', 'bm25_stemmer'],
+    ]) {
+      const value = options[camel] ?? options[snake];
+      if (value !== undefined && typeof value !== 'string') {
+        throw new TypeError(`HttpEmbedder ${camel} must be a string`);
+      }
+    }
+    for (const [camel, snake] of [
+      ['bm25Lowercase', 'bm25_lowercase'],
+      ['bm25AsciiFolding', 'bm25_ascii_folding'],
+    ]) {
+      const value = options[camel] ?? options[snake];
+      if (value !== undefined && typeof value !== 'boolean') {
+        throw new TypeError(`HttpEmbedder ${camel} must be a boolean`);
+      }
+    }
+    {
+      const value = options.bm25Stopwords ?? options.bm25_stopwords;
+      if (
+        value !== undefined &&
+        !(Array.isArray(value) && value.every((item) => typeof item === 'string'))
+      ) {
+        throw new TypeError('HttpEmbedder bm25Stopwords must be an array of strings');
+      }
+    }
+    {
+      const value = options.bm25StopwordsLanguages ?? options.bm25_stopwords_languages;
+      if (
+        value !== undefined &&
+        !(Array.isArray(value) && value.every((item) => typeof item === 'string'))
+      ) {
+        throw new TypeError('HttpEmbedder bm25StopwordsLanguages must be an array of strings');
+      }
+    }
+    for (const [camel, snake] of [
+      ['bm25MinTokenLen', 'bm25_min_token_len'],
+      ['bm25MaxTokenLen', 'bm25_max_token_len'],
+    ]) {
+      const value = options[camel] ?? options[snake];
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+        throw new TypeError(`HttpEmbedder ${camel} must be a non-negative integer`);
+      }
+    }
     this.endpoint = options.endpoint;
     this.apiKey = apiKey ?? '';
     this.model = options.model;
@@ -114,6 +174,15 @@ class HttpEmbedder {
     this.bm25K1 = options.bm25K1 ?? options.bm25_k1;
     this.bm25B = options.bm25B ?? options.bm25_b;
     this.bm25AvgLen = options.bm25AvgLen ?? options.bm25_avg_len;
+    this.bm25Language = options.bm25Language ?? options.bm25_language;
+    this.bm25Tokenizer = options.bm25Tokenizer ?? options.bm25_tokenizer;
+    this.bm25Lowercase = options.bm25Lowercase ?? options.bm25_lowercase;
+    this.bm25AsciiFolding = options.bm25AsciiFolding ?? options.bm25_ascii_folding;
+    this.bm25Stopwords = options.bm25Stopwords ?? options.bm25_stopwords;
+    this.bm25StopwordsLanguages = options.bm25StopwordsLanguages ?? options.bm25_stopwords_languages;
+    this.bm25Stemmer = options.bm25Stemmer ?? options.bm25_stemmer;
+    this.bm25MinTokenLen = options.bm25MinTokenLen ?? options.bm25_min_token_len;
+    this.bm25MaxTokenLen = options.bm25MaxTokenLen ?? options.bm25_max_token_len;
   }
 }
 
@@ -154,35 +223,36 @@ function explainStmt(stmt) {
   return callNative(() => nativeBinding.explainStmt(stmt));
 }
 
-function compileQuery(query, params) {
-  return callNative(() => nativeBinding.compileQuery(query, params));
+function compile(query, params) {
+  return callNative(() => nativeBinding.compile(query, params));
 }
 
 async function execute(query, options) {
   try {
+    // Native returns the report as a live JS object (safe ints as Number,
+    // snowflake u64 as BigInt) — never a JSON string, which would round
+    // through JSON.parse.
     const raw = await nativeBinding.execute(
       normalizeQuery(query),
       normalizeClientOptions(validateOptions(options)),
     );
-    return new ExecutionReport(JSON.parse(raw));
+    return new ExecutionReport(raw);
   } catch (error) {
     throw buildError(error);
   }
 }
 
-async function executeHits(query, options) {
+async function executeHits(query, options, stmt = 0) {
   const report = await execute(query, options);
-  return report.hits(0);
+  return report.hits(stmt);
 }
 
 async function executeStmt(stmt, options) {
   try {
     return new ExecutionReport(
-      JSON.parse(
-        await nativeBinding.executeStmt(
-          stmt,
-          normalizeClientOptions(validateOptions(options)),
-        ),
+      await nativeBinding.executeStmt(
+        stmt,
+        normalizeClientOptions(validateOptions(options)),
       ),
     );
   } catch (error) {
@@ -192,9 +262,13 @@ async function executeStmt(stmt, options) {
 
 class Client {
   constructor(options) {
-    const normalized = normalizeClientOptions(options);
-    this._inner = new nativeBinding.Client(normalized);
-    this._routeAffinity = normalized?.routeAffinity || null;
+    try {
+      const normalized = normalizeClientOptions(options);
+      this._inner = new nativeBinding.Client(normalized);
+      this._routeAffinity = normalized?.routeAffinity || null;
+    } catch (error) {
+      throw buildError(error);
+    }
   }
 
   /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
@@ -208,15 +282,15 @@ class Client {
         normalizeQuery(query),
         validateOptions(options) || undefined,
       );
-      return new ExecutionReport(JSON.parse(raw));
+      return new ExecutionReport(raw);
     } catch (error) {
       throw buildError(error);
     }
   }
 
-  async executeHits(query, options) {
+  async executeHits(query, options, stmt = 0) {
     const report = await this.execute(query, options);
-    return report.hits(0);
+    return report.hits(stmt);
   }
 
   /**
@@ -241,7 +315,7 @@ class Client {
         normalized,
         validateOptions(options) || undefined,
       );
-      return new ExecutionReport(JSON.parse(raw));
+      return new ExecutionReport(raw);
     } catch (error) {
       throw buildError(error);
     }
@@ -263,11 +337,10 @@ class Client {
    */
   async explainAnalyze(query, options) {
     try {
-      const raw = await this._inner.explainAnalyze(
+      return await this._inner.explainAnalyze(
         normalizeQuery(query),
         validateOptions(options) || undefined,
       );
-      return JSON.parse(raw);
     } catch (error) {
       throw buildError(error);
     }
@@ -306,7 +379,7 @@ module.exports = {
   isValid,
   injectFilter,
   tokenize,
-  compileQuery,
+  compile,
   explain,
   explainStmt,
   bind,
