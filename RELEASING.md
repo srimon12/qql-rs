@@ -1,7 +1,7 @@
 # QQL release procedure
 
-All public packages use one repository version. The current release is `0.4.0`;
-the corresponding Git tag is `v0.4.0`. The QQL language specification version
+All public packages use one repository version. The current release is `0.4.1`;
+the corresponding Git tag is `v0.4.1`. The QQL language specification version
 (`1.7`) is independent from the package release version.
 
 ## Published artifacts
@@ -11,7 +11,7 @@ the corresponding Git tag is `v0.4.0`. The QQL language specification version
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql-convert`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
-| VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.4.0`) |
+| VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.4.1`) |
 | GitHub Releases | Standard (`qql-*`) and Full (`qql-full-*`) CLI archives and checksums (both contain a single `qql` binary) |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
@@ -135,7 +135,7 @@ server-side branch rules are therefore mandatory.
 2. Synchronize every version site from the single source of truth (`VERSION`):
 
    ```bash
-   python3 scripts/check_release.py set 0.4.0
+   python3 scripts/check_release.py set 0.4.1
    ```
 
    This rewrites the root `Cargo.toml` (`[workspace.package]` and the internal
@@ -161,7 +161,7 @@ server-side branch rules are therefore mandatory.
    formatting reject syntax that the grammar, snippets, and completions
    advertise. Verify the exports (e.g. `formatQuery`) exist in
    `editors/vscode/wasm/qql_wasm.d.ts` before continuing.
-4. Move the `[Unreleased]` notes in `CHANGELOG.md` into a `[0.4.0]` section
+4. Move the `[Unreleased]` notes in `CHANGELOG.md` into a `[0.4.1]` section
    dated today. The script never edits the changelog; check mode fails until
    the section exists.
 5. If the Qdrant protocol pin moves, re-sync the vendored API surfaces:
@@ -185,7 +185,7 @@ server-side branch rules are therefore mandatory.
 8. Validate synchronized metadata:
 
    ```bash
-   python3 scripts/check_release.py --version 0.4.0
+   python3 scripts/check_release.py --version 0.4.1
    ```
 
 9. Open a pull request into `dev` and let CI pass.
@@ -211,14 +211,14 @@ Install the artifacts in clean temporary projects before approving the release.
    ```bash
    git switch main
    git pull --ff-only origin main
-   python3 scripts/check_release.py --version 0.4.0
+   python3 scripts/check_release.py --version 0.4.1
    ```
 
 4. Create an annotated tag on that exact commit:
 
    ```bash
-   git tag -a v0.4.0 -m "QQL 0.4.0"
-   git push origin v0.4.0
+   git tag -a v0.4.1 -m "QQL 0.4.1"
+   git push origin v0.4.1
    ```
 
 Only the tag push can publish. The release gate verifies that:
@@ -250,18 +250,18 @@ are published before their root dispatcher packages.
 After the workflow succeeds:
 
 ```bash
-cargo info --registry crates-io qql-core@0.4.0
-cargo info --registry crates-io qql-convert@0.4.0
-cargo info --registry crates-io qql@0.4.0
-cargo info --registry crates-io qql-edge@0.4.0
-cargo install qql-cli@0.4.0 --locked --features edge
+cargo info --registry crates-io qql-core@0.4.1
+cargo info --registry crates-io qql-convert@0.4.1
+cargo info --registry crates-io qql@0.4.1
+cargo info --registry crates-io qql-edge@0.4.1
+cargo install qql-cli@0.4.1 --locked --features edge
 
-python -m pip install pyqql==0.4.0
-python -m pip install pyqql-edge==0.4.0
+python -m pip install pyqql==0.4.1
+python -m pip install pyqql-edge==0.4.1
 
-npm view @veristamp/nqql@0.4.0
-npm view @veristamp/nqql-edge@0.4.0
-npm view qql-wasm@0.4.0
+npm view @veristamp/nqql@0.4.1
+npm view @veristamp/nqql-edge@0.4.1
+npm view qql-wasm@0.4.1
 ```
 
 Install the CLI archive on at least one platform and verify
