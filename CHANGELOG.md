@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-09-17
+## [0.4.1] - 2026-09-18
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
 - **Strict Typed Range Bounds**: Range filters reject non-scalar bounds (objects, arrays, booleans, null) at parse time with `QQL-PLAN-RANGE-TYPE` instead of generating invalid wire requests ([#158](https://github.com/srimon12/qql-rs/pull/158)).
