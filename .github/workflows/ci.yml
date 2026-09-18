@@ -479,7 +479,7 @@ jobs:
           const analysis = wasm.analyze('COUNT FROM docs');
           assert.equal(typeof analysis, 'object');
           assert.equal(analysis.valid, true);
-          const compiled = wasm.compile('COUNT FROM docs');
+          const compiled = wasm.compileQuery('COUNT FROM docs');
           assert.equal(typeof compiled, 'object');
           assert.equal(compiled.stmt_type, 'count');
           NODE

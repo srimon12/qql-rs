@@ -42,8 +42,8 @@ export function initWasm(): void {
     _analyze = qqlWasm.analyze as (input: string) => WasmAnalyzeResult;
     _explain = typeof qqlWasm.explain === "function" ? qqlWasm.explain : null;
     _compile =
-      typeof qqlWasm.compile === "function"
-        ? (qqlWasm.compile as (query: string, params?: unknown) => CompiledRoute)
+      typeof qqlWasm.compileQuery === "function"
+        ? (qqlWasm.compileQuery as (query: string, params?: unknown) => CompiledRoute)
         : null;
     _bind = typeof qqlWasm.bind === "function" ? qqlWasm.bind : null;
     _Stmt = typeof qqlWasm.Stmt === "function" ? qqlWasm.Stmt : null;
