@@ -1,9 +1,9 @@
 //! Local fastembed embedder: dense ONNX model plus optional sparse, multi
 //! (ColBERT), image, and cross-encoder slots, with wire-compatible BM25 fallback.
 //!
-//! Split by size hygiene: [`construct`] (option resolution + cached init),
-//! [`accessors`] (introspection + acceptance), [`catalog`] (model list/resolve),
-//! [`inference`] (the `Embedder` trait dispatch), [`bm25`] (fallback helpers).
+//! Split by size hygiene: `construct` (option resolution + cached init),
+//! `accessors` (introspection + acceptance), `catalog` (model list/resolve),
+//! `inference` (the `Embedder` trait dispatch), `bm25` (fallback helpers).
 //! Stable paths are re-exported here so `lib.rs` and downstream crates keep
 //! their imports.
 

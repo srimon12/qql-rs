@@ -29,7 +29,7 @@ pub(crate) fn to_qql_sparse(sv: qdrant_edge::SparseVector) -> SparseVector {
 /// real engine, which ships the segmentation stack (unlike the lean core
 /// pipeline).
 ///
-/// [`Bm25Params::new`] already rejects NaN/±Inf, so the `NotNan` conversions
+/// `Bm25Params::new` already rejects NaN/±Inf, so the `NotNan` conversions
 /// are infallible in practice; they are mapped instead of unwrapped so an
 /// impossible failure would still surface as a typed error.
 pub(crate) fn edge_bm25_config(text: &Bm25TextConfig) -> Result<EdgeBm25Config, QqlError> {
