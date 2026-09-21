@@ -1,7 +1,7 @@
 //! Filter expression core: entry points, clause dispatch, compound nesting.
 //!
 //! Pure move from `filter_converter.rs` (size hygiene split). Match/range
-//! lowering lives in [`super::matching`], geo/slice lowering in [`super::geo`].
+//! lowering lives in `super::matching`, geo/slice lowering in `super::geo`.
 
 use qdrant_edge::{
     Condition, FieldCondition, Filter, HasIdCondition, HasVectorCondition, IsEmptyCondition,

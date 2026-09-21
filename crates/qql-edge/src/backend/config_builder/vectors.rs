@@ -1,7 +1,7 @@
 //! Collection builder: `CreateCollectionRequest` → engine `EdgeConfig`.
 //!
 //! Pure move from `config_builder.rs` (size hygiene split). HNSW/optimizer
-//! lowering lives in [`super::hnsw`], quantization in [`super::quantization`].
+//! lowering lives in `super::hnsw`, quantization in `super::quantization`.
 
 use qdrant_edge::EdgeConfigBuilder;
 use qql_core::ast::{VectorDatatype, VectorDistance};

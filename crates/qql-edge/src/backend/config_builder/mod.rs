@@ -1,7 +1,7 @@
 //! Edge collection configuration builder passing through dense/sparse vector configs, HNSW, quantization, and optimizers.
 //!
-//! Split by size hygiene: [`vectors`] (collection builder + dense/sparse
-//! params), [`hnsw`] (HNSW/optimizer lowering), [`quantization`], [`shared`]
+//! Split by size hygiene: `vectors` (collection builder + dense/sparse
+//! params), `hnsw` (HNSW/optimizer lowering), `quantization`, `shared`
 //! (placement mapping, error constructor). Stable paths are re-exported here
 //! so callers (`backend`, `ops`, `index_schema`) keep their imports.
 

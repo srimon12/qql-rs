@@ -25,8 +25,8 @@
 //!
 //! No serde fallback is needed: every plan variant maps directly.
 //!
-//! Split by size hygiene: [`core`] (expression dispatch), [`matching`]
-//! (match/range/values-count), [`geo`] (geo/slice).
+//! Split by size hygiene: `core` (expression dispatch), `matching`
+//! (match/range/values-count), `geo` (geo/slice).
 
 mod core;
 mod geo;
