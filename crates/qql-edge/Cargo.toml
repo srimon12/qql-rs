@@ -27,7 +27,7 @@ qql-plan = { workspace = true }
 qql-embed = { workspace = true }
 qql = { workspace = true }
 
-fastembed = { version = "6", optional = true, default-features = false, features = [
+fastembed = { version = "7", optional = true, default-features = false, features = [
     "ort-download-binaries-rustls-tls",
     "hf-hub-rustls-tls",
     "image-models",
