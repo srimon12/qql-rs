@@ -62,10 +62,23 @@ Status of subsequent waves (`fix/cleanup-waves-1-2`, `feat/bm25-full-compat`):
   errors are classified through `classify_backend_error_code` into typed `QqlError` objects.
 
 ## 8. Splits not yet taken (size hygiene >400 lines) — [OPEN]
-- `ddl.rs` (1764 lines: collection/index/shard/quota)
-- `grpc_route/query.rs` (needs the big `to_query_variant` match decomposed)
-- `qql-edge/src/embedder.rs` (~1900 lines: fastembed inference models)
-- `plan.rs` (1536 lines)
+- DONE (`fix/edge-backend-split`): `qql-edge/src/backend/filter_converter.rs`
+  (822 → `filter_converter/{core,matching,geo,tests}`, max 398) and
+  `config_builder.rs` (775 → `config_builder/{vectors,hnsw,quantization,shared,tests}`,
+  max 312). Pure moves + one drive-by (`HasId` drops `.cloned()`: `&PlanPointId`
+  already implements `IntoPlanPointId`); stable paths re-exported from `mod.rs`.
+- Still open:
+  - `ddl.rs` (1764 lines: collection/index/shard/quota)
+  - `qql-plan/src/plan.rs` (1536 lines)
+  - `qql-plan/src/query.rs` (1068 lines)
+  - `qql-plan/src/routing.rs` (1008 lines)
+  - `qql-plan/src/filter.rs` (959 lines)
+  - `qql-core/src/parser/config_parsers.rs` (910 lines)
+  - `qql-edge/src/backend/mod.rs` (852 lines: `EdgeQdrant` impl)
+  - `qql-runtime/src/rest_response.rs` (813 lines)
+  - `qql-runtime/src/grpc_route/query.rs` (697 lines: decompose the big `to_query_variant` match)
+  - `qql-edge/src/backend/ops.rs` (643 lines)
+  - `qql-edge/src/embedder.rs` (~1900 lines: fastembed inference models)
 - One file per PR, pure moves, re-export stable paths.
 
 ## 9. Contract to defend in review — [INVARIANTS]
