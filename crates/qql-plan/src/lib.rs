@@ -38,6 +38,7 @@ mod semantic_conv;
 /// Wire and plan-IR request types shared by the REST projection and gRPC conversion.
 pub mod types;
 mod validate;
+pub(crate) mod value_serde;
 
 pub use batch::BatchGrouper;
 pub use formula_types::{FormulaDefault, PlanDecayKind, PlanFormula};
@@ -53,3 +54,4 @@ pub use semantic::{
     PlanVectorStruct, PlanVectorValue,
 };
 pub use types::*;
+pub use value_serde::value_error_text;

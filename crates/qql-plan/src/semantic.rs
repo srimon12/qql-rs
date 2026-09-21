@@ -68,7 +68,7 @@ pub enum PlanVectorValue {
         /// Embedding model; empty when the executor fills it in.
         model: Option<String>,
         /// Opaque inference options, serialized as `options` when present.
-        options: Option<serde_json::Map<String, serde_json::Value>>,
+        options: Option<Vec<(String, qql_core::ast::Value)>>,
     },
     /// Per-point image inference (OpenAPI `Image` passthrough).
     Image {
@@ -77,16 +77,16 @@ pub enum PlanVectorValue {
         /// Image embedding model; empty when the executor fills it in.
         model: Option<String>,
         /// Opaque inference options, serialized as `options` when present.
-        options: Option<serde_json::Map<String, serde_json::Value>>,
+        options: Option<Vec<(String, qql_core::ast::Value)>>,
     },
     /// Per-point custom inference (OpenAPI `InferenceObject` passthrough).
     Object {
         /// Arbitrary model input, serialized as `object`.
-        object: serde_json::Value,
+        object: alloc::boxed::Box<qql_core::ast::Value>,
         /// Embedding model; empty when the executor fills it in.
         model: Option<String>,
         /// Opaque inference options, serialized as `options` when present.
-        options: Option<serde_json::Map<String, serde_json::Value>>,
+        options: Option<Vec<(String, qql_core::ast::Value)>>,
     },
     /// Parameter placeholder for vector (`:name`).
     Param(String),
@@ -159,7 +159,7 @@ pub enum PlanQueryInput {
         /// Embedding model; empty when the executor fills it in.
         model: Option<String>,
         /// Opaque inference options, serialized as `options` when present.
-        options: Option<serde_json::Map<String, serde_json::Value>>,
+        options: Option<Vec<(String, qql_core::ast::Value)>>,
     },
     /// OpenAPI `Image` inference input (image URL or base64 + model).
     /// Prefer resolving to a dense [`PlanQueryInput::Vector`] client-side when
@@ -172,17 +172,17 @@ pub enum PlanQueryInput {
         /// Image embedding model; empty when the executor fills it in.
         model: Option<String>,
         /// Opaque inference options, serialized as `options` when present.
-        options: Option<serde_json::Map<String, serde_json::Value>>,
+        options: Option<Vec<(String, qql_core::ast::Value)>>,
     },
     /// OpenAPI `InferenceObject` input (arbitrary model payload + model).
     /// Passthrough only: the executor never interprets `object`.
     Object {
         /// Arbitrary model input, serialized as `object`.
-        object: serde_json::Value,
+        object: alloc::boxed::Box<qql_core::ast::Value>,
         /// Embedding model; empty when the executor fills it in.
         model: Option<String>,
         /// Opaque inference options, serialized as `options` when present.
-        options: Option<serde_json::Map<String, serde_json::Value>>,
+        options: Option<Vec<(String, qql_core::ast::Value)>>,
     },
 }
 

@@ -1,4 +1,4 @@
-use crate::filter::{top_level_filter, value_to_json};
+use crate::filter::top_level_filter;
 use crate::prefetch::{build_query_with_prefetch, default_model_for_using, extract_lookup_from};
 use crate::semantic::PlanQueryInput;
 use crate::types::*;
@@ -100,7 +100,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 order_by: OrderByQuery {
                     key: field.clone(),
                     direction: dir,
-                    start_from: start_from.as_ref().map(value_to_json),
+                    start_from: start_from.clone(),
                 },
             }
         }

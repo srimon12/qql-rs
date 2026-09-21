@@ -171,9 +171,13 @@ pub struct UpsertPointRequest {
     /// Vectors to write, unnamed or keyed by vector name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector: Option<PlanPointVectors>,
-    /// Payload object stored with the point.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Payload object stored with the point: pairs serialize as the JSON
+    /// object at the transport boundary (see [`crate::value_serde`]).
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::value_serde::serialize_ast_pairs_opt"
+    )]
+    pub payload: Option<Vec<(String, qql_core::ast::Value)>>,
 }
 
 /// Body for `POST /collections/{c}/points/delete`.
@@ -218,8 +222,10 @@ pub struct UpdatePayloadRequest {
     /// Filter selecting the points to update.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
-    /// Payload keys to set on the selected points.
-    pub payload: serde_json::Map<String, serde_json::Value>,
+    /// Payload keys to set on the selected points: pairs serialize as the
+    /// JSON object at the transport boundary (see [`crate::value_serde`]).
+    #[serde(serialize_with = "crate::value_serde::serialize_ast_pairs")]
+    pub payload: Vec<(String, qql_core::ast::Value)>,
     /// Nested assignment path (OpenAPI `SetPayload.key`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,

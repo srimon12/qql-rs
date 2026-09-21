@@ -7,12 +7,12 @@ use qdrant_edge::{
     AnyVariants, DateTimeWrapper, Match, MatchAny, MatchExcept, MatchPhrase, MatchPrefix,
     MatchText, MatchTextAny, MatchValue, Range, RangeInterface, ValueVariants, ValuesCount,
 };
+use qql_core::ast::Value as PlanValue;
 use qql_core::error::QqlError;
 use qql_plan::types::{
     MatchValue as PlanMatchValue, PlanRangeBound as PlanBound, RangeParams as PlanRangeParams,
     ValuesCountParams as PlanValuesCountParams,
 };
-use serde_json::Value;
 
 use super::filter_error;
 
@@ -42,40 +42,70 @@ pub(crate) fn lower_match(value: &PlanMatchValue) -> Result<Match, QqlError> {
 
 /// `MatchValue::value` only exists for strings, integers, and bools on the
 /// Qdrant wire (`ValueVariants`); floats are lowered to a `range` by the
-/// planner before reaching this point.
-fn lower_match_value(value: &Value) -> Result<ValueVariants, QqlError> {
+/// planner before reaching this point. Mirrors the old `serde_json::Number`
+/// rule exactly: plain integers and `u64` values that fit `i64` pass, floats
+/// (even integral ones) fail.
+fn lower_match_value(value: &PlanValue) -> Result<ValueVariants, QqlError> {
     match value {
-        Value::String(string) => Ok(ValueVariants::String(string.clone())),
-        Value::Number(number) => number.as_i64().map(ValueVariants::Integer).ok_or_else(|| {
+        PlanValue::Str(string) => Ok(ValueVariants::String(string.clone())),
+        PlanValue::Int(n) => Ok(ValueVariants::Integer(*n)),
+        PlanValue::UInt(n) => i64::try_from(*n).map(ValueVariants::Integer).map_err(|_| {
             filter_error(format!(
-                "match value must be a string, integer, or bool, got {number}"
+                "match value must be a string, integer, or bool, got {n}"
             ))
         }),
-        Value::Bool(flag) => Ok(ValueVariants::Bool(*flag)),
+        PlanValue::Bool(flag) => Ok(ValueVariants::Bool(*flag)),
+        PlanValue::Param(name, _) => {
+            panic!("invariant violation: unbound parameter :{name} reached edge match lowering");
+        }
+        PlanValue::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached edge match lowering"
+            );
+        }
         other => Err(filter_error(format!(
-            "match value must be a string, integer, or bool, got {other}"
+            "match value must be a string, integer, or bool, got {}",
+            qql_plan::value_error_text(other)
         ))),
     }
 }
 
 /// `any`/`except` accept homogeneous string or integer sets. A mixed list is
-/// rejected, matching the `AnyVariants` wire type.
-fn lower_any_variants(values: &[Value]) -> Result<AnyVariants, QqlError> {
-    if values.iter().all(Value::is_string) {
+/// rejected, matching the `AnyVariants` wire type. Mirrors `is_i64`
+/// semantics: integers and fitting `u64`s count, integral floats do not.
+fn lower_any_variants(values: &[PlanValue]) -> Result<AnyVariants, QqlError> {
+    if values.iter().all(|v| matches!(v, PlanValue::Str(_))) {
         Ok(AnyVariants::Strings(
             values
                 .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
+                .filter_map(|v| match v {
+                    PlanValue::Str(s) => Some(s.clone()),
+                    _ => None,
+                })
                 .collect(),
         ))
-    } else if values.iter().all(Value::is_i64) {
+    } else if values.iter().all(|v| match v {
+        PlanValue::Int(_) => true,
+        PlanValue::UInt(n) => i64::try_from(*n).is_ok(),
+        _ => false,
+    }) {
         Ok(AnyVariants::Integers(
-            values.iter().filter_map(Value::as_i64).collect(),
+            values
+                .iter()
+                .filter_map(|v| match v {
+                    PlanValue::Int(n) => Some(*n),
+                    PlanValue::UInt(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                })
+                .collect(),
         ))
     } else {
         Err(filter_error(format!(
-            "match any/except values must be all strings or all integers, got {values:?}"
+            "match any/except values must be all strings or all integers, got {:?}",
+            values
+                .iter()
+                .map(qql_plan::value_error_text)
+                .collect::<Vec<_>>()
         )))
     }
 }

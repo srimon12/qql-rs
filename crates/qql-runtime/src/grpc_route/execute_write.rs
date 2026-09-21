@@ -39,7 +39,7 @@ pub(crate) async fn execute_upsert(
                 .as_ref()
                 .map(|pl| {
                     pl.iter()
-                        .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                        .map(|(k, v)| (k.clone(), to_qdrant_value(v)))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -200,7 +200,7 @@ pub(crate) async fn execute_update_payload(
     let payload_map: std::collections::HashMap<String, qdrant::Value> = request
         .payload
         .iter()
-        .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+        .map(|(k, v)| (k.clone(), to_qdrant_value(v)))
         .collect();
     let grpc_req = qdrant::SetPayloadPoints {
         collection_name: collection.to_owned(),
@@ -229,7 +229,7 @@ pub(crate) async fn execute_overwrite_payload(
     let payload_map: std::collections::HashMap<String, qdrant::Value> = request
         .payload
         .iter()
-        .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+        .map(|(k, v)| (k.clone(), to_qdrant_value(v)))
         .collect();
     let grpc_req = qdrant::SetPayloadPoints {
         collection_name: collection.to_owned(),
@@ -304,7 +304,7 @@ pub(crate) fn to_points_update_operation(
                         .as_ref()
                         .map(|pl| {
                             pl.iter()
-                                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                                .map(|(k, v)| (k.clone(), to_qdrant_value(v)))
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -336,7 +336,7 @@ pub(crate) fn to_points_update_operation(
             let payload_map: std::collections::HashMap<String, qdrant::Value> = set_payload
                 .payload
                 .iter()
-                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                .map(|(k, v)| (k.clone(), to_qdrant_value(v)))
                 .collect();
             Operation::SetPayload(points_update_operation::SetPayload {
                 payload: payload_map,
@@ -352,7 +352,7 @@ pub(crate) fn to_points_update_operation(
             let payload_map: std::collections::HashMap<String, qdrant::Value> = overwrite_payload
                 .payload
                 .iter()
-                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                .map(|(k, v)| (k.clone(), to_qdrant_value(v)))
                 .collect();
             Operation::OverwritePayload(points_update_operation::OverwritePayload {
                 payload: payload_map,

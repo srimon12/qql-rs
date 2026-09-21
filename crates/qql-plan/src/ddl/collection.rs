@@ -143,7 +143,7 @@ fn fill_collection_config(
         req.strict_mode_config = Some(Box::new(lower_strict_mode_config(strict)?));
     }
     if let Some(ref metadata) = config.metadata {
-        req.metadata = Some(Box::new(lower_metadata_map(metadata)));
+        req.metadata = Some(lower_metadata_map(metadata));
     }
     Ok(())
 }
@@ -166,7 +166,7 @@ fn fill_update_collection_config(
         req.strict_mode_config = Some(Box::new(lower_strict_mode_config(strict)?));
     }
     if let Some(ref metadata) = config.metadata {
-        req.metadata = Some(Box::new(lower_metadata_map(metadata)));
+        req.metadata = Some(lower_metadata_map(metadata));
     }
     // The update wire shape has no WAL field; the parser rejects
     // `ALTER … WITH WAL`, so a hand-built AST reaching here fails closed.

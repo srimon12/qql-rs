@@ -144,13 +144,21 @@ pub struct ValuesCountParams {
 }
 
 /// OpenAPI `Match` variants: exact value, text forms, any-of, or exclusion.
+///
+/// Scalar values are [`qql_core::ast::Value`] rendered to JSON only at the
+/// transport boundary (see [`crate::value_serde`]); the wire shape is
+/// unchanged from the old eager conversion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MatchValue {
     /// Exact match against any JSON value (`{"value": …}`).
     Value {
-        /// Exact JSON value to match.
-        value: serde_json::Value,
+        /// Exact value to match.
+        #[serde(
+            serialize_with = "crate::value_serde::serialize_ast_value",
+            deserialize_with = "crate::value_serde::deserialize_ast_value"
+        )]
+        value: qql_core::ast::Value,
     },
     /// Full-text match on an indexed text field (`{"text": …}`).
     Text {
@@ -165,12 +173,20 @@ pub enum MatchValue {
     /// Match any of the listed values (`{"any": [...]}`).
     Any {
         /// Accepted values (at least one must match).
-        any: Vec<serde_json::Value>,
+        #[serde(
+            serialize_with = "crate::value_serde::serialize_ast_value_vec",
+            deserialize_with = "crate::value_serde::deserialize_ast_value_vec"
+        )]
+        any: Vec<qql_core::ast::Value>,
     },
     /// Match none of the listed values (`{"except": [...]}`).
     Except {
         /// Rejected values (none may match).
-        except: Vec<serde_json::Value>,
+        #[serde(
+            serialize_with = "crate::value_serde::serialize_ast_value_vec",
+            deserialize_with = "crate::value_serde::deserialize_ast_value_vec"
+        )]
+        except: Vec<qql_core::ast::Value>,
     },
     /// Exact phrase match on a text field (`{"phrase": …}`).
     Phrase {
@@ -220,7 +236,7 @@ pub enum PlanRangeBound {
     /// Integer bound; serializes as a JSON integer.
     Int(i64),
     /// Float bound; serializes as a JSON number (`null` when non-finite,
-    /// mirroring `value_to_json`, since JSON has no inf/NaN).
+    /// mirroring the boundary renderer, since JSON has no inf/NaN).
     Float(f64),
     /// ISO-8601-looking string; serializes as a JSON string and lowers to
     /// the edge `DateTime` range interface (the gRPC `Range` wire type is

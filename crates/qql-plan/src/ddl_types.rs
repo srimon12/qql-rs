@@ -538,9 +538,13 @@ pub struct CreateCollectionRequest {
     /// Strict-mode settings (`WITH STRICT_MODE`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict_mode_config: Option<Box<StrictModeConfig>>,
-    /// Free-form collection metadata (`WITH METADATA`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Box<serde_json::Map<String, serde_json::Value>>>,
+    /// Free-form collection metadata (`WITH METADATA`): pairs serialize as
+    /// the JSON object at the transport boundary.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::value_serde::serialize_ast_pairs_opt"
+    )]
+    pub metadata: Option<Vec<(String, qql_core::ast::Value)>>,
     /// Number of shards (`shard_number`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_number: Option<u64>,
@@ -570,9 +574,13 @@ pub struct UpdateCollectionRequest {
     /// Strict-mode replacement (`WITH STRICT_MODE`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict_mode_config: Option<Box<StrictModeConfig>>,
-    /// Metadata merge (`WITH METADATA`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Box<serde_json::Map<String, serde_json::Value>>>,
+    /// Metadata merge (`WITH METADATA`): pairs serialize as the JSON object
+    /// at the transport boundary.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::value_serde::serialize_ast_pairs_opt"
+    )]
+    pub metadata: Option<Vec<(String, qql_core::ast::Value)>>,
     /// Per-vector dense diffs: REST `VectorsConfigDiff` is this name-keyed map
     /// (`""` addresses the default unnamed vector).
     #[serde(skip_serializing_if = "Option::is_none")]

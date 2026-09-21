@@ -117,12 +117,7 @@ pub(crate) async fn execute_create_collection(
             .as_ref()
             .map(|m| {
                 m.iter()
-                    .map(|(k, v)| {
-                        (
-                            k.clone(),
-                            crate::grpc_route::values::to_qdrant_value(v.clone()),
-                        )
-                    })
+                    .map(|(k, v)| (k.clone(), crate::grpc_route::values::to_qdrant_value(v)))
                     .collect()
             })
             .unwrap_or_default(),
@@ -209,12 +204,7 @@ pub(crate) async fn execute_update_collection(
             .as_ref()
             .map(|m| {
                 m.iter()
-                    .map(|(k, v)| {
-                        (
-                            k.clone(),
-                            crate::grpc_route::values::to_qdrant_value(v.clone()),
-                        )
-                    })
+                    .map(|(k, v)| (k.clone(), crate::grpc_route::values::to_qdrant_value(v)))
                     .collect()
             })
             .unwrap_or_default(),
