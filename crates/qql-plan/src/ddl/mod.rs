@@ -1,9 +1,9 @@
 //! DDL lowering: collection/index/shard/quota statements to plan requests.
 //!
-//! Split by size hygiene: [`collection`] (create/alter + fill), [`index`]
-//! (create-index options), [`diff`] (alter diffs), [`options`] (WAL,
-//! strict-mode, metadata, replica states), [`runtime`] (HNSW/optimizer/
-//! quantization IR), [`quota`]. Stable paths are re-exported here so
+//! Split by size hygiene: `collection` (create/alter + fill), `index`
+//! (create-index options), `diff` (alter diffs), `options` (WAL,
+//! strict-mode, metadata, replica states), `runtime` (HNSW/optimizer/
+//! quantization IR), `quota`. Stable paths are re-exported here so
 //! `plan.rs`, `routing.rs`, and the transport adapters keep their imports.
 
 mod collection;
