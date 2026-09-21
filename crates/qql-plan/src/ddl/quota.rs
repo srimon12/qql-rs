@@ -51,6 +51,45 @@ pub(crate) fn lower_set_quota(stmt: &SetQuotaStmt) -> Result<SetQuotaRequest, Qq
     Ok(request)
 }
 
+/// Owned variant of [`lower_set_quota`]: moves config keys.
+pub(crate) fn lower_set_quota_owned(stmt: SetQuotaStmt) -> Result<SetQuotaRequest, QqlError> {
+    let mut request = SetQuotaRequest {
+        config: QuotaConfig::default(),
+        wait: stmt.wait,
+    };
+    for (key, value) in &stmt.config {
+        let lower = key.to_ascii_lowercase();
+        match lower.as_str() {
+            "enabled" => match value {
+                Value::Bool(b) => request.config.enabled = Some(*b),
+                _ => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-QUOTA",
+                        "enabled must be true or false",
+                        value.param_span(),
+                    ));
+                }
+            },
+            "max_resident_memory_percent" | "max_disk_usage_percent" => {
+                request = apply_quota_percent(request, &lower, value, 1, 100)?;
+            }
+            "release_margin_percent" => {
+                request = apply_quota_percent(request, &lower, value, 0, 100)?;
+            }
+            _ => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-QUOTA",
+                    format!(
+                        "unknown quota parameter '{key}'. Expected: enabled, max_resident_memory_percent, max_disk_usage_percent, release_margin_percent"
+                    ),
+                    value.param_span(),
+                ));
+            }
+        }
+    }
+    Ok(request)
+}
+
 fn apply_quota_percent(
     mut request: SetQuotaRequest,
     key: &str,

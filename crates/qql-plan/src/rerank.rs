@@ -1,6 +1,6 @@
 //! Client-side CROSS RERANK planning: candidate queries + payload field ensure.
 
-use crate::plan::{PlannedOperation, plan};
+use crate::plan::{PlannedOperation, plan, plan_owned};
 use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 
@@ -94,6 +94,115 @@ pub(crate) fn plan_cross_rerank(
         field,
         limit: outer.page.limit.unwrap_or(10),
         offset: outer.page.offset.unwrap_or(0),
+        candidates,
+    })
+}
+
+/// Owned variant of [`plan_cross_rerank`]: consumes the outer statement,
+/// moving candidate subqueries and collection / query / model strings.
+///
+/// CTE bodies referenced by candidate prefetches still clone once per
+/// reference (shared CTEs cannot move); inline candidate queries move with
+/// zero copies.
+pub(crate) fn plan_cross_rerank_owned(
+    outer: qql_core::ast::QueryStmt,
+    collection: String,
+) -> Result<PlannedOperation, QqlError> {
+    use qql_core::ast::{PrefetchSource, QueryCollection, QueryExpr};
+    let qql_core::ast::QueryStmt {
+        ctes,
+        expression,
+        page,
+        ..
+    } = outer;
+    let QueryExpr::CrossRerank {
+        query: query_text,
+        model,
+        field,
+        prefetch,
+        ..
+    } = expression
+    else {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-PREFETCH",
+            "CROSS RERANK requires a cross-rerank expression",
+            None,
+        ));
+    };
+    if prefetch.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-PREFETCH",
+            "CROSS RERANK requires at least one PREFETCH",
+            None,
+        ));
+    }
+    if query_text.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-QUERY",
+            "CROSS RERANK query text must not be empty",
+            None,
+        ));
+    }
+    if model.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-MODEL",
+            "CROSS RERANK MODEL must not be empty",
+            None,
+        ));
+    }
+    let field = field
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "text".to_string());
+
+    let mut candidates = Vec::with_capacity(prefetch.len());
+    for pref in prefetch {
+        let mut sub = match pref.source {
+            PrefetchSource::Cte(name) => {
+                let cte = ctes.iter().find(|c| c.name.eq_ignore_ascii_case(&name));
+                let Some(cte) = cte else {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-CROSS-RERANK-CTE",
+                        format!("PREFETCH references unknown CTE '{name}'"),
+                        None,
+                    ));
+                };
+                (*cte.query).clone()
+            }
+            PrefetchSource::Query(q) => *q,
+        };
+        if matches!(sub.collection, QueryCollection::Inherited) {
+            sub.collection = QueryCollection::Explicit(collection.clone());
+        }
+        ensure_payload_field(&mut sub, &field);
+        if let Some(f) = pref.filter {
+            sub.filter = Some(f);
+        }
+        let planned = plan_owned(Stmt::Query(Box::new(sub)))?;
+        match planned {
+            PlannedOperation::Query {
+                collection: c,
+                request,
+            } => candidates.push((c, request)),
+            other => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-CROSS-RERANK-CANDIDATE",
+                    format!(
+                        "CROSS RERANK prefetch must plan as a search query, got {}",
+                        other.operation_label()
+                    ),
+                    None,
+                ));
+            }
+        }
+    }
+
+    Ok(PlannedOperation::CrossRerank {
+        collection,
+        query: query_text,
+        model,
+        field,
+        limit: page.limit.unwrap_or(10),
+        offset: page.offset.unwrap_or(0),
         candidates,
     })
 }

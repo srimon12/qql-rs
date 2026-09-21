@@ -146,6 +146,45 @@ impl From<&Value> for FormulaDefault {
     }
 }
 
+impl From<Value> for FormulaDefault {
+    /// Owned variant: moves strings / lists / objects instead of cloning them.
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Str(value) => Self::String(value),
+            Value::Int(value) => Self::Int(value),
+            Value::UInt(value) => i64::try_from(value)
+                .map(Self::Int)
+                .unwrap_or(Self::Float(value as f64)),
+            Value::Float(value) => Self::Float(value),
+            Value::Bool(value) => Self::Bool(value),
+            Value::Null => Self::Null,
+            Value::Dict(entries) => Self::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, Self::from(value)))
+                    .collect(),
+            ),
+            Value::List(items) => Self::List(items.into_iter().map(Self::from).collect()),
+            Value::F32Array(values) => Self::List(
+                values
+                    .into_iter()
+                    .map(|value| Self::Float(value as f64))
+                    .collect(),
+            ),
+            Value::Param(name, _) => {
+                panic!(
+                    "invariant violation: unbound parameter :{name} reached formula defaults lowering"
+                );
+            }
+            Value::PositionalParam(idx, _) => {
+                panic!(
+                    "invariant violation: unbound positional parameter ?{idx} reached formula defaults lowering"
+                );
+            }
+        }
+    }
+}
+
 /// Transport-neutral formula expression tree (`QUERY FORMULA <expr>`).
 ///
 /// `Serialize` emits the OpenAPI `Expression` wire shape directly.

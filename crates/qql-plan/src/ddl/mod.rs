@@ -23,12 +23,15 @@ pub use crate::ddl_rest::{
     update_collection_op,
 };
 
-pub use collection::{lower_alter_collection, lower_create_collection};
-pub use index::lower_create_index;
+pub use collection::{
+    lower_alter_collection, lower_alter_collection_owned, lower_create_collection,
+    lower_create_collection_owned,
+};
+pub use index::{lower_create_index, lower_create_index_owned};
 pub use runtime::{lower_hnsw_config, lower_optimizers_config, lower_quantization_config};
 
 pub(crate) use options::lower_replica_state;
-pub(crate) use quota::lower_set_quota;
+pub(crate) use quota::{lower_set_quota, lower_set_quota_owned};
 
 use qql_core::error::{QqlError, Span};
 

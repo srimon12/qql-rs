@@ -44,8 +44,8 @@ pub use formula_types::{FormulaDefault, PlanDecayKind, PlanFormula};
 pub use plan::{
     BatchFamily, BatchKey, PlannedOperation, RestProjectionError, batch_item_error,
     build_query_batch, build_update_batch, ensure_no_unbound_params, into_query_batch,
-    into_update_batch, parse_and_plan, plan, plan_template, statement_batch_key, to_rest_route,
-    try_route, verify_batch_cardinality,
+    into_update_batch, parse_and_plan, plan, plan_owned, plan_template, plan_template_owned,
+    statement_batch_key, to_rest_route, try_route, verify_batch_cardinality,
 };
 pub use routing::{CompiledStatement, compile_statement};
 pub use semantic::{

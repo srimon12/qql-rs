@@ -4,16 +4,23 @@
 //! are a projection (`to_rest_route`). gRPC converts the same typed operation.
 
 use crate::ddl::{
-    lower_alter_collection, lower_create_collection, lower_create_index, lower_replica_state,
-    lower_set_quota,
+    lower_alter_collection, lower_alter_collection_owned, lower_create_collection,
+    lower_create_collection_owned, lower_create_index, lower_create_index_owned,
+    lower_replica_state, lower_set_quota, lower_set_quota_owned,
 };
 use crate::mutation::{
-    lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
-    lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
-    lower_update_vector_request, lower_upsert_request, validate_scroll_after,
+    lower_clear_payload_request, lower_clear_payload_request_owned, lower_delete_payload_request,
+    lower_delete_payload_request_owned, lower_delete_request, lower_delete_request_owned,
+    lower_delete_vector_request, lower_delete_vector_request_owned, lower_scroll_request,
+    lower_scroll_request_owned, lower_update_payload_request, lower_update_payload_request_owned,
+    lower_update_vector_request, lower_update_vector_request_owned, lower_upsert_request,
+    lower_upsert_request_owned, validate_scroll_after,
 };
-use crate::query::{lower_query_groups_request, lower_query_request};
-use crate::rerank::plan_cross_rerank;
+use crate::query::{
+    lower_output_selector_public_owned, lower_query_groups_request,
+    lower_query_groups_request_owned, lower_query_request, lower_query_request_owned,
+};
+use crate::rerank::{plan_cross_rerank, plan_cross_rerank_owned};
 use crate::types::*;
 use crate::validate::validate_query_stmt;
 use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
@@ -467,6 +474,18 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     lower_statement_to_planned(statement)
 }
 
+/// Owned fallible planner: consumes the statement, moving every vector buffer,
+/// payload map, and filter instead of cloning it.
+///
+/// This is the hot execution path (`prepare_statement` → `plan_owned`):
+/// `Stmt` is already owned by the executor at dispatch time, so lowering moves
+/// out of it with zero copies. [`plan`] stays as the compat wrapper for
+/// borrowed callers (bindings, `compile_statement`, conformance probes).
+pub fn plan_owned(statement: Stmt) -> Result<PlannedOperation, QqlError> {
+    ensure_no_unbound_params(&statement)?;
+    lower_statement_to_planned_owned(statement)
+}
+
 /// Fallible template planner for prepared statements.
 ///
 /// Permits unbound vector parameters (`:name` or `?N`) so statements can be
@@ -475,6 +494,12 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
 pub fn plan_template(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     qql_core::params::validate_no_unbound_scalar_params(statement)?;
     lower_statement_to_planned(statement)
+}
+
+/// Owned variant of [`plan_template`]: consumes the template statement.
+pub fn plan_template_owned(statement: Stmt) -> Result<PlannedOperation, QqlError> {
+    qql_core::params::validate_no_unbound_scalar_params(&statement)?;
+    lower_statement_to_planned_owned(statement)
 }
 
 pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
@@ -738,6 +763,315 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
     }
 }
 
+/// Owned statement lowering: moves every collection name, vector buffer,
+/// payload map, filter, and shard key out of the AST.
+///
+/// Mirrors [`lower_statement_to_planned`] arm-for-arm so borrowed and owned
+/// plans agree exactly; the only difference is moves versus clones.
+pub(crate) fn lower_statement_to_planned_owned(
+    statement: Stmt,
+) -> Result<PlannedOperation, QqlError> {
+    use crate::filter::top_level_filter_owned;
+    match statement {
+        Stmt::Query(query) => {
+            let mut query = *query;
+            validate_query_stmt(&query)?;
+            let collection =
+                match std::mem::replace(&mut query.collection, QueryCollection::Inherited) {
+                    QueryCollection::Explicit(name) if !name.is_empty() => name,
+                    QueryCollection::Explicit(_) => {
+                        return Err(QqlError::validation(
+                            "QQL-PLAN-COLLECTION",
+                            "query collection name must not be empty",
+                            query.collection_span,
+                        ));
+                    }
+                    QueryCollection::Inherited => {
+                        return Err(QqlError::validation(
+                            "QQL-PLAN-COLLECTION",
+                            "top-level query requires an explicit collection (FROM ...)",
+                            None,
+                        ));
+                    }
+                };
+
+            if matches!(query.expression, QueryExpr::Points { .. }) {
+                let qql_core::ast::QueryStmt {
+                    expression,
+                    output,
+                    shard_key,
+                    ..
+                } = query;
+                let QueryExpr::Points { ids } = expression else {
+                    unreachable!()
+                };
+                let ids = ids
+                    .into_iter()
+                    .map(crate::semantic::PlanPointId::from)
+                    .collect();
+                let (with_payload, with_vector) = lower_output_selector_public_owned(output);
+                return Ok(PlannedOperation::GetPoints {
+                    collection,
+                    request: PointsRequest {
+                        ids,
+                        with_payload,
+                        with_vector,
+                        shard_key: shard_key.map(crate::semantic::PlanShardKey::from),
+                    },
+                });
+            }
+
+            if matches!(query.expression, QueryExpr::CrossRerank { .. }) {
+                return plan_cross_rerank_owned(query, collection);
+            }
+
+            if query.group.is_some() {
+                return Ok(PlannedOperation::QueryGroups {
+                    collection,
+                    request: lower_query_groups_request_owned(query)?,
+                });
+            }
+
+            Ok(PlannedOperation::Query {
+                collection,
+                request: lower_query_request_owned(query)?,
+            })
+        }
+        Stmt::Scroll(scroll) => {
+            let mut scroll = *scroll;
+            validate_scroll_after(scroll.after.as_ref())?;
+            let collection = std::mem::take(&mut scroll.collection);
+            Ok(PlannedOperation::Scroll {
+                collection,
+                request: lower_scroll_request_owned(
+                    scroll.limit,
+                    scroll.filter.map(|f| *f),
+                    scroll.after,
+                    scroll.order_by,
+                    scroll.shard_key,
+                    scroll.with_payload,
+                    scroll.with_vector,
+                )?,
+            })
+        }
+        Stmt::Upsert(upsert) => {
+            let mut upsert = *upsert;
+            let wait = upsert
+                .wait
+                .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty());
+            let collection = std::mem::take(&mut upsert.collection);
+            Ok(PlannedOperation::Upsert {
+                collection,
+                request: lower_upsert_request_owned(upsert)?,
+                wait,
+            })
+        }
+        Stmt::Delete(delete) => {
+            let mut delete = *delete;
+            let wait = delete.wait.unwrap_or(true);
+            let collection = std::mem::take(&mut delete.collection);
+            Ok(PlannedOperation::Delete {
+                collection,
+                request: lower_delete_request_owned(delete)?,
+                wait,
+            })
+        }
+        Stmt::ClearPayload(clear) => {
+            let mut clear = *clear;
+            let wait = clear.wait.unwrap_or(true);
+            let collection = std::mem::take(&mut clear.collection);
+            Ok(PlannedOperation::ClearPayload {
+                collection,
+                request: lower_clear_payload_request_owned(clear)?,
+                wait,
+            })
+        }
+        Stmt::DeletePayload(del) => {
+            let mut del = *del;
+            let wait = del.wait.unwrap_or(true);
+            let collection = std::mem::take(&mut del.collection);
+            Ok(PlannedOperation::DeletePayload {
+                collection,
+                request: lower_delete_payload_request_owned(del)?,
+                wait,
+            })
+        }
+        Stmt::DeleteVector(del_vec) => {
+            let mut del_vec = *del_vec;
+            let wait = del_vec.wait.unwrap_or(true);
+            let collection = std::mem::take(&mut del_vec.collection);
+            Ok(PlannedOperation::DeleteVectors {
+                collection,
+                request: lower_delete_vector_request_owned(del_vec)?,
+                wait,
+            })
+        }
+        Stmt::UpdateVector(update) => {
+            let mut update = *update;
+            let wait = update.wait.unwrap_or(true);
+            let collection = std::mem::take(&mut update.collection);
+            Ok(PlannedOperation::UpdateVectors {
+                collection,
+                request: lower_update_vector_request_owned(update),
+                wait,
+            })
+        }
+        Stmt::UpdatePayload(update) => {
+            let mut update = *update;
+            let wait = update.wait.unwrap_or(true);
+            let overwrite = update.overwrite;
+            let collection = std::mem::take(&mut update.collection);
+            let request = lower_update_payload_request_owned(update)?;
+            if overwrite {
+                Ok(PlannedOperation::OverwritePayload {
+                    collection,
+                    request,
+                    wait,
+                })
+            } else {
+                Ok(PlannedOperation::UpdatePayload {
+                    collection,
+                    request,
+                    wait,
+                })
+            }
+        }
+        Stmt::CreateCollection(create) => {
+            let mut create = *create;
+            let collection = std::mem::take(&mut create.collection);
+            Ok(PlannedOperation::CreateCollection {
+                collection,
+                request: lower_create_collection_owned(create)?,
+            })
+        }
+        Stmt::AlterCollection(alter) => {
+            let mut alter = *alter;
+            let collection = std::mem::take(&mut alter.collection);
+            Ok(PlannedOperation::UpdateCollection {
+                collection,
+                request: lower_alter_collection_owned(alter)?,
+            })
+        }
+        Stmt::DropCollection(drop) => Ok(PlannedOperation::DropCollection {
+            collection: drop.collection,
+        }),
+        Stmt::CreateIndex(index) => {
+            let mut index = *index;
+            let wait = index.wait.unwrap_or(true);
+            let collection = std::mem::take(&mut index.collection);
+            Ok(PlannedOperation::CreateIndex {
+                collection,
+                request: lower_create_index_owned(index)?,
+                wait,
+            })
+        }
+        Stmt::DropIndex(index) => {
+            let mut index = *index;
+            let collection = std::mem::take(&mut index.collection);
+            let field = std::mem::take(&mut index.field);
+            Ok(PlannedOperation::DropIndex { collection, field })
+        }
+        Stmt::Count(count) => {
+            let count = *count;
+            let collection = match count.collection {
+                qql_core::ast::QueryCollection::Explicit(name) if !name.is_empty() => name,
+                qql_core::ast::QueryCollection::Explicit(_) => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "count collection name must not be empty",
+                        None,
+                    ));
+                }
+                qql_core::ast::QueryCollection::Inherited => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "count requires an explicit collection (FROM ...)",
+                        None,
+                    ));
+                }
+            };
+            let filter = count
+                .filter
+                .map(|f| top_level_filter_owned(*f))
+                .transpose()?;
+            Ok(PlannedOperation::Count {
+                collection,
+                request: CountRequest {
+                    filter,
+                    shard_key: count.shard_key.map(crate::semantic::PlanShardKey::from),
+                    exact: count.exact,
+                },
+            })
+        }
+        Stmt::Facet(facet) => {
+            let facet = *facet;
+            let collection = match facet.collection {
+                qql_core::ast::QueryCollection::Explicit(name) if !name.is_empty() => name,
+                qql_core::ast::QueryCollection::Explicit(_) => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "facet collection name must not be empty",
+                        None,
+                    ));
+                }
+                qql_core::ast::QueryCollection::Inherited => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "facet requires an explicit collection (FROM ...)",
+                        None,
+                    ));
+                }
+            };
+            let filter = facet
+                .filter
+                .map(|f| top_level_filter_owned(*f))
+                .transpose()?;
+            Ok(PlannedOperation::Facet {
+                collection,
+                request: FacetRequest {
+                    key: facet.key,
+                    limit: facet.limit,
+                    filter,
+                    exact: facet.exact,
+                    shard_key: facet.shard_key.map(crate::semantic::PlanShardKey::from),
+                },
+            })
+        }
+        Stmt::CreateShardKey(sk) => {
+            let mut sk = *sk;
+            let collection = std::mem::take(&mut sk.collection);
+            Ok(PlannedOperation::CreateShardKey {
+                collection,
+                request: CreateShardKeyRequest {
+                    shard_key: crate::semantic::PlanShardKey::from(sk.shard_key),
+                    shards_number: sk.shards_number,
+                    replication_factor: sk.replication_factor,
+                    placement: sk.placement,
+                    initial_state: lower_replica_state(sk.initial_state.as_deref())?,
+                },
+            })
+        }
+        Stmt::DropShardKey(sk) => {
+            let mut sk = *sk;
+            let collection = std::mem::take(&mut sk.collection);
+            Ok(PlannedOperation::DropShardKey {
+                collection,
+                request: DropShardKeyRequest {
+                    shard_key: crate::semantic::PlanShardKey::from(sk.shard_key),
+                },
+            })
+        }
+        Stmt::ShowCollections => Ok(PlannedOperation::ListCollections),
+        Stmt::ShowCollection(collection) => Ok(PlannedOperation::GetCollection { collection }),
+        Stmt::ShowShardKeys(collection) => Ok(PlannedOperation::ListShardKeys { collection }),
+        Stmt::ShowQuotas => Ok(PlannedOperation::GetQuotas),
+        Stmt::SetQuota(stmt) => Ok(PlannedOperation::SetQuotas {
+            request: lower_set_quota_owned(*stmt)?,
+        }),
+        Stmt::Batch(batch) => plan_batch_owned(*batch),
+    }
+}
+
 /// Plan a `BATCH { … }` block into one batch operation.
 ///
 /// Members plan through the same lowering as standalone statements, then
@@ -837,6 +1171,115 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                 key,
                 operations,
                 wait: batch.wait,
+                timeout: None,
+                consistency: None,
+            })
+        }
+    }
+}
+
+/// Owned variant of [`plan_batch`]: consumes member statements, moving every
+/// member's vectors instead of cloning them.
+fn plan_batch_owned(batch: qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlError> {
+    let qql_core::ast::BatchStmt {
+        statements,
+        wait,
+        params,
+    } = batch;
+    // Save header-governed member flags before moving members: query members
+    // must not carry timeout/consistency, mutation members must not carry WAIT.
+    let member_has_read_opts: Vec<bool> = statements
+        .iter()
+        .map(|member| match member {
+            Stmt::Query(query) => match query.params.as_ref() {
+                Some(p) => p.timeout.is_some() || p.consistency.is_some(),
+                None => false,
+            },
+            _ => false,
+        })
+        .collect();
+    let member_has_wait: Vec<bool> = statements
+        .iter()
+        .map(|member| batch_member_wait(member).is_some())
+        .collect();
+    let mut operations = Vec::with_capacity(statements.len());
+    let first_label = statements
+        .first()
+        .map(Stmt::stmt_kind)
+        .unwrap_or("BATCH")
+        .to_string();
+    let member_labels: Vec<&'static str> = statements.iter().map(Stmt::stmt_kind).collect();
+    for member in statements {
+        operations.push(lower_statement_to_planned_owned(member)?);
+    }
+    let mut keys = operations.iter().map(PlannedOperation::batch_key);
+    let key = match keys.next() {
+        Some(Some(key)) => key,
+        _ => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-BATCH-MEMBER",
+                alloc::format!("BATCH member cannot run in a batch RPC: {first_label}"),
+                None,
+            ));
+        }
+    };
+    for (label, operation) in member_labels.iter().zip(operations.iter()) {
+        if operation.batch_key().as_ref() != Some(&key) {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-BATCH-MIXED",
+                alloc::format!(
+                    "BATCH members must share one collection and one family, got {label} next to {first_label}",
+                ),
+                None,
+            ));
+        }
+    }
+    match &key {
+        BatchKey::Query(_) => {
+            if wait.is_some() {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BATCH-WAIT",
+                    "WAIT has no representation on query batches",
+                    None,
+                ));
+            }
+            let (timeout, consistency) = batch_shared_read_opts(params.as_ref())?;
+            if member_has_read_opts.iter().any(|has| *has) {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BATCH-PARAMS",
+                    "move member PARAMS timeout / consistency to the BATCH header",
+                    None,
+                ));
+            }
+            Ok(PlannedOperation::Batch {
+                key,
+                operations,
+                wait: None,
+                timeout,
+                consistency,
+            })
+        }
+        BatchKey::Mutation(_) => {
+            if let Some(p) = params.as_ref()
+                && (p.timeout.is_some() || p.consistency.is_some())
+            {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BATCH-PARAMS",
+                    "PARAMS timeout / consistency have no representation on mutation batches",
+                    None,
+                ));
+            }
+            if member_has_wait.iter().any(|has| *has) {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BATCH-WAIT",
+                    "move member WAIT to the BATCH header",
+                    None,
+                ));
+            }
+            Ok(PlannedOperation::Batch {
+                key,
+                operations,
+                wait,
                 timeout: None,
                 consistency: None,
             })

@@ -446,12 +446,15 @@ impl Executor {
             crate::executor::dml::upsert::map_unnamed_to_single_dense(&mut upsert, info);
             self.validate_embedded_upsert(&upsert, info)?;
         }
-        let request = qql_plan::mutation::lower_upsert_request(&upsert)?;
+        // Owned lowering: the bound `upsert` is single-use here, so its point
+        // vector buffers move into the request with zero copies.
         let wait = upsert
             .wait
             .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty());
+        let collection = std::mem::take(&mut upsert.collection);
+        let request = qql_plan::mutation::lower_upsert_request_owned(*upsert)?;
         let op = qql_plan::PlannedOperation::Upsert {
-            collection: upsert.collection.clone(),
+            collection,
             request,
             wait,
         };

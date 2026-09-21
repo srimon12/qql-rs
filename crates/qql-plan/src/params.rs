@@ -82,6 +82,61 @@ pub fn lower_search_params(
     }
 }
 
+/// Owned variant of [`lower_search_params`]: moves the IDF corpus filter
+/// instead of cloning it. All other params are `Copy` scalars.
+pub fn lower_search_params_owned(
+    params: qql_core::ast::SearchParams,
+) -> Result<Option<SearchParamsRequest>, QqlError> {
+    use crate::filter::top_level_filter_owned;
+    let mut has = false;
+    let idf = match params.idf {
+        None => None,
+        Some(idf) => Some(match idf.corpus {
+            None => IdfSearchParams::Global,
+            Some(filter) => {
+                let corpus = top_level_filter_owned(filter)?;
+                if filter_expression_is_empty(&corpus) {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-IDF",
+                        "idf corpus filter is empty or has no recognised conditions",
+                        None,
+                    ));
+                }
+                IdfSearchParams::Corpus { corpus }
+            }
+        }),
+    };
+    let r = SearchParamsRequest {
+        hnsw_ef: params.hnsw_ef,
+        exact: params.exact,
+        acorn: params.acorn.map(|enable| AcornSearchParams {
+            enable,
+            max_selectivity: params.max_selectivity,
+        }),
+        indexed_only: params.indexed_only,
+        quantization: params.quantization.as_ref().map(|q| {
+            has = true;
+            QuantizationSearchRequest {
+                ignore: q.ignore,
+                rescore: q.rescore,
+                oversampling: q.oversampling,
+            }
+        }),
+        idf,
+    };
+    if has
+        || r.hnsw_ef.is_some()
+        || r.exact.is_some()
+        || r.acorn.is_some()
+        || r.indexed_only.is_some()
+        || r.idf.is_some()
+    {
+        Ok(Some(r))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Extract request-level opts (OpenAPI query params / proto fields).
 pub fn lower_request_opts(
     params: Option<&qql_core::ast::SearchParams>,

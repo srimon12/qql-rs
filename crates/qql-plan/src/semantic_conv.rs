@@ -27,6 +27,24 @@ impl core::fmt::Display for PlanPointId {
     }
 }
 
+impl From<qql_core::ast::PointId> for PlanPointId {
+    /// Owned point-ID lowering: moves the string payload, no clone.
+    fn from(id: qql_core::ast::PointId) -> Self {
+        match id {
+            qql_core::ast::PointId::Number(n) => PlanPointId::Number(n),
+            qql_core::ast::PointId::String(s) => PlanPointId::String(s),
+            qql_core::ast::PointId::Param(name, _) => {
+                panic!("invariant violation: unbound parameter :{name} reached PlanPointId");
+            }
+            qql_core::ast::PointId::PositionalParam(idx, _) => {
+                panic!(
+                    "invariant violation: unbound positional parameter ?{idx} reached PlanPointId"
+                );
+            }
+        }
+    }
+}
+
 impl From<&qql_core::ast::PointId> for PlanPointId {
     // INVARIANT: `Param` / `PositionalParam` arms panic. `plan()` gates with
     // `ensure_no_unbound_params` and `plan_template()` with
@@ -86,6 +104,24 @@ impl core::fmt::Display for PlanShardKey {
     }
 }
 
+impl From<qql_core::ast::ShardKey> for PlanShardKey {
+    /// Owned shard-key lowering: moves the keyword string, no clone.
+    fn from(key: qql_core::ast::ShardKey) -> Self {
+        match key {
+            qql_core::ast::ShardKey::Keyword(s) => Self::Keyword(s),
+            qql_core::ast::ShardKey::Number(n) => Self::Number(n),
+            qql_core::ast::ShardKey::Param(name, _) => {
+                panic!("invariant violation: unbound parameter :{name} reached PlanShardKey");
+            }
+            qql_core::ast::ShardKey::PositionalParam(idx, _) => {
+                panic!(
+                    "invariant violation: unbound positional parameter ?{idx} reached PlanShardKey"
+                );
+            }
+        }
+    }
+}
+
 impl From<&qql_core::ast::ShardKey> for PlanShardKey {
     // INVARIANT: `Param` / `PositionalParam` arms panic. `plan()` gates with
     // `ensure_no_unbound_params` and `plan_template()` with
@@ -137,6 +173,52 @@ impl<'de> serde::Deserialize<'de> for PlanShardKey {
 }
 
 // ── Vector value ────────────────────────────────────────────────
+
+impl From<qql_core::ast::VectorValue> for PlanVectorValue {
+    /// Owned lowering: moves dense / sparse / multi-dense buffers out of the
+    /// AST with zero copies. The borrowed `From<&VectorValue>` stays as the
+    /// compat path for `plan(&Stmt)` callers.
+    fn from(v: qql_core::ast::VectorValue) -> Self {
+        match v {
+            qql_core::ast::VectorValue::Dense(d) => PlanVectorValue::Dense(d),
+            qql_core::ast::VectorValue::Sparse { indices, values } => {
+                PlanVectorValue::Sparse { indices, values }
+            }
+            qql_core::ast::VectorValue::MultiDense(rows) => PlanVectorValue::MultiDense(rows),
+            qql_core::ast::VectorValue::Document {
+                text,
+                model,
+                options,
+            } => PlanVectorValue::Document {
+                text,
+                model,
+                options: plan_options_owned(options),
+            },
+            qql_core::ast::VectorValue::Image {
+                source,
+                model,
+                options,
+            } => PlanVectorValue::Image {
+                image: source,
+                model,
+                options: plan_options_owned(options),
+            },
+            qql_core::ast::VectorValue::Object {
+                object,
+                model,
+                options,
+            } => PlanVectorValue::Object {
+                object: crate::filter::value_to_json_owned(*object),
+                model,
+                options: plan_options_owned(options),
+            },
+            qql_core::ast::VectorValue::Param(name, _) => PlanVectorValue::Param(name),
+            qql_core::ast::VectorValue::PositionalParam(idx, _) => {
+                PlanVectorValue::PositionalParam(idx)
+            }
+        }
+    }
+}
 
 impl From<&qql_core::ast::VectorValue> for PlanVectorValue {
     fn from(v: &qql_core::ast::VectorValue) -> Self {
@@ -328,6 +410,127 @@ impl PlanVectorValue {
             _ => None,
         }
     }
+
+    /// Owned variant of [`PlanVectorValue::from_value`]: moves `F32Array`
+    /// buffers out of the `Value` instead of cloning them.
+    ///
+    /// `List`/`Dict` shapes still build new `f32` vecs element-wise (the AST
+    /// stores boxed `f64`/`i64` scalars there, so no buffer exists to move).
+    /// The `F32Array` fast path — what the host heuristic and numpy bindings
+    /// produce for real vectors — moves with zero copies.
+    pub fn from_value_owned(val: qql_core::ast::Value) -> Option<Self> {
+        match val {
+            qql_core::ast::Value::F32Array(v) => Some(PlanVectorValue::Dense(v)),
+            qql_core::ast::Value::List(items) => {
+                Self::from_value(&qql_core::ast::Value::List(items))
+            }
+            qql_core::ast::Value::Dict(entries) => {
+                // Move out: destructure owned entries, reusing buffers where
+                // they are already `F32Array`.
+                let mut flat: Option<Vec<f32>> = None;
+                let mut dim: Option<usize> = None;
+                let mut indices: Option<Vec<u32>> = None;
+                let mut values: Option<Vec<f32>> = None;
+                let mut has_data = false;
+                let mut has_dim = false;
+                let mut has_indices = false;
+                let mut has_values = false;
+                for (k, _) in &entries {
+                    if k.eq_ignore_ascii_case("data") {
+                        has_data = true;
+                    } else if k.eq_ignore_ascii_case("dim") {
+                        has_dim = true;
+                    } else if k.eq_ignore_ascii_case("indices") {
+                        has_indices = true;
+                    } else if k.eq_ignore_ascii_case("values") {
+                        has_values = true;
+                    }
+                }
+                if has_data || has_dim {
+                    if has_indices || has_values {
+                        return None;
+                    }
+                    for (k, v) in entries {
+                        if k.eq_ignore_ascii_case("data") {
+                            flat = match v {
+                                qql_core::ast::Value::F32Array(items) => Some(items),
+                                qql_core::ast::Value::List(items) => {
+                                    let mut out = Vec::with_capacity(items.len());
+                                    for item in items {
+                                        match item {
+                                            qql_core::ast::Value::Float(x) => out.push(x as f32),
+                                            qql_core::ast::Value::Int(i) => out.push(i as f32),
+                                            _ => return None,
+                                        }
+                                    }
+                                    Some(out)
+                                }
+                                _ => return None,
+                            };
+                        } else if k.eq_ignore_ascii_case("dim") {
+                            match v {
+                                qql_core::ast::Value::Int(n) if n > 0 => {
+                                    dim = usize::try_from(n).ok();
+                                }
+                                _ => return None,
+                            }
+                        } else {
+                            return None;
+                        }
+                    }
+                    let (flat, dim) = match (flat, dim) {
+                        (Some(flat), Some(dim)) => (flat, dim),
+                        _ => return None,
+                    };
+                    if flat.is_empty() || dim == 0 || flat.len() % dim != 0 {
+                        return None;
+                    }
+                    return Some(PlanVectorValue::MultiDense(
+                        flat.chunks_exact(dim).map(<[f32]>::to_vec).collect(),
+                    ));
+                }
+                for (k, v) in entries {
+                    if k == "indices"
+                        && let qql_core::ast::Value::List(idx_list) = v
+                    {
+                        let mut idxs = Vec::with_capacity(idx_list.len());
+                        for idx in idx_list {
+                            if let qql_core::ast::Value::Int(i) = idx {
+                                idxs.push(i as u32);
+                            } else {
+                                return None;
+                            }
+                        }
+                        indices = Some(idxs);
+                    } else if k == "values" {
+                        match v {
+                            qql_core::ast::Value::F32Array(items) => {
+                                values = Some(items);
+                            }
+                            qql_core::ast::Value::List(val_list) => {
+                                let mut vals = Vec::with_capacity(val_list.len());
+                                for val in val_list {
+                                    match val {
+                                        qql_core::ast::Value::Float(x) => vals.push(x as f32),
+                                        qql_core::ast::Value::Int(i) => vals.push(i as f32),
+                                        _ => return None,
+                                    }
+                                }
+                                values = Some(vals);
+                            }
+                            _ => return None,
+                        }
+                    }
+                }
+                if let (Some(indices), Some(values)) = (indices, values) {
+                    Some(PlanVectorValue::Sparse { indices, values })
+                } else {
+                    None
+                }
+            }
+            other => Self::from_value(&other),
+        }
+    }
 }
 
 /// Streams `f32` as JSON `f64` without allocating an intermediate `Vec<f64>`.
@@ -481,6 +684,52 @@ impl<'de> Deserialize<'de> for PlanVectorStruct {
 
 // ── Query / vector input ────────────────────────────────────────
 
+impl From<qql_core::ast::QueryInput> for PlanQueryInput {
+    /// Owned query-input lowering: moves text / image / vector buffers.
+    fn from(input: qql_core::ast::QueryInput) -> Self {
+        match input {
+            qql_core::ast::QueryInput::Point(id) => PlanQueryInput::Point(PlanPointId::from(id)),
+            qql_core::ast::QueryInput::Vector(v) => {
+                PlanQueryInput::Vector(PlanVectorValue::from(v))
+            }
+            qql_core::ast::QueryInput::Text {
+                text,
+                model,
+                options,
+                ..
+            } => PlanQueryInput::Document {
+                text,
+                model,
+                options: plan_options_owned(options),
+            },
+            qql_core::ast::QueryInput::Image {
+                source,
+                model,
+                options,
+            } => PlanQueryInput::Image {
+                image: source,
+                model,
+                options: plan_options_owned(options),
+            },
+            qql_core::ast::QueryInput::Object {
+                object,
+                model,
+                options,
+            } => PlanQueryInput::Object {
+                object: crate::filter::value_to_json_owned(*object),
+                model,
+                options: plan_options_owned(options),
+            },
+            qql_core::ast::QueryInput::Param(name, _) => {
+                PlanQueryInput::Vector(PlanVectorValue::Param(name))
+            }
+            qql_core::ast::QueryInput::PositionalParam(idx, _) => {
+                PlanQueryInput::Vector(PlanVectorValue::PositionalParam(idx))
+            }
+        }
+    }
+}
+
 impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
     fn from(input: &qql_core::ast::QueryInput) -> Self {
         match input {
@@ -537,6 +786,20 @@ fn plan_options(
     let mut map = serde_json::Map::with_capacity(options.len());
     for (key, value) in options {
         map.insert(key.clone(), crate::filter::value_to_json(value));
+    }
+    Some(map)
+}
+
+/// Owned variant of [`plan_options`]: moves keys and values out of the AST.
+pub(crate) fn plan_options_owned(
+    options: Vec<(alloc::string::String, qql_core::ast::Value)>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if options.is_empty() {
+        return None;
+    }
+    let mut map = serde_json::Map::with_capacity(options.len());
+    for (key, value) in options {
+        map.insert(key, crate::filter::value_to_json_owned(value));
     }
     Some(map)
 }
@@ -598,6 +861,27 @@ impl Serialize for PlanQueryInput {
 }
 
 // ── Point vectors (upsert body) ─────────────────────────────────
+
+impl From<qql_core::ast::PointVectors> for PlanPointVectors {
+    /// Owned point-vectors lowering: moves every named buffer.
+    fn from(v: qql_core::ast::PointVectors) -> Self {
+        match v {
+            qql_core::ast::PointVectors::Unnamed(vv) => {
+                PlanPointVectors::Unnamed(PlanVectorValue::from(vv))
+            }
+            qql_core::ast::PointVectors::Named(entries) => PlanPointVectors::Named(
+                entries
+                    .into_iter()
+                    .map(|(n, vv)| (n, PlanVectorValue::from(vv)))
+                    .collect(),
+            ),
+            qql_core::ast::PointVectors::Param(name, _) => PlanPointVectors::Param(name),
+            qql_core::ast::PointVectors::PositionalParam(idx, _) => {
+                PlanPointVectors::PositionalParam(idx)
+            }
+        }
+    }
+}
 
 impl From<&qql_core::ast::PointVectors> for PlanPointVectors {
     fn from(v: &qql_core::ast::PointVectors) -> Self {

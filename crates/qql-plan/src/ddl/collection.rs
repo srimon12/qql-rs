@@ -219,3 +219,142 @@ fn apply_vector_defaults(vectors: Option<&mut DenseVectorsConfig>, default: &Vec
         None => {}
     }
 }
+
+/// Owned variant of [`lower_create_collection`]: moves vector names and config.
+pub fn lower_create_collection_owned(
+    stmt: CreateCollectionStmt,
+) -> Result<CreateCollectionRequest, QqlError> {
+    let mut req = CreateCollectionRequest {
+        vectors: None,
+        sparse_vectors: None,
+        hnsw_config: None,
+        optimizers_config: None,
+        params: None,
+        quantization_config: None,
+        wal_config: None,
+        strict_mode_config: None,
+        metadata: None,
+        shard_number: None,
+        sharding_method: None,
+        shard_keys: None,
+    };
+
+    let mut vectors = BTreeMap::new();
+    for vd in stmt.vectors {
+        let params = DenseVectorParams {
+            size: vd.size,
+            distance: vd.distance,
+            hnsw_config: vd.hnsw.as_deref().map(lower_hnsw_config),
+            quantization_config: vd.quantization.as_deref().map(lower_quantization_config),
+            on_disk: vd.vectors.as_deref().and_then(|cfg| cfg.on_disk),
+            memory: vd.vectors.as_deref().and_then(|cfg| cfg.memory),
+            datatype: vd.vectors.as_deref().and_then(|cfg| cfg.datatype),
+            multivector_config: vd.multivector.as_ref().map(|mv| MultiVectorConfig {
+                comparator: match mv.comparator {
+                    MultivectorComparator::MaxSim => MultiVectorComparator::MaxSim,
+                },
+            }),
+        };
+        vectors.insert(vd.name, params);
+    }
+
+    let mut sparse = BTreeMap::new();
+    for sv in stmt.sparse_vectors {
+        sparse.insert(
+            sv.name,
+            SparseVectorParams {
+                index: sv.index.as_deref().map(lower_sparse_index_params),
+                modifier: sv
+                    .modifier
+                    .as_deref()
+                    .map(lower_sparse_modifier)
+                    .unwrap_or(SparseModifier::Idf),
+            },
+        );
+    }
+    if !vectors.is_empty() {
+        req.vectors = Some(DenseVectorsConfig::Named(vectors));
+    }
+    if !sparse.is_empty() {
+        req.sparse_vectors = Some(sparse);
+    }
+
+    if let Some(config) = stmt.config {
+        fill_collection_config(&mut req, &config)?;
+        if let Some(ref default) = config.vectors {
+            apply_vector_defaults(req.vectors.as_mut(), default);
+        }
+    }
+
+    Ok(req)
+}
+
+/// Owned variant of [`lower_alter_collection`].
+pub fn lower_alter_collection_owned(
+    stmt: AlterCollectionStmt,
+) -> Result<UpdateCollectionRequest, QqlError> {
+    let mut req = UpdateCollectionRequest {
+        hnsw_config: None,
+        optimizers_config: None,
+        params: None,
+        quantization_config: None,
+        strict_mode_config: None,
+        metadata: None,
+        vectors: None,
+        sparse_vectors: None,
+    };
+    if let Some(config) = stmt.config {
+        fill_update_collection_config_owned(&mut req, *config)?;
+    }
+    Ok(req)
+}
+
+fn fill_update_collection_config_owned(
+    req: &mut UpdateCollectionRequest,
+    config: CollectionConfig,
+) -> Result<(), QqlError> {
+    req.quantization_config = lower_quantization_diff(&config);
+    if let Some(h) = config.hnsw {
+        req.hnsw_config = Some(lower_hnsw_config(&h));
+    }
+    if let Some(o) = config.optimizers {
+        req.optimizers_config = Some(lower_optimizers_config(&o));
+    }
+    if let Some(p) = config.params {
+        req.params = Some(lower_collection_params(&p));
+    }
+    if let Some(strict) = config.strict_mode {
+        req.strict_mode_config = Some(Box::new(lower_strict_mode_config(&strict)?));
+    }
+    if let Some(metadata) = config.metadata {
+        req.metadata = Some(Box::new(lower_metadata_map(&metadata)));
+    }
+    if let Some(pairs) = config.wal {
+        let span = pairs.first().and_then(|(_, value)| value.param_span());
+        return Err(collection_config_error(
+            "WITH WAL is supported only for CREATE COLLECTION",
+            span,
+        ));
+    }
+    if let Some(storage) = config.vectors {
+        let diff = lower_storage_diff(&storage)?;
+        insert_vector_diff(&mut req.vectors, String::new(), diff)?;
+    }
+    for diff in config.vector_diffs {
+        let mut params = match diff.vectors.as_deref() {
+            Some(storage) => lower_storage_diff(storage)?,
+            None => VectorParamsDiff::default(),
+        };
+        params.hnsw_config = diff.hnsw.as_deref().map(lower_hnsw_config);
+        params.quantization_config = lower_quantization_update_diff(diff.quantization.as_deref());
+        insert_vector_diff(&mut req.vectors, diff.name, params)?;
+    }
+    for diff in config.sparse_vector_diffs {
+        let params = SparseVectorParamsDiff {
+            index: diff.index.as_deref().map(lower_sparse_index_params),
+            modifier: diff.modifier.as_deref().map(lower_sparse_modifier),
+        };
+        insert_sparse_vector_diff(&mut req.sparse_vectors, diff.name, params)?;
+    }
+    Ok(())
+}

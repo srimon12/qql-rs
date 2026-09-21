@@ -1,20 +1,37 @@
 use crate::filter::{top_level_filter, value_to_json};
-use crate::prefetch::{build_query_with_prefetch, default_model_for_using, extract_lookup_from};
+use crate::prefetch::{
+    build_query_with_prefetch, default_model_for_using, extract_lookup_from,
+    extract_lookup_from_owned,
+};
 use crate::semantic::PlanQueryInput;
 use crate::types::*;
 use qql_core::ast::{FusionMethod, OrderDirection, QueryExpr, QueryInput, QueryStmt, VectorValue};
 use qql_core::error::QqlError;
 
 pub use crate::params::{lower_request_opts, lower_search_params, push_read_opts};
-pub use crate::prefetch::{lower_prefetch, lower_prefetch_with_ctes};
+pub use crate::prefetch::{
+    build_query_with_prefetch_owned_parts, lower_prefetch, lower_prefetch_owned,
+    lower_prefetch_with_ctes, lower_prefetch_with_ctes_owned,
+};
 
 /// Convert an AST vector value into its transport-neutral plan representation.
 pub fn lower_vector_value(value: &VectorValue) -> PlanVectorValue {
     PlanVectorValue::from(value)
 }
 
+/// Owned variant of [`lower_vector_value`]: moves dense / sparse / multi-dense
+/// buffers out of the AST with zero copies.
+pub fn lower_vector_value_owned(value: VectorValue) -> PlanVectorValue {
+    PlanVectorValue::from(value)
+}
+
 /// Convert an AST query input (point, vector, text, image) into its plan form.
 pub fn lower_query_input(input: &QueryInput) -> PlanQueryInput {
+    PlanQueryInput::from(input)
+}
+
+/// Owned variant of [`lower_query_input`]: moves text / image / vector buffers.
+pub fn lower_query_input_owned(input: QueryInput) -> PlanQueryInput {
     PlanQueryInput::from(input)
 }
 
@@ -181,11 +198,180 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
     })
 }
 
+/// Owned variant of [`lower_query_expr`]: moves every input buffer instead of
+/// cloning it. The borrowed version stays as the compat path.
+pub fn lower_query_expr_owned(expr: QueryExpr) -> Result<QueryVariant, QqlError> {
+    Ok(match expr {
+        QueryExpr::Nearest {
+            input, using, mmr, ..
+        } => {
+            let mut nearest = lower_query_input_owned(input);
+            if let PlanQueryInput::Document { model, .. } = &mut nearest
+                && model.as_deref().unwrap_or("").is_empty()
+            {
+                let using_name = using.as_ref().map(|t| t.name.clone());
+                *model = crate::prefetch::default_model_for_using(using_name.as_deref())
+                    .or_else(|| model.clone());
+            }
+            QueryVariant::Nearest(NearestQuery {
+                nearest,
+                mmr: mmr.map(|m| MmrQueryParams {
+                    diversity: m.diversity,
+                    candidates_limit: m.candidates,
+                }),
+            })
+        }
+        QueryExpr::Recommend {
+            positive,
+            negative,
+            strategy,
+            ..
+        } => {
+            let pos = positive.into_iter().map(lower_query_input_owned).collect();
+            let neg = negative.into_iter().map(lower_query_input_owned).collect();
+            let s = strategy.map(|s| match s {
+                qql_core::ast::RecommendStrategy::AverageVector => "average_vector".into(),
+                qql_core::ast::RecommendStrategy::BestScore => "best_score".into(),
+                qql_core::ast::RecommendStrategy::SumScores => "sum_scores".into(),
+            });
+            QueryVariant::Recommend {
+                recommend: RecommendQuery {
+                    positive: pos,
+                    negative: neg,
+                    strategy: s,
+                },
+            }
+        }
+        QueryExpr::Context { pairs, .. } => {
+            let ctx = pairs
+                .into_iter()
+                .map(|pair| ContextPair {
+                    positive: lower_query_input_owned(pair.positive),
+                    negative: lower_query_input_owned(pair.negative),
+                })
+                .collect();
+            QueryVariant::Context { context: ctx }
+        }
+        QueryExpr::Discover {
+            target, context, ..
+        } => {
+            let ctx = context
+                .into_iter()
+                .map(|pair| ContextPair {
+                    positive: lower_query_input_owned(pair.positive),
+                    negative: lower_query_input_owned(pair.negative),
+                })
+                .collect();
+            QueryVariant::Discover {
+                discover: DiscoverQuery {
+                    target: lower_query_input_owned(target),
+                    context: ctx,
+                },
+            }
+        }
+        QueryExpr::OrderBy {
+            field,
+            direction,
+            start_from,
+        } => {
+            let dir = match direction {
+                OrderDirection::Asc => Some("asc".into()),
+                OrderDirection::Desc => Some("desc".into()),
+            };
+            QueryVariant::OrderBy {
+                order_by: OrderByQuery {
+                    key: field,
+                    direction: dir,
+                    start_from: start_from.map(crate::filter::value_to_json_owned),
+                },
+            }
+        }
+        QueryExpr::SampleRandom => QueryVariant::Sample {
+            sample: "random".into(),
+        },
+        QueryExpr::Fusion { method, .. } => {
+            let m = match method {
+                FusionMethod::Rrf => "rrf",
+                FusionMethod::Dbsf => "dbsf",
+            };
+            QueryVariant::Fusion { fusion: m.into() }
+        }
+        QueryExpr::Formula {
+            expression,
+            defaults,
+            ..
+        } => {
+            let defaults = if defaults.is_empty() {
+                None
+            } else {
+                Some(
+                    defaults
+                        .into_iter()
+                        .map(|(key, value)| (key, FormulaDefault::from(value)))
+                        .collect(),
+                )
+            };
+            QueryVariant::Formula(FormulaQuery {
+                formula: PlanFormula::from_expr(expression.as_ref())?,
+                defaults,
+            })
+        }
+        QueryExpr::RelevanceFeedback {
+            target,
+            feedback,
+            strategy,
+            ..
+        } => {
+            let feedback_items = feedback
+                .into_iter()
+                .map(|item| FeedbackItem {
+                    example: lower_query_input_owned(item.example),
+                    score: item.score,
+                })
+                .collect();
+            QueryVariant::RelevanceFeedback {
+                relevance_feedback: RelevanceFeedbackInput {
+                    target: lower_query_input_owned(target),
+                    feedback: feedback_items,
+                    strategy: FeedbackStrategy {
+                        naive: NaiveFeedbackStrategyParams {
+                            a: strategy.a,
+                            b: strategy.b,
+                            c: strategy.c,
+                        },
+                    },
+                },
+            }
+        }
+        QueryExpr::Hybrid { .. } => QueryVariant::Fusion {
+            fusion: "rrf".into(),
+        },
+        QueryExpr::Rerank { input, .. } => QueryVariant::Nearest(NearestQuery {
+            nearest: lower_query_input_owned(input),
+            mmr: None,
+        }),
+        QueryExpr::CrossRerank { .. } | QueryExpr::Points { .. } => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-UNSUPPORTED-PREFETCH",
+                "POINTS / CROSS RERANK are not supported inside PREFETCH",
+                None,
+            ));
+        }
+    })
+}
+
 /// Lower a `QueryOutput` into payload/vector selection for wire bodies.
 pub fn lower_output_selector_public(
     output: &qql_core::ast::QueryOutput,
 ) -> (Option<PayloadSelectorReq>, Option<VectorSelectorReq>) {
     lower_output_selector(output)
+}
+
+/// Owned variant of [`lower_output_selector_public`]: moves selector vecs.
+pub fn lower_output_selector_public_owned(
+    output: qql_core::ast::QueryOutput,
+) -> (Option<PayloadSelectorReq>, Option<VectorSelectorReq>) {
+    lower_output_selector_owned(output)
 }
 
 fn lower_output_selector(
@@ -210,6 +396,29 @@ fn lower_output_selector(
         qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
         qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
         qql_core::ast::VectorSelector::Names(names) => VectorSelectorReq::Names(names.clone()),
+    });
+    (with_payload, with_vector)
+}
+
+/// Owned variant of [`lower_output_selector`]: moves selector string vecs.
+fn lower_output_selector_owned(
+    output: qql_core::ast::QueryOutput,
+) -> (Option<PayloadSelectorReq>, Option<VectorSelectorReq>) {
+    let with_payload = match output.payload {
+        Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),
+        Some(qql_core::ast::PayloadSelector::None) => Some(PayloadSelectorReq::All(false)),
+        Some(qql_core::ast::PayloadSelector::Include(fields)) => {
+            Some(PayloadSelectorReq::Include { include: fields })
+        }
+        Some(qql_core::ast::PayloadSelector::Exclude(fields)) => {
+            Some(PayloadSelectorReq::Exclude { exclude: fields })
+        }
+        None => Some(PayloadSelectorReq::All(true)),
+    };
+    let with_vector = output.vectors.map(|v| match v {
+        qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
+        qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
+        qql_core::ast::VectorSelector::Names(names) => VectorSelectorReq::Names(names),
     });
     (with_payload, with_vector)
 }
@@ -339,6 +548,174 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
             .shard_key
             .as_ref()
             .map(crate::semantic::PlanShardKey::from),
+        timeout,
+        consistency,
+        group_offset,
+    })
+}
+
+/// Owned variant of [`lower_group_lookup`]: moves collection and selector vecs.
+fn lower_group_lookup_owned(lookup: qql_core::ast::GroupLookup) -> WithLookupValue {
+    if lookup.payload.is_none() && lookup.vectors.is_none() {
+        return WithLookupValue::Collection(lookup.collection);
+    }
+    WithLookupValue::Full(WithLookup {
+        collection: lookup.collection,
+        with_payload: lookup.payload.map(|selector| match selector {
+            qql_core::ast::PayloadSelector::All => PayloadSelectorReq::All(true),
+            qql_core::ast::PayloadSelector::None => PayloadSelectorReq::All(false),
+            qql_core::ast::PayloadSelector::Include(fields) => {
+                PayloadSelectorReq::Include { include: fields }
+            }
+            qql_core::ast::PayloadSelector::Exclude(fields) => {
+                PayloadSelectorReq::Exclude { exclude: fields }
+            }
+        }),
+        with_vectors: lookup.vectors.map(|selector| match selector {
+            qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
+            qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
+            qql_core::ast::VectorSelector::Names(names) => VectorSelectorReq::Names(names),
+        }),
+    })
+}
+
+/// Owned variant of [`lower_query_request`]: consumes the statement, moving
+/// vectors / filters / params instead of cloning them.
+pub fn lower_query_request_owned(
+    query: qql_core::ast::QueryStmt,
+) -> Result<QueryRequest, QqlError> {
+    use crate::filter::top_level_filter_owned;
+    use crate::params::lower_search_params_owned;
+    let qql_core::ast::QueryStmt {
+        expression,
+        filter,
+        params,
+        score_threshold,
+        output,
+        page,
+        shard_key,
+        ctes,
+        ..
+    } = query;
+    let (with_payload, with_vector) = lower_output_selector_owned(output);
+    let (timeout, consistency) = match params.as_ref() {
+        Some(p) => (
+            p.timeout,
+            p.consistency
+                .as_ref()
+                .map(crate::types::ReadConsistencyParam::from),
+        ),
+        None => (None, None),
+    };
+    let lookup_from = extract_lookup_from_owned(&expression);
+    // `build_query_with_prefetch_owned_parts` needs filter/params for hybrid arms;
+    // pass them by reference while the owned lowering moves expression + ctes.
+    let (query_variant, using, prefetch) = crate::prefetch::build_query_with_prefetch_owned_parts(
+        expression,
+        ctes,
+        filter.as_deref(),
+        params.as_ref(),
+        page.limit,
+        score_threshold,
+    )?;
+    Ok(QueryRequest {
+        query: query_variant,
+        using,
+        prefetch,
+        filter: filter.map(|f| top_level_filter_owned(*f)).transpose()?,
+        params: params.map(lower_search_params_owned).transpose()?.flatten(),
+        score_threshold,
+        with_payload,
+        with_vector,
+        limit: page.limit,
+        offset: page.offset,
+        lookup_from,
+        shard_key: shard_key.map(crate::semantic::PlanShardKey::from),
+        timeout,
+        consistency,
+    })
+}
+
+/// Owned variant of [`lower_query_groups_request`].
+pub fn lower_query_groups_request_owned(
+    query: qql_core::ast::QueryStmt,
+) -> Result<QueryGroupsRequest, QqlError> {
+    use crate::filter::top_level_filter_owned;
+    use crate::params::lower_search_params_owned;
+    let qql_core::ast::QueryStmt {
+        expression,
+        filter,
+        params,
+        score_threshold,
+        output,
+        page,
+        shard_key,
+        ctes,
+        group,
+        ..
+    } = query;
+    let Some(group) = group else {
+        return Err(QqlError::validation(
+            "QQL-PLAN-GROUP",
+            "group required for groups query",
+            None,
+        ));
+    };
+    if group.field.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-GROUP",
+            "group field must not be empty",
+            group.field_span,
+        ));
+    };
+    let offset = page.offset.unwrap_or(0);
+    let user_limit = page.limit.unwrap_or(10);
+    let effective_limit = user_limit.checked_add(offset).ok_or_else(|| {
+        QqlError::validation(
+            "QQL-VALIDATION-LIMIT-OVERFLOW",
+            format!(
+                "grouped query LIMIT {user_limit} + OFFSET {offset} overflows u64; \
+                 reduce LIMIT or OFFSET"
+            ),
+            None,
+        )
+    })?;
+    let group_offset = if offset > 0 { Some(offset) } else { None };
+
+    let (with_payload, with_vector) = lower_output_selector_owned(output);
+    let (timeout, consistency) = match params.as_ref() {
+        Some(p) => (
+            p.timeout,
+            p.consistency
+                .as_ref()
+                .map(crate::types::ReadConsistencyParam::from),
+        ),
+        None => (None, None),
+    };
+    let lookup_from = extract_lookup_from_owned(&expression);
+    let (query_variant, using, prefetch) = crate::prefetch::build_query_with_prefetch_owned_parts(
+        expression,
+        ctes,
+        filter.as_deref(),
+        params.as_ref(),
+        page.limit,
+        score_threshold,
+    )?;
+    Ok(QueryGroupsRequest {
+        query: query_variant,
+        using,
+        prefetch,
+        filter: filter.map(|f| top_level_filter_owned(*f)).transpose()?,
+        params: params.map(lower_search_params_owned).transpose()?.flatten(),
+        score_threshold,
+        with_payload,
+        with_vector,
+        group_by: group.field,
+        group_size: group.size.unwrap_or(3),
+        limit: effective_limit,
+        with_lookup: group.lookup.map(lower_group_lookup_owned),
+        lookup_from,
+        shard_key: shard_key.map(crate::semantic::PlanShardKey::from),
         timeout,
         consistency,
         group_offset,

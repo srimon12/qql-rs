@@ -57,6 +57,49 @@ fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
     req
 }
 
+/// Owned variant of [`lower_upsert_request`]: moves every point vector buffer,
+/// payload key/value, and filter — the 10k×128-dim hot path with zero copies.
+pub fn lower_upsert_request_owned(stmt: UpsertStmt) -> Result<UpsertRequest, QqlError> {
+    use crate::filter::top_level_filter_owned;
+    let mut points = Vec::with_capacity(stmt.points.len());
+    for point in stmt.points {
+        match point {
+            PointEntry::Inline(inline) => points.push(lower_upsert_point_owned(inline)),
+            PointEntry::Param(..) | PointEntry::PositionalParam(..) => {}
+        }
+    }
+    Ok(UpsertRequest {
+        points,
+        update_filter: stmt.update_filter.map(top_level_filter_owned).transpose()?,
+        update_mode: stmt.update_mode.map(|mode| match mode {
+            qql_core::ast::UpsertUpdateMode::InsertOnly => UpdateMode::InsertOnly,
+            qql_core::ast::UpsertUpdateMode::UpdateOnly => UpdateMode::UpdateOnly,
+            qql_core::ast::UpsertUpdateMode::Upsert => UpdateMode::Upsert,
+        }),
+        shard_key: stmt.shard_key.map(PlanShardKey::from),
+    })
+}
+
+fn lower_upsert_point_owned(point: UpsertPoint) -> UpsertPointRequest {
+    use crate::filter::value_to_json_owned;
+    let mut req = UpsertPointRequest {
+        id: PlanPointId::from(point.id),
+        vector: None,
+        payload: None,
+    };
+    if let Some(vectors) = point.vectors {
+        req.vector = Some(PlanPointVectors::from(vectors));
+    }
+    if !point.payload.is_empty() {
+        let mut payload = serde_json::Map::with_capacity(point.payload.len());
+        for (key, value) in point.payload {
+            payload.insert(key, value_to_json_owned(value));
+        }
+        req.payload = Some(payload);
+    }
+    req
+}
+
 /// Lower `DELETE` to the `POST /points/delete` body, by IDs or filter.
 pub fn lower_delete_request(stmt: &DeleteStmt) -> Result<DeleteRequest, QqlError> {
     Ok(match &stmt.selector {
@@ -204,6 +247,156 @@ pub fn lower_delete_vector_request(
     })
 }
 
+/// Owned variant of [`lower_delete_request`]: moves point IDs / filter / shard key.
+pub fn lower_delete_request_owned(stmt: DeleteStmt) -> Result<DeleteRequest, QqlError> {
+    use crate::filter::{point_id_req_typed_owned, top_level_filter_owned};
+    Ok(match stmt.selector {
+        PointSelector::Id(id) => DeleteRequest {
+            points: Some(vec![point_id_req_typed_owned(id)]),
+            filter: None,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Ids(ids) => DeleteRequest {
+            points: Some(ids.into_iter().map(point_id_req_typed_owned).collect()),
+            filter: None,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Filter(filter) => DeleteRequest {
+            points: None,
+            filter: Some(top_level_filter_owned(*filter)?),
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+    })
+}
+
+/// Owned variant of [`lower_update_vector_request`]: moves every vector buffer.
+pub fn lower_update_vector_request_owned(stmt: UpdateVectorStmt) -> UpdateVectorRequest {
+    use crate::filter::point_id_req_typed_owned;
+    UpdateVectorRequest {
+        points: stmt
+            .points
+            .into_iter()
+            .map(|point| UpdateVectorPoint {
+                id: point_id_req_typed_owned(point.id),
+                vector: PlanPointVectors::from(point.vectors),
+            })
+            .collect(),
+        shard_key: stmt.shard_key.map(PlanShardKey::from),
+    }
+}
+
+/// Owned variant of [`lower_update_payload_request`]: moves payload entries.
+pub fn lower_update_payload_request_owned(
+    stmt: UpdatePayloadStmt,
+) -> Result<UpdatePayloadRequest, QqlError> {
+    use crate::filter::{point_id_req_typed_owned, top_level_filter_owned, value_to_json_owned};
+    let mut payload = serde_json::Map::with_capacity(stmt.payload.len());
+    for (key, value) in stmt.payload {
+        payload.insert(key, value_to_json_owned(value));
+    }
+    Ok(match stmt.selector {
+        PointSelector::Id(id) => UpdatePayloadRequest {
+            points: Some(vec![point_id_req_typed_owned(id)]),
+            filter: None,
+            payload,
+            key: stmt.key,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Ids(ids) => UpdatePayloadRequest {
+            points: Some(ids.into_iter().map(point_id_req_typed_owned).collect()),
+            filter: None,
+            payload,
+            key: stmt.key,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Filter(filter) => UpdatePayloadRequest {
+            points: None,
+            filter: Some(top_level_filter_owned(*filter)?),
+            payload,
+            key: stmt.key,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+    })
+}
+
+/// Owned variant of [`lower_clear_payload_request`].
+pub fn lower_clear_payload_request_owned(
+    stmt: ClearPayloadStmt,
+) -> Result<ClearPayloadRequest, QqlError> {
+    use crate::filter::{point_id_req_typed_owned, top_level_filter_owned};
+    Ok(match stmt.selector {
+        PointSelector::Id(id) => ClearPayloadRequest {
+            points: Some(vec![point_id_req_typed_owned(id)]),
+            filter: None,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Ids(ids) => ClearPayloadRequest {
+            points: Some(ids.into_iter().map(point_id_req_typed_owned).collect()),
+            filter: None,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Filter(filter) => ClearPayloadRequest {
+            points: None,
+            filter: Some(top_level_filter_owned(*filter)?),
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+    })
+}
+
+/// Owned variant of [`lower_delete_payload_request`]: moves key vec.
+pub fn lower_delete_payload_request_owned(
+    stmt: DeletePayloadStmt,
+) -> Result<DeletePayloadRequest, QqlError> {
+    use crate::filter::{point_id_req_typed_owned, top_level_filter_owned};
+    Ok(match stmt.selector {
+        PointSelector::Id(id) => DeletePayloadRequest {
+            keys: stmt.keys,
+            points: Some(vec![point_id_req_typed_owned(id)]),
+            filter: None,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Ids(ids) => DeletePayloadRequest {
+            keys: stmt.keys,
+            points: Some(ids.into_iter().map(point_id_req_typed_owned).collect()),
+            filter: None,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Filter(filter) => DeletePayloadRequest {
+            keys: stmt.keys,
+            points: None,
+            filter: Some(top_level_filter_owned(*filter)?),
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+    })
+}
+
+/// Owned variant of [`lower_delete_vector_request`]: moves name vec.
+pub fn lower_delete_vector_request_owned(
+    stmt: DeleteVectorStmt,
+) -> Result<DeleteVectorRequest, QqlError> {
+    use crate::filter::{point_id_req_typed_owned, top_level_filter_owned};
+    Ok(match stmt.selector {
+        PointSelector::Id(id) => DeleteVectorRequest {
+            points: Some(vec![point_id_req_typed_owned(id)]),
+            filter: None,
+            vector: stmt.vector_names,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Ids(ids) => DeleteVectorRequest {
+            points: Some(ids.into_iter().map(point_id_req_typed_owned).collect()),
+            filter: None,
+            vector: stmt.vector_names,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+        PointSelector::Filter(filter) => DeleteVectorRequest {
+            points: None,
+            filter: Some(top_level_filter_owned(*filter)?),
+            vector: stmt.vector_names,
+            shard_key: stmt.shard_key.map(PlanShardKey::from),
+        },
+    })
+}
+
 /// Parse a UUID point ID string (dashes optional) into its 128-bit value.
 fn uuid_to_u128(s: &str) -> Option<u128> {
     let clean: String = s.chars().filter(|c| *c != '-').collect();
@@ -340,6 +533,62 @@ pub fn lower_scroll_request(
             start_from: order.start_from.as_ref().map(value_to_json),
         }),
         shard_key: shard_key.as_ref().map(PlanShardKey::from),
+    })
+}
+
+/// Owned variant of [`lower_scroll_request`]: moves filter / selectors / shard key.
+pub fn lower_scroll_request_owned(
+    limit: u64,
+    filter: Option<qql_core::ast::FilterExpr>,
+    after: Option<qql_core::ast::PointId>,
+    order_by: Option<qql_core::ast::ScrollOrderBy>,
+    shard_key: Option<qql_core::ast::ShardKey>,
+    with_payload: Option<qql_core::ast::PayloadSelector>,
+    with_vector: Option<qql_core::ast::VectorSelector>,
+) -> Result<ScrollRequest, QqlError> {
+    use crate::filter::{point_id_req_typed_owned, top_level_filter_owned, value_to_json_owned};
+    let with_payload = match with_payload {
+        None => Some(PayloadSelectorReq::All(true)),
+        Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),
+        Some(qql_core::ast::PayloadSelector::None) => Some(PayloadSelectorReq::All(false)),
+        Some(qql_core::ast::PayloadSelector::Include(fields)) => {
+            Some(PayloadSelectorReq::Include { include: fields })
+        }
+        Some(qql_core::ast::PayloadSelector::Exclude(fields)) => {
+            Some(PayloadSelectorReq::Exclude { exclude: fields })
+        }
+    };
+    let with_vector = match with_vector {
+        Some(qql_core::ast::VectorSelector::All) => Some(VectorSelectorReq::All(true)),
+        Some(qql_core::ast::VectorSelector::None) => Some(VectorSelectorReq::All(false)),
+        Some(qql_core::ast::VectorSelector::Names(names)) => Some(VectorSelectorReq::Names(names)),
+        None => Some(VectorSelectorReq::All(false)),
+    };
+    Ok(ScrollRequest {
+        filter: filter.map(top_level_filter_owned).transpose()?,
+        offset: after.map(|id| match id {
+            qql_core::ast::PointId::Number(n) => PlanPointId::Number(n.saturating_add(1)),
+            qql_core::ast::PointId::String(s) => {
+                if let Some(next) = increment_uuid_point_id(&s) {
+                    PlanPointId::String(next)
+                } else {
+                    PlanPointId::String(s)
+                }
+            }
+            other => point_id_req_typed_owned(other),
+        }),
+        limit: Some(limit),
+        with_payload,
+        with_vector,
+        order_by: order_by.map(|order| OrderByQuery {
+            key: order.field,
+            direction: Some(match order.direction {
+                qql_core::ast::OrderDirection::Asc => "asc".into(),
+                qql_core::ast::OrderDirection::Desc => "desc".into(),
+            }),
+            start_from: order.start_from.map(value_to_json_owned),
+        }),
+        shard_key: shard_key.map(PlanShardKey::from),
     })
 }
 

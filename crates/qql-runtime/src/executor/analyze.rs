@@ -13,7 +13,7 @@ use std::time::Instant;
 use qql_core::ast::{Stmt, Value};
 use qql_core::error::QqlError;
 use qql_core::parser;
-use qql_plan::plan;
+use qql_plan::plan_owned;
 
 use crate::executor::telemetry::PhaseTimings;
 use crate::executor::{AnalyzeReport, ExecResponse, Executor, OnError};
@@ -221,7 +221,7 @@ impl Executor {
 
         let start = Instant::now();
         let prepared = self.prepare_statement(stmt).await?;
-        let planned = plan(&prepared)?;
+        let planned = plan_owned(prepared)?;
         let prepare_plan_ms = elapsed_ms(start);
 
         // Client-side pair scorer: never a single Qdrant route, so there is

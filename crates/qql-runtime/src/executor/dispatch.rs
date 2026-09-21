@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
-use qql_plan::{PlannedOperation, plan};
+use qql_plan::{PlannedOperation, plan_owned};
 
 use crate::executor::response::{BackendResponse, ExecData, score_f64};
 use crate::executor::{ExecResponse, Executor, OnError, SearchHit};
@@ -33,7 +33,7 @@ impl Executor {
 
     async fn execute_node_inner(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
         let prepared = self.prepare_statement(stmt).await?;
-        let planned = plan(&prepared)?;
+        let planned = plan_owned(prepared)?;
         self.dispatch_planned(&planned).await
     }
 

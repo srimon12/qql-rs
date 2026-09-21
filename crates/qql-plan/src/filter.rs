@@ -464,6 +464,391 @@ pub fn point_id_req_typed(id: &qql_core::ast::PointId) -> crate::semantic::PlanP
     crate::semantic::PlanPointId::from(id)
 }
 
+/// Owned variant of [`point_id_req_typed`]: moves the string payload.
+pub fn point_id_req_typed_owned(id: qql_core::ast::PointId) -> crate::semantic::PlanPointId {
+    crate::semantic::PlanPointId::from(id)
+}
+
+/// Owned variant of [`value_to_json`]: moves strings / lists / dicts /
+/// `F32Array` contents out of the AST instead of cloning them.
+///
+/// JSON numbers are still freshly allocated (no buffer exists to move), but
+/// every string payload and every container moves with zero copies.
+pub fn value_to_json_owned(value: Value) -> serde_json::Value {
+    match value {
+        Value::Str(s) => serde_json::Value::String(s),
+        Value::Int(n) => serde_json::Value::Number(n.into()),
+        Value::UInt(n) => serde_json::Value::Number(n.into()),
+        Value::Float(f) => serde_json::Number::from_f64(f)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        Value::Bool(b) => serde_json::Value::Bool(b),
+        Value::Null => serde_json::Value::Null,
+        Value::F32Array(values) => serde_json::Value::Array(
+            values
+                .into_iter()
+                .map(|f| {
+                    serde_json::Number::from_f64(f as f64)
+                        .map_or(serde_json::Value::Null, serde_json::Value::Number)
+                })
+                .collect(),
+        ),
+        Value::List(items) => {
+            serde_json::Value::Array(items.into_iter().map(value_to_json_owned).collect())
+        }
+        Value::Dict(entries) => {
+            let mut map = serde_json::Map::with_capacity(entries.len());
+            for (k, v) in entries {
+                map.insert(k, value_to_json_owned(v));
+            }
+            serde_json::Value::Object(map)
+        }
+        Value::Param(name, _) => {
+            panic!("invariant violation: unbound parameter :{name} reached filter lowering");
+        }
+        Value::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached filter lowering"
+            );
+        }
+    }
+}
+
+/// Owned variant of [`lower_filter`]: consumes the AST, moving field names,
+/// match strings, and JSON values instead of cloning them.
+pub fn lower_filter_owned(filter: FilterExpr) -> Result<FilterExpression, QqlError> {
+    Ok(match filter {
+        FilterExpr::And { operands } => FilterExpression::Compound(FilterCompound {
+            must: operands
+                .into_iter()
+                .map(lower_clause_owned)
+                .collect::<Result<_, _>>()?,
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        }),
+        FilterExpr::Or { operands } => FilterExpression::Compound(FilterCompound {
+            must: Vec::new(),
+            must_not: Vec::new(),
+            should: operands
+                .into_iter()
+                .map(lower_clause_owned)
+                .collect::<Result<_, _>>()?,
+            min_should: None,
+        }),
+        FilterExpr::Not { operand } => FilterExpression::Compound(FilterCompound {
+            must: Vec::new(),
+            must_not: vec![lower_clause_owned(*operand)?],
+            should: Vec::new(),
+            min_should: None,
+        }),
+        FilterExpr::MinShould {
+            min_count,
+            operands,
+        } => FilterExpression::Compound(FilterCompound {
+            must: Vec::new(),
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: Some(MinShould {
+                conditions: operands
+                    .into_iter()
+                    .map(lower_clause_owned)
+                    .collect::<Result<_, _>>()?,
+                min_count,
+            }),
+        }),
+        other => FilterExpression::Single(Box::new(lower_clause_owned(other)?)),
+    })
+}
+
+/// Owned variant of [`top_level_filter`].
+pub fn top_level_filter_owned(filter: FilterExpr) -> Result<FilterExpression, QqlError> {
+    Ok(match lower_filter_owned(filter)? {
+        FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
+            must: vec![*clause],
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        }),
+        compound => compound,
+    })
+}
+
+fn lower_clause_owned(filter: FilterExpr) -> Result<FilterClause, QqlError> {
+    Ok(match filter {
+        FilterExpr::PointId(predicate) => lower_point_id_owned(predicate),
+        FilterExpr::Compare { field, op, value } => lower_compare_owned(field, op, value)?,
+        FilterExpr::Between { field, low, high } => lower_between_owned(field, low, high)?,
+        FilterExpr::In { field, values } => lower_match_any_owned(field, values),
+        FilterExpr::IsNull { field } => FilterClause::IsNull(IsNullCondition {
+            is_null: KeyOnly { key: field },
+        }),
+        FilterExpr::IsEmpty { field } => FilterClause::IsEmpty(IsEmptyCondition {
+            is_empty: KeyOnly { key: field },
+        }),
+        FilterExpr::MatchText { field, text } => {
+            field_condition_owned(field, |fc| fc.r#match = Some(MatchValue::Text { text }))
+        }
+        FilterExpr::MatchAny { field, values } => {
+            let any = values.into_iter().map(value_to_json_owned).collect();
+            field_condition_owned(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
+        }
+        FilterExpr::MatchPhrase { field, text } => field_condition_owned(field, |fc| {
+            fc.r#match = Some(MatchValue::Phrase { phrase: text })
+        }),
+        FilterExpr::MatchPrefix { field, prefix } => {
+            field_condition_owned(field, |fc| fc.r#match = Some(MatchValue::Prefix { prefix }))
+        }
+        FilterExpr::MatchTokens { field, text } => field_condition_owned(field, |fc| {
+            fc.r#match = Some(MatchValue::TextAny { text_any: text })
+        }),
+        FilterExpr::MatchExcept { field, values } => {
+            let except = values.into_iter().map(value_to_json_owned).collect();
+            field_condition_owned(field, |fc| fc.r#match = Some(MatchValue::Except { except }))
+        }
+        FilterExpr::MinShould {
+            min_count,
+            operands,
+        } => {
+            let min_should = MinShould {
+                conditions: operands
+                    .into_iter()
+                    .map(lower_clause_owned)
+                    .collect::<Result<_, _>>()?,
+                min_count,
+            };
+            FilterClause::Filter(Box::new(FilterCompound {
+                must: Vec::new(),
+                must_not: Vec::new(),
+                should: Vec::new(),
+                min_should: Some(min_should),
+            }))
+        }
+        FilterExpr::Nested { path, filter } => FilterClause::Nested(NestedCondition {
+            nested: NestedParams {
+                key: path,
+                filter: Box::new(lower_filter_owned(*filter)?),
+            },
+        }),
+        FilterExpr::HasVector { name } => {
+            FilterClause::HasVector(HasVectorCondition { has_vector: name })
+        }
+        FilterExpr::Slice { total, index } => FilterClause::Slice(SliceCondition {
+            slice: SliceParams { total, index },
+        }),
+        FilterExpr::ValuesCount { field, op, count } => {
+            let mut fc = empty_field_condition_owned(field);
+            fc.values_count = Some(values_count_params(op, count));
+            FilterClause::Field(Box::new(fc))
+        }
+        FilterExpr::GeoBoundingBox {
+            field,
+            top_left,
+            bottom_right,
+        } => field_condition_owned(field, |fc| {
+            fc.geo_bounding_box = Some(GeoBoundingBox {
+                top_left: geo_point_req(&top_left),
+                bottom_right: geo_point_req(&bottom_right),
+            })
+        }),
+        FilterExpr::GeoRadius {
+            field,
+            center,
+            radius,
+        } => field_condition_owned(field, |fc| {
+            fc.geo_radius = Some(GeoRadius {
+                center: geo_point_req(&center),
+                radius,
+            })
+        }),
+        FilterExpr::GeoPolygon {
+            field,
+            exterior,
+            interiors,
+        } => field_condition_owned(field, |fc| {
+            fc.geo_polygon = Some(GeoPolygon {
+                exterior: GeoLineString {
+                    points: exterior.iter().map(geo_point_req).collect(),
+                },
+                interiors: interiors
+                    .iter()
+                    .map(|ring| GeoLineString {
+                        points: ring.iter().map(geo_point_req).collect(),
+                    })
+                    .collect(),
+            })
+        }),
+        FilterExpr::And { operands } => FilterClause::Filter(Box::new(FilterCompound {
+            must: operands
+                .into_iter()
+                .map(lower_clause_owned)
+                .collect::<Result<_, _>>()?,
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        })),
+        FilterExpr::Or { operands } => FilterClause::Filter(Box::new(FilterCompound {
+            must: Vec::new(),
+            must_not: Vec::new(),
+            should: operands
+                .into_iter()
+                .map(lower_clause_owned)
+                .collect::<Result<_, _>>()?,
+            min_should: None,
+        })),
+        FilterExpr::Not { operand } => FilterClause::Filter(Box::new(FilterCompound {
+            must: Vec::new(),
+            must_not: vec![lower_clause_owned(*operand)?],
+            should: Vec::new(),
+            min_should: None,
+        })),
+    })
+}
+
+fn empty_field_condition_owned(field: String) -> FieldCondition {
+    FieldCondition {
+        key: field,
+        r#match: None,
+        range: None,
+        geo_bounding_box: None,
+        geo_radius: None,
+        geo_polygon: None,
+        values_count: None,
+        is_empty: None,
+        is_null: None,
+    }
+}
+
+fn field_condition_owned(field: String, f: impl FnOnce(&mut FieldCondition)) -> FilterClause {
+    let mut fc = empty_field_condition_owned(field);
+    f(&mut fc);
+    FilterClause::Field(Box::new(fc))
+}
+
+fn lower_point_id_owned(predicate: PointIdPredicate) -> FilterClause {
+    let ids = match predicate {
+        PointIdPredicate::Eq(id) => alloc::vec![point_id_req_typed_owned(id)],
+        PointIdPredicate::In(ids) => ids.into_iter().map(point_id_req_typed_owned).collect(),
+    };
+    FilterClause::HasId(HasIdCondition { has_id: ids })
+}
+
+fn lower_compare_owned(
+    field: String,
+    op: ComparisonOp,
+    value: Value,
+) -> Result<FilterClause, QqlError> {
+    if op == ComparisonOp::Eq {
+        if let Value::Float(_) = value {
+            let bound = range_bound_owned(value)?;
+            return Ok(field_condition_owned(field, |fc| {
+                fc.range = Some(RangeParams {
+                    gt: None,
+                    gte: Some(bound.clone()),
+                    lt: None,
+                    lte: Some(bound),
+                })
+            }));
+        }
+        return Ok(field_condition_owned(field, |fc| {
+            fc.r#match = Some(MatchValue::Value {
+                value: value_to_json_owned(value),
+            })
+        }));
+    }
+    let range = comparison_range_owned(op, value)?;
+    Ok(field_condition_owned(field, |fc| {
+        fc.range = Some(range);
+    }))
+}
+
+fn lower_between_owned(field: String, low: Value, high: Value) -> Result<FilterClause, QqlError> {
+    let gte = range_bound_owned(low)?;
+    let lte = range_bound_owned(high)?;
+    Ok(field_condition_owned(field, |fc| {
+        fc.range = Some(RangeParams {
+            gt: None,
+            gte: Some(gte),
+            lt: None,
+            lte: Some(lte),
+        })
+    }))
+}
+
+fn lower_match_any_owned(field: String, values: Vec<Value>) -> FilterClause {
+    let any = values.into_iter().map(value_to_json_owned).collect();
+    field_condition_owned(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
+}
+
+fn comparison_range_owned(op: ComparisonOp, value: Value) -> Result<RangeParams, QqlError> {
+    let bound = range_bound_owned(value)?;
+    Ok(match op {
+        ComparisonOp::Gt => RangeParams {
+            gt: Some(bound),
+            gte: None,
+            lt: None,
+            lte: None,
+        },
+        ComparisonOp::Gte => RangeParams {
+            gt: None,
+            gte: Some(bound),
+            lt: None,
+            lte: None,
+        },
+        ComparisonOp::Lt => RangeParams {
+            gt: None,
+            gte: None,
+            lt: Some(bound),
+            lte: None,
+        },
+        ComparisonOp::Lte => RangeParams {
+            gt: None,
+            gte: None,
+            lt: None,
+            lte: Some(bound),
+        },
+        ComparisonOp::Eq => RangeParams {
+            gt: None,
+            gte: Some(bound.clone()),
+            lt: None,
+            lte: Some(bound),
+        },
+    })
+}
+
+fn range_bound_owned(value: Value) -> Result<PlanRangeBound, QqlError> {
+    Ok(match value {
+        Value::Int(n) => PlanRangeBound::Int(n),
+        Value::UInt(n) => i64::try_from(n)
+            .map(PlanRangeBound::Int)
+            .unwrap_or(PlanRangeBound::Float(n as f64)),
+        Value::Float(f) => PlanRangeBound::Float(f),
+        Value::Str(s) => {
+            if looks_like_iso_datetime(&s) {
+                PlanRangeBound::DateTime(s)
+            } else {
+                PlanRangeBound::Text(s)
+            }
+        }
+        Value::Param(name, _) => {
+            panic!("invariant violation: unbound parameter :{name} reached range lowering");
+        }
+        Value::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached range lowering"
+            );
+        }
+        other => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-RANGE-TYPE",
+                format!(
+                    "range bound has non-scalar value {other:?}; expected a number, string, or datetime"
+                ),
+                other.param_span(),
+            ));
+        }
+    })
+}
+
 fn geo_point_req(point: &GeoPoint) -> crate::types::GeoPoint {
     crate::types::GeoPoint {
         lat: point.lat,

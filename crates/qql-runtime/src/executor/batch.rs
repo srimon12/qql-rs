@@ -1,7 +1,7 @@
 use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 use qql_core::parser;
-use qql_plan::{BatchGrouper, PlannedOperation, plan};
+use qql_plan::{BatchGrouper, PlannedOperation, plan_owned};
 
 use crate::executor::{ExecResponse, ExecutionReport, Executor, OnError};
 
@@ -134,7 +134,7 @@ impl Executor {
                 }
             };
 
-            let planned = match plan(&prepared) {
+            let planned = match plan_owned(prepared) {
                 Ok(planned) => planned,
                 Err(e) => {
                     if let Some(ops) = grouper.flush_on_error() {

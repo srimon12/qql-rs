@@ -79,6 +79,76 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
     })
 }
 
+/// Owned variant of [`lower_create_index`]: moves field name and option keys.
+pub fn lower_create_index_owned(stmt: CreateIndexStmt) -> Result<CreateIndexRequest, QqlError> {
+    let field_schema = IndexFieldType::parse(&stmt.field_type).ok_or_else(|| {
+        QqlError::validation(
+            "QQL-PLAN-INDEX-TYPE",
+            format!("unknown index field type '{}'", stmt.field_type),
+            None,
+        )
+    })?;
+
+    let mut options = IndexOptions::default();
+    for (key, value) in &stmt.options {
+        let lower = key.to_ascii_lowercase();
+        match lower.as_str() {
+            "is_tenant" => options.is_tenant = Some(index_bool(key, value)?),
+            "on_disk" => options.on_disk = Some(index_bool(key, value)?),
+            "enable_hnsw" => options.enable_hnsw = Some(index_bool(key, value)?),
+            "lowercase" => options.lowercase = Some(index_bool(key, value)?),
+            "ascii_folding" => options.ascii_folding = Some(index_bool(key, value)?),
+            "phrase_matching" => options.phrase_matching = Some(index_bool(key, value)?),
+            "lookup" => options.lookup = Some(index_bool(key, value)?),
+            "range" => options.range = Some(index_bool(key, value)?),
+            "is_principal" => options.is_principal = Some(index_bool(key, value)?),
+            "prefix" => options.prefix = Some(index_bool(key, value)?),
+            "min_token_len" => options.min_token_len = Some(index_u64(key, value)?),
+            "max_token_len" => options.max_token_len = Some(index_u64(key, value)?),
+            "tokenizer" => {
+                let raw = index_str(key, value)?;
+                options.tokenizer = Some(TextTokenizer::parse(raw).ok_or_else(|| {
+                    QqlError::validation(
+                        "QQL-PLAN-INDEX-OPTION",
+                        format!(
+                            "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
+                        ),
+                        value.param_span(),
+                    )
+                })?);
+            }
+            "stemmer" => options.stemmer = Some(StemmingAlgorithm::parse(index_str(key, value)?)),
+            "stopwords" => {
+                options.stopwords = Some(lower_stopwords(key, value)?);
+            }
+            "memory" => {
+                let raw = index_str(key, value)?;
+                options.memory = Some(MemoryPlacement::parse(raw).ok_or_else(|| {
+                    QqlError::validation(
+                        "QQL-PLAN-INDEX-OPTION",
+                        format!(
+                            "unsupported memory placement '{raw}'. Expected: cold, cached, pinned"
+                        ),
+                        value.param_span(),
+                    )
+                })?);
+            }
+            other => {
+                return Err(index_option_error(
+                    format!("unknown index option '{other}'"),
+                    value.param_span(),
+                ));
+            }
+        }
+    }
+
+    Ok(CreateIndexRequest {
+        field_name: stmt.field,
+        field_schema,
+        options,
+    })
+}
+
 fn index_option_error(
     message: impl Into<alloc::borrow::Cow<'static, str>>,
     span: Option<Span>,
