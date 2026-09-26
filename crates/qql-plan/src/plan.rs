@@ -5,7 +5,7 @@
 
 use crate::ddl::{
     lower_alter_collection, lower_create_collection, lower_create_index, lower_replica_state,
-    lower_set_quota,
+    lower_set_quota, validate_shard_key_counts,
 };
 use crate::mutation::{
     lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
@@ -731,16 +731,19 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 },
             })
         }
-        Stmt::CreateShardKey(sk) => Ok(PlannedOperation::CreateShardKey {
-            collection: sk.collection.clone(),
-            request: CreateShardKeyRequest {
-                shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
-                shards_number: sk.shards_number,
-                replication_factor: sk.replication_factor,
-                placement: sk.placement.clone(),
-                initial_state: lower_replica_state(sk.initial_state.as_deref())?,
-            },
-        }),
+        Stmt::CreateShardKey(sk) => {
+            validate_shard_key_counts(sk.shards_number, sk.replication_factor)?;
+            Ok(PlannedOperation::CreateShardKey {
+                collection: sk.collection.clone(),
+                request: CreateShardKeyRequest {
+                    shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
+                    shards_number: sk.shards_number,
+                    replication_factor: sk.replication_factor,
+                    placement: sk.placement.clone(),
+                    initial_state: lower_replica_state(sk.initial_state.as_deref())?,
+                },
+            })
+        }
         Stmt::DropShardKey(sk) => Ok(PlannedOperation::DropShardKey {
             collection: sk.collection.clone(),
             request: DropShardKeyRequest {
@@ -1354,6 +1357,28 @@ mod tests {
                 "planned key for {source}"
             );
         }
+    }
+
+    #[test]
+    fn create_shard_key_counts_fail_closed_on_hand_built_ast() {
+        // OpenAPI `CreateShardingKey`: uint32, minimum 1. The parser gates the
+        // literal form; bound/hand-built values must gate here too.
+        let mut stmt = Parser::parse("CREATE SHARD KEY 'a' ON COLLECTION docs;").unwrap();
+        let set = |stmt: &mut Stmt, shards: Option<u64>, replication: Option<u64>| {
+            let Stmt::CreateShardKey(sk) = stmt else {
+                panic!("expected CreateShardKey");
+            };
+            sk.shards_number = shards;
+            sk.replication_factor = replication;
+        };
+        set(&mut stmt, Some(0), None);
+        assert_eq!(plan(&stmt).unwrap_err().code, "QQL-PLAN-SHARD-KEY");
+        set(&mut stmt, Some(u32::MAX as u64 + 1), None);
+        assert_eq!(plan(&stmt).unwrap_err().code, "QQL-PLAN-SHARD-KEY");
+        set(&mut stmt, None, Some(0));
+        assert_eq!(plan(&stmt).unwrap_err().code, "QQL-PLAN-SHARD-KEY");
+        set(&mut stmt, None, Some(2));
+        assert!(plan(&stmt).is_ok());
     }
 
     #[test]

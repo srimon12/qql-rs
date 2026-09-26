@@ -67,8 +67,16 @@ pub(crate) fn plan_cross_rerank(
         }
         // Candidate stage needs document text for pair scoring.
         ensure_payload_field(&mut sub, &field);
-        if let Some(f) = &pref.filter {
-            sub.filter = Some(f.clone());
+        // The PREFETCH-level `WHERE` narrows the candidate stage in addition
+        // to the stage's own predicate (two `WHERE`s read as conjunctive);
+        // never replace the candidate filter with the outer one.
+        if let Some(outer) = &pref.filter {
+            sub.filter = Some(match sub.filter.take() {
+                Some(source) => Box::new(qql_core::ast::FilterExpr::And {
+                    operands: vec![*source, (**outer).clone()],
+                }),
+                None => outer.clone(),
+            });
         }
         // Candidate stages are planned through the same lowering as any query,
         // minus the unbound-param gate: the outer statement already ran it

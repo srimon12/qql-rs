@@ -53,6 +53,27 @@ pub fn lower_prefetch_with_ctes(
             None,
         ));
     }
+    // `Prefetch` has no shard_key and the stage is not a request: routing a
+    // source silently would query the wrong shard (a tenant-isolation hazard
+    // in the multitenancy story), so fail closed.
+    if source_query.shard_key.is_some() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-PREFETCH-SHARD",
+            "PREFETCH sources cannot carry SHARD routing; route the outer query instead",
+            None,
+        ));
+    }
+    // Per-request read opts have no prefetch-stage representation either:
+    // they would be silently dropped (unlike body `PARAMS`, which lower).
+    if let Some(params) = source_query.params.as_ref()
+        && (params.timeout.is_some() || params.consistency.is_some())
+    {
+        return Err(QqlError::validation(
+            "QQL-PLAN-PREFETCH-PARAMS",
+            "PREFETCH sources cannot carry PARAMS timeout / consistency",
+            None,
+        ));
+    }
 
     let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) = {
         let (variant, using, nested) = build_query_with_prefetch(source_query, source_scope)?;
@@ -78,13 +99,15 @@ pub fn lower_prefetch_with_ctes(
         )
     };
 
-    // Outer PREFETCH WHERE / SCORE THRESHOLD override source-query values when set.
-    let filter = prefetch
+    // Two `WHERE`s read as conjunctive: compose the outer PREFETCH filter with
+    // the source query's own filter instead of replacing it (which silently
+    // dropped, e.g., a tenant predicate).
+    let outer_filter = prefetch
         .filter
         .as_ref()
         .map(|f| top_level_filter(f))
-        .transpose()?
-        .or(source_filter);
+        .transpose()?;
+    let filter = compose_filters(source_filter, outer_filter);
     let score_threshold = prefetch.score_threshold.or(source_score);
 
     Ok(PrefetchRequest {
@@ -108,6 +131,32 @@ pub fn lower_prefetch_with_ctes(
 ///
 /// `ctes` is the CTE scope visible where `query` was written (the root
 /// statement's definitions, or the prefix visible to a CTE body).
+/// Compose a source-query filter with an outer PREFETCH-level filter as
+/// `source AND outer`. Either side alone passes through unchanged.
+fn compose_filters(
+    source: Option<FilterExpression>,
+    outer: Option<FilterExpression>,
+) -> Option<FilterExpression> {
+    match (source, outer) {
+        (None, None) => None,
+        (Some(filter), None) | (None, Some(filter)) => Some(filter),
+        (Some(source), Some(outer)) => Some(FilterExpression::Compound(FilterCompound {
+            must: vec![as_clause(source), as_clause(outer)],
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        })),
+    }
+}
+
+/// Present a lowered filter as a single clause so it can nest under `must`.
+fn as_clause(filter: FilterExpression) -> FilterClause {
+    match filter {
+        FilterExpression::Single(clause) => *clause,
+        FilterExpression::Compound(compound) => FilterClause::Filter(Box::new(compound)),
+    }
+}
+
 pub(crate) fn build_query_with_prefetch(
     query: &QueryStmt,
     ctes: &[qql_core::ast::Cte],

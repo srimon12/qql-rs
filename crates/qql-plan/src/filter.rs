@@ -40,13 +40,7 @@ pub fn lower_filter(filter: &FilterExpr) -> Result<FilterExpression, QqlError> {
             must: Vec::new(),
             must_not: Vec::new(),
             should: Vec::new(),
-            min_should: Some(MinShould {
-                conditions: operands
-                    .iter()
-                    .map(lower_clause)
-                    .collect::<Result<_, _>>()?,
-                min_count: *min_count,
-            }),
+            min_should: Some(lower_min_should(*min_count, operands)?),
         }),
         other => FilterExpression::Single(Box::new(lower_clause(other)?)),
     })
@@ -105,15 +99,10 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
             operands,
         } => {
             // A bare `{"min_should": …}` is not a valid nested Condition, so
-            // nested occurrences ride a `{"filter": …}` envelope (top-level
-            // `MIN SHOULD` lifts to the compound object in `lower_filter`).
-            let min_should = MinShould {
-                conditions: operands
-                    .iter()
-                    .map(lower_clause)
-                    .collect::<Result<_, _>>()?,
-                min_count: *min_count,
-            };
+            // nested occurrences ride the `Filter` variant of `Condition` as a
+            // bare `{min_should: …}` object (top-level `MIN SHOULD` lifts to
+            // the same compound in `lower_filter`).
+            let min_should = lower_min_should(*min_count, operands)?;
             FilterClause::Filter(Box::new(FilterCompound {
                 must: Vec::new(),
                 must_not: Vec::new(),
@@ -130,12 +119,7 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
         FilterExpr::HasVector { name } => FilterClause::HasVector(HasVectorCondition {
             has_vector: name.clone(),
         }),
-        FilterExpr::Slice { total, index } => FilterClause::Slice(SliceCondition {
-            slice: SliceParams {
-                total: *total,
-                index: *index,
-            },
-        }),
+        FilterExpr::Slice { total, index } => lower_slice(*total, *index)?,
         FilterExpr::ValuesCount { field, op, count } => {
             let mut fc = empty_field_condition(field);
             fc.values_count = Some(values_count_params(*op, *count));
@@ -203,6 +187,44 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
             min_should: None,
         })),
     })
+}
+
+/// Lower a `MIN SHOULD` clause set, enforcing the OpenAPI `MinShould`
+/// `min_count` minimum of 1 (0 would match every point and is never what the
+/// statement means).
+fn lower_min_should(min_count: u64, operands: &[FilterExpr]) -> Result<MinShould, QqlError> {
+    if min_count == 0 {
+        return Err(QqlError::validation(
+            "QQL-PLAN-MIN-SHOULD",
+            "MIN SHOULD requires min_count >= 1",
+            None,
+        ));
+    }
+    Ok(MinShould {
+        conditions: operands
+            .iter()
+            .map(lower_clause)
+            .collect::<Result<_, _>>()?,
+        min_count,
+    })
+}
+
+/// Lower a deterministic id-space `SLICE` predicate, enforcing the OpenAPI
+/// `Slice` bounds (uint32 `total`, `total >= 1`, `index < total`).
+fn lower_slice(total: u64, index: u64) -> Result<FilterClause, QqlError> {
+    if total == 0 || total > u32::MAX as u64 || index >= total {
+        return Err(QqlError::validation(
+            "QQL-PLAN-SLICE",
+            format!(
+                "SLICE requires 1 <= total <= {} and index < total, got total={total}, index={index}",
+                u32::MAX
+            ),
+            None,
+        ));
+    }
+    Ok(FilterClause::Slice(SliceCondition {
+        slice: SliceParams { total, index },
+    }))
 }
 
 fn empty_field_condition(field: &str) -> FieldCondition {
@@ -430,6 +452,9 @@ fn comparison_range(op: ComparisonOp, value: &Value) -> Result<RangeParams, QqlE
 /// `QQL-PLAN-RANGE-TYPE` instead of stringifying into a bound that matches
 /// wrong rows or 400s downstream.
 fn range_bound(value: &Value) -> Result<PlanRangeBound, QqlError> {
+    // JSON has no NaN/infinity: a non-finite bound would serialize as `null`
+    // and compare against null-valued rows instead of failing.
+    crate::value_serde::validate_finite_value(value)?;
     Ok(match value {
         Value::Int(n) => PlanRangeBound::Int(*n),
         // The parser only produces `UInt` for literals overflowing `i64`;
@@ -945,6 +970,62 @@ mod tests {
             &lower_filter(&f).unwrap(),
             json!({"slice": {"total": 4, "index": 1}}),
         );
+    }
+
+    #[test]
+    fn slice_bounds_fail_closed() {
+        // OpenAPI `Slice`: uint32, total >= 1, index < total.
+        for filter in [
+            FilterExpr::Slice { total: 0, index: 0 },
+            FilterExpr::Slice {
+                total: u32::MAX as u64 + 1,
+                index: 0,
+            },
+            FilterExpr::Slice { total: 4, index: 4 },
+        ] {
+            let err = lower_filter(&filter).unwrap_err();
+            assert_eq!(err.code, "QQL-PLAN-SLICE", "{filter:?}");
+        }
+    }
+
+    #[test]
+    fn min_should_zero_fails_closed() {
+        // OpenAPI `MinShould.min_count` minimum is 1; 0 would match every
+        // point and is never what the statement means.
+        let nested = FilterExpr::MinShould {
+            min_count: 0,
+            operands: vec![FilterExpr::Compare {
+                field: "a".into(),
+                op: ComparisonOp::Eq,
+                value: Value::Int(1),
+            }],
+        };
+        let err = lower_filter(&nested).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-MIN-SHOULD");
+        assert!(err.message.contains("min_count"), "{err:?}");
+
+        let top = FilterExpr::Not {
+            operand: Box::new(FilterExpr::MinShould {
+                min_count: 0,
+                operands: vec![],
+            }),
+        };
+        assert_eq!(lower_filter(&top).unwrap_err().code, "QQL-PLAN-MIN-SHOULD");
+    }
+
+    #[test]
+    fn non_finite_range_bound_fails_closed() {
+        // JSON has no NaN; the boundary renderer would emit `null` and match
+        // null-valued rows instead of failing.
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let f = FilterExpr::Compare {
+                field: "x".into(),
+                op: ComparisonOp::Gt,
+                value: Value::Float(value),
+            };
+            let err = lower_filter(&f).unwrap_err();
+            assert_eq!(err.code, "QQL-PLAN-NON-FINITE", "{value}");
+        }
     }
 
     #[test]

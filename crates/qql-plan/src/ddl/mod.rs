@@ -27,7 +27,7 @@ pub use collection::{lower_alter_collection, lower_create_collection};
 pub use index::lower_create_index;
 pub use runtime::{lower_hnsw_config, lower_optimizers_config, lower_quantization_config};
 
-pub(crate) use options::lower_replica_state;
+pub(crate) use options::{lower_replica_state, validate_shard_key_counts};
 pub(crate) use quota::lower_set_quota;
 
 use qql_core::error::{QqlError, Span};
