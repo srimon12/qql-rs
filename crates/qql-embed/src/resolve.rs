@@ -36,14 +36,14 @@ async fn resolve_upsert_embeddings(
             let PointEntry::Inline(inline) = point else {
                 continue;
             };
+            // Same field set and fixed priority as the USING / EMBED paths
+            // (`collect_default_text_targets`), so a point that embeds from
+            // `title` under an explicit spec is not silently skipped here and
+            // payload key order can never pick the text.
             if inline.vectors.is_none()
-                && let Some((_, qql_core::ast::Value::Str(text))) =
-                    inline.payload.iter().find(|(k, _)| {
-                        eq_lowered(k, "text") || eq_lowered(k, "body") || eq_lowered(k, "content")
-                    })
-                && !text.is_empty()
+                && let Some(text) = first_default_text_field(&inline.payload)
             {
-                targets.push((idx, text.clone()));
+                targets.push((idx, text.to_string()));
             }
         }
         if !targets.is_empty() {
@@ -53,7 +53,12 @@ async fn resolve_upsert_embeddings(
             // dense-only collections never receive orphan sparse vectors.
             let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
             let dense_vecs = embedder.embed_dense_batch(&texts, "default").await?;
-            ensure_batch_len(dense_vecs.len(), indices.len(), "default")?;
+            ensure_batch_len(
+                dense_vecs.len(),
+                indices.len(),
+                "default",
+                "embed_dense_batch",
+            )?;
             for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(point, DENSE_VECTOR_NAME, VectorValue::Dense(d_vec))?;
@@ -61,14 +66,19 @@ async fn resolve_upsert_embeddings(
         }
     }
 
+    // Duplicate-target tracking spans the whole statement: the `embedding`
+    // spec and every `embed` directive share one list. Duplicates inside a
+    // multi-spec already fail; without this, a second clause of a different
+    // modality silently clobbered the first vector via `add_point_vector`.
+    // Kept a small `Vec`: a handful of names at most, so a linear scan beats a
+    // per-op `HashSet` (no hashing).
+    let mut seen_vectors = Vec::new();
     if let Some(spec) = upsert.embedding.clone() {
-        // Duplicate-target tracking stays a small `Vec`: a handful of names
-        // at most, so linear scan beats a per-op `HashSet` (no hashing).
-        let mut seen_vectors = Vec::new();
         resolve_single_embedding_spec(upsert, &spec, embedder, &mut seen_vectors).await?;
     }
 
     for directive in &upsert.embed {
+        check_and_insert_vector_name(&mut seen_vectors, &directive.target_vector)?;
         let field_name = &directive.source_field;
         let target_vec_name = &directive.target_vector;
         let mut targets = Vec::new();
@@ -92,7 +102,7 @@ async fn resolve_upsert_embeddings(
                     let m_name = model.as_deref().unwrap_or("default");
                     let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                     let vecs = embedder.embed_dense_batch(&texts, m_name).await?;
-                    ensure_batch_len(vecs.len(), indices.len(), m_name)?;
+                    ensure_batch_len(vecs.len(), indices.len(), m_name, "embed_dense_batch")?;
                     for (idx, vec) in indices.into_iter().zip(vecs) {
                         let point = &mut upsert.points[idx];
                         add_point_vector(point, target_vec_name, VectorValue::Dense(vec))?;
@@ -102,7 +112,7 @@ async fn resolve_upsert_embeddings(
                     let m = model.as_deref().unwrap_or("default");
                     let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                     let vecs = embedder.embed_sparse_document_batch(&texts, m).await?;
-                    ensure_batch_len(vecs.len(), indices.len(), m)?;
+                    ensure_batch_len(vecs.len(), indices.len(), m, "embed_sparse_document_batch")?;
                     for (idx, s_vec) in indices.into_iter().zip(vecs) {
                         let point = &mut upsert.points[idx];
                         add_point_vector(
@@ -201,7 +211,7 @@ async fn resolve_single_embedding_spec(
 
             let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
             let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
-            ensure_batch_len(vecs.len(), indices.len(), model_name)?;
+            ensure_batch_len(vecs.len(), indices.len(), model_name, "embed_dense_batch")?;
             for (idx, vec) in indices.into_iter().zip(vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(point, vector_name, VectorValue::Dense(vec))?;
@@ -223,7 +233,12 @@ async fn resolve_single_embedding_spec(
             let vecs = embedder
                 .embed_sparse_document_batch(&texts, model_name)
                 .await?;
-            ensure_batch_len(vecs.len(), indices.len(), model_name)?;
+            ensure_batch_len(
+                vecs.len(),
+                indices.len(),
+                model_name,
+                "embed_sparse_document_batch",
+            )?;
             for (idx, sparse_vec) in indices.into_iter().zip(vecs) {
                 add_point_vector(
                     &mut upsert.points[idx],
@@ -259,7 +274,12 @@ async fn resolve_single_embedding_spec(
 
             let (indices, texts): (Vec<usize>, Vec<String>) = dense_targets.into_iter().unzip();
             let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
-            ensure_batch_len(dense_vecs.len(), indices.len(), d_model)?;
+            ensure_batch_len(
+                dense_vecs.len(),
+                indices.len(),
+                d_model,
+                "embed_dense_batch",
+            )?;
             for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
@@ -270,7 +290,12 @@ async fn resolve_single_embedding_spec(
             let sparse_vecs = embedder
                 .embed_sparse_document_batch(&sparse_texts, s_model)
                 .await?;
-            ensure_batch_len(sparse_vecs.len(), sparse_indices.len(), s_model)?;
+            ensure_batch_len(
+                sparse_vecs.len(),
+                sparse_indices.len(),
+                s_model,
+                "embed_sparse_document_batch",
+            )?;
             for (idx, sparse_vec) in sparse_indices.into_iter().zip(sparse_vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(
@@ -367,21 +392,7 @@ fn validate_non_empty_targets(
     field: Option<&str>,
 ) -> Result<(), QqlError> {
     if targets.is_empty() {
-        let actual_fields = upsert
-            .points
-            .first()
-            .and_then(|p| match p {
-                PointEntry::Inline(inline) => Some(inline),
-                PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
-            })
-            .map(|p| {
-                p.payload
-                    .iter()
-                    .map(|(k, _)| k.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default();
+        let actual_fields = diagnostic_payload_fields(upsert);
 
         let err_msg = if let Some(f) = field {
             format!(
@@ -399,6 +410,26 @@ fn validate_non_empty_targets(
     Ok(())
 }
 
+/// Payload key union across the first few inline points for diagnostics.
+///
+/// Listing only the first point's keys misleads triage on heterogeneous
+/// batches (a later point may carry the field the error says is missing).
+fn diagnostic_payload_fields(upsert: &UpsertStmt) -> String {
+    const DIAGNOSTIC_POINTS: usize = 5;
+    let mut fields: Vec<&str> = Vec::new();
+    for point in upsert.points.iter().take(DIAGNOSTIC_POINTS) {
+        let PointEntry::Inline(inline) = point else {
+            continue;
+        };
+        for (key, _) in &inline.payload {
+            if !fields.contains(&key.as_str()) {
+                fields.push(key.as_str());
+            }
+        }
+    }
+    fields.join(", ")
+}
+
 fn check_and_insert_vector_name(
     seen_vectors: &mut Vec<String>,
     vector_name: &str,
@@ -406,7 +437,7 @@ fn check_and_insert_vector_name(
     if seen_vectors.iter().any(|name| name == vector_name) {
         return Err(QqlError::execution(
             "QQL-EMBEDDING",
-            format!("duplicate target vector '{vector_name}' in multi-spec embedding clause"),
+            format!("duplicate target vector '{vector_name}' in UPSERT embedding clauses"),
             None,
         ));
     }
@@ -542,19 +573,24 @@ fn collect_default_text_targets(points: &[PointEntry]) -> Vec<(usize, String)> {
             let PointEntry::Inline(inline) = point else {
                 return None;
             };
-            for &candidate in DEFAULT_TEXT_FIELDS_ORDERED {
-                if let Some((_, qql_core::ast::Value::Str(text))) = inline
-                    .payload
-                    .iter()
-                    .find(|(key, _)| eq_lowered(key, candidate))
-                    && !text.is_empty()
-                {
-                    return Some((idx, text.clone()));
-                }
-            }
-            None
+            first_default_text_field(&inline.payload).map(|text| (idx, text.to_string()))
         })
         .collect()
+}
+
+/// First non-empty string among [`DEFAULT_TEXT_FIELDS_ORDERED`] in fixed
+/// priority (not payload order). Shared by the explicit-spec target collector
+/// and the no-clause UPSERT fallback so both embed the same field.
+fn first_default_text_field(payload: &[(String, qql_core::ast::Value)]) -> Option<&str> {
+    DEFAULT_TEXT_FIELDS_ORDERED.iter().find_map(|&candidate| {
+        payload
+            .iter()
+            .find(|(key, _)| eq_lowered(key, candidate))
+            .and_then(|(_, value)| match value {
+                qql_core::ast::Value::Str(text) if !text.is_empty() => Some(text.as_str()),
+                _ => None,
+            })
+    })
 }
 
 fn add_point_vector(
@@ -562,6 +598,16 @@ fn add_point_vector(
     name: &str,
     vector: VectorValue,
 ) -> Result<(), QqlError> {
+    if name.is_empty() {
+        // Every embedding path names its target (USING / EMBED / defaults);
+        // an unnamed vector would silently replace a bound
+        // `PointVectors::Param(..)`, so fail closed instead.
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING",
+            "cannot embed into an unnamed vector target; name the target vector",
+            None,
+        ));
+    }
     let point = match point {
         PointEntry::Inline(inline) => inline,
         // Unreachable via collect_*_targets (they skip placeholders), but
@@ -581,30 +627,6 @@ fn add_point_vector(
             ));
         }
     };
-    if name.is_empty() {
-        return match &mut point.vectors {
-            Some(PointVectors::Unnamed(existing)) => {
-                *existing = vector;
-                Ok(())
-            }
-            Some(PointVectors::Named(list)) => {
-                if let Some(existing) = list.iter_mut().find(|(key, _)| key.is_empty()) {
-                    existing.1 = vector;
-                } else {
-                    list.push((String::new(), vector));
-                }
-                Ok(())
-            }
-            Some(PointVectors::Param(..)) | Some(PointVectors::PositionalParam(..)) => {
-                point.vectors = Some(PointVectors::Unnamed(vector));
-                Ok(())
-            }
-            None => {
-                point.vectors = Some(PointVectors::Unnamed(vector));
-                Ok(())
-            }
-        };
-    }
     match &mut point.vectors {
         Some(PointVectors::Named(list)) => {
             if let Some(existing) = list.iter_mut().find(|(k, _)| k == name) {
