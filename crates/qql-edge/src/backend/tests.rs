@@ -229,7 +229,10 @@ fn typed_update_batch_returns_mutations() {
         }
 
         let mutations = vec![
-            plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}}"),
+            // `WAIT true` keeps the members' effective wait uniform: the batch
+            // builder rejects mixed-wait batches (embedding-less upserts
+            // default to `WAIT false`).
+            plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}} WAIT true"),
             plan_one("UPDATE docs SET PAYLOAD = {city: 'NYC'} WHERE id = 2"),
             plan_one("DELETE FROM docs WHERE id = 2"),
         ];
