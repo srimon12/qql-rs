@@ -52,6 +52,12 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # 4.3.0 pulls onnxruntime-web 1.31, whose self-hosted asyncify wasm is
+    # 25.6 MiB — over Cloudflare Pages' 25 MiB per-file limit (deploy-site run
+    # 36248514386 failed on it). `pnpm check` now runs check-dist-size.mjs, but
+    # keep this pinned so the upgrade is a deliberate decision.
+    ignore:
+      - dependency-name: "@huggingface/transformers"
     groups:
       website:
         applies-to: version-updates
@@ -102,6 +108,12 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # @napi-rs/cli >= 3.8.0 wedges the post-build filesystem-reconciliation
+    # lock on Windows release runners (napi-rs#3512 and follow-ups) and fails
+    # every release. 3.7.4 predates reconciliation; keep the pin until
+    # upstream fixes the Windows wedge.
+    ignore:
+      - dependency-name: "@napi-rs/cli"
     groups:
       nqql-tooling:
         applies-to: version-updates
@@ -122,6 +134,9 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # Same Windows reconciliation wedge as /crates/nqql — see the comment there.
+    ignore:
+      - dependency-name: "@napi-rs/cli"
     groups:
       nqql-edge-tooling:
         applies-to: version-updates

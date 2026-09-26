@@ -65,6 +65,6 @@
     "@veristamp/nqql-edge-win32-x64-msvc": "0.4.2"
   },
   "devDependencies": {
-    "@napi-rs/cli": "3.10.4"
+    "@napi-rs/cli": "3.7.4"
   }
 }
