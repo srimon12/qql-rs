@@ -178,6 +178,26 @@ fn empty_in_list_rejected() {
 }
 
 #[test]
+fn query_points_rejects_paging_clauses() {
+    // Literal and placeholder paging spellings must be equally illegal on
+    // QUERY POINTS (core-audit #3).
+    for source in [
+        "QUERY POINTS (1, 2) FROM docs LIMIT 5;",
+        "QUERY POINTS (1, 2) FROM docs LIMIT :n;",
+        "QUERY POINTS (1, 2) FROM docs LIMIT ?;",
+        "QUERY POINTS (1, 2) FROM docs OFFSET :n;",
+        "QUERY POINTS (1, 2) FROM docs LIMIT 5 OFFSET :n;",
+    ] {
+        let err = Parser::parse(source).expect_err(&format!("expected error for: {source}"));
+        assert_eq!(err.kind, ErrorKind::Validation, "wrong kind for: {source}");
+        assert_eq!(
+            err.code, "QQL-VALIDATION-POINTS-CLAUSE",
+            "wrong code for: {source}"
+        );
+    }
+}
+
+#[test]
 fn invalid_shard_params_rejected() {
     assert_validation_err!(
         "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (sharding_method = true);"
@@ -257,6 +277,61 @@ fn non_finite_float_literals_rejected() {
             err.code
         );
     }
+}
+
+#[test]
+fn out_of_range_integer_literals_rejected() {
+    // Digit-leading literals outside i64/u64 must fail instead of silently
+    // becoming exact string matches (core-audit #4).
+    for source in [
+        "QUERY TEXT 'x' FROM docs WHERE price = 99999999999999999999;",
+        "QUERY TEXT 'x' FROM docs WHERE score = -99999999999999999999;",
+    ] {
+        let err = Parser::parse(source).expect_err(&format!("expected error for: {source}"));
+        assert_eq!(err.kind, ErrorKind::Parse, "wrong kind for: {source}");
+        assert_eq!(err.code, "QQL-PARSE-NUMBER", "wrong code for: {source}");
+        assert!(err.span.is_some(), "overflow error must carry a span");
+    }
+
+    // u64::MAX still parses (as UInt), and the INTEGER keyword spelling
+    // remains a string.
+    Parser::parse("QUERY TEXT 'x' FROM docs WHERE price = 18446744073709551615;")
+        .expect("u64::MAX must parse");
+    Parser::parse("QUERY TEXT 'x' FROM docs WHERE t = INTEGER;")
+        .expect("INTEGER keyword spelling must stay a string");
+}
+
+#[test]
+fn config_validation_spans_stay_inside_the_block() {
+    // core-audit #10: config validation runs after the block is consumed, so
+    // errors must not point at the following token or EOF.
+    let hnsw = "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (m = 3);";
+    let err = Parser::parse(hnsw).expect_err("m = 3 must be rejected");
+    let span = err.span.expect("config error must carry a span");
+    let block = hnsw.find("(m = 3)").unwrap();
+    assert!(
+        span.start >= block && span.end <= block + "(m = 3)".len(),
+        "HNSW span {span:?} must lie inside the block"
+    );
+
+    let quant = "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'nope');";
+    let err = Parser::parse(quant).expect_err("unknown QUANTIZATION type must be rejected");
+    let span = err.span.expect("config error must carry a span");
+    let block = quant.find("(type = 'nope')").unwrap();
+    assert!(
+        span.start >= block && span.end <= block + "(type = 'nope')".len(),
+        "quantization span {span:?} must lie inside the block"
+    );
+
+    let shard = "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 0);";
+    let err = Parser::parse(shard).expect_err("shards_number = 0 must be rejected");
+    let span = err.span.expect("shard-key error must carry a span");
+    let with = shard.find("WITH").unwrap();
+    let end = shard.find(");").unwrap() + 1;
+    assert!(
+        span.start >= with && span.end <= end,
+        "shard-key span {span:?} must lie inside the WITH block"
+    );
 }
 
 #[test]
@@ -350,6 +425,9 @@ fn create_shard_key_config_rejects_unknown_keys_and_invalid_values() {
         "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 1.5);",
         "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (foo = 1);",
         "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2, foo = 1);",
+        // The wire fields are u32; a larger value must not reach the backend.
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 5000000000);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 5000000000);",
     ];
     for source in cases {
         let err = Parser::parse(source)

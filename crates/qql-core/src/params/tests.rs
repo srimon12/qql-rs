@@ -234,6 +234,49 @@ fn test_bind_stmt_ast() {
 }
 
 #[test]
+fn test_idf_params_binding_and_census() {
+    use crate::params::{collect_statement_params, validate_no_unbound_params};
+
+    // `PARAMS (idf = WHERE …)` placeholders must be bound and censused like
+    // any other filter (core-audit #2).
+    let query = "QUERY TEXT 'x' FROM docs PARAMS (idf = WHERE tenant = :t) LIMIT 5;";
+    let mut stmt = Parser::parse(query).expect("idf filter with placeholder should parse");
+
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("t"), "census must see :t, got {named:?}");
+
+    let err = validate_no_unbound_params(&stmt).expect_err("unbound :t must be reported");
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "t").then(|| Value::Str("acme".into())),
+        &[],
+    )
+    .expect("bind_stmt must bind the idf corpus filter");
+    validate_no_unbound_params(&stmt).expect("bound idf corpus must be clean");
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(
+        formatted.contains("idf = WHERE tenant = 'acme'"),
+        "got: {formatted}"
+    );
+
+    // `BATCH { … } PARAMS (idf = WHERE …)` shares the same gap.
+    let batch = "BATCH { QUERY TEXT 'x' FROM docs LIMIT 5; } PARAMS (idf = WHERE tenant = :t);";
+    let mut stmt = Parser::parse(batch).expect("batch params with placeholder should parse");
+    let err = validate_no_unbound_params(&stmt).expect_err("unbound batch :t must be reported");
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "t").then(|| Value::Str("acme".into())),
+        &[],
+    )
+    .expect("bind_stmt must bind batch PARAMS idf corpus");
+    validate_no_unbound_params(&stmt).expect("bound batch idf corpus must be clean");
+}
+
+#[test]
 fn test_truncate_vector_literals() {
     let qql = "QUERY VECTOR [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] FROM docs LIMIT 5;";
     let truncated = truncate_vector_literals(qql, 3);
@@ -261,6 +304,142 @@ fn test_bind_preserves_triple_quoted_and_raw_strings() {
     assert_eq!(
         result,
         r#"QUERY TEXT """hello :not_a_param""" FROM docs WHERE raw = r'foo\:bar' AND val = 42;"#
+    );
+}
+
+#[test]
+fn test_ddl_config_values_bind_and_census() {
+    use crate::params::{collect_statement_params, validate_no_unbound_params};
+
+    // Bindable config values must be censused and bound (core-audit #11).
+    let query = "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH METADATA (owner = :who);";
+    let mut stmt = Parser::parse(query).expect("metadata placeholder should parse");
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("who"), "census must see :who, got {named:?}");
+    let err = validate_no_unbound_params(&stmt).expect_err("unbound :who must be reported");
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "who").then_some(Value::Str("acme".into())),
+        &[],
+    )
+    .expect("metadata value must bind");
+    validate_no_unbound_params(&stmt).expect("bound metadata must be clean");
+
+    let query = "SET QUOTA (max_disk_usage_percent = :p);";
+    let mut stmt = Parser::parse(query).expect("quota placeholder should parse");
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("p"), "census must see :p, got {named:?}");
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "p").then_some(Value::Int(90)),
+        &[],
+    )
+    .expect("quota value must bind");
+    validate_no_unbound_params(&stmt).expect("bound quota must be clean");
+}
+
+#[test]
+fn test_bound_negative_literal_after_minus_stays_parseable() {
+    // `x-:n` bound to -2 must not render `x--2`, which the lexer reads as a
+    // line comment (core-audit #7).
+    let query = "QUERY FORMULA x-:n FROM docs;";
+    let bound = bind_named(query, |name| (name == "n").then_some(Value::Int(-2))).unwrap();
+    assert_eq!(bound, "QUERY FORMULA x- -2 FROM docs;");
+    Parser::parse(&bound).expect("bound text must re-parse");
+
+    let query = "QUERY FORMULA x-? FROM docs;";
+    let bound = bind_positional(query, &[Value::Float(-2.5)]).unwrap();
+    assert_eq!(bound, "QUERY FORMULA x- -2.5 FROM docs;");
+    Parser::parse(&bound).expect("bound text must re-parse");
+}
+
+#[test]
+fn test_protected_scan_matches_lexer_on_quote_runs() {
+    use crate::lexer::Lexer;
+    use crate::token::TokenKind;
+
+    // core-audit #6: the shared protected-span scanner must agree with the
+    // lexer on every string-token span for quote-run shapes that diverged.
+    for text in [
+        "''''",
+        "\"\"\"\"",
+        "''''''",
+        "'''a'''",
+        "\"\"\"a\"\"\"",
+        "r'''x'''",
+        "r''x''",
+        "\"a\"",
+        "`x`",
+        "'a\\'b'",
+        "\"a\\\"b\"",
+        // Trailing content after a quote run is where the scanners diverged:
+        // the old scanner committed to a triple-quoted span and consumed
+        // everything to the end of the slice.
+        "'''' AND tenant = :t",
+        "\"\"\"\" AND tenant = :t",
+        "r'''x''' :t",
+        "r''x'' :t",
+    ] {
+        let bytes = text.as_bytes();
+        for tok in Lexer::new(text) {
+            let tok = tok.expect("tricky literals must lex");
+            if tok.kind == TokenKind::String {
+                assert_eq!(
+                    skip_protected(bytes, tok.span.start),
+                    Some(tok.span.end),
+                    "protected scan diverges from lexer for {text:?} at {}",
+                    tok.span.start
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_bind_after_four_quote_run() {
+    // `''''` is the SQL-escaped one-apostrophe string; placeholders after it
+    // must still bind instead of being swallowed as string content
+    // (core-audit #6).
+    let query = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = :t;";
+    let bound = bind_named(query, |name| {
+        (name == "t").then(|| Value::Str("acme".into()))
+    })
+    .unwrap();
+    assert_eq!(
+        bound,
+        "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = 'acme';"
+    );
+
+    let query_pos = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = ?;";
+    let bound = bind_positional(query_pos, &[Value::Str("acme".into())]).unwrap();
+    assert_eq!(
+        bound,
+        "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = 'acme';"
+    );
+
+    // `""""` is two empty double-quoted strings — the same trap.
+    let query = "QUERY TEXT 'x' FROM docs WHERE a = \"\"\"\" AND tenant = :t;";
+    let bound = bind_named(query, |name| {
+        (name == "t").then(|| Value::Str("acme".into()))
+    })
+    .unwrap();
+    assert_eq!(
+        bound,
+        "QUERY TEXT 'x' FROM docs WHERE a = \"\"\"\" AND tenant = 'acme';"
+    );
+
+    // Missing params after such a run must still be reported, never skipped.
+    let err = bind_named(query, |_| None).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+}
+
+#[test]
+fn test_truncate_vector_literals_after_four_quote_run() {
+    let qql = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND v = [0.1, 0.2, 0.3, 0.4];";
+    assert_eq!(
+        truncate_vector_literals(qql, 2),
+        "QUERY TEXT 'x' FROM docs WHERE a = '''' AND v = [0.1, 0.2, ... (4 dims)];"
     );
 }
 

@@ -1,4 +1,4 @@
-use super::{AstLowerer, ascii_equal};
+use super::AstLowerer;
 use crate::ast::{
     IdfParams, PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value,
     VectorSelector,
@@ -111,7 +111,7 @@ impl<'a> AstLowerer<'a> {
                 Some(span),
             ));
         }
-        if token.kind == TokenKind::Where || ascii_equal(token.text, "WHERE") {
+        if token.kind == TokenKind::Where {
             self.advance()?;
             return Ok(IdfParams {
                 corpus: Some(self.parse_filter_expr()?),
@@ -176,15 +176,11 @@ impl<'a> AstLowerer<'a> {
 
     fn parse_selector_bool(&mut self) -> Result<Option<bool>, QqlError> {
         let tok = self.peek()?;
-        if tok.kind == TokenKind::True
-            || (tok.is_keyword_or_identifier() && tok.text.eq_ignore_ascii_case("true"))
-        {
+        if tok.kind == TokenKind::True {
             self.advance()?;
             return Ok(Some(true));
         }
-        if tok.kind == TokenKind::False
-            || (tok.is_keyword_or_identifier() && tok.text.eq_ignore_ascii_case("false"))
-        {
+        if tok.kind == TokenKind::False {
             self.advance()?;
             return Ok(Some(false));
         }

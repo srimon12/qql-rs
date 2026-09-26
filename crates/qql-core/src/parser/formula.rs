@@ -231,9 +231,7 @@ fn parse_formula_case_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, 
 fn parse_optional_bracket_default(p: &mut AstLowerer<'_>) -> Result<Option<f64>, QqlError> {
     if p.peek()?.kind == TokenKind::Lbracket && p.index + 1 < p.tokens.len() {
         let next_tok = &p.tokens[p.index + 1];
-        if next_tok.kind == TokenKind::Default
-            || (next_tok.is_keyword_or_identifier() && ascii_equal(next_tok.text, "DEFAULT"))
-        {
+        if next_tok.kind == TokenKind::Default {
             p.advance()?;
             p.advance()?;
             p.expect(TokenKind::Equals)?;
@@ -289,26 +287,46 @@ fn parse_formula_function_call(
 
             let mut lat = None;
             let mut lon = None;
+            let mut lat_present = false;
+            let mut lon_present = false;
             for (k, v) in &dict {
                 if ascii_equal(k, "lat") || ascii_equal(k, "LAT") {
+                    lat_present = true;
                     match v {
                         Value::Float(f) => lat = Some(*f),
                         Value::Int(i) => lat = Some(*i as f64),
+                        Value::UInt(i) => lat = Some(*i as f64),
                         _ => {}
                     }
                 }
                 if ascii_equal(k, "lon") || ascii_equal(k, "LON") {
+                    lon_present = true;
                     match v {
                         Value::Float(f) => lon = Some(*f),
                         Value::Int(i) => lon = Some(*i as f64),
+                        Value::UInt(i) => lon = Some(*i as f64),
                         _ => {}
                     }
                 }
             }
-            let lat =
-                lat.ok_or_else(|| syntax_err("geo_distance dict must have 'lat' key", span))?;
-            let lon =
-                lon.ok_or_else(|| syntax_err("geo_distance dict must have 'lon' key", span))?;
+            let lat = match lat {
+                Some(v) => v,
+                None if lat_present => {
+                    return Err(syntax_err("geo_distance dict 'lat' must be a number", span));
+                }
+                None => {
+                    return Err(syntax_err("geo_distance dict must have 'lat' key", span));
+                }
+            };
+            let lon = match lon {
+                Some(v) => v,
+                None if lon_present => {
+                    return Err(syntax_err("geo_distance dict 'lon' must be a number", span));
+                }
+                None => {
+                    return Err(syntax_err("geo_distance dict must have 'lon' key", span));
+                }
+            };
             return Ok(FormulaExpr::GeoDistance { lat, lon, field });
         }
         _ => {}
@@ -424,6 +442,15 @@ fn parse_formula_function_call(
             Ok(FormulaExpr::GeoDistance { lat, lon, field })
         }
         "exp_decay" | "gauss_decay" | "lin_decay" => {
+            if args.len() > 4 {
+                return Err(syntax_err(
+                    alloc::format!(
+                        "{}() accepts at most 4 positional arguments (x, target, scale, midpoint)",
+                        func_name.to_uppercase()
+                    ),
+                    span,
+                ));
+            }
             let x = if !args.is_empty() {
                 args[0].clone()
             } else if let Some(val) = kwargs
@@ -519,19 +546,8 @@ fn parse_formula_function_call(
                 None
             };
 
-            let static_kind: &'static str = match func_name {
-                "exp_decay" => "exp_decay",
-                "gauss_decay" => "gauss_decay",
-                "lin_decay" => "lin_decay",
-                _ => {
-                    return Err(syntax_err(
-                        alloc::format!("unknown decay function: {}", func_name),
-                        span,
-                    ));
-                }
-            };
             Ok(FormulaExpr::Decay {
-                kind: static_kind.to_string(),
+                kind: func_name.to_string(),
                 x: Box::new(x),
                 target,
                 scale,

@@ -551,6 +551,17 @@ impl Census {
         }
     }
 
+    /// `PARAMS (idf = WHERE …)` corpus filter, shared by query-level `PARAMS`
+    /// and `BATCH … PARAMS`.
+    fn search_params(&mut self, params: Option<&crate::ast::SearchParams>) {
+        if let Some(corpus) = params
+            .and_then(|params| params.idf.as_ref())
+            .and_then(|idf| idf.corpus.as_ref())
+        {
+            self.filter(corpus);
+        }
+    }
+
     fn query_stmt(&mut self, query: &QueryStmt) {
         for cte in &query.ctes {
             self.query_stmt(&cte.query);
@@ -559,40 +570,13 @@ impl Census {
         if let Some(filter) = &query.filter {
             self.filter(filter);
         }
+        self.search_params(query.params.as_ref());
         self.shard_opt(&query.shard_key);
         if let Some(param) = &query.page.limit_param {
-            let span = query.page.limit_span;
-            if let Some(name) = param.strip_prefix(':') {
-                self.record_named(name);
-            } else if let Some(idx_str) = param.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    self.record_pos(idx);
-                } else {
-                    self.max_pos = self.max_pos.max(1);
-                }
-            } else {
-                self.record_named(param);
-            }
-            let full = unbound_param_str_err(param, span);
-            let scalar = unbound_param_str_err(param, span);
-            self.note_both(full, scalar);
+            self.page_limit_param(param, query.page.limit_span);
         }
         if let Some(param) = &query.page.offset_param {
-            let span = query.page.offset_span;
-            if let Some(name) = param.strip_prefix(':') {
-                self.record_named(name);
-            } else if let Some(idx_str) = param.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    self.record_pos(idx);
-                } else {
-                    self.max_pos = self.max_pos.max(1);
-                }
-            } else {
-                self.record_named(param);
-            }
-            let full = unbound_param_str_err(param, span);
-            let scalar = unbound_param_str_err(param, span);
-            self.note_both(full, scalar);
+            self.page_limit_param(param, query.page.offset_span);
         }
     }
 
@@ -730,7 +714,18 @@ impl Census {
                     self.ddl_options(config);
                 }
             }
+            Stmt::CreateIndex(index) => {
+                for (_, v) in &index.options {
+                    self.value(v);
+                }
+            }
+            Stmt::SetQuota(quota) => {
+                for (_, v) in &quota.config {
+                    self.value(v);
+                }
+            }
             Stmt::Batch(batch) => {
+                self.search_params(batch.params.as_ref());
                 for member in &batch.statements {
                     self.stmt(member);
                 }

@@ -15,7 +15,7 @@ use crate::ast::{
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
-use super::{AstLowerer, ascii_equal};
+use super::AstLowerer;
 
 /// Malformed or unrepresentable `ALTER COLLECTION` per-vector diff.
 fn vector_diff_error(message: impl Into<alloc::borrow::Cow<'static, str>>, span: Span) -> QqlError {
@@ -119,18 +119,6 @@ impl<'a> AstLowerer<'a> {
                         ));
                     }
                     vectors = block;
-                }
-                _ if tok.is_keyword_or_identifier() && ascii_equal(tok.text, "QUANTIZATION") => {
-                    // Defensive mirror of the main clause dispatch (some lexer
-                    // paths surface QUANTIZATION as an identifier).
-                    self.advance()?;
-                    if quantization.is_some() {
-                        return Err(vector_diff_error(
-                            alloc::format!("duplicate QUANTIZATION block in vector diff '{name}'"),
-                            tok.span,
-                        ));
-                    }
-                    quantization = Some(self.parse_quantization_diff_block()?);
                 }
                 _ => {
                     return Err(vector_diff_error(

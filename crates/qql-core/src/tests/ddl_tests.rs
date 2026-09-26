@@ -127,6 +127,44 @@ fn create_collection_rejects_bad_memory_and_datatype() {
 }
 
 #[test]
+fn quantization_and_sparse_options_reject_wrong_types() {
+    // Wrong-typed sub-fields must fail closed instead of configuring nothing
+    // (core-audit #5).
+    let cases = [
+        // TURBO bits must be numeric.
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'turbo', bits = 'four');",
+        // PRODUCT compression must be a string.
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'product', compression = 4);",
+        // BINARY query_encoding must be a string.
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'binary', query_encoding = 1);",
+        // SPARSE modifier must be a string.
+        "CREATE COLLECTION docs (sparse SPARSE WITH SPARSE (modifier = 5));",
+    ];
+    for source in cases {
+        let err = Parser::parse(source).expect_err(&format!("expected error for: {source}"));
+        assert_eq!(
+            err.kind,
+            crate::error::ErrorKind::Validation,
+            "wrong kind for: {source}"
+        );
+        assert_eq!(
+            err.code, "QQL-VALIDATION-CONFIG",
+            "wrong code for: {source}"
+        );
+    }
+
+    // The well-typed spellings still parse.
+    for source in [
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'turbo', bits = 1.5);",
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'product', compression = 'x16');",
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'binary', query_encoding = 'scalar8bits');",
+        "CREATE COLLECTION docs (sparse SPARSE WITH SPARSE (modifier = 'idf'));",
+    ] {
+        Parser::parse(source).unwrap_or_else(|e| panic!("{source}: {e}"));
+    }
+}
+
+#[test]
 fn create_sparse_with_memory_roundtrips_fmt() {
     let stmt = Parser::parse(
         "CREATE COLLECTION docs (sparse SPARSE WITH SPARSE (modifier = 'idf', memory = 'cached'));",

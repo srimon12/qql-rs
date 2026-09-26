@@ -162,7 +162,7 @@ impl<'a> AstLowerer<'a> {
         let (key, collection) = if self.peek()?.kind == TokenKind::From {
             self.advance()?;
             let coll = crate::ast::QueryCollection::Explicit(self.parse_identifier()?);
-            if self.peek()?.kind == TokenKind::Key || self.peek_word("KEY")? {
+            if self.peek()?.kind == TokenKind::Key {
                 self.advance()?;
             }
             let k = self.parse_identifier()?;
