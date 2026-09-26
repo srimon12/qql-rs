@@ -1,6 +1,6 @@
 //! Client-side CROSS RERANK planning: candidate queries + payload field ensure.
 
-use crate::plan::{PlannedOperation, plan};
+use crate::plan::PlannedOperation;
 use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 
@@ -68,7 +68,12 @@ pub(crate) fn plan_cross_rerank(
         if let Some(f) = &pref.filter {
             sub.filter = Some(f.clone());
         }
-        let planned = plan(&Stmt::Query(Box::new(sub)))?;
+        // Candidate stages are planned through the same lowering as any query,
+        // minus the unbound-param gate: the outer statement already ran it
+        // (the param census recurses into CROSS RERANK prefetch sources), and
+        // template planning (`plan_template`) must leave vector placeholders
+        // for `bind_vector_params` to fill at execution time.
+        let planned = crate::plan::lower_statement_to_planned(&Stmt::Query(Box::new(sub)))?;
         match planned {
             PlannedOperation::Query {
                 collection: c,
