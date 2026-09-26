@@ -1,11 +1,11 @@
 //! Client-side CROSS RERANK planning: candidate queries + payload field ensure.
 
 use crate::plan::PlannedOperation;
-use qql_core::ast::Stmt;
 use qql_core::error::QqlError;
 
 pub(crate) fn plan_cross_rerank(
     outer: &qql_core::ast::QueryStmt,
+    ctes: &[qql_core::ast::Cte],
     collection: &str,
     query_text: &str,
     model: &str,
@@ -43,23 +43,25 @@ pub(crate) fn plan_cross_rerank(
 
     let mut candidates = Vec::with_capacity(prefetch.len());
     for pref in prefetch {
-        let mut sub = match &pref.source {
-            PrefetchSource::Cte(name) => {
-                let cte = outer
-                    .ctes
-                    .iter()
-                    .find(|c| c.name.eq_ignore_ascii_case(name));
-                let Some(cte) = cte else {
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-CROSS-RERANK-CTE",
-                        format!("PREFETCH references unknown CTE '{name}'"),
-                        None,
-                    ));
-                };
-                (*cte.query).clone()
-            }
-            PrefetchSource::Query(q) => (**q).clone(),
-        };
+        // The candidate body is planned standalone (its collection is made
+        // explicit below), under the CTE scope visible where the prefetch was
+        // written: the enclosing scope for inline sources, the prefix before
+        // the named CTE for references.
+        let (mut sub, sub_ctes): (qql_core::ast::QueryStmt, &[qql_core::ast::Cte]) =
+            match &pref.source {
+                PrefetchSource::Cte(name) => {
+                    let Some(index) = ctes.iter().position(|c| c.name.eq_ignore_ascii_case(name))
+                    else {
+                        return Err(QqlError::validation(
+                            "QQL-PLAN-CROSS-RERANK-CTE",
+                            format!("PREFETCH references unknown CTE '{name}'"),
+                            None,
+                        ));
+                    };
+                    ((*ctes[index].query).clone(), &ctes[..index])
+                }
+                PrefetchSource::Query(q) => ((**q).clone(), ctes),
+            };
         if matches!(sub.collection, QueryCollection::Inherited) {
             sub.collection = QueryCollection::Explicit(collection.to_string());
         }
@@ -73,7 +75,7 @@ pub(crate) fn plan_cross_rerank(
         // (the param census recurses into CROSS RERANK prefetch sources), and
         // template planning (`plan_template`) must leave vector placeholders
         // for `bind_vector_params` to fill at execution time.
-        let planned = crate::plan::lower_statement_to_planned(&Stmt::Query(Box::new(sub)))?;
+        let planned = crate::plan::lower_query_to_planned(&sub, sub_ctes)?;
         match planned {
             PlannedOperation::Query {
                 collection: c,

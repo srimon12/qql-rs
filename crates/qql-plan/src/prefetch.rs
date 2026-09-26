@@ -13,24 +13,35 @@ pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> Result<PrefetchRequ
     lower_prefetch_with_ctes(prefetch, &[])
 }
 
-/// Lower a `PREFETCH` clause, resolving `CTE` sources against `ctes`.
+/// Lower a `PREFETCH` clause, resolving `CTE` sources against the visible
+/// scope `ctes`.
+///
+/// `ctes` is the list visible at the *reference site*: the root statement's
+/// definitions, or the prefix visible where an enclosing CTE body was
+/// defined. Resolving a name at index `i` lowers that CTE's body under
+/// `&ctes[..i]` — exactly the prior-only visibility the parser enforced when
+/// it accepted the reference — so resolution strictly moves backwards and
+/// always terminates. Inline `QUERY` sub-sources inherit the current scope,
+/// matching the parser.
 pub fn lower_prefetch_with_ctes(
     prefetch: &qql_core::ast::Prefetch,
     ctes: &[qql_core::ast::Cte],
 ) -> Result<PrefetchRequest, QqlError> {
-    let source_query: &QueryStmt = match &prefetch.source {
-        PrefetchSource::Cte(name) => ctes
-            .iter()
-            .find(|c| c.name.eq_ignore_ascii_case(name))
-            .map(|c| c.query.as_ref())
-            .ok_or_else(|| {
-                QqlError::validation(
-                    "QQL-PLAN-PREFETCH-CTE",
-                    format!("PREFETCH references unknown CTE '{name}'"),
-                    None,
-                )
-            })?,
-        PrefetchSource::Query(query) => query.as_ref(),
+    let (source_query, source_scope): (&QueryStmt, &[qql_core::ast::Cte]) = match &prefetch.source {
+        PrefetchSource::Cte(name) => {
+            let index = ctes
+                .iter()
+                .position(|c| c.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| {
+                    QqlError::validation(
+                        "QQL-PLAN-PREFETCH-CTE",
+                        format!("PREFETCH references unknown CTE '{name}'"),
+                        None,
+                    )
+                })?;
+            (&ctes[index].query, &ctes[..index])
+        }
+        PrefetchSource::Query(query) => (query.as_ref(), ctes),
     };
 
     // PrefetchRequest cannot represent grouping (no group_by / group_size
@@ -44,7 +55,7 @@ pub fn lower_prefetch_with_ctes(
     }
 
     let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) = {
-        let (variant, using, nested) = build_query_with_prefetch(source_query)?;
+        let (variant, using, nested) = build_query_with_prefetch(source_query, source_scope)?;
         (
             Some(variant),
             using,
@@ -92,8 +103,14 @@ pub fn lower_prefetch_with_ctes(
     })
 }
 
+/// Build the wire query variant for a statement, plus its `USING` target and
+/// lowered prefetch stages.
+///
+/// `ctes` is the CTE scope visible where `query` was written (the root
+/// statement's definitions, or the prefix visible to a CTE body).
 pub(crate) fn build_query_with_prefetch(
     query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
 ) -> Result<(QueryVariant, Option<String>, Vec<PrefetchRequest>), QqlError> {
     match &query.expression {
         QueryExpr::Hybrid {
@@ -209,7 +226,7 @@ pub(crate) fn build_query_with_prefetch(
             }
             let pf_requests: Vec<PrefetchRequest> = prefetch
                 .iter()
-                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
+                .map(|p| lower_prefetch_with_ctes(p, ctes))
                 .collect::<Result<_, _>>()?;
             let nearest_input = match input {
                 QueryInput::Text { text, .. } => PlanQueryInput::Document {
@@ -252,7 +269,7 @@ pub(crate) fn build_query_with_prefetch(
             let prefetches = expression_prefetch(&query.expression);
             let pf_requests: Vec<PrefetchRequest> = prefetches
                 .iter()
-                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
+                .map(|p| lower_prefetch_with_ctes(p, ctes))
                 .collect::<Result<_, _>>()?;
             Ok((variant, using, pf_requests))
         }

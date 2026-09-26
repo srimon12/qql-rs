@@ -127,9 +127,17 @@ fn modality_code(modality: JobModality) -> (&'static str, &'static str) {
     }
 }
 
+/// Collect every embedding job reachable from one statement.
+///
+/// The walk is definition-order and total: CTE bodies are visited once (they
+/// are stored once on the root statement), and inline prefetch sub-queries
+/// recurse through [`collect_query_jobs`], which is the same shape
+/// [`apply_query_embeddings`] consumes. CTE *references* (`PREFETCH (name)`)
+/// carry no jobs of their own — the plan resolves them to the bodies visited
+/// here.
 fn collect_query_jobs(query: &QueryStmt, jobs: &mut Vec<QueryJob>) -> Result<(), QqlError> {
     for cte in &query.ctes {
-        collect_expr_jobs(&cte.query.expression, jobs)?;
+        collect_query_jobs(&cte.query, jobs)?;
     }
     collect_expr_jobs(&query.expression, jobs)
 }
@@ -694,7 +702,7 @@ fn apply_query_embeddings<'a>(
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
         for cte in &mut query.ctes {
-            apply_expr_embeddings(&mut cte.query.expression, cursor).await?;
+            apply_query_embeddings(&mut cte.query, cursor).await?;
         }
         apply_expr_embeddings(&mut query.expression, cursor).await?;
         Ok(())

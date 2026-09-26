@@ -241,9 +241,21 @@ fn lower_group_lookup(lookup: &qql_core::ast::GroupLookup) -> WithLookupValue {
 }
 
 /// Lower a full `QUERY` statement into the `/points/query` request body.
+///
+/// The statement's own `ctes` are the reference scope; CTE bodies reached
+/// through `PREFETCH (name)` lower through
+/// [`lower_query_request_with_ctes`] with their visible prefix.
 pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
+    lower_query_request_with_ctes(query, &query.ctes)
+}
+
+/// Lower a `QUERY` statement under an explicit CTE reference scope.
+pub(crate) fn lower_query_request_with_ctes(
+    query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
+) -> Result<QueryRequest, QqlError> {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
-    let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
+    let (query_variant, using, prefetch) = build_query_with_prefetch(query, ctes)?;
 
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryRequest {
@@ -279,6 +291,14 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
 ///
 /// User LIMIT and OFFSET fold into the wire `limit` + `group_offset` pair.
 pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
+    lower_query_groups_request_with_ctes(query, &query.ctes)
+}
+
+/// Lower a grouped `QUERY` statement under an explicit CTE reference scope.
+pub(crate) fn lower_query_groups_request_with_ctes(
+    query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
+) -> Result<QueryGroupsRequest, QqlError> {
     let Some(group) = query.group.as_ref() else {
         // No GROUP BY clause exists to point at, so this stays span-less by
         // design (see the never-misattribute rule); the plan() caller only
@@ -311,7 +331,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
     let group_offset = if offset > 0 { Some(offset) } else { None };
 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
-    let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
+    let (query_variant, using, prefetch) = build_query_with_prefetch(query, ctes)?;
 
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryGroupsRequest {
@@ -519,6 +539,52 @@ mod tests {
             pf
         );
         assert_eq!(pf["limit"], 20);
+    }
+
+    #[test]
+    fn nested_cte_prefetch_resolves_against_the_root_scope() {
+        // `b` references `a`; the planner must lower `b`'s body under the
+        // prefix visible where `b` was defined (definitions are stored once,
+        // never copied into the body).
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20), \
+             b AS (QUERY TEXT 'y' MODEL 'e5' FROM docs USING dense PREFETCH (a) LIMIT 30) \
+             QUERY FUSION RRF FROM docs PREFETCH (b) LIMIT 10;",
+        );
+        let outer = &json["prefetch"][0];
+        assert_eq!(outer["limit"], 30);
+        assert_eq!(outer["query"]["nearest"]["text"], "y");
+        let nested = &outer["prefetch"][0];
+        assert_eq!(nested["query"]["nearest"]["text"], "x");
+        assert_eq!(nested["limit"], 20);
+    }
+
+    #[test]
+    fn inline_prefetch_subquery_sees_the_enclosing_cte_scope() {
+        // Scope visibility is uniform: inline `PREFETCH (QUERY …)` sources see
+        // the same CTEs a CTE body does.
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20) \
+             QUERY FUSION RRF FROM docs \
+             PREFETCH (QUERY TEXT 'y' MODEL 'e5' FROM docs USING dense PREFETCH (a) LIMIT 30) \
+             LIMIT 10;",
+        );
+        let nested = &json["prefetch"][0]["prefetch"][0];
+        assert_eq!(nested["query"]["nearest"]["text"], "x");
+        assert_eq!(nested["limit"], 20);
+    }
+
+    #[test]
+    fn cte_body_sees_only_prior_definitions() {
+        // Prior-only visibility keeps resolution terminating: a body cannot
+        // reference a CTE defined after it.
+        let err = Parser::parse(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense PREFETCH (b)), \
+             b AS (QUERY TEXT 'y' MODEL 'e5' FROM docs USING dense LIMIT 5) \
+             QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 5;",
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-VALIDATION-PREFETCH-CTE");
     }
 
     #[test]

@@ -12,11 +12,11 @@ use crate::mutation::{
     lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
     lower_update_vector_request, lower_upsert_request, validate_scroll_after,
 };
-use crate::query::{lower_query_groups_request, lower_query_request};
+use crate::query::{lower_query_groups_request_with_ctes, lower_query_request_with_ctes};
 use crate::rerank::plan_cross_rerank;
 use crate::types::*;
 use crate::validate::validate_query_stmt;
-use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
+use qql_core::ast::{QueryCollection, QueryExpr, QueryStmt, Stmt};
 use qql_core::error::QqlError;
 
 pub use crate::routing::{RestProjectionError, to_rest_route, try_route};
@@ -498,78 +498,86 @@ pub fn plan_template(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     lower_statement_to_planned(statement)
 }
 
+/// Lower a `QUERY` statement under an explicit CTE reference scope.
+///
+/// The scope is the statement's own `ctes` at the root and the visible prefix
+/// when the statement is a CTE body reached through `PREFETCH (name)`.
+pub(crate) fn lower_query_to_planned(
+    query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
+) -> Result<PlannedOperation, QqlError> {
+    validate_query_stmt(query)?;
+    let collection = match &query.collection {
+        QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
+        QueryCollection::Explicit(_) => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION",
+                "query collection name must not be empty",
+                query.collection_span,
+            ));
+        }
+        QueryCollection::Inherited => {
+            // No collection token exists to point at (the parser
+            // rejects this shape earlier with its own span), so no
+            // span is better than a wrong one.
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION",
+                "top-level query requires an explicit collection (FROM ...)",
+                None,
+            ));
+        }
+    };
+
+    if matches!(query.expression, QueryExpr::Points { .. }) {
+        let ids = match &query.expression {
+            QueryExpr::Points { ids } => {
+                ids.iter().map(crate::semantic::PlanPointId::from).collect()
+            }
+            _ => unreachable!(),
+        };
+        let (with_payload, with_vector) = crate::query::lower_output_selector_public(&query.output);
+        return Ok(PlannedOperation::GetPoints {
+            collection,
+            request: PointsRequest {
+                ids,
+                with_payload,
+                with_vector,
+                shard_key: query
+                    .shard_key
+                    .as_ref()
+                    .map(crate::semantic::PlanShardKey::from),
+            },
+        });
+    }
+
+    if let QueryExpr::CrossRerank {
+        query: qtext,
+        model,
+        field,
+        prefetch,
+        ..
+    } = &query.expression
+    {
+        return plan_cross_rerank(query, ctes, &collection, qtext, model, field, prefetch);
+    }
+
+    if query.group.is_some() {
+        // GROUP BY is routed to QueryGroups which supports both LIMIT and OFFSET (via group_offset).
+        return Ok(PlannedOperation::QueryGroups {
+            collection,
+            request: lower_query_groups_request_with_ctes(query, ctes)?,
+        });
+    }
+
+    Ok(PlannedOperation::Query {
+        collection,
+        request: lower_query_request_with_ctes(query, ctes)?,
+    })
+}
+
 pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     match statement {
-        Stmt::Query(query) => {
-            validate_query_stmt(query)?;
-            let collection = match &query.collection {
-                QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
-                QueryCollection::Explicit(_) => {
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-COLLECTION",
-                        "query collection name must not be empty",
-                        query.collection_span,
-                    ));
-                }
-                QueryCollection::Inherited => {
-                    // No collection token exists to point at (the parser
-                    // rejects this shape earlier with its own span), so no
-                    // span is better than a wrong one.
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-COLLECTION",
-                        "top-level query requires an explicit collection (FROM ...)",
-                        None,
-                    ));
-                }
-            };
-
-            if matches!(query.expression, QueryExpr::Points { .. }) {
-                let ids = match &query.expression {
-                    QueryExpr::Points { ids } => {
-                        ids.iter().map(crate::semantic::PlanPointId::from).collect()
-                    }
-                    _ => unreachable!(),
-                };
-                let (with_payload, with_vector) =
-                    crate::query::lower_output_selector_public(&query.output);
-                return Ok(PlannedOperation::GetPoints {
-                    collection,
-                    request: PointsRequest {
-                        ids,
-                        with_payload,
-                        with_vector,
-                        shard_key: query
-                            .shard_key
-                            .as_ref()
-                            .map(crate::semantic::PlanShardKey::from),
-                    },
-                });
-            }
-
-            if let QueryExpr::CrossRerank {
-                query: qtext,
-                model,
-                field,
-                prefetch,
-                ..
-            } = &query.expression
-            {
-                return plan_cross_rerank(query, &collection, qtext, model, field, prefetch);
-            }
-
-            if query.group.is_some() {
-                // GROUP BY is routed to QueryGroups which supports both LIMIT and OFFSET (via group_offset).
-                return Ok(PlannedOperation::QueryGroups {
-                    collection,
-                    request: lower_query_groups_request(query)?,
-                });
-            }
-
-            Ok(PlannedOperation::Query {
-                collection,
-                request: lower_query_request(query)?,
-            })
-        }
+        Stmt::Query(query) => lower_query_to_planned(query, &query.ctes),
         Stmt::Scroll(scroll) => {
             validate_scroll_after(scroll.after.as_ref())?;
             Ok(PlannedOperation::Scroll {
