@@ -65,6 +65,16 @@ COUNT FROM docs WHERE status = 'active'; -- trailing comment
 }
 
 #[test]
+fn test_format_comment_after_four_quote_run() {
+    // A `''''` run must not abandon comment scanning for the rest of the
+    // statement (core-audit #6).
+    let input = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND b = 1 -- keep me\n;\n";
+    let formatted = format(input).unwrap();
+    assert!(formatted.contains("keep me"), "lost comment: {formatted}");
+    Parser::parse_all(&formatted).expect("formatted output must re-parse");
+}
+
+#[test]
 fn test_format_collapses_multiple_blank_lines() {
     let input = r#"COUNT FROM docs;
 

@@ -308,6 +308,95 @@ fn test_bind_preserves_triple_quoted_and_raw_strings() {
 }
 
 #[test]
+fn test_protected_scan_matches_lexer_on_quote_runs() {
+    use crate::lexer::Lexer;
+    use crate::token::TokenKind;
+
+    // core-audit #6: the shared protected-span scanner must agree with the
+    // lexer on every string-token span for quote-run shapes that diverged.
+    for text in [
+        "''''",
+        "\"\"\"\"",
+        "''''''",
+        "'''a'''",
+        "\"\"\"a\"\"\"",
+        "r'''x'''",
+        "r''x''",
+        "\"a\"",
+        "`x`",
+        "'a\\'b'",
+        "\"a\\\"b\"",
+        // Trailing content after a quote run is where the scanners diverged:
+        // the old scanner committed to a triple-quoted span and consumed
+        // everything to the end of the slice.
+        "'''' AND tenant = :t",
+        "\"\"\"\" AND tenant = :t",
+        "r'''x''' :t",
+        "r''x'' :t",
+    ] {
+        let bytes = text.as_bytes();
+        for tok in Lexer::new(text) {
+            let tok = tok.expect("tricky literals must lex");
+            if tok.kind == TokenKind::String {
+                assert_eq!(
+                    skip_protected(bytes, tok.span.start),
+                    Some(tok.span.end),
+                    "protected scan diverges from lexer for {text:?} at {}",
+                    tok.span.start
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_bind_after_four_quote_run() {
+    // `''''` is the SQL-escaped one-apostrophe string; placeholders after it
+    // must still bind instead of being swallowed as string content
+    // (core-audit #6).
+    let query = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = :t;";
+    let bound = bind_named(query, |name| {
+        (name == "t").then(|| Value::Str("acme".into()))
+    })
+    .unwrap();
+    assert_eq!(
+        bound,
+        "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = 'acme';"
+    );
+
+    let query_pos = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = ?;";
+    let bound = bind_positional(query_pos, &[Value::Str("acme".into())]).unwrap();
+    assert_eq!(
+        bound,
+        "QUERY TEXT 'x' FROM docs WHERE a = '''' AND tenant = 'acme';"
+    );
+
+    // `""""` is two empty double-quoted strings — the same trap.
+    let query = "QUERY TEXT 'x' FROM docs WHERE a = \"\"\"\" AND tenant = :t;";
+    let bound = bind_named(query, |name| {
+        (name == "t").then(|| Value::Str("acme".into()))
+    })
+    .unwrap();
+    assert_eq!(
+        bound,
+        "QUERY TEXT 'x' FROM docs WHERE a = \"\"\"\" AND tenant = 'acme';"
+    );
+
+    // Missing params after such a run must still be reported, never skipped.
+    let err = bind_named(query, |_| None).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+}
+
+#[test]
+fn test_truncate_vector_literals_after_four_quote_run() {
+    let qql = "QUERY TEXT 'x' FROM docs WHERE a = '''' AND v = [0.1, 0.2, 0.3, 0.4];";
+    assert_eq!(
+        truncate_vector_literals(qql, 2),
+        "QUERY TEXT 'x' FROM docs WHERE a = '''' AND v = [0.1, 0.2, ... (4 dims)];"
+    );
+}
+
+#[test]
 fn test_scroll_and_facet_limit_and_after_binding() {
     let scroll_query = "SCROLL FROM docs AFTER :cursor LIMIT :lim;";
     let mut scroll_stmt = Parser::parse(scroll_query).expect("scroll query should parse");
