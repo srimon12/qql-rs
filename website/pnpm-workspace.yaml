@@ -14,9 +14,10 @@ allowBuilds:
   sharp: true
 
 # Security overrides for transitive Dependabot alerts (GHSA-2v37-7h3g-55p8,
-# GHSA-xcpc-8h2w-3j85, GHSA-5p4m-2wfm-xmqj). Patched versions verified on npm.
+# GHSA-xcpc-8h2w-3j85, GHSA-5p4m-2wfm-xmqj, GHSA-7q85-xj36-vmfc,
+# GHSA-vwc7-r8mq-g2x9, GHSA-2883-xcg3-v3hh). Patched versions verified on npm.
 overrides:
   nanoid: 3.3.18
-  adm-zip: 0.6.0
-  js-yaml: 4.3.1
+  adm-zip: 0.6.1
+  js-yaml: 4.3.2
   sharp: 0.35.4
