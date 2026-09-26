@@ -284,6 +284,28 @@ fn non_finite_float_literals_rejected() {
 }
 
 #[test]
+fn out_of_range_integer_literals_rejected() {
+    // Digit-leading literals outside i64/u64 must fail instead of silently
+    // becoming exact string matches (core-audit #4).
+    for source in [
+        "QUERY TEXT 'x' FROM docs WHERE price = 99999999999999999999;",
+        "QUERY TEXT 'x' FROM docs WHERE score = -99999999999999999999;",
+    ] {
+        let err = Parser::parse(source).expect_err(&format!("expected error for: {source}"));
+        assert_eq!(err.kind, ErrorKind::Parse, "wrong kind for: {source}");
+        assert_eq!(err.code, "QQL-PARSE-NUMBER", "wrong code for: {source}");
+        assert!(err.span.is_some(), "overflow error must carry a span");
+    }
+
+    // u64::MAX still parses (as UInt), and the INTEGER keyword spelling
+    // remains a string.
+    Parser::parse("QUERY TEXT 'x' FROM docs WHERE price = 18446744073709551615;")
+        .expect("u64::MAX must parse");
+    Parser::parse("QUERY TEXT 'x' FROM docs WHERE t = INTEGER;")
+        .expect("INTEGER keyword spelling must stay a string");
+}
+
+#[test]
 fn limit_beyond_u64_and_zero_rejected_with_positive_integer_code() {
     // Integer literals larger than u64::MAX must be rejected at parse time,
     // not silently clamped or wrapped; LIMIT/OFFSET are `positive_integer`

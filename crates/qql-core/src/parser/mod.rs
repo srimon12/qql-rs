@@ -342,7 +342,22 @@ impl<'a> AstLowerer<'a> {
                     Ok(crate::ast::Value::Int(v))
                 } else if let Ok(v) = tok.text.parse::<u64>() {
                     Ok(crate::ast::Value::UInt(v))
+                } else if tok
+                    .text
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|b| b.is_ascii_digit() || *b == b'-')
+                {
+                    // Digit-leading text that fits neither `i64` nor `u64` is
+                    // out of range — fail instead of turning the numeric
+                    // comparison into a string match (core-audit #4).
+                    Err(QqlError::parse(
+                        "QQL-PARSE-NUMBER",
+                        alloc::format!("integer literal '{}' is out of range", tok.text),
+                        tok.span,
+                    ))
                 } else {
+                    // The `INTEGER` keyword spelling.
                     Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }
