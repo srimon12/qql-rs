@@ -53,7 +53,7 @@ Key decisions:
 - Bare `vector: [...]` targets the default vector. Named maps target named vectors.
 - Sparse values use `{indices: [...], values: [...]}`.
 - Multivector values are nested arrays `[[...], ...]`.
-- Inference dicts use `{text: '...', model: '...'}` or `{image: '...', model: '...'}` or `{object: {...}, model: '...'}`. Only string `text` and `image` or an `object` key claim the inference shape. A dict with numeric `text` stays a named vector.
+- Inference dicts use `{text: '...', model: '...'}` or `{image: '...', model: '...'}` or `{object: {...}, model: '...'}`. Only a string `text` / `image` or an object-valued `object` claims the inference shape. A dict with numeric `text` or a list-valued `object` stays a named vector.
 - Typed arrays bind efficiently in SDKs. `Float32Array` packs dense vectors with one copy. Integer arrays bind sparse indices. Plain `number[]` of 32 plus elements packs as `F32Array` in Node and Python. Payload values never repack.
 
 ## Conditional upsert

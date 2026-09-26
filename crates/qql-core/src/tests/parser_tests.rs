@@ -870,6 +870,45 @@ fn upsert_using_image_parses() {
 }
 
 #[test]
+fn named_vector_called_object_is_not_inference_input() {
+    // A dict value is the inference payload; a list value is a dense vector
+    // named `object` (core-audit #14).
+    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: {object: [0.1, 0.2]}};")
+        .expect("named vector 'object' must parse");
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let crate::ast::PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!("expected inline point")
+    };
+    let Some(crate::ast::PointVectors::Named(list)) = &point.vectors else {
+        panic!("expected named vectors, got {:?}", point.vectors)
+    };
+    assert_eq!(list[0].0, "object");
+    assert!(matches!(
+        list[0].1,
+        crate::ast::VectorValue::Dense(ref values) if values == &[0.1, 0.2]
+    ));
+
+    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: {object: {a: 1}, model: 'm'}};")
+        .expect("inference object must parse");
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let crate::ast::PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!("expected inline point")
+    };
+    assert!(
+        matches!(
+            &point.vectors,
+            Some(crate::ast::PointVectors::Unnamed(crate::ast::VectorValue::Object { .. }))
+        ),
+        "expected inference object, got {:?}",
+        point.vectors
+    );
+}
+
+#[test]
 fn using_as_multi_marks_dense_multivector() {
     let s =
         Parser::parse("QUERY TEXT 'search' FROM docs USING colbert AS MULTI LIMIT 10;").unwrap();
