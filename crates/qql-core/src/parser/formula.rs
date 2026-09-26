@@ -231,9 +231,7 @@ fn parse_formula_case_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, 
 fn parse_optional_bracket_default(p: &mut AstLowerer<'_>) -> Result<Option<f64>, QqlError> {
     if p.peek()?.kind == TokenKind::Lbracket && p.index + 1 < p.tokens.len() {
         let next_tok = &p.tokens[p.index + 1];
-        if next_tok.kind == TokenKind::Default
-            || (next_tok.is_keyword_or_identifier() && ascii_equal(next_tok.text, "DEFAULT"))
-        {
+        if next_tok.kind == TokenKind::Default {
             p.advance()?;
             p.advance()?;
             p.expect(TokenKind::Equals)?;

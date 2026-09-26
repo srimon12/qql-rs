@@ -134,10 +134,6 @@ impl<'a> AstLowerer<'a> {
                 self.advance()?;
                 self.parse_quantization_config_block()
             }
-            _ if tok.is_keyword_or_identifier() && ascii_equal(tok.text, "QUANTIZATION") => {
-                self.advance()?;
-                self.parse_quantization_config_block()
-            }
             _ => Err(validation_err(
                 alloc::format!(
                     "{}, got '{}'",

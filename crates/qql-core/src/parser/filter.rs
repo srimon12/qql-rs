@@ -1,5 +1,5 @@
 use super::helpers::point_id_from_value;
-use super::{AstLowerer, ascii_equal};
+use super::AstLowerer;
 use crate::ast::{ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value};
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
@@ -50,9 +50,7 @@ impl<'a> AstLowerer<'a> {
             self.expect(TokenKind::Rparen)?;
             return Ok(expression);
         }
-        if self.peek()?.kind == TokenKind::Nested
-            || (self.peek()?.is_keyword_or_identifier() && ascii_equal(self.peek()?.text, "NESTED"))
-        {
+        if self.peek()?.kind == TokenKind::Nested {
             self.advance()?;
             self.expect(TokenKind::Lparen)?;
             let path = self.parse_string()?;
