@@ -151,7 +151,7 @@ const QUERY_CORPUS: &[&str] = &[
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE code MATCH EXCEPT (1, 2) LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE MIN SHOULD 2 (a = 1, b = 2) LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE MIN SHOULD 1 (title MATCH TOKENS 'a b', tags MATCH EXCEPT (1, 2)) LIMIT 5;",
-    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE big = 18446744073709551615 LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE big = 9223372036854775807 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE n > 18446744073709551615 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE name > 'm' LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE name BETWEEN 'a' AND 'm' LIMIT 5;",

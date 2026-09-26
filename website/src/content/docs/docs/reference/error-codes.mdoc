@@ -179,6 +179,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-PLAN-INDEX-OPTION` | Invalid or unsupported `CREATE INDEX` option value |
 | `QQL-PLAN-INDEX-TYPE` | Unknown payload index field type |
+| `QQL-PLAN-MATCH-TYPE` | A match value or `IN` / `MATCH ANY` / `MATCH EXCEPT` list has no wire representation (non-int64 integer, float, bool, mixed kinds, or duplicates) |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
@@ -589,6 +590,7 @@ QQL-PLAN-GROUP
 QQL-PLAN-IDF
 QQL-PLAN-INDEX-OPTION
 QQL-PLAN-INDEX-TYPE
+QQL-PLAN-MATCH-TYPE
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-QUOTA

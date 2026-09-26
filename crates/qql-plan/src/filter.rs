@@ -73,7 +73,7 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
         FilterExpr::PointId(predicate) => lower_point_id(predicate),
         FilterExpr::Compare { field, op, value } => lower_compare(field, *op, value)?,
         FilterExpr::Between { field, low, high } => lower_between(field, low, high)?,
-        FilterExpr::In { field, values } => lower_match_any(field, values),
+        FilterExpr::In { field, values } => lower_match_list(field, values, false)?,
         FilterExpr::IsNull { field } => FilterClause::IsNull(IsNullCondition {
             is_null: KeyOnly { key: field.clone() },
         }),
@@ -83,10 +83,7 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
         FilterExpr::MatchText { field, text } => field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Text { text: text.clone() })
         }),
-        FilterExpr::MatchAny { field, values } => {
-            let any: Vec<_> = values.to_vec();
-            field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
-        }
+        FilterExpr::MatchAny { field, values } => lower_match_list(field, values, false)?,
         FilterExpr::MatchPhrase { field, text } => field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Phrase {
                 phrase: text.clone(),
@@ -102,10 +99,7 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
                 text_any: text.clone(),
             })
         }),
-        FilterExpr::MatchExcept { field, values } => {
-            let except: Vec<_> = values.to_vec();
-            field_condition(field, |fc| fc.r#match = Some(MatchValue::Except { except }))
-        }
+        FilterExpr::MatchExcept { field, values } => lower_match_list(field, values, true)?,
         FilterExpr::MinShould {
             min_count,
             operands,
@@ -254,6 +248,15 @@ fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> Result<FilterC
                 })
             }));
         }
+        // `ValueVariants` (REST) and the gRPC/edge `Match` integer are int64:
+        // a `u64` above `i64::MAX` cannot be represented by any transport, and
+        // widening it to a double range would round above 2^53. Fail closed
+        // instead of shipping a body the backend rejects.
+        if let Value::UInt(n) = value
+            && i64::try_from(*n).is_err()
+        {
+            return Err(oversized_match_error(value));
+        }
         return Ok(field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Value {
                 value: value.clone(),
@@ -279,9 +282,102 @@ fn lower_between(field: &str, low: &Value, high: &Value) -> Result<FilterClause,
     }))
 }
 
-fn lower_match_any(field: &str, values: &[Value]) -> FilterClause {
-    let any: Vec<_> = values.to_vec();
-    field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
+/// Element kind an OpenAPI `AnyVariants` / gRPC `Match` list can carry:
+/// `string[]` or `int64[]` only — no floats, bools, nulls, or mixed lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatchListKind {
+    String,
+    Integer,
+}
+
+/// One match-list entry's canonical kind + key (for duplicate detection).
+fn match_list_entry(value: &Value) -> Result<(MatchListKind, String), QqlError> {
+    match value {
+        Value::Str(s) => Ok((MatchListKind::String, format!("s:{s}"))),
+        Value::Int(n) => Ok((MatchListKind::Integer, format!("i:{n}"))),
+        Value::UInt(n) if i64::try_from(*n).is_ok() => {
+            Ok((MatchListKind::Integer, format!("i:{n}")))
+        }
+        _ => Err(match_list_entry_error(value)),
+    }
+}
+
+/// Structured error for a match-list entry no transport can represent.
+fn match_list_entry_error(value: &Value) -> QqlError {
+    let message = if matches!(value, Value::UInt(_)) {
+        format!(
+            "match list entry {} is above the int64 range match lists support; use a range filter",
+            crate::value_serde::value_error_text(value)
+        )
+    } else {
+        format!(
+            "match list entry {} cannot be represented on any transport: match lists are \
+             homogeneous string or int64 arrays; use a range filter for floats",
+            crate::value_serde::value_error_text(value)
+        )
+    };
+    QqlError::validation("QQL-PLAN-MATCH-TYPE", message, value.param_span())
+}
+
+/// Structured error for an oversized single `=` match value.
+fn oversized_match_error(value: &Value) -> QqlError {
+    QqlError::validation(
+        "QQL-PLAN-MATCH-TYPE",
+        format!(
+            "match value {} is above the int64 range match values support; use a range filter",
+            crate::value_serde::value_error_text(value)
+        ),
+        value.param_span(),
+    )
+}
+
+/// Lower an `IN` / `MATCH ANY` / `MATCH EXCEPT` value list.
+///
+/// OpenAPI `AnyVariants` is `string[] (uniqueItems) | int64[] (uniqueItems)`;
+/// the gRPC/edge `Match` carries the same homogeneous string-or-int64 pair.
+/// Floats, bools, nulls, mixed kinds, oversized `u64`, and duplicate entries
+/// produce a stable plan error (`QQL-PLAN-MATCH-TYPE`) instead of a
+/// schema-invalid body some transports reject and others reinterpret.
+fn lower_match_list(field: &str, values: &[Value], except: bool) -> Result<FilterClause, QqlError> {
+    let mut kind: Option<MatchListKind> = None;
+    let mut seen = alloc::collections::BTreeSet::new();
+    for (index, value) in values.iter().enumerate() {
+        let (entry_kind, key) = match_list_entry(value)?;
+        match kind {
+            None => kind = Some(entry_kind),
+            Some(known) if known != entry_kind => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-MATCH-TYPE",
+                    format!(
+                        "match list mixes strings and integers at entry {} ({}): match lists must \
+                         be all strings or all integers",
+                        index + 1,
+                        crate::value_serde::value_error_text(value)
+                    ),
+                    value.param_span(),
+                ));
+            }
+            Some(_) => {}
+        }
+        if !seen.insert(key) {
+            return Err(QqlError::validation(
+                "QQL-PLAN-MATCH-TYPE",
+                format!(
+                    "match list contains duplicate value {}: wire match lists are sets (uniqueItems)",
+                    crate::value_serde::value_error_text(value)
+                ),
+                value.param_span(),
+            ));
+        }
+    }
+    let lowered: Vec<_> = values.to_vec();
+    Ok(field_condition(field, |fc| {
+        fc.r#match = Some(if except {
+            MatchValue::Except { except: lowered }
+        } else {
+            MatchValue::Any { any: lowered }
+        })
+    }))
 }
 
 fn comparison_range(op: ComparisonOp, value: &Value) -> Result<RangeParams, QqlError> {
@@ -641,16 +737,106 @@ mod tests {
     }
 
     #[test]
-    fn uint_value_serializes_as_json_number() {
+    fn uint_value_within_i64_serializes_as_json_number() {
+        let f = FilterExpr::Compare {
+            field: "big".into(),
+            op: ComparisonOp::Eq,
+            value: Value::UInt(42),
+        };
+        assert_json(
+            &lower_filter(&f).unwrap(),
+            json!({"key": "big", "match": {"value": 42}}),
+        );
+    }
+
+    #[test]
+    fn uint_value_above_i64_fails_closed() {
+        // OpenAPI `ValueVariants` / gRPC `Match` integers are int64: a u64
+        // above `i64::MAX` has no wire representation and must not be shipped
+        // as a schema-invalid number (nor rounded through a double range).
         let f = FilterExpr::Compare {
             field: "big".into(),
             op: ComparisonOp::Eq,
             value: Value::UInt(18446744073709551615),
         };
-        assert_json(
-            &lower_filter(&f).unwrap(),
-            json!({"key": "big", "match": {"value": 18446744073709551615u64}}),
-        );
+        let err = lower_filter(&f).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE");
+        assert!(err.message.contains("18446744073709551615"), "{err:?}");
+    }
+
+    #[test]
+    fn float_lists_fail_closed() {
+        // `AnyVariants` is `string[] | int64[]`; the `=` path already lowers
+        // floats to an exact range, so lists must reject them too instead of
+        // emitting a schema-invalid `any` / `except` array.
+        let cases = [
+            FilterExpr::In {
+                field: "price".into(),
+                values: vec![Value::Float(4.5), Value::Float(9.9)],
+            },
+            FilterExpr::MatchAny {
+                field: "price".into(),
+                values: vec![Value::Float(4.5)],
+            },
+            FilterExpr::MatchExcept {
+                field: "price".into(),
+                values: vec![Value::Float(4.5)],
+            },
+        ];
+        for filter in cases {
+            let err = lower_filter(&filter).unwrap_err();
+            assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE", "{filter:?}");
+        }
+    }
+
+    #[test]
+    fn mixed_match_lists_fail_closed() {
+        let f = FilterExpr::In {
+            field: "code".into(),
+            values: vec![Value::Str("a".into()), Value::Int(1)],
+        };
+        let err = lower_filter(&f).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE");
+        assert!(err.message.contains("mixes"), "{err:?}");
+    }
+
+    #[test]
+    fn duplicate_match_lists_fail_closed() {
+        let f = FilterExpr::MatchAny {
+            field: "code".into(),
+            values: vec![Value::Int(1), Value::Int(1)],
+        };
+        let err = lower_filter(&f).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE");
+        assert!(err.message.contains("duplicate"), "{err:?}");
+
+        // `Int(1)` and a small `UInt(1)` are the same wire integer.
+        let f = FilterExpr::In {
+            field: "code".into(),
+            values: vec![Value::Int(1), Value::UInt(1)],
+        };
+        assert_eq!(lower_filter(&f).unwrap_err().code, "QQL-PLAN-MATCH-TYPE");
+    }
+
+    #[test]
+    fn oversized_uint_list_entries_fail_closed() {
+        let f = FilterExpr::In {
+            field: "code".into(),
+            values: vec![Value::Int(1), Value::UInt(i64::MAX as u64 + 1)],
+        };
+        let err = lower_filter(&f).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE");
+        assert!(err.message.contains("int64"), "{err:?}");
+    }
+
+    #[test]
+    fn bool_list_entries_fail_closed() {
+        // `AnyVariants` has no bool array arm.
+        let f = FilterExpr::MatchAny {
+            field: "flag".into(),
+            values: vec![Value::Bool(true)],
+        };
+        assert_eq!(lower_filter(&f).unwrap_err().code, "QQL-PLAN-MATCH-TYPE");
     }
 
     #[test]
