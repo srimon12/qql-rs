@@ -337,7 +337,6 @@ fn test_ddl_config_values_bind_and_census() {
     )
     .expect("quota value must bind");
     validate_no_unbound_params(&stmt).expect("bound quota must be clean");
-
 }
 
 #[test]

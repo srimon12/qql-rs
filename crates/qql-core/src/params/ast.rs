@@ -338,9 +338,13 @@ fn bind_collection_config<F>(
 where
     F: Fn(&str) -> Option<Value>,
 {
-    for pairs in [&mut config.wal, &mut config.strict_mode, &mut config.metadata]
-        .into_iter()
-        .flatten()
+    for pairs in [
+        &mut config.wal,
+        &mut config.strict_mode,
+        &mut config.metadata,
+    ]
+    .into_iter()
+    .flatten()
     {
         bind_config_values(pairs, lookup, positional)?;
     }
@@ -511,7 +515,10 @@ where
         }
         Stmt::CreateCollection(create) => {
             if let Some(config) = create.config.as_mut() {
-                let keys = config.params.as_mut().and_then(|params| params.shard_keys.as_mut());
+                let keys = config
+                    .params
+                    .as_mut()
+                    .and_then(|params| params.shard_keys.as_mut());
                 bind_shard_key_list(keys, &lookup, positional)?;
                 bind_collection_config(config, &lookup, positional)?;
             }
@@ -519,7 +526,10 @@ where
         }
         Stmt::AlterCollection(alter) => {
             if let Some(config) = alter.config.as_mut() {
-                let keys = config.params.as_mut().and_then(|params| params.shard_keys.as_mut());
+                let keys = config
+                    .params
+                    .as_mut()
+                    .and_then(|params| params.shard_keys.as_mut());
                 bind_shard_key_list(keys, &lookup, positional)?;
                 bind_collection_config(config, &lookup, positional)?;
             }
