@@ -252,8 +252,25 @@ where
     if let Some(filter) = &mut query.filter {
         bind_filter(filter, lookup, positional)?;
     }
+    bind_search_params(query.params.as_mut(), lookup, positional)?;
     bind_page_spec(&mut query.page, lookup, positional)?;
     bind_shard_key(&mut query.shard_key, lookup, positional)?;
+    Ok(())
+}
+
+/// Bind parameters into `PARAMS (idf = WHERE …)` on a statement-carried
+/// [`SearchParams`] (query-level `PARAMS` and `BATCH … PARAMS`).
+fn bind_search_params(
+    params: Option<&mut crate::ast::SearchParams>,
+    lookup: &dyn Fn(&str) -> Option<Value>,
+    positional: &[Value],
+) -> Result<(), QqlError> {
+    if let Some(idf) = params.and_then(|params| params.idf.as_mut())
+        && let Some(corpus) = &mut idf.corpus
+    {
+        // `bind_filter` requires `Sized`; re-borrow the erased lookup.
+        bind_filter(corpus, &lookup, positional)?;
+    }
     Ok(())
 }
 
@@ -445,6 +462,7 @@ where
             // Erase to `dyn` so nested batches reuse one instantiation
             // instead of growing `&&&&F` forever.
             let lookup = &lookup as &dyn Fn(&str) -> Option<Value>;
+            bind_search_params(batch.params.as_mut(), lookup, positional)?;
             for member in &mut batch.statements {
                 bind_stmt(member, lookup, positional)?;
             }

@@ -234,6 +234,49 @@ fn test_bind_stmt_ast() {
 }
 
 #[test]
+fn test_idf_params_binding_and_census() {
+    use crate::params::{collect_statement_params, validate_no_unbound_params};
+
+    // `PARAMS (idf = WHERE …)` placeholders must be bound and censused like
+    // any other filter (core-audit #2).
+    let query = "QUERY TEXT 'x' FROM docs PARAMS (idf = WHERE tenant = :t) LIMIT 5;";
+    let mut stmt = Parser::parse(query).expect("idf filter with placeholder should parse");
+
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("t"), "census must see :t, got {named:?}");
+
+    let err = validate_no_unbound_params(&stmt).expect_err("unbound :t must be reported");
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "t").then(|| Value::Str("acme".into())),
+        &[],
+    )
+    .expect("bind_stmt must bind the idf corpus filter");
+    validate_no_unbound_params(&stmt).expect("bound idf corpus must be clean");
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(
+        formatted.contains("idf = WHERE tenant = 'acme'"),
+        "got: {formatted}"
+    );
+
+    // `BATCH { … } PARAMS (idf = WHERE …)` shares the same gap.
+    let batch = "BATCH { QUERY TEXT 'x' FROM docs LIMIT 5; } PARAMS (idf = WHERE tenant = :t);";
+    let mut stmt = Parser::parse(batch).expect("batch params with placeholder should parse");
+    let err = validate_no_unbound_params(&stmt).expect_err("unbound batch :t must be reported");
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "t").then(|| Value::Str("acme".into())),
+        &[],
+    )
+    .expect("bind_stmt must bind batch PARAMS idf corpus");
+    validate_no_unbound_params(&stmt).expect("bound batch idf corpus must be clean");
+}
+
+#[test]
 fn test_truncate_vector_literals() {
     let qql = "QUERY VECTOR [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] FROM docs LIMIT 5;";
     let truncated = truncate_vector_literals(qql, 3);

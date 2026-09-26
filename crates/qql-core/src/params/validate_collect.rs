@@ -551,6 +551,17 @@ impl Census {
         }
     }
 
+    /// `PARAMS (idf = WHERE …)` corpus filter, shared by query-level `PARAMS`
+    /// and `BATCH … PARAMS`.
+    fn search_params(&mut self, params: Option<&crate::ast::SearchParams>) {
+        if let Some(corpus) = params
+            .and_then(|params| params.idf.as_ref())
+            .and_then(|idf| idf.corpus.as_ref())
+        {
+            self.filter(corpus);
+        }
+    }
+
     fn query_stmt(&mut self, query: &QueryStmt) {
         for cte in &query.ctes {
             self.query_stmt(&cte.query);
@@ -559,6 +570,7 @@ impl Census {
         if let Some(filter) = &query.filter {
             self.filter(filter);
         }
+        self.search_params(query.params.as_ref());
         self.shard_opt(&query.shard_key);
         if let Some(param) = &query.page.limit_param {
             let span = query.page.limit_span;
@@ -731,6 +743,7 @@ impl Census {
                 }
             }
             Stmt::Batch(batch) => {
+                self.search_params(batch.params.as_ref());
                 for member in &batch.statements {
                     self.stmt(member);
                 }
