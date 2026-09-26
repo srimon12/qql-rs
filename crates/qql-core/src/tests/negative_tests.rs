@@ -178,6 +178,30 @@ fn empty_in_list_rejected() {
 }
 
 #[test]
+fn query_points_rejects_paging_clauses() {
+    // Literal and placeholder paging spellings must be equally illegal on
+    // QUERY POINTS (core-audit #3).
+    for source in [
+        "QUERY POINTS (1, 2) FROM docs LIMIT 5;",
+        "QUERY POINTS (1, 2) FROM docs LIMIT :n;",
+        "QUERY POINTS (1, 2) FROM docs LIMIT ?;",
+        "QUERY POINTS (1, 2) FROM docs OFFSET :n;",
+        "QUERY POINTS (1, 2) FROM docs LIMIT 5 OFFSET :n;",
+    ] {
+        let err = Parser::parse(source).expect_err(&format!("expected error for: {source}"));
+        assert_eq!(
+            err.kind,
+            ErrorKind::Validation,
+            "wrong kind for: {source}"
+        );
+        assert_eq!(
+            err.code, "QQL-VALIDATION-POINTS-CLAUSE",
+            "wrong code for: {source}"
+        );
+    }
+}
+
+#[test]
 fn invalid_shard_params_rejected() {
     assert_validation_err!(
         "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (sharding_method = true);"

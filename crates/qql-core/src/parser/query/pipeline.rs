@@ -1,6 +1,6 @@
 use crate::ast::{
-    Cte, FilterExpr, FusionMethod, GroupSpec, LookupSpec, Prefetch, PrefetchSource, QueryExpr,
-    QueryInput, VectorTarget,
+    Cte, FilterExpr, FusionMethod, GroupSpec, LookupSpec, PageSpec, Prefetch, PrefetchSource,
+    QueryExpr, QueryInput, VectorTarget,
 };
 use crate::error::{QqlError, Span};
 use crate::parser::{AstLowerer, ascii_equal};
@@ -326,15 +326,13 @@ pub(crate) fn validate_prefetch_references(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_common_clauses(
     expression: &QueryExpr,
     filter: Option<&FilterExpr>,
     params: Option<&crate::ast::SearchParams>,
     score_threshold: Option<f64>,
     group: Option<&GroupSpec>,
-    limit: Option<u64>,
-    offset: Option<u64>,
+    page: &PageSpec,
     span: Span,
 ) -> Result<(), QqlError> {
     if let Some(score) = score_threshold
@@ -346,13 +344,17 @@ pub(crate) fn validate_common_clauses(
             Some(span),
         ));
     }
+    // Paging clause presence includes placeholders: `LIMIT :n` must be as
+    // illegal on QUERY POINTS as the literal `LIMIT 5` (core-audit #3).
     if matches!(expression, QueryExpr::Points { .. })
         && (filter.is_some()
             || params.is_some()
             || score_threshold.is_some()
             || group.is_some()
-            || limit.is_some()
-            || offset.is_some())
+            || page.limit.is_some()
+            || page.offset.is_some()
+            || page.limit_param.is_some()
+            || page.offset_param.is_some())
     {
         return Err(QqlError::validation(
             "QQL-VALIDATION-POINTS-CLAUSE",

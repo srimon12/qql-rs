@@ -233,6 +233,15 @@ impl<'a> AstLowerer<'a> {
             ));
         }
 
+        let page = PageSpec {
+            limit,
+            offset,
+            limit_param,
+            offset_param,
+            limit_span,
+            offset_span,
+        };
+
         attach_pipeline(&mut expression, using, prefetch, expression_span)?;
         validate_prefetch_references(&expression, &ctes, expression_span)?;
         validate_common_clauses(
@@ -241,8 +250,7 @@ impl<'a> AstLowerer<'a> {
             params.as_ref(),
             score_threshold,
             group.as_ref(),
-            limit,
-            offset,
+            &page,
             expression_span,
         )?;
 
@@ -256,14 +264,7 @@ impl<'a> AstLowerer<'a> {
             score_threshold,
             group,
             output: QueryOutput { payload, vectors },
-            page: PageSpec {
-                limit,
-                offset,
-                limit_param,
-                offset_param,
-                limit_span,
-                offset_span,
-            },
+            page,
             shard_key,
         })
     }
