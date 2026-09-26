@@ -196,6 +196,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-REST-BATCH` | `BATCH` runs through the batch RPCs, not a single REST route |
 | `QQL-REST-OVERWRITE-BATCH-ONLY` | `OVERWRITE` has no single REST route (`POST /points/payload` is merge-only); use a batch |
+| `QQL-REST-MULTI-STEP` | The statement projects to a multi-step REST sequence (e.g. `CREATE COLLECTION` with `shard_keys` / `read_fan_out_*`) and has no single route |
 | `QQL-GRPC` | Generic gRPC transport failure |
 | `QQL-GRPC-BATCH` | `BATCH` runs through the batch RPCs, not a single gRPC route |
 | `QQL-GRPC-DDL-RANGE` | A DDL value exceeds the bundled Qdrant proto `uint32` range |
@@ -612,6 +613,7 @@ QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
 QQL-REST-BATCH
 QQL-REST-CLIENT-SIDE
+QQL-REST-MULTI-STEP
 QQL-REST-OVERWRITE-BATCH-ONLY
 QQL-SERIALIZE
 QQL-SERIALIZE-AST

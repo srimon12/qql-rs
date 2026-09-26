@@ -437,6 +437,97 @@ fn rest_body_flattens_params_and_nests_quantization() {
 }
 
 #[test]
+fn rest_projection_create_with_shard_keys_requires_multi_step() {
+    // `shard_keys` / `read_fan_out_*` have no single-route body fields: the
+    // projection must refuse a single route instead of silently losing them
+    // (the runtime applies the multi-step sequence).
+    let stmt = parse_stmt(
+        "CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH PARAMS (shard_keys = ['a', 'b']);",
+    );
+    let Stmt::CreateCollection(ref cc) = stmt else {
+        panic!()
+    };
+    let req = lower_create_collection(cc).unwrap();
+    assert!(create_collection_needs_multi_step(&req));
+
+    let op = crate::plan::PlannedOperation::CreateCollection {
+        collection: "docs".into(),
+        request: req.clone(),
+    };
+    let err = crate::to_rest_route(&op).expect_err("multi-step create has no single route");
+    assert_eq!(
+        err,
+        crate::RestProjectionError::MultiStep {
+            stmt_type: "create_collection"
+        }
+    );
+    assert_eq!(err.to_qql_error().code, "QQL-REST-MULTI-STEP");
+
+    // Offline compile keeps `stmt_type` with no route.
+    let compiled = crate::compile_statement(&stmt).expect("compile");
+    assert_eq!(compiled.stmt_type, "create_collection");
+    assert!(compiled.route.is_none());
+    assert_eq!(
+        crate::try_route(&stmt).expect_err("no route").code,
+        "QQL-REST-MULTI-STEP"
+    );
+
+    // Deferred fan-out params take the same path.
+    let mut with_fanout = req.clone();
+    with_fanout.shard_keys = None;
+    with_fanout
+        .params
+        .as_mut()
+        .expect("params")
+        .read_fan_out_factor = Some(3);
+    assert!(create_collection_needs_multi_step(&with_fanout));
+
+    // Without extras the single route (and its body) is unchanged.
+    let plain = parse_stmt("CREATE COLLECTION docs (v VECTOR(8, COSINE));");
+    let Stmt::CreateCollection(ref cc) = plain else {
+        panic!()
+    };
+    let plain_req = lower_create_collection(cc).unwrap();
+    assert!(!create_collection_needs_multi_step(&plain_req));
+    let route = crate::try_route(&plain).expect("single-route create");
+    assert_eq!(route.path, "/collections/docs");
+}
+
+#[test]
+fn update_plan_rejects_create_only_shard_params() {
+    // The ALTER wire shape cannot express shard topology; dropping the keys
+    // would "succeed" while doing nothing.
+    for source in [
+        "ALTER COLLECTION docs WITH PARAMS (shard_number = 8);",
+        "ALTER COLLECTION docs WITH PARAMS (sharding_method = 'custom');",
+        "ALTER COLLECTION docs WITH PARAMS (shard_keys = ['a', 'b']);",
+    ] {
+        let stmt = parse_stmt(source);
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let err = lower_alter_collection(ac).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION-CONFIG", "{source}: {err:?}");
+        assert!(
+            err.message.contains("CREATE COLLECTION"),
+            "{source}: {err:?}"
+        );
+    }
+
+    // Update-only params still lower.
+    let stmt = parse_stmt(
+        "ALTER COLLECTION docs WITH PARAMS (replication_factor = 2, read_fan_out_factor = 3);",
+    );
+    let Stmt::AlterCollection(ref ac) = stmt else {
+        panic!()
+    };
+    let req = lower_alter_collection(ac).unwrap();
+    let params = req.params.expect("params");
+    assert_eq!(params.replication_factor, Some(2));
+    assert_eq!(params.read_fan_out_factor, Some(3));
+}
+
+#[test]
 fn rest_body_config_sections_are_objects_not_null() {
     // Regression: these sections used `serde_json::to_value(...).unwrap_or_default()`,
     // silently inserting JSON `null` on any serialization failure. Assert the
