@@ -67,7 +67,17 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
             }
             out
         }
-        FormulaExpr::Neg { operand } => format!("-{}", render_formula_min(operand, 3)),
+        FormulaExpr::Neg { operand } => {
+            // A nested negation renders `--…`, which the lexer eats as a line
+            // comment; parenthesize whenever the operand starts with `-`
+            // (core-audit #8).
+            let operand = render_formula_min(operand, 3);
+            if operand.starts_with('-') {
+                format!("-({operand})")
+            } else {
+                format!("-{operand}")
+            }
+        }
         FormulaExpr::Abs { x } => format!("ABS({})", render_formula_min(x, 0)),
         FormulaExpr::Sqrt { x, domain_default } => {
             let mut out = format!("SQRT({})", render_formula_min(x, 0));

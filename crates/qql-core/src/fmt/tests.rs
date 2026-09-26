@@ -65,6 +65,27 @@ COUNT FROM docs WHERE status = 'active'; -- trailing comment
 }
 
 #[test]
+fn test_format_nested_negation_reparses() {
+    // `--x` / `--2.0` are line comments to the lexer; the formatter must
+    // parenthesize the operand so output re-parses (core-audit #8).
+    for source in [
+        "QUERY FORMULA - -x FROM docs LIMIT 5;",
+        "QUERY FORMULA - -2.0 FROM docs LIMIT 5;",
+        "QUERY FORMULA 1 + - -x FROM docs LIMIT 5;",
+    ] {
+        let parsed = Parser::parse(source).unwrap_or_else(|e| panic!("parse {source}: {e}"));
+        let formatted = format_stmt(&parsed);
+        assert!(
+            !formatted.contains("--"),
+            "formatted output contains a comment marker: {formatted}"
+        );
+        let reparsed =
+            Parser::parse(&formatted).unwrap_or_else(|e| panic!("reparse {formatted}: {e}"));
+        assert_eq!(format_stmt(&reparsed), formatted, "not canonical: {source}");
+    }
+}
+
+#[test]
 fn test_format_comment_after_four_quote_run() {
     // A `''''` run must not abandon comment scanning for the rest of the
     // statement (core-audit #6).
