@@ -694,26 +694,38 @@ impl<'a> AstLowerer<'a> {
         if qtype == QuantizationType::Turbo
             && let Some(v) = config_value(&config, "bits")
         {
-            let bits_val = match v {
-                Value::Int(n) => Some(*n as f64),
-                Value::Float(f) => Some(*f),
-                _ => None,
-            };
-            if let Some(b) = bits_val {
-                if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
+            let b = match v {
+                Value::Int(n) => *n as f64,
+                Value::Float(f) => *f,
+                _ => {
                     return Err(validation_err(
-                        "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
+                        "bits must be a number (1, 1.5, 2, or 4) for TURBO quantization",
                         self.peek()?.span,
                     ));
                 }
-                bits = Some(b);
+            };
+            if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
+                return Err(validation_err(
+                    "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
+                    self.peek()?.span,
+                ));
             }
+            bits = Some(b);
         }
 
         let mut compression: Option<String> = None;
         if qtype == QuantizationType::Product
-            && let Some(Value::Str(c)) = config_value(&config, "compression")
+            && let Some(c) = config_value(&config, "compression")
         {
+            let c = match c {
+                Value::Str(s) => s,
+                _ => {
+                    return Err(validation_err(
+                        "compression must be a string for PRODUCT quantization",
+                        self.peek()?.span,
+                    ));
+                }
+            };
             let c_lower = c.to_ascii_lowercase();
             if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
                 compression = Some(c_lower);
@@ -762,7 +774,16 @@ impl<'a> AstLowerer<'a> {
                 });
             }
 
-            if let Some(Value::Str(qe)) = config_value(&config, "query_encoding") {
+            if let Some(qe) = config_value(&config, "query_encoding") {
+                let qe = match qe {
+                    Value::Str(s) => s,
+                    _ => {
+                        return Err(validation_err(
+                            "query_encoding must be a string for BINARY quantization",
+                            self.peek()?.span,
+                        ));
+                    }
+                };
                 let qe_lower = qe.to_ascii_lowercase();
                 if matches!(
                     qe_lower.as_str(),
@@ -856,7 +877,16 @@ impl<'a> AstLowerer<'a> {
         }
 
         let mut modifier = None;
-        if let Some(Value::Str(m)) = config_value(&config, "modifier") {
+        if let Some(m) = config_value(&config, "modifier") {
+            let m = match m {
+                Value::Str(s) => s,
+                _ => {
+                    return Err(validation_err(
+                        "modifier must be a string (none or idf) for SPARSE vector",
+                        self.peek()?.span,
+                    ));
+                }
+            };
             let m_lower = m.to_ascii_lowercase();
             if matches!(m_lower.as_str(), "none" | "idf") {
                 modifier = Some(m_lower);
