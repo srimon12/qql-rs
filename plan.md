@@ -1,9 +1,10 @@
 # Later plan — debt round 3+ (status after round 2, waves 1-2, bm25-compat & audit)
 
 Status of round 2 (`fix/debt-round2`): scores→f64, PlanRangeBound, span threading, planner core, 7 splits, CLI exit code.
-Status of subsequent waves (`fix/cleanup-waves-1-2`, `feat/bm25-full-compat`):
+Status of subsequent waves (`fix/cleanup-waves-1-2`, `feat/bm25-full-compat`, `feat/grpc-zero-copy`):
 - PR #159: RestProjectionError classified, body_ref removed (Route.body is public), DDL exact spans threaded.
 - PR #160: local BM25 pipeline bit-for-bit parity with server Qdrant, avg_len estimator, murmur3 collision merging.
+- PR #184: plan IR holds AST `Value`s; dynamic values render once at the transport boundary (no plan-time JSON tree, no gRPC subtree pre-clone).
 - Current audit fixes: WASM `send_json` classified into typed `QqlError` (no raw string errors), `HttpEmbedder` BM25 pipeline precompilation, and error codes documentation synchronization.
 
 ---

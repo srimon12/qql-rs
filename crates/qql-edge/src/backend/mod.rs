@@ -42,7 +42,7 @@ use config_builder::{build_edge_config, edge_hnsw_config_over, overlay_optimizer
 use conversions::{
     edge_hnsw_spec, edge_optimizers_spec, edge_quantization_spec, from_edge_facet_hit,
     from_edge_group_to_typed, from_edge_record_to_hit, from_edge_scored_point_to_hit,
-    hydrate_edge_groups, to_edge_id, to_edge_ids,
+    hydrate_edge_groups, plan_value_to_json, to_edge_id, to_edge_ids,
 };
 use error_map::{EdgeOp, edge_err, edge_input_err};
 use filter_converter::convert_edge_filter;
@@ -466,7 +466,17 @@ impl EdgeQdrant {
                     })?
                     .clone(),
             )?;
-            let payload_val = Value::Object(p.payload.clone().unwrap_or_default());
+            let payload_val = Value::Object(
+                p.payload
+                    .as_ref()
+                    .map(|pairs| {
+                        pairs
+                            .iter()
+                            .map(|(k, v)| (k.clone(), plan_value_to_json(v)))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            );
             let ps = qdrant_edge::PointStruct::new(id, vector_struct, payload_val);
             let psp: qdrant_edge::PointStructPersisted = ps.into();
             parsed_points.push(psp);
@@ -712,7 +722,12 @@ impl EdgeQdrant {
     ) -> Result<(), QqlError> {
         reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
-        let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
+        let payload = qdrant_edge::Payload(
+            req.payload
+                .iter()
+                .map(|(k, v)| (k.clone(), plan_value_to_json(v)))
+                .collect(),
+        );
         let key = req.key.as_deref().map(parse_json_path).transpose()?;
 
         let op = if let Some(points) = &req.points {
@@ -760,7 +775,12 @@ impl EdgeQdrant {
     ) -> Result<(), QqlError> {
         reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
-        let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
+        let payload = qdrant_edge::Payload(
+            req.payload
+                .iter()
+                .map(|(k, v)| (k.clone(), plan_value_to_json(v)))
+                .collect(),
+        );
         let key = req.key.as_deref().map(parse_json_path).transpose()?;
 
         let op = if let Some(points) = &req.points {

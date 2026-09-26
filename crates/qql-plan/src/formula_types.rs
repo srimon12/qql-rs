@@ -15,7 +15,7 @@ use serde::{Serialize, Serializer};
 
 use qql_core::ast::{FormulaExpr, Value};
 
-use crate::filter::{lower_filter, value_to_json};
+use crate::filter::lower_filter;
 use crate::filter_types::{FieldCondition, FilterClause, FilterExpression, MatchValue};
 
 /// Decay curve family of a [`PlanFormula::Decay`] node.
@@ -104,7 +104,7 @@ impl From<&Value> for FormulaDefault {
     /// # Invariant
     ///
     /// `Param` / `PositionalParam` panic: `plan()` rejects unbound parameters
-    /// before lowering, mirroring [`crate::filter::value_to_json`].
+    /// before lowering, mirroring the boundary-serialization invariant.
     fn from(value: &Value) -> Self {
         match value {
             Value::Str(value) => Self::String(value.clone()),
@@ -378,11 +378,11 @@ fn variable_wire_name(name: &str) -> String {
 fn match_condition_filter(field: &str, values: &[Value]) -> FilterExpression {
     let r#match = if values.len() == 1 {
         MatchValue::Value {
-            value: value_to_json(&values[0]),
+            value: values[0].clone(),
         }
     } else {
         MatchValue::Any {
-            any: values.iter().map(value_to_json).collect(),
+            any: values.to_vec(),
         }
     };
     FilterExpression::Single(Box::new(FilterClause::Field(Box::new(FieldCondition {

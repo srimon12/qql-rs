@@ -84,7 +84,7 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
             fc.r#match = Some(MatchValue::Text { text: text.clone() })
         }),
         FilterExpr::MatchAny { field, values } => {
-            let any: Vec<_> = values.iter().map(value_to_json).collect();
+            let any: Vec<_> = values.to_vec();
             field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
         }
         FilterExpr::MatchPhrase { field, text } => field_condition(field, |fc| {
@@ -103,7 +103,7 @@ fn lower_clause(filter: &FilterExpr) -> Result<FilterClause, QqlError> {
             })
         }),
         FilterExpr::MatchExcept { field, values } => {
-            let except: Vec<_> = values.iter().map(value_to_json).collect();
+            let except: Vec<_> = values.to_vec();
             field_condition(field, |fc| fc.r#match = Some(MatchValue::Except { except }))
         }
         FilterExpr::MinShould {
@@ -256,7 +256,7 @@ fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> Result<FilterC
         }
         return Ok(field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Value {
-                value: value_to_json(value),
+                value: value.clone(),
             })
         }));
     }
@@ -280,7 +280,7 @@ fn lower_between(field: &str, low: &Value, high: &Value) -> Result<FilterClause,
 }
 
 fn lower_match_any(field: &str, values: &[Value]) -> FilterClause {
-    let any: Vec<_> = values.iter().map(value_to_json).collect();
+    let any: Vec<_> = values.to_vec();
     field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
 }
 
@@ -355,7 +355,7 @@ fn range_bound(value: &Value) -> Result<PlanRangeBound, QqlError> {
             }
         }
         // Unreachable through the supported entry points (see above);
-        // mirrors the `value_to_json` invariant panic for unbound placeholders.
+        // mirrors the boundary-serialization invariant panic for unbound placeholders.
         Value::Param(name, _) => {
             panic!("invariant violation: unbound parameter :{name} reached range lowering");
         }
@@ -410,52 +410,6 @@ fn values_count_params(op: ComparisonOp, count: u64) -> ValuesCountParams {
             lt: None,
             lte: Some(count),
         },
-    }
-}
-
-/// Convert a dynamic AST `Value` into its JSON wire representation.
-///
-/// # Invariant
-///
-/// `Param` / `PositionalParam` arms panic: `plan()` runs
-/// `ensure_no_unbound_params` first and `plan_template()` runs
-/// `validate_no_unbound_scalar_params`, so no unbound placeholder reaches
-/// here through the supported entry points. Direct callers must preserve
-/// that gating order.
-pub fn value_to_json(value: &Value) -> serde_json::Value {
-    match value {
-        Value::Str(s) => serde_json::Value::String(s.clone()),
-        Value::Int(n) => serde_json::Value::Number((*n).into()),
-        Value::UInt(n) => serde_json::Value::Number((*n).into()),
-        Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map_or(serde_json::Value::Null, serde_json::Value::Number),
-        Value::Bool(b) => serde_json::Value::Bool(*b),
-        Value::Null => serde_json::Value::Null,
-        Value::F32Array(values) => serde_json::Value::Array(
-            values
-                .iter()
-                .map(|f| {
-                    serde_json::Number::from_f64(*f as f64)
-                        .map_or(serde_json::Value::Null, serde_json::Value::Number)
-                })
-                .collect(),
-        ),
-        Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
-        Value::Dict(entries) => {
-            let mut map = serde_json::Map::with_capacity(entries.len());
-            for (k, v) in entries {
-                map.insert(k.clone(), value_to_json(v));
-            }
-            serde_json::Value::Object(map)
-        }
-        Value::Param(name, _) => {
-            panic!("invariant violation: unbound parameter :{name} reached filter lowering");
-        }
-        Value::PositionalParam(idx, _) => {
-            panic!(
-                "invariant violation: unbound positional parameter ?{idx} reached filter lowering"
-            );
-        }
     }
 }
 

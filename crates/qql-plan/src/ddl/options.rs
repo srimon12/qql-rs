@@ -268,19 +268,13 @@ fn lower_strict_sparse_config(value: &Value) -> Result<StrictModeSparseConfig, Q
     Ok(StrictModeSparseConfig { vectors })
 }
 
-/// Lower `WITH METADATA (…)` pairs to the free-form metadata map.
+/// Lower `WITH METADATA (…)` pairs to the free-form metadata list.
 ///
 /// `ensure_no_unbound_params` (via `validate_no_unbound_ddl_options`) rejects
-/// placeholders before lowering, so `value_to_json` never sees one here
-/// through the supported entry points.
-pub(crate) fn lower_metadata_map(
-    pairs: &[(String, Value)],
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(pairs.len());
-    for (key, value) in pairs {
-        map.insert(key.clone(), crate::filter::value_to_json(value));
-    }
-    map
+/// placeholders before lowering; pairs are cloned here and rendered to JSON
+/// once at the transport boundary.
+pub(crate) fn lower_metadata_map(pairs: &[(String, Value)]) -> Vec<(String, Value)> {
+    pairs.to_vec()
 }
 
 /// Canonical OpenAPI `ReplicaState` names for shard-key `initial_state`.

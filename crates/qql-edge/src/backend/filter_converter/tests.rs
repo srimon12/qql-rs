@@ -96,7 +96,7 @@ fn typed_lowering_matches_serde_reference_for_all_variants() {
             match_field(
                 "city",
                 PlanMatch::Value {
-                    value: json!("NYC"),
+                    value: qql_core::ast::Value::Str("NYC".into()),
                 },
             ),
             range_field(
@@ -204,7 +204,12 @@ fn typed_lowering_matches_serde_reference_for_all_variants() {
                     // parse it too: a bare nested condition serializes as
                     // `{"key": …}` which `Nested::filter: Filter` rejects.
                     filter: Box::new(PlanExpression::Compound(PlanCompound {
-                        must: vec![match_field("size", PlanMatch::Value { value: json!(42) })],
+                        must: vec![match_field(
+                            "size",
+                            PlanMatch::Value {
+                                value: qql_core::ast::Value::Int(42),
+                            },
+                        )],
                         must_not: vec![],
                         should: vec![],
                         min_should: None,
@@ -215,7 +220,7 @@ fn typed_lowering_matches_serde_reference_for_all_variants() {
                 must: vec![match_field(
                     "status",
                     PlanMatch::Value {
-                        value: json!("active"),
+                        value: qql_core::ast::Value::Str("active".into()),
                     },
                 )],
                 must_not: vec![],
@@ -226,7 +231,10 @@ fn typed_lowering_matches_serde_reference_for_all_variants() {
         must_not: vec![match_field(
             "status",
             PlanMatch::Any {
-                any: vec![json!("deleted"), json!("archived")],
+                any: vec![
+                    qql_core::ast::Value::Str("deleted".into()),
+                    qql_core::ast::Value::Str("archived".into()),
+                ],
             },
         )],
         should: vec![
@@ -245,7 +253,10 @@ fn typed_lowering_matches_serde_reference_for_all_variants() {
             match_field(
                 "color",
                 PlanMatch::Except {
-                    except: vec![json!("red"), json!("blue")],
+                    except: vec![
+                        qql_core::ast::Value::Str("red".into()),
+                        qql_core::ast::Value::Str("blue".into()),
+                    ],
                 },
             ),
             match_field(
@@ -274,7 +285,7 @@ fn bare_field_clause_matches_serde_reference() {
     let expression = PlanExpression::Single(Box::new(match_field(
         "city",
         PlanMatch::Value {
-            value: json!("NYC"),
+            value: qql_core::ast::Value::Str("NYC".into()),
         },
     )));
     assert_parity(&expression, "bare field condition");
@@ -327,7 +338,9 @@ fn bare_nested_filter_is_wrapped_in_must() {
             key: "variants".to_string(),
             filter: Box::new(PlanExpression::Single(Box::new(match_field(
                 "size",
-                PlanMatch::Value { value: json!(42) },
+                PlanMatch::Value {
+                    value: qql_core::ast::Value::Int(42),
+                },
             )))),
         },
     })));
@@ -352,7 +365,7 @@ fn legacy_min_should_moves_should_conditions() {
             conditions: vec![match_field(
                 "tier",
                 PlanMatch::Value {
-                    value: json!("gold"),
+                    value: qql_core::ast::Value::Str("gold".into()),
                 },
             )],
             min_count: 1,
@@ -369,7 +382,9 @@ fn legacy_min_should_moves_should_conditions() {
 fn float_match_value_fails_closed() {
     let expression = PlanExpression::Single(Box::new(match_field(
         "price",
-        PlanMatch::Value { value: json!(1.5) },
+        PlanMatch::Value {
+            value: qql_core::ast::Value::Float(1.5),
+        },
     )));
     let error = convert_edge_filter(Some(&expression)).unwrap_err();
     assert_eq!(error.code, "QQL-EDGE-FILTER-CONVERT");
@@ -381,7 +396,10 @@ fn mixed_any_values_fail_closed() {
     let expression = PlanExpression::Single(Box::new(match_field(
         "tag",
         PlanMatch::Any {
-            any: vec![json!("one"), json!(2)],
+            any: vec![
+                qql_core::ast::Value::Str("one".into()),
+                qql_core::ast::Value::Int(2),
+            ],
         },
     )));
     let error = convert_edge_filter(Some(&expression)).unwrap_err();
