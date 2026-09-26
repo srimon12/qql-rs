@@ -1,8 +1,10 @@
 name: Security
 
-# Scheduled dependency audits (npm / pnpm / pip) and CodeQL static analysis
-# for the Rust workspace. Scheduled + dispatch only — dependency-audit jobs
-# would otherwise block every PR on advisory mirror flakiness.
+# Scheduled dependency audits (npm / pnpm / pip). CodeQL runs through the
+# repository's default setup (Rust + Actions/JS/TS/Python); an advanced
+# CodeQL job here cannot upload SARIF while default setup is enabled.
+# Scheduled + dispatch only — dependency-audit jobs would otherwise block
+# every PR on advisory mirror flakiness.
 
 on:
   workflow_dispatch:
@@ -41,25 +43,6 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories bans licenses sources
-
-  codeql-rust:
-    name: CodeQL (Rust)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v7
-      # Rust extraction is source-only now: CodeQL dropped the manual build
-      # mode in 2.27, and `none` still covers every workspace crate including
-      # the edge bindings, without a cargo build.
-      - uses: github/codeql-action/init@v4
-        with:
-          languages: rust
-          build-mode: none
-      - uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:rust"
 
   npm-audit:
     name: npm audit (nqql, nqql-edge)
