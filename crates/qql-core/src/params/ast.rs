@@ -312,6 +312,41 @@ where
     Ok(())
 }
 
+/// Bind parameters in raw `Value` config pairs (`WAL`, `STRICT_MODE`,
+/// `METADATA`, `SET QUOTA`, index options). Typed config fields are validated
+/// at parse time; these pairs stay dynamic until the planner.
+fn bind_config_values<F>(
+    pairs: &mut [(String, Value)],
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    for (_, value) in pairs {
+        bind_value(value, lookup, positional)?;
+    }
+    Ok(())
+}
+
+/// Bind parameters in the raw pairs of a collection config block.
+fn bind_collection_config<F>(
+    config: &mut crate::ast::CollectionConfig,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    for pairs in [&mut config.wal, &mut config.strict_mode, &mut config.metadata]
+        .into_iter()
+        .flatten()
+    {
+        bind_config_values(pairs, lookup, positional)?;
+    }
+    Ok(())
+}
+
 /// Bind parameters into a parsed AST `Stmt` in-place.
 pub fn bind_stmt<F>(stmt: &mut Stmt, lookup: F, positional: &[Value]) -> Result<(), QqlError>
 where
@@ -475,21 +510,23 @@ where
             bind_required_shard_key(&mut drop.shard_key, &lookup, positional)
         }
         Stmt::CreateCollection(create) => {
-            let keys = create
-                .config
-                .as_mut()
-                .and_then(|config| config.params.as_mut())
-                .and_then(|params| params.shard_keys.as_mut());
-            bind_shard_key_list(keys, &lookup, positional)
+            if let Some(config) = create.config.as_mut() {
+                let keys = config.params.as_mut().and_then(|params| params.shard_keys.as_mut());
+                bind_shard_key_list(keys, &lookup, positional)?;
+                bind_collection_config(config, &lookup, positional)?;
+            }
+            Ok(())
         }
         Stmt::AlterCollection(alter) => {
-            let keys = alter
-                .config
-                .as_mut()
-                .and_then(|config| config.params.as_mut())
-                .and_then(|params| params.shard_keys.as_mut());
-            bind_shard_key_list(keys, &lookup, positional)
+            if let Some(config) = alter.config.as_mut() {
+                let keys = config.params.as_mut().and_then(|params| params.shard_keys.as_mut());
+                bind_shard_key_list(keys, &lookup, positional)?;
+                bind_collection_config(config, &lookup, positional)?;
+            }
+            Ok(())
         }
+        Stmt::CreateIndex(index) => bind_config_values(&mut index.options, &lookup, positional),
+        Stmt::SetQuota(quota) => bind_config_values(&mut quota.config, &lookup, positional),
         other => Err(QqlError::validation(
             "QQL-BIND-UNSUPPORTED-STATEMENT",
             format!(

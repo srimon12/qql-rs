@@ -714,6 +714,16 @@ impl Census {
                     self.ddl_options(config);
                 }
             }
+            Stmt::CreateIndex(index) => {
+                for (_, v) in &index.options {
+                    self.value(v);
+                }
+            }
+            Stmt::SetQuota(quota) => {
+                for (_, v) in &quota.config {
+                    self.value(v);
+                }
+            }
             Stmt::Batch(batch) => {
                 self.search_params(batch.params.as_ref());
                 for member in &batch.statements {

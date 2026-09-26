@@ -308,6 +308,39 @@ fn test_bind_preserves_triple_quoted_and_raw_strings() {
 }
 
 #[test]
+fn test_ddl_config_values_bind_and_census() {
+    use crate::params::{collect_statement_params, validate_no_unbound_params};
+
+    // Bindable config values must be censused and bound (core-audit #11).
+    let query = "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH METADATA (owner = :who);";
+    let mut stmt = Parser::parse(query).expect("metadata placeholder should parse");
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("who"), "census must see :who, got {named:?}");
+    let err = validate_no_unbound_params(&stmt).expect_err("unbound :who must be reported");
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "who").then_some(Value::Str("acme".into())),
+        &[],
+    )
+    .expect("metadata value must bind");
+    validate_no_unbound_params(&stmt).expect("bound metadata must be clean");
+
+    let query = "SET QUOTA (max_disk_usage_percent = :p);";
+    let mut stmt = Parser::parse(query).expect("quota placeholder should parse");
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("p"), "census must see :p, got {named:?}");
+    bind_stmt(
+        &mut stmt,
+        |name| (name == "p").then_some(Value::Int(90)),
+        &[],
+    )
+    .expect("quota value must bind");
+    validate_no_unbound_params(&stmt).expect("bound quota must be clean");
+
+}
+
+#[test]
 fn test_bound_negative_literal_after_minus_stays_parseable() {
     // `x-:n` bound to -2 must not render `x--2`, which the lexer reads as a
     // line comment (core-audit #7).
