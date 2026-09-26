@@ -190,7 +190,7 @@ jobs:
           [[ -n "$version" ]] || { echo "workspace rust-version missing"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
 
@@ -313,7 +313,7 @@ jobs:
           key: fastembed-bge-small-en-v1.5-python
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: Build and test Python SDKs
         # pyqql-edge is PyO3 over qql-edge → same Rust fastembed path →
         # HF_HOME resolves as the cache ROOT (no /hub suffix) and overrides
@@ -368,7 +368,7 @@ jobs:
           key: fastembed-bge-small-en-v1.5-node
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.13.1"
+          node-version: "24"
       - name: Shared DX helper files must stay byte-identical across SDKs
         run: |
           set -euo pipefail
@@ -440,7 +440,7 @@ jobs:
           cache-on-failure: true
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.13.1"
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.15.0
@@ -518,7 +518,7 @@ jobs:
           cache-on-failure: true
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.13.1"
+          node-version: "24"
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.15.0
