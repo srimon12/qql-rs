@@ -283,8 +283,8 @@ fn lower_group_lookup(lookup: &qql_core::ast::GroupLookup) -> WithLookupValue {
 /// Lower a full `QUERY` statement into the `/points/query` request body.
 ///
 /// The statement's own `ctes` are the reference scope; CTE bodies reached
-/// through `PREFETCH (name)` lower through
-/// [`lower_query_request_with_ctes`] with their visible prefix.
+/// through `PREFETCH (name)` lower under their visible prior-definitions
+/// prefix (see the crate-internal scoped variant).
 pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
     lower_query_request_with_ctes(query, &query.ctes)
 }
