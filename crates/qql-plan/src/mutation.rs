@@ -1,4 +1,4 @@
-use crate::filter::{point_id_req_typed, top_level_filter, value_to_json};
+use crate::filter::{point_id_req_typed, top_level_filter};
 use crate::semantic::PlanShardKey;
 use crate::types::*;
 use alloc::format;
@@ -48,11 +48,7 @@ fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
         req.vector = Some(PlanPointVectors::from(vectors));
     }
     if !point.payload.is_empty() {
-        let mut payload = serde_json::Map::with_capacity(point.payload.len());
-        for (key, value) in &point.payload {
-            payload.insert(key.clone(), value_to_json(value));
-        }
-        req.payload = Some(payload);
+        req.payload = Some(point.payload.clone());
     }
     req
 }
@@ -100,10 +96,7 @@ pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorReque
 pub fn lower_update_payload_request(
     stmt: &UpdatePayloadStmt,
 ) -> Result<UpdatePayloadRequest, QqlError> {
-    let mut payload = serde_json::Map::with_capacity(stmt.payload.len());
-    for (key, value) in &stmt.payload {
-        payload.insert(key.clone(), value_to_json(value));
-    }
+    let payload = stmt.payload.clone();
     Ok(match &stmt.selector {
         PointSelector::Id(id) => UpdatePayloadRequest {
             points: Some(vec![point_id_req_typed(id)]),
@@ -337,7 +330,7 @@ pub fn lower_scroll_request(
                 qql_core::ast::OrderDirection::Asc => "asc".into(),
                 qql_core::ast::OrderDirection::Desc => "desc".into(),
             }),
-            start_from: order.start_from.as_ref().map(value_to_json),
+            start_from: order.start_from.clone(),
         }),
         shard_key: shard_key.as_ref().map(PlanShardKey::from),
     })

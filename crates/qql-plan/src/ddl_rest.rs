@@ -43,8 +43,11 @@ pub struct CreateCollectionRestBody<'a> {
     wal_config: Option<&'a WalConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     strict_mode_config: Option<&'a StrictModeConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::value_serde::serialize_ast_pairs_opt_ref"
+    )]
+    metadata: Option<&'a Vec<(String, qql_core::ast::Value)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     shard_number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,7 +73,7 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> CreateColle
         quantization_config: req.quantization_config.as_ref(),
         wal_config: req.wal_config.as_deref(),
         strict_mode_config: req.strict_mode_config.as_deref(),
-        metadata: req.metadata.as_deref(),
+        metadata: req.metadata.as_ref(),
         shard_number: req.shard_number,
         sharding_method: req.sharding_method,
         // OpenAPI CreateCollection: replication_factor / write_consistency_factor /

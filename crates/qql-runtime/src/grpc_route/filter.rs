@@ -168,18 +168,22 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
 /// produce a structured error instead of being silently dropped or wrapped
 /// into negative integers.
 pub(crate) fn exact_list_match(
-    values: &[serde_json::Value],
+    values: &[qql_core::ast::Value],
     any: bool,
 ) -> Result<qdrant::Match, QqlError> {
     use qdrant::r#match::MatchValue as Mv;
 
-    let any_string = values.iter().any(|v| v.is_string());
-    let all_strings = values.iter().all(|v| v.is_string());
+    let any_string = values
+        .iter()
+        .any(|v| matches!(v, qql_core::ast::Value::Str(_)));
+    let all_strings = values
+        .iter()
+        .all(|v| matches!(v, qql_core::ast::Value::Str(_)));
     if any_string && !all_strings {
         let offending = values
             .iter()
-            .find(|v| !v.is_string())
-            .map(|v| v.to_string())
+            .find(|v| !matches!(v, qql_core::ast::Value::Str(_)))
+            .map(qql_plan::value_error_text)
             .unwrap_or_else(|| "non-string entry".to_string());
         return Err(QqlError::validation(
             "QQL-GRPC-LIST-TYPE",
@@ -192,7 +196,10 @@ pub(crate) fn exact_list_match(
     if all_strings {
         let strings: Vec<String> = values
             .iter()
-            .map(|v| String::from(v.as_str().expect("guarded by all_strings")))
+            .map(|v| match v {
+                qql_core::ast::Value::Str(s) => s.clone(),
+                _ => unreachable!("guarded by all_strings"),
+            })
             .collect();
         return Ok(qdrant::Match {
             match_value: Some(if any {
@@ -221,12 +228,11 @@ pub(crate) fn exact_list_match(
 
 /// Convert one `IN`/`NOT IN` entry to the int64 wire type, rejecting values
 /// the bundled proto cannot carry.
-pub(crate) fn list_integer(value: &serde_json::Value) -> Result<i64, QqlError> {
-    if let Some(n) = value.as_i64() {
-        return Ok(n);
-    }
-    if let Some(n) = value.as_u64() {
-        return i64::try_from(n).map_err(|_| {
+pub(crate) fn list_integer(value: &qql_core::ast::Value) -> Result<i64, QqlError> {
+    use qql_core::ast::Value;
+    match value {
+        Value::Int(n) => Ok(*n),
+        Value::UInt(n) => i64::try_from(*n).map_err(|_| {
             QqlError::validation(
                 "QQL-GRPC-LIST-INT",
                 format!(
@@ -235,34 +241,34 @@ pub(crate) fn list_integer(value: &serde_json::Value) -> Result<i64, QqlError> {
                 ),
                 None,
             )
-        });
-    }
-    if let Some(f) = value.as_f64() {
-        // Mirror single-value `to_match`: an integral float is carried as an
-        // integer match (Qdrant compares payload numbers numerically).
-        let integral = f.is_finite()
-            && f.fract() == 0.0
-            && f >= i64::MIN as f64
-            && f <= i64::MAX as f64
-            && (f as i64) as f64 == f;
-        if integral {
-            return Ok(f as i64);
+        }),
+        Value::Float(f) => {
+            // Mirror single-value `to_match`: an integral float is carried as an
+            // integer match (Qdrant compares payload numbers numerically).
+            let integral = f.is_finite()
+                && f.fract() == 0.0
+                && *f >= i64::MIN as f64
+                && *f <= i64::MAX as f64
+                && (*f as i64) as f64 == *f;
+            if integral {
+                return Ok(*f as i64);
+            }
+            Err(unrepresentable_list_entry(value))
         }
-        return Err(QqlError::validation(
-            "QQL-GRPC-LIST-TYPE",
-            format!(
-                "IN/NOT IN list entry {value} cannot be represented on the gRPC path: the bundled Qdrant proto only supports homogeneous string or int64 lists; use an exact integer value or a RANGE filter"
-            ),
-            None,
-        ));
+        _ => Err(unrepresentable_list_entry(value)),
     }
-    Err(QqlError::validation(
+}
+
+/// Structured error for an `IN`/`NOT IN` entry the proto cannot carry.
+fn unrepresentable_list_entry(value: &qql_core::ast::Value) -> QqlError {
+    QqlError::validation(
         "QQL-GRPC-LIST-TYPE",
         format!(
-            "IN/NOT IN list entry {value} cannot be represented on the gRPC path: the bundled Qdrant proto only supports homogeneous string or int64 lists"
+            "IN/NOT IN list entry {} cannot be represented on the gRPC path: the bundled Qdrant proto only supports homogeneous string or int64 lists; use an exact integer value or a RANGE filter",
+            qql_plan::value_error_text(value)
         ),
         None,
-    ))
+    )
 }
 
 /// Convert one plan range bound to the gRPC double wire type.
@@ -286,58 +292,89 @@ fn range_double(bound: Option<&PlanRangeBound>) -> Result<Option<f64>, QqlError>
         .transpose()
 }
 
+/// Structured error for a float (or overflowing `u64`) equality value: the
+/// bundled proto's `Match` has no double field. Renders with std `Display`
+/// exactly like the old JSON pipeline did.
+fn float_match_error(f: f64) -> QqlError {
+    QqlError::validation(
+        "QQL-GRPC-FLOAT-MATCH",
+        format!(
+            "float equality value {f} cannot be represented on the gRPC path: the bundled Qdrant proto's Match has no double field; use a RANGE filter or an exact integer value"
+        ),
+        None,
+    )
+}
+
 pub(crate) fn to_match(mv: &MatchValue) -> Result<qdrant::Match, QqlError> {
     use qdrant::r#match::MatchValue as Mv;
+    use qql_core::ast::Value;
     match mv {
-        MatchValue::Value { value } => {
-            if let Some(s) = value.as_str() {
-                Ok(qdrant::Match {
-                    match_value: Some(Mv::Keyword(s.into())),
-                })
-            } else if let Some(b) = value.as_bool() {
-                Ok(qdrant::Match {
-                    match_value: Some(Mv::Boolean(b)),
-                })
-            } else if let Some(n) = value.as_i64() {
-                Ok(qdrant::Match {
+        MatchValue::Value { value } => match value {
+            Value::Str(s) => Ok(qdrant::Match {
+                match_value: Some(Mv::Keyword(s.clone())),
+            }),
+            Value::Bool(b) => Ok(qdrant::Match {
+                match_value: Some(Mv::Boolean(*b)),
+            }),
+            Value::Int(n) => Ok(qdrant::Match {
+                match_value: Some(Mv::Integer(*n)),
+            }),
+            Value::UInt(n) => match i64::try_from(*n) {
+                Ok(n) => Ok(qdrant::Match {
                     match_value: Some(Mv::Integer(n)),
-                })
-            } else if let Some(f) = value.as_f64() {
+                }),
+                Err(_) => Err(float_match_error(*n as f64)),
+            },
+            Value::Float(f) => {
                 // The pinned proto's `Match` has no `double_value` field, so a
                 // float equality filter (`WHERE x = 1.5`) has no exact wire
                 // representation. An integral value can be carried as an
                 // integer match (Qdrant compares payload numbers numerically);
                 // anything else returns a structured error instead of emitting
                 // an empty `Match` and silently matching nothing.
+                // Non-finite floats ride the generic arm below: the old JSON
+                // pipeline rendered them `null`, which never matched here.
                 let integral = f.is_finite()
                     && f.fract() == 0.0
-                    && f >= i64::MIN as f64
-                    && f <= i64::MAX as f64
-                    && (f as i64) as f64 == f;
+                    && *f >= i64::MIN as f64
+                    && *f <= i64::MAX as f64
+                    && (*f as i64) as f64 == *f;
                 if integral {
                     Ok(qdrant::Match {
-                        match_value: Some(Mv::Integer(f as i64)),
+                        match_value: Some(Mv::Integer(*f as i64)),
                     })
+                } else if f.is_finite() {
+                    Err(float_match_error(*f))
                 } else {
                     Err(QqlError::validation(
-                        "QQL-GRPC-FLOAT-MATCH",
+                        "QQL-GRPC-MATCH-VALUE",
                         format!(
-                            "float equality value {f} cannot be represented on the gRPC path: the bundled Qdrant proto's Match has no double field; use a RANGE filter or an exact integer value"
+                            "match value {} cannot be represented on the gRPC path",
+                            qql_plan::value_error_text(value)
                         ),
                         None,
                     ))
                 }
-            } else {
-                Err(QqlError::validation(
-                    "QQL-GRPC-MATCH-VALUE",
-                    format!(
-                        "match value {} cannot be represented on the gRPC path",
-                        value
-                    ),
-                    None,
-                ))
             }
-        }
+            Value::Param(name, _) => {
+                panic!(
+                    "invariant violation: unbound parameter :{name} reached gRPC match conversion"
+                );
+            }
+            Value::PositionalParam(idx, _) => {
+                panic!(
+                    "invariant violation: unbound positional parameter ?{idx} reached gRPC match conversion"
+                );
+            }
+            _ => Err(QqlError::validation(
+                "QQL-GRPC-MATCH-VALUE",
+                format!(
+                    "match value {} cannot be represented on the gRPC path",
+                    qql_plan::value_error_text(value)
+                ),
+                None,
+            )),
+        },
         MatchValue::Text { text } => Ok(qdrant::Match {
             match_value: Some(Mv::Text(text.clone())),
         }),

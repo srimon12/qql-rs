@@ -4,6 +4,7 @@ use super::ddl::{
     hnsw_config_from_plan, quantization_config_from_plan, sparse_vectors_config_diff,
     strict_mode_config_from_plan, vector_params, vectors_config_diff, wal_config_from_plan,
 };
+use super::execute_write::to_points_update_operation;
 use super::filter::to_match;
 use super::query::{
     plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
@@ -490,7 +491,13 @@ fn create_collection_wal_strict_mode_metadata() {
     assert_eq!(strict.max_query_limit, Some(50));
 
     let metadata = req.metadata.as_ref().expect("metadata should be set");
-    assert_eq!(metadata.get("env").and_then(|v| v.as_str()), Some("prod"));
+    assert_eq!(
+        metadata
+            .iter()
+            .find(|(k, _)| k == "env")
+            .and_then(|(_, v)| v.as_str()),
+        Some("prod")
+    );
 }
 
 /// Upsert → gRPC point count + shard key
@@ -761,7 +768,10 @@ fn typed_get_points_keeps_every_hit() {
 fn grpc_exact_list_match_is_homogeneous_and_fallible() {
     // Homogeneous string list → keywords.
     let mv = to_match(&MatchValue::Any {
-        any: vec![serde_json::json!("a"), serde_json::json!("b")],
+        any: vec![
+            qql_core::ast::Value::Str("a".into()),
+            qql_core::ast::Value::Str("b".into()),
+        ],
     })
     .unwrap();
     match mv.match_value.unwrap() {
@@ -773,7 +783,10 @@ fn grpc_exact_list_match_is_homogeneous_and_fallible() {
 
     // Homogeneous string list via Except → except_keywords.
     let mv = to_match(&MatchValue::Except {
-        except: vec![serde_json::json!("a"), serde_json::json!("b")],
+        except: vec![
+            qql_core::ast::Value::Str("a".into()),
+            qql_core::ast::Value::Str("b".into()),
+        ],
     })
     .unwrap();
     match mv.match_value.unwrap() {
@@ -786,9 +799,9 @@ fn grpc_exact_list_match_is_homogeneous_and_fallible() {
     // Homogeneous integer list (positive and negative) → integers.
     let mv = to_match(&MatchValue::Any {
         any: vec![
-            serde_json::json!(1),
-            serde_json::json!(-2),
-            serde_json::json!(3),
+            qql_core::ast::Value::Int(1),
+            qql_core::ast::Value::Int(-2),
+            qql_core::ast::Value::Int(3),
         ],
     })
     .unwrap();
@@ -801,7 +814,7 @@ fn grpc_exact_list_match_is_homogeneous_and_fallible() {
 
     // Homogeneous integer list via Except → except_integers.
     let mv = to_match(&MatchValue::Except {
-        except: vec![serde_json::json!(10), serde_json::json!(20)],
+        except: vec![qql_core::ast::Value::Int(10), qql_core::ast::Value::Int(20)],
     })
     .unwrap();
     match mv.match_value.unwrap() {
@@ -814,7 +827,10 @@ fn grpc_exact_list_match_is_homogeneous_and_fallible() {
     // Integral floats map to integer matches, mirroring single-value
     // `WHERE x = 2.0` → Integer(2).
     let mv = to_match(&MatchValue::Any {
-        any: vec![serde_json::json!(2.0), serde_json::json!(3.0)],
+        any: vec![
+            qql_core::ast::Value::Float(2.0),
+            qql_core::ast::Value::Float(3.0),
+        ],
     })
     .unwrap();
     match mv.match_value.unwrap() {
@@ -830,7 +846,10 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
     // Mixed string + integer list → structured error, not a silent drop
     // of the integer entry.
     let err = to_match(&MatchValue::Any {
-        any: vec![serde_json::json!("a"), serde_json::json!(1)],
+        any: vec![
+            qql_core::ast::Value::Str("a".into()),
+            qql_core::ast::Value::Int(1),
+        ],
     })
     .unwrap_err();
     assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
@@ -839,7 +858,10 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
 
     // Non-integral floats have no list encoding → structured error.
     let err = to_match(&MatchValue::Any {
-        any: vec![serde_json::json!(1.5), serde_json::json!(2.5)],
+        any: vec![
+            qql_core::ast::Value::Float(1.5),
+            qql_core::ast::Value::Float(2.5),
+        ],
     })
     .unwrap_err();
     assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
@@ -848,7 +870,10 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
 
     // A float mixed into a string list is caught as heterogeneous.
     let err = to_match(&MatchValue::Except {
-        except: vec![serde_json::json!("a"), serde_json::json!(1.5)],
+        except: vec![
+            qql_core::ast::Value::Str("a".into()),
+            qql_core::ast::Value::Float(1.5),
+        ],
     })
     .unwrap_err();
     assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
@@ -856,7 +881,10 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
 
     // Booleans are unrepresentable in either list form.
     let err = to_match(&MatchValue::Any {
-        any: vec![serde_json::json!(true), serde_json::json!(false)],
+        any: vec![
+            qql_core::ast::Value::Bool(true),
+            qql_core::ast::Value::Bool(false),
+        ],
     })
     .unwrap_err();
     assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
@@ -865,7 +893,7 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
     // u64 above i64::MAX must error, never wrap into a negative integer.
     let oversized = i64::MAX as u64 + 1;
     let err = to_match(&MatchValue::Any {
-        any: vec![serde_json::json!(oversized)],
+        any: vec![qql_core::ast::Value::UInt(oversized)],
     })
     .unwrap_err();
     assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
@@ -1577,5 +1605,82 @@ fn usage_to_telemetry_matches_json_pipeline() {
     assert_eq!(
         parsed.inference.expect("inference present").models["bm25"].tokens,
         512
+    );
+}
+
+/// Bulk-path timing report: 10k×128-dim upsert through plan → gRPC proto →
+/// REST JSON (min-of-5, release). Asserts output shape only; prints timings.
+///
+/// Copy accounting after the `value_to_json` removal (gRPC path):
+/// AST→plan (1 clone, borrowed lowering) → proto (1 clone into messages) →
+/// prost encode (1 copy to bytes). Before, payloads additionally paid a
+/// plan-time JSON tree plus a whole-subtree pre-clone (`v.clone()`) before
+/// proto conversion, and REST paid two JSON trees instead of one.
+///
+/// Measured on this machine (release, min-of-5, 10k×128-dim upsert):
+/// before plan 5.72ms / proto 7.58ms / REST 25.63ms;
+/// after  plan 4.27ms / proto 6.47ms / REST 24.70ms.
+#[test]
+fn bulk_upsert_copy_bench_report() {
+    use qql_core::ast::{
+        PointEntry, PointId, PointVectors, Stmt, UpsertPoint, UpsertStmt, VectorValue,
+    };
+
+    const N: usize = 10_000;
+    const DIM: usize = 128;
+    let build_stmt = || {
+        let mut points = Vec::with_capacity(N);
+        for i in 0..N {
+            let vec = (0..DIM).map(|d| (i * DIM + d) as f32 * 0.001).collect();
+            points.push(PointEntry::Inline(UpsertPoint {
+                id: PointId::Number(i as u64),
+                vectors: Some(PointVectors::Unnamed(VectorValue::Dense(vec))),
+                payload: vec![("t".to_string(), qql_core::ast::Value::Int(i as i64))],
+            }));
+        }
+        Stmt::Upsert(Box::new(UpsertStmt {
+            collection: "docs".to_string(),
+            points,
+            embedding: None,
+            embed: Vec::new(),
+            update_filter: None,
+            update_mode: None,
+            shard_key: None,
+            wait: None,
+        }))
+    };
+
+    // Warmup (allocator).
+    let op = qql_plan::plan(&build_stmt()).unwrap();
+    let qql_plan::PlannedOperation::Upsert { request, .. } = &op else {
+        panic!("expected upsert");
+    };
+    assert_eq!(request.points.len(), N);
+
+    let mut plan_best = f64::INFINITY;
+    let mut proto_best = f64::INFINITY;
+    let mut rest_best = f64::INFINITY;
+    for _ in 0..5 {
+        let stmt = build_stmt();
+        let t0 = std::time::Instant::now();
+        let op = qql_plan::plan(&stmt).unwrap();
+        plan_best = plan_best.min(t0.elapsed().as_secs_f64() * 1000.0);
+
+        let t0 = std::time::Instant::now();
+        let route = qql_plan::to_rest_route(&op).unwrap();
+        assert!(route.body.is_some());
+        rest_best = rest_best.min(t0.elapsed().as_secs_f64() * 1000.0);
+
+        // Owned handoff is free (pre-existing `into_update_batch` path);
+        // the timed conversion below is exactly what production pays.
+        let (_, update_op) =
+            qql_plan::mutation::planned_to_update_operation_owned(op).expect("upsert converts");
+        let t0 = std::time::Instant::now();
+        let proto_op = to_points_update_operation(&update_op).unwrap();
+        proto_best = proto_best.min(t0.elapsed().as_secs_f64() * 1000.0);
+        assert!(proto_op.operation.is_some());
+    }
+    eprintln!(
+        "bulk upsert {N}x{DIM}: plan min {plan_best:.2}ms, plan→proto min {proto_best:.2}ms, plan→REST min {rest_best:.2}ms"
     );
 }

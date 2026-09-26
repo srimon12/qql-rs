@@ -194,7 +194,10 @@ fn match_except_filter_contract_matches_openapi() {
     let clause = FilterClause::Field(Box::new(FieldCondition {
         key: "tag".into(),
         r#match: Some(MatchValue::Except {
-            except: vec![serde_json::json!("a"), serde_json::json!("b")],
+            except: vec![
+                qql_core::ast::Value::Str("a".into()),
+                qql_core::ast::Value::Str("b".into()),
+            ],
         }),
         ..Default::default()
     }));

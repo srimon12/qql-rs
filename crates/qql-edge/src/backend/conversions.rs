@@ -52,6 +52,54 @@ impl IntoPlanPointId for &PlanPointId {
     }
 }
 
+/// Convert a plan AST value to the edge JSON payload shape.
+///
+/// Boundary-local to the edge backend (`qdrant_edge` payload types are
+/// JSON-shaped): the shared plan path carries AST values and never builds
+/// this tree. Non-finite floats become `null` (no JSON inf/NaN), mirroring
+/// the REST wire rendering.
+pub(crate) fn plan_value_to_json(value: &qql_core::ast::Value) -> serde_json::Value {
+    use qql_core::ast::Value;
+    match value {
+        Value::Str(s) => serde_json::Value::String(s.clone()),
+        Value::Int(n) => serde_json::Value::Number((*n).into()),
+        Value::UInt(n) => serde_json::Value::Number((*n).into()),
+        Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Null => serde_json::Value::Null,
+        Value::F32Array(values) => serde_json::Value::Array(
+            values
+                .iter()
+                .map(|f| {
+                    serde_json::Number::from_f64(*f as f64)
+                        .map_or(serde_json::Value::Null, serde_json::Value::Number)
+                })
+                .collect(),
+        ),
+        Value::List(items) => {
+            serde_json::Value::Array(items.iter().map(plan_value_to_json).collect())
+        }
+        Value::Dict(entries) => {
+            let mut map = serde_json::Map::with_capacity(entries.len());
+            for (k, v) in entries {
+                map.insert(k.clone(), plan_value_to_json(v));
+            }
+            serde_json::Value::Object(map)
+        }
+        Value::Param(name, _) => {
+            panic!(
+                "invariant violation: unbound parameter :{name} reached edge payload conversion"
+            );
+        }
+        Value::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached edge payload conversion"
+            );
+        }
+    }
+}
+
 /// Typed plan ID from a `qdrant-edge` point ID (no JSON hop).
 pub(crate) fn from_edge_plan_id(id: &PointId) -> PlanPointId {
     match id {

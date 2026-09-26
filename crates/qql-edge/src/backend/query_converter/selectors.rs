@@ -105,26 +105,33 @@ pub(crate) fn convert_order_by_interface(
         .as_ref()
         .map(|value| {
             use qdrant_edge::StartFrom;
-            if let Some(n) = value.as_i64() {
-                Ok(StartFrom::Integer(n))
-            } else if let Some(n) = value.as_u64() {
-                i64::try_from(n)
+            use qql_core::ast::Value;
+            match value {
+                Value::Int(n) => Ok(StartFrom::Integer(*n)),
+                Value::UInt(n) => i64::try_from(*n)
                     .map(StartFrom::Integer)
-                    .map_err(|_| edge_error(format!("order_by start_from {n} exceeds i64")))
-            } else if let Some(f) = value.as_f64() {
-                Ok(StartFrom::Float(f))
-            } else if let Some(text) = value.as_str() {
-                text.parse::<qdrant_edge::DateTimeWrapper>()
+                    .map_err(|_| edge_error(format!("order_by start_from {n} exceeds i64"))),
+                Value::Float(f) => Ok(StartFrom::Float(*f)),
+                Value::Str(text) => text
+                    .parse::<qdrant_edge::DateTimeWrapper>()
                     .map(StartFrom::Datetime)
                     .map_err(|_| {
                         edge_error(format!(
                             "order_by start_from '{text}' must be an integer, float, or ISO-8601 datetime"
                         ))
-                    })
-            } else {
-                Err(edge_error(format!(
-                    "order_by start_from {value} must be an integer, float, or ISO-8601 datetime"
-                )))
+                    }),
+                Value::Param(name, _) => {
+                    panic!("invariant violation: unbound parameter :{name} reached edge order_by lowering");
+                }
+                Value::PositionalParam(idx, _) => {
+                    panic!(
+                        "invariant violation: unbound positional parameter ?{idx} reached edge order_by lowering"
+                    );
+                }
+                other => Err(edge_error(format!(
+                    "order_by start_from {} must be an integer, float, or ISO-8601 datetime",
+                    qql_plan::value_error_text(other)
+                ))),
             }
         })
         .transpose()?;

@@ -451,7 +451,7 @@ fn test_formula_decay_datetime_key_and_case_conversion() {
         qql_plan::types::FilterClause::Field(Box::new(qql_plan::types::FieldCondition {
             key: "status".to_string(),
             r#match: Some(qql_plan::types::MatchValue::Value {
-                value: serde_json::json!("active"),
+                value: qql_core::ast::Value::Str("active".into()),
             }),
             ..Default::default()
         })),
@@ -565,7 +565,7 @@ fn city_match() -> qql_plan::types::FilterClause {
     qql_plan::types::FilterClause::Field(Box::new(qql_plan::types::FieldCondition {
         key: "city".to_string(),
         r#match: Some(qql_plan::types::MatchValue::Value {
-            value: serde_json::json!("NYC"),
+            value: qql_core::ast::Value::Str("NYC".into()),
         }),
         range: None,
         geo_bounding_box: None,

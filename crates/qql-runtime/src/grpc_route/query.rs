@@ -339,7 +339,7 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> Result<qdrant::VectorIn
             model,
             options,
         } => Variant::Object(qdrant::InferenceObject {
-            object: Some(super::values::to_qdrant_value(object.clone())),
+            object: Some(super::values::to_qdrant_value(object.as_ref())),
             model: model.clone().unwrap_or_default(),
             options: grpc_options(options),
         }),
@@ -393,7 +393,7 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> Result<qdrant::VectorIn
             model,
             options,
         }) => Variant::Object(qdrant::InferenceObject {
-            object: Some(super::values::to_qdrant_value(object.clone())),
+            object: Some(super::values::to_qdrant_value(object.as_ref())),
             model: model.clone().unwrap_or_default(),
             options: grpc_options(options),
         }),
@@ -405,13 +405,14 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> Result<qdrant::VectorIn
 
 /// Convert plan inference `options` to the proto options map (empty when unset).
 fn grpc_options(
-    options: &Option<serde_json::Map<String, serde_json::Value>>,
+    options: &Option<Vec<(String, qql_core::ast::Value)>>,
 ) -> std::collections::HashMap<String, qdrant::Value> {
     options
         .as_ref()
-        .map(|map| {
-            map.iter()
-                .map(|(k, v)| (k.clone(), super::values::to_qdrant_value(v.clone())))
+        .map(|pairs| {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.clone(), super::values::to_qdrant_value(v)))
                 .collect()
         })
         .unwrap_or_default()
@@ -524,7 +525,7 @@ pub(crate) fn plan_vector_to_proto(v: &PlanVectorValue) -> Result<qdrant::Vector
             model,
             options,
         } => ProtoVector::Object(qdrant::InferenceObject {
-            object: Some(super::values::to_qdrant_value(object.clone())),
+            object: Some(super::values::to_qdrant_value(object.as_ref())),
             model: model.clone().unwrap_or_default(),
             options: grpc_options(options),
         }),

@@ -424,8 +424,11 @@ pub struct OrderByQuery {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<String>,
     /// Starting payload value to scroll from (integer, float, or datetime string).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start_from: Option<serde_json::Value>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::value_serde::serialize_ast_value_opt"
+    )]
+    pub start_from: Option<qql_core::ast::Value>,
 }
 
 /// One multi-stage prefetch stage; nested stages recurse via `prefetch`.
