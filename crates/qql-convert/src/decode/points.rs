@@ -117,7 +117,9 @@ pub(crate) fn scroll(body: &Value, ctx: DecodeCtx<'_>) -> Result<ScrollStmt, Con
             ));
         }
     };
-    let limit = json::opt_u64(obj, "limit", path)?.unwrap_or(10);
+    // The REST body's absent `limit` means the server default of 10; emitting
+    // it explicitly keeps the decoded statement exact.
+    let limit = Some(json::opt_u64(obj, "limit", path)?.unwrap_or(10));
     let after = match obj.get("offset").filter(|v| !v.is_null()) {
         None => None,
         Some(offset) => offset_to_after(&vector::point_id(offset, &child(path, "offset"))?),

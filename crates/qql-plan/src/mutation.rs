@@ -273,11 +273,12 @@ pub fn validate_scroll_after(after: Option<&qql_core::ast::PointId>) -> Result<(
 /// plus optional payload selection and payload-key ordering.
 ///
 /// The `after` cursor lowers exclusively (`AFTER n` → `offset n + 1`,
-/// UUIDs to their successor); opaque strings pass through unchanged.
-/// Callers must run [`validate_scroll_after`] first to reject cursors with
-/// no next page (`u64::MAX` / UUID-max).
+/// UUIDs to their successor); opaque strings pass through unchanged, and
+/// cursors with no next page (`u64::MAX` / UUID-max) are rejected here.
+/// A `None` limit means an unbound `LIMIT :param` placeholder (or a hand-built
+/// statement): fail closed instead of planning the server's default page size.
 pub fn lower_scroll_request(
-    limit: u64,
+    limit: Option<u64>,
     filter: Option<&qql_core::ast::FilterExpr>,
     after: Option<&qql_core::ast::PointId>,
     order_by: Option<&qql_core::ast::ScrollOrderBy>,
@@ -285,6 +286,14 @@ pub fn lower_scroll_request(
     with_payload: Option<&qql_core::ast::PayloadSelector>,
     with_vector: Option<&qql_core::ast::VectorSelector>,
 ) -> Result<ScrollRequest, QqlError> {
+    validate_scroll_after(after)?;
+    let Some(limit) = limit else {
+        return Err(QqlError::validation(
+            "QQL-PLAN-SCROLL-LIMIT",
+            "SCROLL requires a LIMIT (an unbound LIMIT placeholder cannot be planned)",
+            None,
+        ));
+    };
     let with_payload = match with_payload {
         None => Some(PayloadSelectorReq::All(true)),
         Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),

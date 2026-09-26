@@ -188,6 +188,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
+| `QQL-PLAN-SCROLL-LIMIT` | `SCROLL` has no resolvable `LIMIT` (an unbound placeholder or hand-built statement) |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-SERIALIZE` | A plan IR request body failed JSON serialization (a `Serialize` regression) |
 | `QQL-PLAN-SCROLL-AFTER` | A `SCROLL ... AFTER` cursor has no next page (already the maximum point ID or UUID) |
@@ -601,6 +602,7 @@ QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
 QQL-PLAN-SCROLL-AFTER
+QQL-PLAN-SCROLL-LIMIT
 QQL-PLAN-SERIALIZE
 QQL-PLAN-SHARD-KEY
 QQL-PLAN-UNSUPPORTED-PREFETCH

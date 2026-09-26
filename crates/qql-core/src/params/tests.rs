@@ -531,8 +531,8 @@ fn test_format_positional_limit_is_bare_question_mark() {
 
 #[test]
 fn test_format_named_scroll_and_facet_limit_params() {
-    // ScrollStmt.limit is a plain u64 with a default — formatting must
-    // render the placeholder, not `LIMIT <default>` / `LIMIT None`.
+    // ScrollStmt.limit stays unset while the placeholder is unbound —
+    // formatting must render the placeholder, not `LIMIT None`.
     assert_format_reparses("SCROLL FROM docs LIMIT :lim;", "named SCROLL LIMIT");
     assert_format_reparses("FACET category FROM docs LIMIT :lim;", "named FACET LIMIT");
     assert_format_reparses(

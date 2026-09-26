@@ -75,9 +75,12 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Limit)?;
         let (limit, limit_param, limit_span) =
             if let Some((param, span)) = self.parse_placeholder_param()? {
-                (10, Some(param), Some(span))
+                // Unlike the other clause defaults, an unbound placeholder
+                // must never fall back to a concrete limit: it stays `None`
+                // until binding, and the planner rejects a `None` limit.
+                (None, Some(param), Some(span))
             } else {
-                (self.parse_positive_u64("SCROLL LIMIT")?, None, None)
+                (Some(self.parse_positive_u64("SCROLL LIMIT")?), None, None)
             };
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,

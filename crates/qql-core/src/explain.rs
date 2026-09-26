@@ -195,8 +195,8 @@ pub fn explain_node(statement: &Stmt) -> String {
             }
             if let Some(param) = &statement.limit_param {
                 let _ = writeln!(output, "└── Limit: {}", param);
-            } else {
-                let _ = writeln!(output, "└── Limit: {}", statement.limit);
+            } else if let Some(limit) = statement.limit {
+                let _ = writeln!(output, "└── Limit: {}", limit);
             }
         }
         Stmt::Upsert(statement) => {
