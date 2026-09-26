@@ -50,9 +50,11 @@ async fn test_batch_mutations_same_collection() {
 
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
+    // Explicit `WAIT true` on the upserts: embedding-less upserts default to
+    // `WAIT false`, which is a different ambient group than the waiting DELETE.
     let stmts = qql_core::parser::Parser::parse_all(
-        "UPSERT INTO docs VALUES {id: 1, title: 'a'};\
-         UPSERT INTO docs VALUES {id: 2, title: 'b'};\
+        "UPSERT INTO docs VALUES {id: 1, title: 'a'} WAIT true;\
+         UPSERT INTO docs VALUES {id: 2, title: 'b'} WAIT true;\
          DELETE FROM docs WHERE id = 3;",
     )
     .unwrap();
@@ -134,7 +136,7 @@ async fn test_delete_payload_batches_with_mutations() {
     let individual_calls = client.execute_planned_call_count.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
-        "UPSERT INTO docs VALUES {id: 1, title: 'a'};\
+        "UPSERT INTO docs VALUES {id: 1, title: 'a'} WAIT true;\
          DELETE PAYLOAD draft FROM docs WHERE id = 1;",
     )
     .unwrap();
@@ -171,10 +173,10 @@ async fn test_delete_payload_batches_with_mutations() {
     let individual_calls = client.execute_planned_call_count.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
-        "UPSERT INTO docs VALUES {id: 1, title: 'a'};\
+        "UPSERT INTO docs VALUES {id: 1, title: 'a'} WAIT true;\
          DELETE PAYLOAD draft FROM docs WHERE id = 1;\
          DELETE FROM docs WHERE id = 2;\
-         UPSERT INTO docs VALUES {id: 3, title: 'c'};",
+         UPSERT INTO docs VALUES {id: 3, title: 'c'} WAIT true;",
     )
     .unwrap();
     let results = executor
@@ -279,7 +281,7 @@ async fn test_batch_preserves_order_mixed_query_and_mutation() {
 
     // Two mutations, then two queries — should batch each group separately
     let stmts = qql_core::parser::Parser::parse_all(
-        "UPSERT INTO docs VALUES {id: 1};\
+        "UPSERT INTO docs VALUES {id: 1} WAIT true;\
          DELETE FROM docs WHERE id = 2;\
          QUERY TEXT 'a' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
          QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
@@ -650,6 +652,104 @@ async fn test_explicit_query_batch_carries_timeout() {
         Some(30),
         "header timeout reaches the backend"
     );
+}
+
+#[tokio::test]
+async fn test_ambient_query_groups_execute_with_their_own_read_opts() {
+    // P0: differing per-statement read opts must split into separate ambient
+    // groups, and each group must execute with its own header opts — never the
+    // neighbor's.
+    let mut client = MockQdrantClient::default();
+    client.info = Some(CollectionInfo::default());
+    let batch_calls = client.batch_call_count.clone();
+    let last_timeout = client.last_batch_timeout.clone();
+    let last_consistency = client.last_batch_consistency.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "QUERY TEXT 'a' MODEL 'test-model' FROM docs USING dense AS DENSE PARAMS (timeout = 5) LIMIT 1;\
+         QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE PARAMS (timeout = 5) LIMIT 1;\
+         QUERY TEXT 'c' MODEL 'test-model' FROM docs USING dense AS DENSE PARAMS (timeout = 30, consistency = all) LIMIT 1;",
+    )
+    .unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 3, "one response per statement: {results:?}");
+    for r in &results {
+        assert!(r.ok, "every statement must succeed: {r:?}");
+    }
+    assert_eq!(
+        *batch_calls.lock().unwrap(),
+        1,
+        "only the two same-opt queries co-group; the differing one dispatches singly"
+    );
+    assert_eq!(
+        *last_timeout.lock().unwrap(),
+        Some(5),
+        "the group executes with its own timeout"
+    );
+    assert_eq!(
+        *last_consistency.lock().unwrap(),
+        None,
+        "the group executes with its own consistency"
+    );
+}
+
+#[tokio::test]
+async fn test_ambient_mutation_groups_execute_with_their_own_wait() {
+    // P0: two `WAIT false` upserts co-group and execute with `wait=false`
+    // (previously hardcoded `wait=true`); a `WAIT true` neighbor splits.
+    let client = MockQdrantClient::default();
+    let update_calls = client.update_batch_call_count.clone();
+    let last_wait = client.last_update_batch_wait.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]} WAIT false;\
+         UPSERT INTO docs VALUES {id: 2, vector: [0.1, 0.2]} WAIT false;",
+    )
+    .unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(*update_calls.lock().unwrap(), 1, "same wait must co-group");
+    assert_eq!(
+        *last_wait.lock().unwrap(),
+        Some(false),
+        "explicit WAIT false must reach the backend"
+    );
+
+    // `WAIT false` next to `WAIT true` is two groups, each with its own wait.
+    let client = MockQdrantClient::default();
+    let update_calls = client.update_batch_call_count.clone();
+    let last_wait = client.last_update_batch_wait.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]} WAIT false;\
+         UPSERT INTO docs VALUES {id: 2, vector: [0.1, 0.2]} WAIT false;\
+         UPSERT INTO docs VALUES {id: 3, vector: [0.1, 0.2]} WAIT true;\
+         UPSERT INTO docs VALUES {id: 4, vector: [0.1, 0.2]} WAIT true;",
+    )
+    .unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 4);
+    assert_eq!(
+        *update_calls.lock().unwrap(),
+        2,
+        "differing wait must split into two groups"
+    );
+    assert_eq!(*last_wait.lock().unwrap(), Some(true));
 }
 
 #[tokio::test]

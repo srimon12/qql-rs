@@ -327,8 +327,8 @@ impl PlannedOperation {
             PlannedOperation::GetQuotas => "show_quotas",
             PlannedOperation::SetQuotas { .. } => "set_quota",
             PlannedOperation::Batch { key, .. } => match key {
-                BatchKey::Query(_) => "query_batch",
-                BatchKey::Mutation(_) => "update_batch",
+                BatchKey::Query { .. } => "query_batch",
+                BatchKey::Mutation { .. } => "update_batch",
             },
         }
     }
@@ -360,9 +360,7 @@ impl PlannedOperation {
             | PlannedOperation::ListShardKeys { collection }
             | PlannedOperation::GetCollection { collection }
             | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
-            PlannedOperation::Batch { key, .. } => Some(match key {
-                BatchKey::Query(collection) | BatchKey::Mutation(collection) => collection.as_str(),
-            }),
+            PlannedOperation::Batch { key, .. } => Some(key.collection()),
             PlannedOperation::ListCollections
             | PlannedOperation::GetQuotas
             | PlannedOperation::SetQuotas { .. } => None,
@@ -387,21 +385,44 @@ impl PlannedOperation {
         }
     }
 
-    /// Batch grouping key (collection + family) for executor dispatch.
+    /// Batch grouping key (collection + family + per-statement execution
+    /// opts) for executor dispatch.
     ///
     /// Returns `None` for single-shot operations that cannot be grouped.
     pub fn batch_key(&self) -> Option<BatchKey> {
         match self.batch_family() {
             BatchFamily::Query => match self {
-                PlannedOperation::Query { collection, .. } => {
-                    Some(BatchKey::Query(collection.clone()))
-                }
+                PlannedOperation::Query {
+                    collection,
+                    request,
+                } => Some(BatchKey::Query {
+                    collection: collection.clone(),
+                    timeout: request.timeout,
+                    consistency: request.consistency.clone(),
+                }),
                 _ => None,
             },
-            BatchFamily::Mutation => self
-                .collection()
-                .map(|collection| BatchKey::Mutation(collection.to_owned())),
+            BatchFamily::Mutation => self.collection().map(|collection| BatchKey::Mutation {
+                collection: collection.to_owned(),
+                wait: self.mutation_wait().unwrap_or(true),
+            }),
             BatchFamily::Single => None,
+        }
+    }
+
+    /// Effective `?wait=` carried by a mutation operation; `None` for
+    /// non-mutations.
+    pub fn mutation_wait(&self) -> Option<bool> {
+        match self {
+            PlannedOperation::Upsert { wait, .. }
+            | PlannedOperation::Delete { wait, .. }
+            | PlannedOperation::UpdatePayload { wait, .. }
+            | PlannedOperation::OverwritePayload { wait, .. }
+            | PlannedOperation::ClearPayload { wait, .. }
+            | PlannedOperation::DeletePayload { wait, .. }
+            | PlannedOperation::UpdateVectors { wait, .. }
+            | PlannedOperation::DeleteVectors { wait, .. } => Some(*wait),
+            _ => None,
         }
     }
 
@@ -444,8 +465,8 @@ pub enum BatchFamily {
 
 /// Grouping key for statement/operation batching (same collection + family).
 pub use crate::batch::{
-    BatchKey, batch_item_error, build_query_batch, build_update_batch, into_query_batch,
-    into_update_batch, statement_batch_key, verify_batch_cardinality,
+    BatchKey, BatchOpts, batch_item_error, build_query_batch, build_update_batch, into_query_batch,
+    into_update_batch, statement_batch_key, statement_wait, verify_batch_cardinality,
 };
 
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
@@ -567,38 +588,36 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
             request: lower_upsert_request(upsert)?,
-            wait: upsert
-                .wait
-                .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty()),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
             request: lower_delete_request(delete)?,
-            wait: delete.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
             request: lower_clear_payload_request(clear)?,
-            wait: clear.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
             collection: del.collection.clone(),
             request: lower_delete_payload_request(del)?,
-            wait: del.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
             request: lower_delete_vector_request(del_vec)?,
-            wait: del_vec.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::UpdateVector(update) => Ok(PlannedOperation::UpdateVectors {
             collection: update.collection.clone(),
             request: lower_update_vector_request(update),
-            wait: update.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::UpdatePayload(update) => {
             let request = lower_update_payload_request(update)?;
-            let wait = update.wait.unwrap_or(true);
+            let wait = statement_wait(statement).unwrap_or(true);
             if update.overwrite {
                 Ok(PlannedOperation::OverwritePayload {
                     collection: update.collection.clone(),
@@ -768,7 +787,14 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
         }
     };
     for (member, operation) in batch.statements.iter().zip(operations.iter()) {
-        if operation.batch_key().as_ref() != Some(&key) {
+        // Members must share family + collection; per-statement execution
+        // opts are owned by the BATCH header (`WAIT`, `PARAMS`), so the
+        // per-kind defaults must not split a declared batch.
+        if !operation
+            .batch_key()
+            .as_ref()
+            .is_some_and(|member_key| member_key.same_family(&key))
+        {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-BATCH-MIXED",
                 alloc::format!(
@@ -785,7 +811,7 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
         }
     }
     match &key {
-        BatchKey::Query(_) => {
+        BatchKey::Query { collection, .. } => {
             if batch.wait.is_some() {
                 return Err(QqlError::validation(
                     "QQL-VALIDATION-BATCH-WAIT",
@@ -806,6 +832,11 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                     ));
                 }
             }
+            let key = BatchKey::Query {
+                collection: collection.clone(),
+                timeout,
+                consistency: consistency.clone(),
+            };
             Ok(PlannedOperation::Batch {
                 key,
                 operations,
@@ -814,7 +845,7 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                 consistency,
             })
         }
-        BatchKey::Mutation(_) => {
+        BatchKey::Mutation { collection, .. } => {
             if let Some(params) = batch.params.as_ref()
                 && (params.timeout.is_some() || params.consistency.is_some())
             {
@@ -833,6 +864,17 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                     ));
                 }
             }
+            let wait = batch.wait.unwrap_or(true);
+            // Every member runs with the header WAIT; stamp it on the planned
+            // members so batch building validates the flag the RPC uses.
+            let mut operations = operations;
+            for operation in &mut operations {
+                set_mutation_wait(operation, wait);
+            }
+            let key = BatchKey::Mutation {
+                collection: collection.clone(),
+                wait,
+            };
             Ok(PlannedOperation::Batch {
                 key,
                 operations,
@@ -841,6 +883,21 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                 consistency: None,
             })
         }
+    }
+}
+
+/// Stamp a batch's effective `wait` onto one planned mutation member.
+fn set_mutation_wait(operation: &mut PlannedOperation, wait: bool) {
+    match operation {
+        PlannedOperation::Upsert { wait: member, .. }
+        | PlannedOperation::Delete { wait: member, .. }
+        | PlannedOperation::UpdatePayload { wait: member, .. }
+        | PlannedOperation::OverwritePayload { wait: member, .. }
+        | PlannedOperation::ClearPayload { wait: member, .. }
+        | PlannedOperation::DeletePayload { wait: member, .. }
+        | PlannedOperation::UpdateVectors { wait: member, .. }
+        | PlannedOperation::DeleteVectors { wait: member, .. } => *member = wait,
+        _ => {}
     }
 }
 
@@ -1185,7 +1242,7 @@ mod tests {
         let op2 = plan(&s2).unwrap();
         assert_eq!(op1.batch_key(), op2.batch_key());
         assert!(planned_to_update_operation(&op1).is_some());
-        let (collection, labels, batch) = crate::batch::build_update_batch(&[op1, op2]).unwrap();
+        let (collection, labels, _, batch) = crate::batch::build_update_batch(&[op1, op2]).unwrap();
         assert_eq!(collection, "docs");
         assert_eq!(labels, vec!["DELETE_PAYLOAD", "DELETE_PAYLOAD"]);
         assert_eq!(batch.operations.len(), 2);

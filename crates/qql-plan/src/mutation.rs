@@ -518,54 +518,55 @@ pub fn planned_to_update_operation_owned(
 /// operations for individual retry. Only the small collection `String` is
 /// cloned per member; request payloads move back untouched.
 ///
-/// Rebuilt operations carry `wait: true`, matching ambient batch semantics
-/// ("ambient groups always wait"); the wire batch likewise executes with
-/// `wait=true`, so retry preserves the durability the batch promised.
+/// `wait` is the executing batch's effective `?wait=`; retry must preserve the
+/// durability the batch promised (the member's own flag is not observable
+/// through the wire batch, which carries only the batch header value).
 pub fn update_operation_into_planned(
     collection: &str,
     op: UpdateOperation,
+    wait: bool,
 ) -> crate::plan::PlannedOperation {
     use crate::plan::PlannedOperation;
     match op {
         UpdateOperation::Upsert { upsert } => PlannedOperation::Upsert {
             collection: collection.to_owned(),
             request: upsert,
-            wait: true,
+            wait,
         },
         UpdateOperation::Delete { delete } => PlannedOperation::Delete {
             collection: collection.to_owned(),
             request: delete,
-            wait: true,
+            wait,
         },
         UpdateOperation::SetPayload { set_payload } => PlannedOperation::UpdatePayload {
             collection: collection.to_owned(),
             request: set_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::Overwrite { overwrite_payload } => PlannedOperation::OverwritePayload {
             collection: collection.to_owned(),
             request: overwrite_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::ClearPayload { clear_payload } => PlannedOperation::ClearPayload {
             collection: collection.to_owned(),
             request: clear_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::DeletePayload { delete_payload } => PlannedOperation::DeletePayload {
             collection: collection.to_owned(),
             request: delete_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::UpdateVectors { update_vectors } => PlannedOperation::UpdateVectors {
             collection: collection.to_owned(),
             request: update_vectors,
-            wait: true,
+            wait,
         },
         UpdateOperation::DeleteVectors { delete_vectors } => PlannedOperation::DeleteVectors {
             collection: collection.to_owned(),
             request: delete_vectors,
-            wait: true,
+            wait,
         },
     }
 }

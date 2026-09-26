@@ -357,8 +357,8 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             timeout,
             consistency,
         } => match key {
-            crate::batch::BatchKey::Query(collection) => {
-                let (_, batch) = crate::batch::build_query_batch(operations).map_err(|e| {
+            crate::batch::BatchKey::Query { collection, .. } => {
+                let (_, _, batch) = crate::batch::build_query_batch(operations).map_err(|e| {
                     RestProjectionError::SerializeFailed {
                         message: e.to_string(),
                     }
@@ -370,12 +370,13 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                     body: body(&batch)?,
                 }
             }
-            crate::batch::BatchKey::Mutation(collection) => {
-                let (_, _, batch) = crate::batch::build_update_batch(operations).map_err(|e| {
-                    RestProjectionError::SerializeFailed {
-                        message: e.to_string(),
-                    }
-                })?;
+            crate::batch::BatchKey::Mutation { collection, .. } => {
+                let (_, _, _, batch) =
+                    crate::batch::build_update_batch(operations).map_err(|e| {
+                        RestProjectionError::SerializeFailed {
+                            message: e.to_string(),
+                        }
+                    })?;
                 let mut query = Vec::new();
                 if let Some(wait) = wait {
                     query.push(("wait".into(), wait.to_string()));

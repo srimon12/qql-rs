@@ -148,10 +148,10 @@ pub trait QdrantOps: QdrantOpsBound {
     /// via Qdrant's `/points/query/batch` (REST) or `QueryBatch` (gRPC) endpoint.
     /// Returns one typed response per search, in order.
     ///
-    /// `timeout` / `consistency` are the batch-level query params. Explicit
-    /// `BATCH` blocks pass their header opts; ambient statement groups pass
-    /// `None` (per-search read opts stay on the member requests for gRPC and
-    /// are dropped on REST, as before).
+    /// `timeout` / `consistency` are the batch-level query params (one pair
+    /// per batch RPC — members cannot carry their own). Ambient statement
+    /// groups pass the group's shared opts (differing members never co-group);
+    /// explicit `BATCH` blocks pass their header opts.
     async fn execute_query_batch(
         &self,
         collection: &str,
@@ -165,7 +165,9 @@ pub trait QdrantOps: QdrantOpsBound {
     /// Returns one typed response per operation, in order.
     ///
     /// Explicit `BATCH` blocks pass their header `WAIT` (default `true`);
-    /// ambient statement groups pass `true`, preserving prior behavior.
+    /// ambient statement groups pass the group's effective `wait` (members
+    /// with differing `wait` never co-group, so no member's semantics change
+    /// by being batched).
     async fn execute_update_batch(
         &self,
         collection: &str,

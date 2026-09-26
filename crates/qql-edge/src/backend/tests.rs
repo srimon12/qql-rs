@@ -233,7 +233,7 @@ fn typed_update_batch_returns_mutations() {
             plan_one("UPDATE docs SET PAYLOAD = {city: 'NYC'} WHERE id = 2"),
             plan_one("DELETE FROM docs WHERE id = 2"),
         ];
-        let (collection, _labels, batch) =
+        let (collection, _labels, _opts, batch) =
             qql_plan::build_update_batch(&mutations).expect("update batch");
         assert_eq!(collection, "docs");
 
