@@ -302,6 +302,39 @@ fn out_of_range_integer_literals_rejected() {
 }
 
 #[test]
+fn config_validation_spans_stay_inside_the_block() {
+    // core-audit #10: config validation runs after the block is consumed, so
+    // errors must not point at the following token or EOF.
+    let hnsw = "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (m = 3);";
+    let err = Parser::parse(hnsw).expect_err("m = 3 must be rejected");
+    let span = err.span.expect("config error must carry a span");
+    let block = hnsw.find("(m = 3)").unwrap();
+    assert!(
+        span.start >= block && span.end <= block + "(m = 3)".len(),
+        "HNSW span {span:?} must lie inside the block"
+    );
+
+    let quant = "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH QUANTIZATION (type = 'nope');";
+    let err = Parser::parse(quant).expect_err("unknown QUANTIZATION type must be rejected");
+    let span = err.span.expect("config error must carry a span");
+    let block = quant.find("(type = 'nope')").unwrap();
+    assert!(
+        span.start >= block && span.end <= block + "(type = 'nope')".len(),
+        "quantization span {span:?} must lie inside the block"
+    );
+
+    let shard = "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 0);";
+    let err = Parser::parse(shard).expect_err("shards_number = 0 must be rejected");
+    let span = err.span.expect("shard-key error must carry a span");
+    let with = shard.find("WITH").unwrap();
+    let end = shard.find(");").unwrap() + 1;
+    assert!(
+        span.start >= with && span.end <= end,
+        "shard-key span {span:?} must lie inside the WITH block"
+    );
+}
+
+#[test]
 fn limit_beyond_u64_and_zero_rejected_with_positive_integer_code() {
     // Integer literals larger than u64::MAX must be rejected at parse time,
     // not silently clamped or wrapped; LIMIT/OFFSET are `positive_integer`
