@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ⚠️ Breaking Changes & Invariant Enforcements
+- **Strict Numeric & Config Parsing**: digit-leading integer literals outside `i64`/`u64` fail with `QQL-PARSE-NUMBER` instead of degrading to string matches; `WITH QUANTIZATION` `bits`/`compression`/`query_encoding` and `WITH SPARSE` `modifier` reject wrong-typed values (`QQL-VALIDATION-CONFIG`); `QUERY POINTS … LIMIT :n` / `OFFSET :n` are rejected like their literal spellings; `CREATE SHARD KEY` `shards_number`/`replication_factor` must fit `u32`.
+- **Named Vector `object`**: a list-valued `object` in a vector dict is a named vector, not an `InferenceObject` payload — only an object-valued key claims the inference shape, mirroring `text`/`image`.
+
+### 🐛 Bug Fixes
+- **Parameter Binding**: `PARAMS (idf = WHERE …)` and `BATCH … PARAMS` placeholders are bound and censused (unbound IDF filters now fail `QQL-BIND-MISSING-PARAM`); `WAL`/`STRICT_MODE`/`METADATA`/`SET QUOTA` config values bind instead of parse-yes/bind-no/validate-no.
+- **Text Binding & Formatting**: the protected-span scanner matches the lexer on `''''`, `""""`, and `r'''…'''`, so placeholders after those runs bind and comments survive formatting; the formatter parenthesizes nested formula negation instead of emitting a `--` comment; glued binary minus (`1-2`, `a-1`) parses as subtraction, and text binding no longer renders `x--2` for `x-:n`.
+- **Diagnostics**: config-block and shard-key validation errors point at the consumed block instead of the following token/EOF; decay functions reject surplus positional arguments; `geo_distance` accepts unsigned coordinates.
+
 ## [0.4.2] - 2026-09-26
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
