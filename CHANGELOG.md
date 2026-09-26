@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-26
+
+### ⚠️ Breaking Changes & Invariant Enforcements
+- **Typed Plan Values**: `qql-plan` holds `qql_core::ast::Value` instead of `serde_json::Value`; `value_to_json` is removed. JSON renders once at the transport boundary; wire bytes unchanged ([#184](https://github.com/srimon12/qql-rs/pull/184)).
+- **u64 Match Overflow Fails Closed**: gRPC rejects `u64` match values above `i64::MAX` instead of saturating ([#184](https://github.com/srimon12/qql-rs/pull/184)).
+
+### ⚡ Performance & Internal Architecture
+- **Boundary-Only Value Rendering**: no per-value `serde_json` tree at plan time; gRPC converts AST values straight to protobuf with no pre-clone. 10k×128 upsert: plan 5.72→4.27 ms, plan→proto 7.58→6.47 ms, plan→REST 25.63→24.70 ms ([#184](https://github.com/srimon12/qql-rs/pull/184)).
+- **Size-Hygiene Splits**: `qql-edge` backend filter/config and embedder, plus `qql-plan` DDL, split into focused modules with no behavior change ([#180](https://github.com/srimon12/qql-rs/pull/180), [#181](https://github.com/srimon12/qql-rs/pull/181), [#182](https://github.com/srimon12/qql-rs/pull/182)).
+
+### 🌐 Website, Playground & DX
+- **VS Code Extension Requires 1.138+**: `engines.vscode` tracks `@types/vscode` 1.138 ([#184](https://github.com/srimon12/qql-rs/pull/184)).
+
+### 🛠️ Workspace, Tooling & Verification
+- Routine dependency and tooling bumps: `fastembed` 7.1.0, `actions/setup-node` 7, `@vscode/vsce` 4.0, plus the vscode-ext, napi, cargo, and website groups ([#172](https://github.com/srimon12/qql-rs/pull/172)–[#179](https://github.com/srimon12/qql-rs/pull/179)).
+
 ## [0.4.1] - 2026-09-18
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
@@ -19,8 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stable `toJSON` Object Contract**: `Stmt.toJSON()` returns the BigInt-safe plain object (same as `toObject()`) on Node and WASM; `toJson()` stays the exact-text string. `JSON.stringify` throws on snowflake `BigInt` IDs by design instead of rounding or double-encoding ([#167](https://github.com/srimon12/qql-rs/pull/167)).
 - **Unified Batch Error Contract**: `Executor::execute_batch_nodes` and its batch internals take `OnError` instead of a `bool` flag ([#167](https://github.com/srimon12/qql-rs/pull/167)).
 - **Single `compile` Everywhere**: Module-level route compilation is now `compile` on Python, Node, and WASM (replacing `compile_query` / `compileQuery`); `Client.compile` and `Stmt.compile_route` are unchanged. WASM also drops `setRemoteEmbedder` (use `setHttpEmbedder`) and snake-case `inject_filter` (use `injectFilter`); `compileBytes` / `compileRouteBytes` accept `params` ([#167](https://github.com/srimon12/qql-rs/pull/167)).
-- **Typed Plan Values**: `qql-plan` holds `qql_core::ast::Value` instead of `serde_json::Value`; `value_to_json` is removed. JSON renders once at the transport boundary; wire bytes unchanged ([#184](https://github.com/srimon12/qql-rs/pull/184)).
-- **u64 Match Overflow Fails Closed**: gRPC rejects `u64` match values above `i64::MAX` instead of saturating ([#184](https://github.com/srimon12/qql-rs/pull/184)).
 
 ### 🚀 Core Engine & Language
 - **Wire-Compatible BM25 Text Pipeline**: The document encoder is bit-for-bit compatible with Qdrant's `qdrant/bm25` across 30 languages (ASCII folding, stopword lists, custom vocabularies), so client-embedded sparse vectors are interchangeable with server-side inference ([#160](https://github.com/srimon12/qql-rs/pull/160)).
@@ -52,7 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command Palette, Shortcuts & Mobile Panes**: `⌘K` palette over every action and statement, a keyboard-shortcut reference dialog, platform-aware key hints, a cursor/statement status strip, and an Editor/Result pane switch on mobile, where a run reveals the result pane ([#166](https://github.com/srimon12/qql-rs/pull/166)).
 - **Configurable In-Browser Embeddings**: Choose any Transformers.js model (curated list or custom id) and a WebGPU/WASM backend, with the resolved dimension reported in the header. New sessions default to browser embeddings, so the first run works without a local embedding server ([#166](https://github.com/srimon12/qql-rs/pull/166)).
 - **Playground Rebuilt as Layered Modules**: The 1.8k-line controller is now a 26-line entry over `core/` · `editor/` · `run/` · `panels/` · `dialogs/` · `shell/` · `services/`. Preference persistence, slice-run error attribution, dialog wiring, and result visibility were fixed in the process, and every website area gained an `AGENTS.md` guide ([#166](https://github.com/srimon12/qql-rs/pull/166)).
-- **VS Code Extension Requires 1.138+**: `engines.vscode` tracks `@types/vscode` 1.138 ([#184](https://github.com/srimon12/qql-rs/pull/184)).
 
 ### ⚡ Performance & Internal Architecture
 - **Single-Pass Planning Core**: Query and mutation planning share one `plan_and_project` core, removing redundant allocations and intermediate JSON clones ([#158](https://github.com/srimon12/qql-rs/pull/158), [#159](https://github.com/srimon12/qql-rs/pull/159)).
@@ -60,7 +73,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Topology & Schema Caching**: Collection topologies are cached across statements, minimizing metadata roundtrips ([#154](https://github.com/srimon12/qql-rs/pull/154)).
 - **Single HTTP Sender**: REST transport is consolidated into one HTTP sender with a unified response-envelope path ([#159](https://github.com/srimon12/qql-rs/pull/159)).
 - **Zero-Clone Batch Builds**: Ambient query and mutation batches move requests into the wire batch instead of cloning per member, with response normalization split into `executor/normalize.rs`. Same routes, responses, and retry semantics ([#165](https://github.com/srimon12/qql-rs/pull/165)).
-- **Boundary-Only Value Rendering**: no per-value `serde_json` tree at plan time; gRPC converts AST values straight to protobuf with no pre-clone. 10k×128 upsert: plan 5.72→4.27 ms, plan→proto 7.58→6.47 ms, plan→REST 25.63→24.70 ms ([#184](https://github.com/srimon12/qql-rs/pull/184)).
 
 ## [0.4.0] - 2026-09-12
 
