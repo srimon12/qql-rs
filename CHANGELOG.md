@@ -18,13 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CTE Visibility**: inline prefetch sub-queries see enclosing CTEs (bodies still see prior definitions only); forward references stay rejected.
 - **Strict Numeric & Config Parsing**: digit-leading integer literals outside `i64`/`u64` fail with `QQL-PARSE-NUMBER` instead of degrading to string matches; `WITH QUANTIZATION` `bits`/`compression`/`query_encoding` and `WITH SPARSE` `modifier` reject wrong-typed values (`QQL-VALIDATION-CONFIG`); `QUERY POINTS … LIMIT :n` / `OFFSET :n` are rejected like their literal spellings; `CREATE SHARD KEY` `shards_number`/`replication_factor` must fit `u32`.
 - **Named Vector `object`**: a list-valued `object` in a vector dict is a named vector, not an `InferenceObject` payload — only an object-valued key claims the inference shape, mirroring `text`/`image`.
+- **Client Embedding Fails Closed on Unrepresentable Inputs**: with a client embedder attached, `OPTIONS {…}` on `TEXT`/`IMAGE` (a server-side inference directive the embedder trait cannot honor) and unbound `TEXT :param` / `HYBRID TEXT :param` now fail with `QQL-EMBEDDING` instead of silently dropping the options or embedding the empty placeholder; `OBJECT` inputs still pass `OPTIONS` through to server-side inference.
+- **UPSERT Target Conflicts**: a vector target named by both an `embedding` spec and an `embed` directive (or by two directives) now fails with `QQL-EMBEDDING` instead of the later clause silently overwriting the earlier vector.
+- **Query Nesting Guard**: hand-built `CTE` / `PREFETCH` nesting deeper than 64 levels fails closed with `QQL-VALIDATION-NESTING` in the embedding and topology walks instead of risking a stack overflow.
+- **`qql-embed` Surface Trimmed**: `SparseEmbedder`, `Embedder::embed_joint` / `embed_joint_batch` (plus `JointEmbeddingOutput` and the edge override), and `sparse::for_each_token` / `for_each_token_id` are removed — all had zero product callers.
 
 ### 🐛 Bug Fixes
 - **CTE Chains**: `WITH` definitions are stored once and resolved by scope, so ~25 chained CTEs parse to a linear AST (was exponential), and a nested `PREFETCH (name)` inside a CTE resolves to the client-embedded body instead of a server-side inference fallback.
+- **Auto-Embed Field Priority**: the no-clause UPSERT fallback searches the same ordered default text fields (`text`, `body`, `content`, `title`, …) as `USING` / `EMBED` instead of only `text`/`body`/`content` in payload order, so the embedded field no longer depends on payload key order and a `title`-only point embeds like its explicit-spec counterpart.
+- **`MODEL 'qdrant/bm25'`**: accepted (ASCII case-insensitive) as an alias of the local wire-compatible BM25 pipeline on the trait defaults and the HTTP/edge local paths, instead of being rejected.
+- **Batch Cardinality Messages**: a host batch returning the wrong vector count now names the entry point that was called (`embed_sparse_document_batch` on sparse legs) instead of always blaming `embed_dense_batch`.
+- **Embedding Diagnostics**: the "Found fields" hint unions the payload keys of the first few inline points instead of listing only the first point's keys.
 - **Template Vector Binding**: prepared-statement vectors bind inside `QUERY … GROUP BY`, `BATCH` members, `CROSS RERANK` candidates, and prefetch stages below the first level instead of shipping literal `":name"` strings.
 - **Parameter Binding**: `PARAMS (idf = WHERE …)` and `BATCH … PARAMS` placeholders are bound and censused (unbound IDF filters now fail `QQL-BIND-MISSING-PARAM`); `WAL`/`STRICT_MODE`/`METADATA`/`SET QUOTA` config values bind instead of parse-yes/bind-no/validate-no.
 - **Text Binding & Formatting**: the protected-span scanner matches the lexer on `''''`, `""""`, and `r'''…'''`, so placeholders after those runs bind and comments survive formatting; the formatter parenthesizes nested formula negation instead of emitting a `--` comment; glued binary minus (`1-2`, `a-1`) parses as subtraction, and text binding no longer renders `x--2` for `x-:n`.
 - **Diagnostics**: config-block and shard-key validation errors point at the consumed block instead of the following token/EOF; decay functions reject surplus positional arguments; `geo_distance` accepts unsigned coordinates.
+
+### ⚡ Performance & Internal Architecture
+- **BM25 Pipeline Reuse**: the default sparse `Embedder` implementations reuse the process-wide default pipeline (instead of rebuilding the stopword set and stemmer per text) when the configured text options are the defaults, and `sparse::embed_document_with_params` runs on that shared pipeline — output is byte-identical.
+- **BM25 Docs Corrected**: bit-for-bit server parity for TF weights is downgraded to "within f32 rounding" in the docs, and the post-stemming `chars()` length limits plus the unfolded stopword-entry behavior are pinned by tests as deliberate (unverified) behavior rather than claimed parity.
 
 ## [0.4.2] - 2026-09-26
 
