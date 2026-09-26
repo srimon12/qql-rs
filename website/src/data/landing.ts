@@ -3,7 +3,7 @@
 export const hero = {
 	headline: "SQL for Qdrant.",
 	lede: "One declarative statement for hybrid search, filters, mutations and schema. Runs everywhere Qdrant does.",
-	eyebrow: "Open source · MIT · v0.4.1",
+	eyebrow: "Open source · MIT · v0.4.2",
 	specimenTitle: "search.qql",
 	specimenMeta: "QQL · MIT",
 	specimenRoute: "POST /collections/medical/points/query",
@@ -138,7 +138,7 @@ export const faq = {
 		{
 			question: "Is it production-ready?",
 			answer:
-				"It is young: v0.4.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+				"It is young: v0.4.2. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
 		},
 		{
 			question: "Can I try it without a cluster?",

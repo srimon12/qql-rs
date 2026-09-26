@@ -1291,7 +1291,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1494,7 +1494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1559,9 +1559,9 @@ dependencies = [
 
 [[package]]
 name = "fastembed"
-version = "7.0.1"
+version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c88b42d8347afbf09e3d2fac61fcc22b698b7b2f35a27a6e988bcdad5784b07"
+checksum = "3850d724d559da51a4b88f68b0ba111a2627c32279bec6b3c256f073c71a3195"
 dependencies = [
  "hf-hub",
  "image",
@@ -3313,7 +3313,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "nqql"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "napi",
  "napi-derive",
@@ -3328,7 +3328,7 @@ dependencies = [
 
 [[package]]
 name = "nqql-common"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "napi",
  "qql",
@@ -3340,7 +3340,7 @@ dependencies = [
 
 [[package]]
 name = "nqql-edge"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "napi",
  "napi-derive",
@@ -4292,7 +4292,7 @@ dependencies = [
 
 [[package]]
 name = "pyqql"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
@@ -4308,7 +4308,7 @@ dependencies = [
 
 [[package]]
 name = "pyqql-common"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "pyo3",
  "pythonize",
@@ -4322,7 +4322,7 @@ dependencies = [
 
 [[package]]
 name = "pyqql-edge"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
@@ -4462,7 +4462,7 @@ dependencies = [
 
 [[package]]
 name = "qql"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4489,7 +4489,7 @@ dependencies = [
 
 [[package]]
 name = "qql-cli"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "axum",
  "clap",
@@ -4509,7 +4509,7 @@ dependencies = [
 
 [[package]]
 name = "qql-conformance"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "pest",
  "pest_derive",
@@ -4520,7 +4520,7 @@ dependencies = [
 
 [[package]]
 name = "qql-convert"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "qql-core",
  "qql-plan",
@@ -4529,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "qql-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "phf 0.14.0",
  "serde",
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "qql-edge"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "fastembed",
@@ -4556,7 +4556,7 @@ dependencies = [
 
 [[package]]
 name = "qql-embed"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "murmur3_32",
@@ -4568,11 +4568,11 @@ dependencies = [
 
 [[package]]
 name = "qql-grammar-gen"
-version = "0.4.1"
+version = "0.4.2"
 
 [[package]]
 name = "qql-plan"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "qql-core",
  "serde",
@@ -4581,7 +4581,7 @@ dependencies = [
 
 [[package]]
 name = "qql-wasm"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "gloo-net",
@@ -4667,7 +4667,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5225,7 +5225,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5284,7 +5284,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5868,7 +5868,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6763,7 +6763,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
