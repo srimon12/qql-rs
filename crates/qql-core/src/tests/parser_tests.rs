@@ -240,6 +240,38 @@ fn formula_max_min_acosh_functions() {
 }
 
 #[test]
+fn decay_surplus_arguments_rejected() {
+    // Surplus positional args used to be silently dropped (core-audit #13).
+    for source in [
+        "QUERY FORMULA EXP_DECAY(t, 0, 7, 0.5, 99) FROM docs;",
+        "QUERY FORMULA GAUSS_DECAY(t, 0, 7, 0.5, 99) FROM docs;",
+        "QUERY FORMULA LIN_DECAY(t, 0, 7, 0.5, 99) FROM docs;",
+    ] {
+        let err = Parser::parse(source).expect_err(&format!("expected arity error for: {source}"));
+        assert_eq!(err.kind, crate::error::ErrorKind::Parse, "wrong kind: {source}");
+    }
+    // Four positional args still parse.
+    Parser::parse("QUERY FORMULA EXP_DECAY(t, 0, 7, 0.5) FROM docs;")
+        .expect("four positional args are valid");
+}
+
+#[test]
+fn geo_distance_accepts_uint_coordinates() {
+    // core-audit #13: an unsigned lat/lon literal (Value::UInt) must not fall
+    // through to the misleading "must have 'lat' key" error.
+    Parser::parse("QUERY FORMULA GEO_DISTANCE({lat: 18446744073709551615, lon: 0}, loc) FROM docs;")
+        .expect("UInt lat must be accepted");
+
+    let err = Parser::parse("QUERY FORMULA GEO_DISTANCE({lat: 'x', lon: 122}, loc) FROM docs;")
+        .expect_err("non-numeric lat must fail");
+    assert!(
+        err.message.contains("'lat' must be a number"),
+        "unexpected message: {}",
+        err.message
+    );
+}
+
+#[test]
 fn formula_domain_default_parsing() {
     let s = Parser::parse(
         "QUERY FORMULA ACOSH(rank) [DEFAULT = 0.0] + SQRT(score) [DEFAULT = 0.0] FROM docs;",
