@@ -45,7 +45,7 @@ tonic-prost-build = "0.14"
 protoc-bin-vendored = "3"
 
 [dev-dependencies]
-jsonschema = "0.56"
+jsonschema = "0.57"
 
 [lints]
 workspace = true
