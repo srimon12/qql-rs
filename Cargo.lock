@@ -4563,6 +4563,7 @@ dependencies = [
  "phf 0.14.0",
  "qdrant-rust-stemmers",
  "qql-core",
+ "qql-plan",
  "tokio",
 ]
 

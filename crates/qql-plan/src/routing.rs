@@ -35,6 +35,20 @@ pub enum RestProjectionError {
     /// is merge-only, so `OVERWRITE` only runs inside a batch
     /// (`POST /points/batch` with `{ "overwrite_payload": … }`).
     OverwriteRequiresBatch,
+    /// The statement projects to a *sequence* of REST calls, not one route
+    /// (e.g. `CREATE COLLECTION` with `shard_keys` / `read_fan_out_*`, where
+    /// the runtime applies the extra steps: `PATCH` params, `PUT …/shards`).
+    /// Compile still exposes `stmt_type`; there is no single route to return.
+    MultiStep {
+        /// Statement type name used in error messages.
+        stmt_type: &'static str,
+    },
+    /// A batch builder invariant failed (homogeneous family/collection/opts).
+    /// Surfaces as `QQL-BATCH-INVARIANT`, not as a serialization regression.
+    BatchInvariant {
+        /// Invariant message from the builder.
+        message: String,
+    },
     /// Plan IR failed to serialize to JSON (a `Serialize` regression).
     SerializeFailed {
         /// Underlying serde error message.
@@ -45,14 +59,17 @@ pub enum RestProjectionError {
 impl RestProjectionError {
     /// Shared mapping to a structured [`QqlError`].
     ///
-    /// REST (`qql-runtime`) and WASM project through here so the code and
-    /// message stay identical on every transport. Call sites must not
-    /// re-spell these arms.
+    /// REST (`qql-runtime`), WASM and the SDK compile entry points project
+    /// through here so the code, kind and message stay identical on every
+    /// path. Call sites must not re-spell these arms.
     pub fn to_qql_error(self) -> QqlError {
         match self {
-            Self::ClientSideOnly { stmt_type } => QqlError::execution(
+            Self::ClientSideOnly { stmt_type } => QqlError::validation(
                 "QQL-REST-CLIENT-SIDE",
-                format!("{stmt_type} cannot be executed as a single REST route"),
+                format!(
+                    "{stmt_type} is client-side and has no single Qdrant REST route; \
+                     execute via the runtime client-side path"
+                ),
                 None,
             ),
             Self::SerializeFailed { message } => QqlError::execution(
@@ -65,6 +82,17 @@ impl RestProjectionError {
                 "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only; run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
                 None,
             ),
+            Self::MultiStep { stmt_type } => QqlError::validation(
+                "QQL-REST-MULTI-STEP",
+                format!(
+                    "{stmt_type} projects to a multi-step REST sequence (a conditional PATCH \
+                     and/or per-key shard writes); it has no single Qdrant REST route"
+                ),
+                None,
+            ),
+            Self::BatchInvariant { message } => {
+                QqlError::execution("QQL-BATCH-INVARIANT", message, None)
+            }
         }
     }
 }
@@ -81,6 +109,14 @@ pub(crate) fn serialize_body<T: serde::Serialize>(
     req: &T,
 ) -> Result<serde_json::Value, serde_json::Error> {
     serde_json::to_value(req)
+}
+
+/// Map a batch-builder invariant failure into the projection error channel
+/// without relabeling it as a serialization regression.
+fn batch_invariant(error: QqlError) -> RestProjectionError {
+    RestProjectionError::BatchInvariant {
+        message: error.message.into_owned(),
+    }
 }
 
 /// REST projection of a planned operation (HTTP method/path/query/body).
@@ -258,12 +294,23 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         PlannedOperation::CreateCollection {
             collection,
             request,
-        } => Route {
-            method: Method::Put,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: body(&crate::ddl::create_collection_rest_body(request))?,
-        },
+        } => {
+            // `shard_keys` / `read_fan_out_*` need the multi-step sequence
+            // (conditional PATCH + per-key shard PUTs) that the runtime
+            // applies. A single-route projection would silently drop them, so
+            // fail closed instead.
+            if crate::ddl::create_collection_needs_multi_step(request) {
+                return Err(RestProjectionError::MultiStep {
+                    stmt_type: "create_collection",
+                });
+            }
+            Route {
+                method: Method::Put,
+                path: format!("/collections/{collection}"),
+                query: Vec::new(),
+                body: body(&crate::ddl::create_collection_rest_body(request))?,
+            }
+        }
         PlannedOperation::UpdateCollection {
             collection,
             request,
@@ -357,12 +404,9 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             timeout,
             consistency,
         } => match key {
-            crate::batch::BatchKey::Query(collection) => {
-                let (_, batch) = crate::batch::build_query_batch(operations).map_err(|e| {
-                    RestProjectionError::SerializeFailed {
-                        message: e.to_string(),
-                    }
-                })?;
+            crate::batch::BatchKey::Query { collection, .. } => {
+                let (_, _, batch) =
+                    crate::batch::build_query_batch(operations).map_err(batch_invariant)?;
                 Route {
                     method: Method::Post,
                     path: format!("/collections/{collection}/points/query/batch"),
@@ -370,12 +414,9 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                     body: body(&batch)?,
                 }
             }
-            crate::batch::BatchKey::Mutation(collection) => {
-                let (_, _, batch) = crate::batch::build_update_batch(operations).map_err(|e| {
-                    RestProjectionError::SerializeFailed {
-                        message: e.to_string(),
-                    }
-                })?;
+            crate::batch::BatchKey::Mutation { collection, .. } => {
+                let (_, _, _, batch) =
+                    crate::batch::build_update_batch(operations).map_err(batch_invariant)?;
                 let mut query = Vec::new();
                 if let Some(wait) = wait {
                     query.push(("wait".into(), wait.to_string()));
@@ -397,9 +438,9 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
 }
 
 /// Outcome of the shared plan → project core: either a routable [`Route`]
-/// or the reason there is no single Qdrant REST route (client-side-only or
-/// batch-only). A serialization regression never surfaces here — it fails the
-/// whole compilation as `QQL-PLAN-SERIALIZE`.
+/// or the reason there is no single Qdrant REST route (client-side-only,
+/// batch-only, or multi-step). A serialization regression never surfaces
+/// here — it fails the whole compilation as `QQL-PLAN-SERIALIZE`.
 enum ProjectOutcome {
     /// A real Qdrant REST route.
     Route(Route),
@@ -408,6 +449,9 @@ enum ProjectOutcome {
     /// `OVERWRITE` payload writes (merge-only `POST /points/payload` cannot
     /// replace payload; batch-only).
     BatchOnly,
+    /// Multi-step projects (e.g. `CREATE COLLECTION` with shard keys);
+    /// carries the statement type name.
+    MultiStep(&'static str),
 }
 
 /// Single fallible plan → project path behind [`try_route`] and
@@ -433,47 +477,44 @@ fn plan_and_project(statement: &Stmt) -> Result<(&'static str, ProjectOutcome), 
         Err(RestProjectionError::OverwriteRequiresBatch) => {
             Ok((stmt_type, ProjectOutcome::BatchOnly))
         }
-        // A serialization failure is a plan-IR regression, not a missing
-        // route — surface it instead of swallowing it as "client-side".
-        Err(RestProjectionError::SerializeFailed { message }) => Err(QqlError::execution(
-            "QQL-PLAN-SERIALIZE",
-            format!("plan IR REST request body serialization failed: {message}"),
-            None,
-        )),
+        Err(RestProjectionError::MultiStep { stmt_type }) => {
+            Ok((stmt_type, ProjectOutcome::MultiStep(stmt_type)))
+        }
+        // Real failures (serialization regressions, batch invariants) surface
+        // through the one shared mapping instead of being swallowed.
+        Err(other) => Err(other.to_qql_error()),
     }
 }
 
 /// Plan a statement and project it to a REST route in one call.
 ///
-/// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
-/// RERANK) that have no single Qdrant REST endpoint, and
-/// `QQL-REST-OVERWRITE-BATCH-ONLY` for `OVERWRITE` payload writes (merge-only
-/// `POST /points/payload` cannot replace payload; use a batch).
+/// Non-routable statements fail through [`RestProjectionError::to_qql_error`]
+/// so every entry point returns the same code, kind and message:
+/// `QQL-REST-CLIENT-SIDE` (client-side operations, e.g. CROSS RERANK),
+/// `QQL-REST-OVERWRITE-BATCH-ONLY` (`OVERWRITE` payload writes), and
+/// `QQL-REST-MULTI-STEP` (multi-step create sequences).
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
     let (_, outcome) = plan_and_project(statement)?;
     match outcome {
         ProjectOutcome::Route(route) => Ok(route),
-        ProjectOutcome::ClientSide(stmt_type) => Err(QqlError::validation(
-            "QQL-REST-CLIENT-SIDE",
-            format!(
-                "{stmt_type} is client-side and has no single Qdrant REST route; \
-                 execute via the runtime CROSS RERANK path"
-            ),
-            None,
-        )),
-        ProjectOutcome::BatchOnly => Err(QqlError::validation(
-            "QQL-REST-OVERWRITE-BATCH-ONLY",
-            "OVERWRITE has no single Qdrant REST route: POST /points/payload is merge-only; \
-             run the statement inside a BATCH block (POST /points/batch with overwrite_payload)",
-            None,
-        )),
+        ProjectOutcome::ClientSide(stmt_type) => {
+            Err(RestProjectionError::ClientSideOnly { stmt_type }.to_qql_error())
+        }
+        ProjectOutcome::BatchOnly => {
+            Err(RestProjectionError::OverwriteRequiresBatch.to_qql_error())
+        }
+        ProjectOutcome::MultiStep(stmt_type) => {
+            Err(RestProjectionError::MultiStep { stmt_type }.to_qql_error())
+        }
     }
 }
 
 /// Offline compile result for host SDKs.
 ///
-/// `route` is `None` for client-side operations (e.g. CROSS RERANK) that have
-/// a stable `stmt_type` but no single Qdrant HTTP endpoint.
+/// `route` is `None` for statements with a stable `stmt_type` but no single
+/// Qdrant HTTP endpoint: client-side operations (e.g. CROSS RERANK),
+/// batch-only writes (`OVERWRITE`), and multi-step DDL (e.g. `CREATE
+/// COLLECTION` with shard keys).
 #[derive(Debug)]
 pub struct CompiledStatement {
     /// Stable snake_case type id from `compile_stmt_type`.
@@ -486,12 +527,14 @@ pub struct CompiledStatement {
 ///
 /// Always sets `stmt_type` from [`crate::plan::PlannedOperation::compile_stmt_type`].
 /// REST path/method/payload are present only when a real Qdrant route exists
-/// (`None` for client-side-only and batch-only operations).
+/// (`None` for client-side-only, batch-only, and multi-step operations).
 pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core::error::QqlError> {
     let (stmt_type, outcome) = plan_and_project(statement)?;
     let route = match outcome {
         ProjectOutcome::Route(route) => Some(route),
-        ProjectOutcome::ClientSide(_) | ProjectOutcome::BatchOnly => None,
+        ProjectOutcome::ClientSide(_)
+        | ProjectOutcome::BatchOnly
+        | ProjectOutcome::MultiStep(_) => None,
     };
     Ok(CompiledStatement { stmt_type, route })
 }
@@ -519,6 +562,67 @@ mod tests {
         let compiled = compile_statement(&s).unwrap();
         assert_eq!(compiled.stmt_type, "cross_rerank");
         assert!(compiled.route.is_none());
+    }
+
+    #[test]
+    fn projection_errors_share_one_mapping_contract() {
+        // One condition, one code/kind/message triple: `try_route` must not
+        // re-spell what `to_qql_error` already defines.
+        let cases = [
+            (
+                RestProjectionError::ClientSideOnly {
+                    stmt_type: "cross_rerank",
+                },
+                "QQL-REST-CLIENT-SIDE",
+                qql_core::error::ErrorKind::Validation,
+            ),
+            (
+                RestProjectionError::OverwriteRequiresBatch,
+                "QQL-REST-OVERWRITE-BATCH-ONLY",
+                qql_core::error::ErrorKind::Validation,
+            ),
+            (
+                RestProjectionError::MultiStep {
+                    stmt_type: "create_collection",
+                },
+                "QQL-REST-MULTI-STEP",
+                qql_core::error::ErrorKind::Validation,
+            ),
+            (
+                RestProjectionError::BatchInvariant {
+                    message: "query batch members disagree on timeout / consistency".into(),
+                },
+                "QQL-BATCH-INVARIANT",
+                qql_core::error::ErrorKind::Execution,
+            ),
+            (
+                RestProjectionError::SerializeFailed {
+                    message: "boom".into(),
+                },
+                "QQL-PLAN-SERIALIZE",
+                qql_core::error::ErrorKind::Execution,
+            ),
+        ];
+        for (error, code, kind) in cases {
+            let mapped = error.to_qql_error();
+            assert_eq!(mapped.code, code, "{code}");
+            assert_eq!(mapped.kind, kind, "{code}");
+            assert!(!mapped.message.is_empty(), "{code}");
+        }
+
+        // The fallible route entry agrees with the shared mapping exactly.
+        let s = Parser::parse(
+            "QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD body FROM docs PREFETCH (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) LIMIT 10;",
+        )
+        .unwrap();
+        let via_try_route = try_route(&s).unwrap_err();
+        let via_mapping = RestProjectionError::ClientSideOnly {
+            stmt_type: "cross_rerank",
+        }
+        .to_qql_error();
+        assert_eq!(via_try_route.code, via_mapping.code);
+        assert_eq!(via_try_route.kind, via_mapping.kind);
+        assert_eq!(via_try_route.message, via_mapping.message);
     }
 
     #[test]

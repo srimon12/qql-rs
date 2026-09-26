@@ -18,16 +18,16 @@ mod tests;
 
 pub use crate::ddl_rest::{
     CreateCollectionDeferredParams, CreateCollectionRestBody, CreateIndexRestBody, RestDdlStep,
-    create_collection_deferred_params_rest, create_collection_rest_body,
-    create_collection_rest_steps, create_index_op, create_index_rest_body, drop_index_op,
-    update_collection_op,
+    create_collection_deferred_params_rest, create_collection_needs_multi_step,
+    create_collection_rest_body, create_collection_rest_steps, create_index_op,
+    create_index_rest_body, drop_index_op, update_collection_op,
 };
 
 pub use collection::{lower_alter_collection, lower_create_collection};
 pub use index::lower_create_index;
 pub use runtime::{lower_hnsw_config, lower_optimizers_config, lower_quantization_config};
 
-pub(crate) use options::lower_replica_state;
+pub(crate) use options::{lower_replica_state, validate_shard_key_counts};
 pub(crate) use quota::lower_set_quota;
 
 use qql_core::error::{QqlError, Span};

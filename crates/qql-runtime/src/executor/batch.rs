@@ -224,15 +224,13 @@ impl Executor {
         let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
         if is_query {
             // Owned build: each `QueryRequest` moves (zero clones on the hot
-            // path). Success normalizes from the response alone; failures
-            // reconstruct per-member operations for retry (cold path only).
-            let (collection, batch) = qql_plan::into_query_batch(operations)?;
+            // path). The group's read opts are uniform by construction (they
+            // are part of the batch key) and ride the batch RPC header.
+            let (collection, opts, batch) = qql_plan::into_query_batch(operations)?;
             let expected = batch.searches.len();
-            // Ambient groups carry no header opts: per-search read opts stay
-            // on the member requests (gRPC) as before.
             let retry = match self
                 .client
-                .execute_query_batch(&collection, &batch, None, None)
+                .execute_query_batch(&collection, &batch, opts.timeout, opts.consistency)
                 .await
             {
                 Ok(responses) if responses.len() == expected => {
@@ -323,14 +321,14 @@ impl Executor {
         }
 
         // Owned build: each mutation request moves (zero clones on the hot
-        // path). Success normalizes from the owned wire operations; failures
-        // move them back into planned operations for retry (cold path only).
-        let (collection, _, batch) = qql_plan::into_update_batch(operations)?;
+        // path). The group's effective `wait` is uniform by construction (it
+        // is part of the batch key) and rides the batch RPC header.
+        let (collection, _, opts, batch) = qql_plan::into_update_batch(operations)?;
         let expected = batch.operations.len();
-        // Ambient groups always wait, preserving prior behavior.
+        let wait = opts.wait.unwrap_or(true);
         let retry = match self
             .client
-            .execute_update_batch(&collection, &batch, true)
+            .execute_update_batch(&collection, &batch, wait)
             .await
         {
             Ok(responses) if responses.len() == expected => {
@@ -361,7 +359,7 @@ impl Executor {
             let operations = batch
                 .operations
                 .into_iter()
-                .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op))
+                .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op, wait))
                 .collect();
             self.retry_batch_individually(operations, results).await?;
         }
@@ -397,8 +395,8 @@ impl Executor {
             ));
         };
         match key {
-            qql_plan::BatchKey::Query(collection) => {
-                let (_, batch) = qql_plan::build_query_batch(operations)?;
+            qql_plan::BatchKey::Query { collection, .. } => {
+                let (_, _, batch) = qql_plan::build_query_batch(operations)?;
                 let expected = batch.searches.len();
                 match self
                     .client
@@ -429,8 +427,8 @@ impl Executor {
                     }
                 }
             }
-            qql_plan::BatchKey::Mutation(collection) => {
-                let (_, _, batch) = qql_plan::build_update_batch(operations)?;
+            qql_plan::BatchKey::Mutation { collection, .. } => {
+                let (_, _, _, batch) = qql_plan::build_update_batch(operations)?;
                 let expected = batch.operations.len();
                 match self
                     .client

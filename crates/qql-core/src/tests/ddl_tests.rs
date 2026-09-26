@@ -467,7 +467,7 @@ fn scroll_basic() {
     let s = Parser::parse("SCROLL FROM docs LIMIT 50;").unwrap();
     let Stmt::Scroll(sc) = s else { panic!() };
     assert_eq!(sc.collection, "docs");
-    assert_eq!(sc.limit, 50);
+    assert_eq!(sc.limit, Some(50));
     assert!(sc.with_vector.is_none());
 }
 

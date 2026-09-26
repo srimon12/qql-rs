@@ -52,47 +52,7 @@
               "collection": {
                 "Explicit": "docs"
               },
-              "ctes": [
-                {
-                  "name": "dense",
-                  "query": {
-                    "collection": {
-                      "Explicit": "docs"
-                    },
-                    "ctes": [],
-                    "expression": {
-                      "Nearest": {
-                        "input": {
-                          "Text": {
-                            "model": null,
-                            "text": "machine learning"
-                          }
-                        },
-                        "mmr": null,
-                        "prefetch": [],
-                        "using": {
-                          "kind": "Dense",
-                          "multi": false,
-                          "name": "semantic_v2"
-                        }
-                      }
-                    },
-                    "filter": null,
-                    "group": null,
-                    "output": {
-                      "payload": null,
-                      "vectors": null
-                    },
-                    "page": {
-                      "limit": 100,
-                      "offset": null
-                    },
-                    "params": null,
-                    "score_threshold": null,
-                    "shard_key": null
-                  }
-                }
-              ],
+              "ctes": [],
               "expression": {
                 "Nearest": {
                   "input": {
@@ -211,45 +171,7 @@
             "name": "sparse",
             "query": {
               "collection": "Inherited",
-              "ctes": [
-                {
-                  "name": "dense",
-                  "query": {
-                    "collection": "Inherited",
-                    "ctes": [],
-                    "expression": {
-                      "Nearest": {
-                        "input": {
-                          "Text": {
-                            "model": null,
-                            "text": "machine learning"
-                          }
-                        },
-                        "mmr": null,
-                        "prefetch": [],
-                        "using": {
-                          "kind": "Dense",
-                          "multi": false,
-                          "name": "semantic_v2"
-                        }
-                      }
-                    },
-                    "filter": null,
-                    "group": null,
-                    "output": {
-                      "payload": null,
-                      "vectors": null
-                    },
-                    "page": {
-                      "limit": 100,
-                      "offset": null
-                    },
-                    "params": null,
-                    "score_threshold": null,
-                    "shard_key": null
-                  }
-                }
-              ],
+              "ctes": [],
               "expression": {
                 "Nearest": {
                   "input": {
@@ -368,45 +290,7 @@
             "name": "sparse",
             "query": {
               "collection": "Inherited",
-              "ctes": [
-                {
-                  "name": "dense",
-                  "query": {
-                    "collection": "Inherited",
-                    "ctes": [],
-                    "expression": {
-                      "Nearest": {
-                        "input": {
-                          "Text": {
-                            "model": null,
-                            "text": "search"
-                          }
-                        },
-                        "mmr": null,
-                        "prefetch": [],
-                        "using": {
-                          "kind": null,
-                          "multi": false,
-                          "name": "dense"
-                        }
-                      }
-                    },
-                    "filter": null,
-                    "group": null,
-                    "output": {
-                      "payload": null,
-                      "vectors": null
-                    },
-                    "page": {
-                      "limit": 200,
-                      "offset": null
-                    },
-                    "params": null,
-                    "score_threshold": null,
-                    "shard_key": null
-                  }
-                }
-              ],
+              "ctes": [],
               "expression": {
                 "Nearest": {
                   "input": {
@@ -696,45 +580,7 @@
             "name": "second",
             "query": {
               "collection": "Inherited",
-              "ctes": [
-                {
-                  "name": "first",
-                  "query": {
-                    "collection": "Inherited",
-                    "ctes": [],
-                    "expression": {
-                      "Nearest": {
-                        "input": {
-                          "Text": {
-                            "model": null,
-                            "text": "query"
-                          }
-                        },
-                        "mmr": null,
-                        "prefetch": [],
-                        "using": {
-                          "kind": null,
-                          "multi": false,
-                          "name": "dense"
-                        }
-                      }
-                    },
-                    "filter": null,
-                    "group": null,
-                    "output": {
-                      "payload": null,
-                      "vectors": null
-                    },
-                    "page": {
-                      "limit": 100,
-                      "offset": null
-                    },
-                    "params": null,
-                    "score_threshold": null,
-                    "shard_key": null
-                  }
-                }
-              ],
+              "ctes": [],
               "expression": {
                 "Nearest": {
                   "input": {
@@ -853,45 +699,7 @@
             "name": "sparse",
             "query": {
               "collection": "Inherited",
-              "ctes": [
-                {
-                  "name": "dense",
-                  "query": {
-                    "collection": "Inherited",
-                    "ctes": [],
-                    "expression": {
-                      "Nearest": {
-                        "input": {
-                          "Text": {
-                            "model": null,
-                            "text": "search"
-                          }
-                        },
-                        "mmr": null,
-                        "prefetch": [],
-                        "using": {
-                          "kind": null,
-                          "multi": false,
-                          "name": "dense"
-                        }
-                      }
-                    },
-                    "filter": null,
-                    "group": null,
-                    "output": {
-                      "payload": null,
-                      "vectors": null
-                    },
-                    "page": {
-                      "limit": 200,
-                      "offset": null
-                    },
-                    "params": null,
-                    "score_threshold": null,
-                    "shard_key": null
-                  }
-                }
-              ],
+              "ctes": [],
               "expression": {
                 "Nearest": {
                   "input": {

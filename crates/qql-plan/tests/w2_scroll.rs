@@ -1,5 +1,6 @@
 //! W2 scroll/ordering/lookup lowering: AST → plan → REST body shapes.
 
+use qql_core::ast::Stmt;
 use qql_core::parser::Parser;
 use qql_plan::PlannedOperation;
 use qql_plan::{plan, to_rest_route};
@@ -110,4 +111,35 @@ fn scroll_plans_to_scroll_operation() {
     let op = plan(&stmt).unwrap();
     assert!(matches!(op, PlannedOperation::Scroll { .. }));
     assert_eq!(op.collection(), Some("docs"));
+}
+
+#[test]
+fn scroll_limit_placeholder_never_plans_as_a_default() {
+    // An unbound `LIMIT :n` must not plan as the server default of 10: the
+    // runtime path fails at the bind gate, and a hand-built statement with no
+    // resolved limit fails in the lowering.
+    let stmt = Parser::parse("SCROLL FROM docs LIMIT :n;").unwrap();
+    let err = plan(&stmt).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM", "{err:?}");
+
+    let mut bound = Parser::parse("SCROLL FROM docs LIMIT :n;").unwrap();
+    qql_core::params::bind_stmt(
+        &mut bound,
+        |name| (name == "n").then_some(qql_core::ast::Value::Int(7)),
+        &[],
+    )
+    .unwrap();
+    let op = plan(&bound).unwrap();
+    let PlannedOperation::Scroll { request, .. } = op else {
+        panic!("expected Scroll");
+    };
+    assert_eq!(request.limit, Some(7));
+
+    // Hand-built AST: `None` limit with no placeholder left to bind.
+    let Stmt::Scroll(mut scroll) = Parser::parse("SCROLL FROM docs LIMIT 5;").unwrap() else {
+        panic!("expected Scroll");
+    };
+    scroll.limit = None;
+    let err = plan(&Stmt::Scroll(scroll)).unwrap_err();
+    assert_eq!(err.code, "QQL-PLAN-SCROLL-LIMIT", "{err:?}");
 }

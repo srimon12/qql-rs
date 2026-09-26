@@ -34,6 +34,22 @@ pub fn lower_search_params(
     params: &qql_core::ast::SearchParams,
 ) -> Result<Option<SearchParamsRequest>, QqlError> {
     let mut has = false;
+    if params.max_selectivity.is_some() && params.acorn.is_none() {
+        // The parser rejects this combination; a hand-built AST reaching the
+        // planner must fail closed instead of silently dropping the ceiling.
+        return Err(QqlError::validation(
+            "QQL-PLAN-PARAMS",
+            "max_selectivity requires PARAMS (acorn = true, ...)",
+            None,
+        ));
+    }
+    if params.rrf_k == Some(0) {
+        return Err(QqlError::validation(
+            "QQL-PLAN-RRF-PARAMS",
+            "rrf_k must be at least 1 (OpenAPI Rrf.k minimum)",
+            None,
+        ));
+    }
     let idf = match params.idf.as_ref() {
         None => None,
         Some(idf) => Some(match &idf.corpus {

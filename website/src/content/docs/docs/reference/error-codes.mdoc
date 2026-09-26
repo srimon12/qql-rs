@@ -174,26 +174,38 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-CROSS-RERANK-MODEL` | `CROSS RERANK MODEL` must not be empty |
 | `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
+| `QQL-PLAN-DELETE-VECTOR` | `DELETE VECTOR` vector list is empty or contains duplicates (`DeleteVectors` requires minItems 1, uniqueItems) |
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
+| `QQL-PLAN-FORMULA-DECAY` | Formula references an unknown decay function; expected `EXP_DECAY`, `LIN_DECAY`, or `GAUSS_DECAY` |
 | `QQL-PLAN-GROUP` | A groups query was lowered without a `GROUP BY` (internal misuse) |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-PLAN-INDEX-OPTION` | Invalid or unsupported `CREATE INDEX` option value |
 | `QQL-PLAN-INDEX-TYPE` | Unknown payload index field type |
+| `QQL-PLAN-MATCH-TYPE` | A match value or `IN` / `MATCH ANY` / `MATCH EXCEPT` list has no wire representation (non-int64 integer, float, bool, mixed kinds, or duplicates) |
+| `QQL-PLAN-MIN-SHOULD` | `MIN SHOULD` requires `min_count >= 1` (OpenAPI `MinShould` minimum) |
+| `QQL-PLAN-MMR` | `MMR DIVERSITY` outside `[0, 1]` or `CANDIDATES` outside `1..=16384` |
+| `QQL-PLAN-NON-FINITE` | A dynamic value contains NaN/infinity, which JSON cannot represent (it would silently become `null`) |
+| `QQL-PLAN-PARAMS` | A hand-built `PARAMS` combination the parser rejects (`max_selectivity` without `acorn`) |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
+| `QQL-PLAN-PREFETCH-PARAMS` | A `PREFETCH` source carries request-level `timeout` / `consistency`, which prefetch stages cannot express |
+| `QQL-PLAN-PREFETCH-SHARD` | A `PREFETCH` source carries `SHARD` routing, which prefetch stages cannot express |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-RANGE-TYPE` | A range bound resolved to a non-scalar value; expected a number, string, or datetime |
 | `QQL-PLAN-RECOMMEND-AVERAGE` | `average_vector` examples must share one vector shape |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
+| `QQL-PLAN-SCROLL-LIMIT` | `SCROLL` has no resolvable `LIMIT` (an unbound placeholder or hand-built statement) |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-SERIALIZE` | A plan IR request body failed JSON serialization (a `Serialize` regression) |
+| `QQL-PLAN-SLICE` | `SLICE` bounds violate OpenAPI `Slice` (`total` uint32, `total >= 1`, `index < total`) |
 | `QQL-PLAN-SCROLL-AFTER` | A `SCROLL ... AFTER` cursor has no next page (already the maximum point ID or UUID) |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-REST-BATCH` | `BATCH` runs through the batch RPCs, not a single REST route |
 | `QQL-REST-OVERWRITE-BATCH-ONLY` | `OVERWRITE` has no single REST route (`POST /points/payload` is merge-only); use a batch |
+| `QQL-REST-MULTI-STEP` | The statement projects to a multi-step REST sequence (e.g. `CREATE COLLECTION` with `shard_keys` / `read_fan_out_*`) and has no single route |
 | `QQL-GRPC` | Generic gRPC transport failure |
 | `QQL-GRPC-BATCH` | `BATCH` runs through the batch RPCs, not a single gRPC route |
 | `QQL-GRPC-DDL-RANGE` | A DDL value exceeds the bundled Qdrant proto `uint32` range |
@@ -584,13 +596,22 @@ QQL-PLAN-CROSS-RERANK-CTE
 QQL-PLAN-CROSS-RERANK-MODEL
 QQL-PLAN-CROSS-RERANK-PREFETCH
 QQL-PLAN-CROSS-RERANK-QUERY
+QQL-PLAN-DELETE-VECTOR
+QQL-PLAN-FORMULA-DECAY
 QQL-PLAN-FUSION-PREFETCH
 QQL-PLAN-GROUP
 QQL-PLAN-IDF
 QQL-PLAN-INDEX-OPTION
 QQL-PLAN-INDEX-TYPE
+QQL-PLAN-MATCH-TYPE
+QQL-PLAN-MIN-SHOULD
+QQL-PLAN-MMR
+QQL-PLAN-NON-FINITE
+QQL-PLAN-PARAMS
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
+QQL-PLAN-PREFETCH-PARAMS
+QQL-PLAN-PREFETCH-SHARD
 QQL-PLAN-QUOTA
 QQL-PLAN-RANGE-TYPE
 QQL-PLAN-RECOMMEND-AVERAGE
@@ -599,8 +620,10 @@ QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
 QQL-PLAN-SCROLL-AFTER
+QQL-PLAN-SCROLL-LIMIT
 QQL-PLAN-SERIALIZE
 QQL-PLAN-SHARD-KEY
+QQL-PLAN-SLICE
 QQL-PLAN-UNSUPPORTED-PREFETCH
 QQL-PLAN-VECTOR-DIFF
 QQL-PLAN-VECTOR-KIND
@@ -608,6 +631,7 @@ QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
 QQL-REST-BATCH
 QQL-REST-CLIENT-SIDE
+QQL-REST-MULTI-STEP
 QQL-REST-OVERWRITE-BATCH-ONLY
 QQL-SERIALIZE
 QQL-SERIALIZE-AST

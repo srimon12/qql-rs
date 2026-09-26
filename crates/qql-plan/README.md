@@ -97,6 +97,14 @@ let op = plan(&Parser::parse(
 let route = to_rest_route(&op)?; // PUT /quotas?wait=true
 ```
 
+`to_rest_route` projects **one** route. Statements with no single route fail
+closed instead of emitting an incomplete body: `CROSS RERANK`
+(`QQL-REST-CLIENT-SIDE`), `OVERWRITE` (`QQL-REST-OVERWRITE-BATCH-ONLY`), and
+`CREATE COLLECTION` carrying `shard_keys` / `read_fan_out_*`
+(`QQL-REST-MULTI-STEP` — the runtime applies the steps from
+`ddl::create_collection_rest_steps`). `compile_statement` keeps `stmt_type`
+with `route: None` for all three.
+
 ## Modules
 
 Public crate surface. REST projection lives in `routing`; `plan` re-exports

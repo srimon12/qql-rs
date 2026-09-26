@@ -18,6 +18,7 @@ use serde::Deserialize as _;
 use serde::Serialize as _;
 
 use qql_core::ast::Value;
+use qql_core::error::QqlError;
 
 /// `serde` adapter borrowing an AST value with [`serialize_ast_value`] semantics.
 pub(crate) struct SerValue<'a>(pub &'a Value);
@@ -191,6 +192,46 @@ pub(crate) fn deserialize_ast_value_vec<'de, D: serde::Deserializer<'de>>(
             "expected a JSON array for match values, got {other}"
         ))),
     }
+}
+
+/// Reject non-finite floats anywhere in a value bound for the wire.
+///
+/// JSON has no `NaN`/`±infinity`, so the boundary renderer would emit `null`:
+/// a bound parameter (`WHERE x > :n` with NaN, a payload value, a formula
+/// default) would silently match/compare against null-valued rows instead of
+/// failing. Called at lowering for every dynamic value a plan struct carries.
+pub(crate) fn validate_finite_value(value: &Value) -> Result<(), QqlError> {
+    match value {
+        Value::Float(f) if !f.is_finite() => Err(non_finite_error(value)),
+        Value::F32Array(values) if values.iter().any(|f| !f.is_finite()) => {
+            Err(non_finite_error(value))
+        }
+        Value::List(items) => items.iter().try_for_each(validate_finite_value),
+        Value::Dict(entries) => entries
+            .iter()
+            .try_for_each(|(_, item)| validate_finite_value(item)),
+        _ => Ok(()),
+    }
+}
+
+/// [`validate_finite_value`] over a payload/config pair list.
+pub(crate) fn validate_finite_pairs(
+    pairs: &[(alloc::string::String, Value)],
+) -> Result<(), QqlError> {
+    pairs
+        .iter()
+        .try_for_each(|(_, value)| validate_finite_value(value))
+}
+
+fn non_finite_error(value: &Value) -> QqlError {
+    QqlError::validation(
+        "QQL-PLAN-NON-FINITE",
+        alloc::format!(
+            "{} is not a finite number; JSON has no NaN/infinity representation",
+            value_error_text(value)
+        ),
+        value.param_span(),
+    )
 }
 
 /// Render a scalar AST value exactly as the old `serde_json` pipeline did,

@@ -13,6 +13,9 @@ pub fn lower_vector_value(value: &VectorValue) -> PlanVectorValue {
     PlanVectorValue::from(value)
 }
 
+/// OpenAPI `Mmr.candidates_limit` ceiling.
+const MMR_CANDIDATES_MAX: u64 = 16384;
+
 /// Convert an AST query input (point, vector, text, image) into its plan form.
 pub fn lower_query_input(input: &QueryInput) -> PlanQueryInput {
     PlanQueryInput::from(input)
@@ -31,13 +34,33 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 *model = default_model_for_using(using.as_ref().map(|t| t.name.as_str()))
                     .or_else(|| model.clone());
             }
-            QueryVariant::Nearest(NearestQuery {
-                nearest,
-                mmr: mmr.as_ref().map(|m| MmrQueryParams {
-                    diversity: m.diversity,
-                    candidates_limit: m.candidates,
-                }),
-            })
+            let mmr = match mmr.as_ref() {
+                None => None,
+                Some(m) => {
+                    if !m.diversity.is_finite() || !(0.0..=1.0).contains(&m.diversity) {
+                        return Err(QqlError::validation(
+                            "QQL-PLAN-MMR",
+                            format!("MMR DIVERSITY must be within [0, 1], got {}", m.diversity),
+                            None,
+                        ));
+                    }
+                    if m.candidates == 0 || m.candidates > MMR_CANDIDATES_MAX {
+                        return Err(QqlError::validation(
+                            "QQL-PLAN-MMR",
+                            format!(
+                                "MMR CANDIDATES must be within 1..={MMR_CANDIDATES_MAX}, got {}",
+                                m.candidates
+                            ),
+                            None,
+                        ));
+                    }
+                    Some(MmrQueryParams {
+                        diversity: m.diversity,
+                        candidates_limit: m.candidates,
+                    })
+                }
+            };
+            QueryVariant::Nearest(NearestQuery { nearest, mmr })
         }
         QueryExpr::Recommend {
             positive,
@@ -92,6 +115,9 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
             direction,
             start_from,
         } => {
+            if let Some(start_from) = start_from.as_ref() {
+                crate::value_serde::validate_finite_value(start_from)?;
+            }
             let dir = match direction {
                 OrderDirection::Asc => Some("asc".into()),
                 OrderDirection::Desc => Some("desc".into()),
@@ -122,6 +148,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
             let defaults = if defaults.is_empty() {
                 None
             } else {
+                crate::value_serde::validate_finite_pairs(defaults)?;
                 Some(
                     defaults
                         .iter()
@@ -161,13 +188,26 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 },
             }
         }
-        QueryExpr::Hybrid { .. } => QueryVariant::Fusion {
-            fusion: "rrf".into(),
-        },
-        QueryExpr::Rerank { input, .. } => QueryVariant::Nearest(NearestQuery {
-            nearest: lower_query_input(input),
-            mmr: None,
-        }),
+        // Hybrid / Rerank expand into prefetch stages and a fusion/rerank
+        // target; this single-expression lowering cannot represent them, and
+        // a partial lowering would silently score differently (hardcoded RRF
+        // or a dropped rerank model / candidate pool). They are always lowered
+        // through `build_query_with_prefetch`, so reaching this arm means the
+        // caller bypassed that pipeline.
+        QueryExpr::Hybrid { .. } => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-UNSUPPORTED-PREFETCH",
+                "HYBRID must be lowered through the prefetch pipeline",
+                None,
+            ));
+        }
+        QueryExpr::Rerank { .. } => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-UNSUPPORTED-PREFETCH",
+                "RERANK must be lowered through the prefetch pipeline",
+                None,
+            ));
+        }
         // Points / CrossRerank are planned by plan() special-cases and cannot
         // be represented as a QueryVariant. Reaching this arm means one leaked
         // into a prefetch source — a structured error, never a panic.
@@ -241,9 +281,21 @@ fn lower_group_lookup(lookup: &qql_core::ast::GroupLookup) -> WithLookupValue {
 }
 
 /// Lower a full `QUERY` statement into the `/points/query` request body.
+///
+/// The statement's own `ctes` are the reference scope; CTE bodies reached
+/// through `PREFETCH (name)` lower under their visible prior-definitions
+/// prefix (see the crate-internal scoped variant).
 pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
+    lower_query_request_with_ctes(query, &query.ctes)
+}
+
+/// Lower a `QUERY` statement under an explicit CTE reference scope.
+pub(crate) fn lower_query_request_with_ctes(
+    query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
+) -> Result<QueryRequest, QqlError> {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
-    let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
+    let (query_variant, using, prefetch) = build_query_with_prefetch(query, ctes)?;
 
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryRequest {
@@ -279,6 +331,14 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
 ///
 /// User LIMIT and OFFSET fold into the wire `limit` + `group_offset` pair.
 pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
+    lower_query_groups_request_with_ctes(query, &query.ctes)
+}
+
+/// Lower a grouped `QUERY` statement under an explicit CTE reference scope.
+pub(crate) fn lower_query_groups_request_with_ctes(
+    query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
+) -> Result<QueryGroupsRequest, QqlError> {
     let Some(group) = query.group.as_ref() else {
         // No GROUP BY clause exists to point at, so this stays span-less by
         // design (see the never-misattribute rule); the plan() caller only
@@ -311,7 +371,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
     let group_offset = if offset > 0 { Some(offset) } else { None };
 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
-    let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
+    let (query_variant, using, prefetch) = build_query_with_prefetch(query, ctes)?;
 
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryGroupsRequest {
@@ -347,6 +407,9 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::plan::plan;
+    use qql_core::ast::Stmt;
     use qql_core::parser::Parser;
 
     fn parse_route(source: &str) -> serde_json::Value {
@@ -519,6 +582,52 @@ mod tests {
             pf
         );
         assert_eq!(pf["limit"], 20);
+    }
+
+    #[test]
+    fn nested_cte_prefetch_resolves_against_the_root_scope() {
+        // `b` references `a`; the planner must lower `b`'s body under the
+        // prefix visible where `b` was defined (definitions are stored once,
+        // never copied into the body).
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20), \
+             b AS (QUERY TEXT 'y' MODEL 'e5' FROM docs USING dense PREFETCH (a) LIMIT 30) \
+             QUERY FUSION RRF FROM docs PREFETCH (b) LIMIT 10;",
+        );
+        let outer = &json["prefetch"][0];
+        assert_eq!(outer["limit"], 30);
+        assert_eq!(outer["query"]["nearest"]["text"], "y");
+        let nested = &outer["prefetch"][0];
+        assert_eq!(nested["query"]["nearest"]["text"], "x");
+        assert_eq!(nested["limit"], 20);
+    }
+
+    #[test]
+    fn inline_prefetch_subquery_sees_the_enclosing_cte_scope() {
+        // Scope visibility is uniform: inline `PREFETCH (QUERY …)` sources see
+        // the same CTEs a CTE body does.
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20) \
+             QUERY FUSION RRF FROM docs \
+             PREFETCH (QUERY TEXT 'y' MODEL 'e5' FROM docs USING dense PREFETCH (a) LIMIT 30) \
+             LIMIT 10;",
+        );
+        let nested = &json["prefetch"][0]["prefetch"][0];
+        assert_eq!(nested["query"]["nearest"]["text"], "x");
+        assert_eq!(nested["limit"], 20);
+    }
+
+    #[test]
+    fn cte_body_sees_only_prior_definitions() {
+        // Prior-only visibility keeps resolution terminating: a body cannot
+        // reference a CTE defined after it.
+        let err = Parser::parse(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense PREFETCH (b)), \
+             b AS (QUERY TEXT 'y' MODEL 'e5' FROM docs USING dense LIMIT 5) \
+             QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 5;",
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-VALIDATION-PREFETCH-CTE");
     }
 
     #[test]
@@ -933,6 +1042,146 @@ mod tests {
         let err = crate::plan::plan(&stmt).unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
         assert_eq!(err.code, "QQL-PLAN-PREFETCH-CTE");
+    }
+
+    #[test]
+    fn mmr_bounds_fail_closed() {
+        use qql_core::ast::{MmrConfig, QueryInput, VectorKind, VectorTarget, VectorValue};
+        let base = |mmr: Option<MmrConfig>| QueryExpr::Nearest {
+            input: QueryInput::Vector(VectorValue::Dense(vec![0.1])),
+            using: Some(VectorTarget {
+                name: "d".into(),
+                kind: Some(VectorKind::Dense),
+                multi: false,
+            }),
+            prefetch: Vec::new(),
+            mmr: mmr.map(Box::new),
+        };
+        for mmr in [
+            MmrConfig {
+                diversity: 1.5,
+                candidates: 10,
+            },
+            MmrConfig {
+                diversity: -0.1,
+                candidates: 10,
+            },
+            MmrConfig {
+                diversity: 0.5,
+                candidates: 0,
+            },
+            MmrConfig {
+                diversity: 0.5,
+                candidates: 16385,
+            },
+        ] {
+            let err = lower_query_expr(&base(Some(mmr.clone()))).unwrap_err();
+            assert_eq!(err.code, "QQL-PLAN-MMR", "{mmr:?}");
+        }
+        assert!(
+            lower_query_expr(&base(Some(MmrConfig {
+                diversity: 0.5,
+                candidates: 16384,
+            })))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn pipeline_only_expressions_fail_closed_in_lower_query_expr() {
+        use qql_core::ast::{FusionMethod, QueryInput, VectorKind, VectorTarget};
+        let hybrid = QueryExpr::Hybrid {
+            text: "x".into(),
+            model: None,
+            dense_vector: None,
+            sparse_vector: None,
+            fusion: FusionMethod::Dbsf,
+            text_param: None,
+        };
+        let err = lower_query_expr(&hybrid).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-UNSUPPORTED-PREFETCH");
+
+        let rerank = QueryExpr::Rerank {
+            input: QueryInput::Text {
+                text: "x".into(),
+                model: Some("colbert".into()),
+                text_param: None,
+                options: Vec::new(),
+            },
+            model: "colbert".into(),
+            using: Some(VectorTarget {
+                name: "colbert".into(),
+                kind: Some(VectorKind::Dense),
+                multi: true,
+            }),
+            prefetch: Vec::new(),
+        };
+        assert_eq!(
+            lower_query_expr(&rerank).unwrap_err().code,
+            "QQL-PLAN-UNSUPPORTED-PREFETCH"
+        );
+    }
+
+    #[test]
+    fn prefetch_source_shard_and_read_opts_fail_closed() {
+        // A prefetch stage cannot carry routing or request-level read opts;
+        // silently dropping SHARD would widen results across tenants.
+        let err = plan(&Parser::parse(
+            "QUERY FUSION RRF FROM docs PREFETCH (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense SHARD 'acme' LIMIT 5) LIMIT 5;",
+        )
+        .unwrap())
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-PREFETCH-SHARD", "{err:?}");
+
+        let err = plan(&Parser::parse(
+            "QUERY FUSION RRF FROM docs PREFETCH (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense PARAMS (timeout = 5) LIMIT 5) LIMIT 5;",
+        )
+        .unwrap())
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-PREFETCH-PARAMS", "{err:?}");
+    }
+
+    #[test]
+    fn prefetch_outer_where_composes_with_source_where() {
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE tenant = 'acme' LIMIT 5) \
+             QUERY FUSION RRF FROM docs PREFETCH (a WHERE status = 'live') LIMIT 5;",
+        );
+        let filter = &json["prefetch"][0]["filter"];
+        let rendered = filter.to_string();
+        assert!(rendered.contains("tenant"), "{filter}");
+        assert!(rendered.contains("acme"), "{filter}");
+        assert!(rendered.contains("status"), "{filter}");
+        assert!(rendered.contains("live"), "{filter}");
+    }
+
+    #[test]
+    fn rrf_k_zero_fails_closed_and_max_selectivity_needs_acorn() {
+        // The parser already rejects `rrf_k = 0`; a hand-built (or bound)
+        // zero must still not reach a wire body violating Rrf.k minimum 1.
+        let mut stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense PARAMS (rrf_k = 10) LIMIT 5;",
+        )
+        .unwrap();
+        let Stmt::Query(query) = &mut stmt else {
+            panic!("expected query");
+        };
+        query.params.as_mut().unwrap().rrf_k = Some(0);
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-RRF-PARAMS", "{err:?}");
+
+        // max_selectivity without acorn only reaches the planner through a
+        // hand-built AST (the parser rejects it): mutate the parsed params.
+        let mut stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5;",
+        )
+        .unwrap();
+        let Stmt::Query(query) = &mut stmt else {
+            panic!("expected query");
+        };
+        query.params.as_mut().unwrap().acorn = None;
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-PARAMS", "{err:?}");
     }
 
     #[test]

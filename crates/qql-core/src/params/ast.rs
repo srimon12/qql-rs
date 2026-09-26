@@ -372,8 +372,14 @@ where
             }
             if let Some(param) = scroll.limit_param.take() {
                 let span = scroll.limit_span.take();
-                scroll.limit =
-                    resolve_param_u64(&param, span, &lookup, positional, "SCROLL LIMIT", true)?;
+                scroll.limit = Some(resolve_param_u64(
+                    &param,
+                    span,
+                    &lookup,
+                    positional,
+                    "SCROLL LIMIT",
+                    true,
+                )?);
             }
             bind_shard_key(&mut scroll.shard_key, &lookup, positional)?;
             Ok(())

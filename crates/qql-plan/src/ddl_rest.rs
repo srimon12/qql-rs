@@ -178,6 +178,23 @@ struct ShardKeyRestBody<'a> {
     shard_key: &'a PlanShardKey,
 }
 
+/// Whether a planned create needs the multi-step REST sequence rather than a
+/// single `PUT /collections/{c}` body.
+///
+/// `shard_keys` and `read_fan_out_*` have no `CreateCollection` body fields
+/// (the OpenAPI body exposes neither), so they are applied by the follow-up
+/// `PATCH` / per-key `PUT …/shards` steps. `to_rest_route` uses this to fail
+/// closed with a multi-step projection error instead of emitting a
+/// single-route body that silently loses them.
+pub fn create_collection_needs_multi_step(req: &CreateCollectionRequest) -> bool {
+    let deferred_params = req
+        .params
+        .as_ref()
+        .is_some_and(|p| p.read_fan_out_factor.is_some() || p.read_fan_out_delay_ms.is_some());
+    let shard_keys = req.shard_keys.as_ref().is_some_and(|keys| !keys.is_empty());
+    deferred_params || shard_keys
+}
+
 /// Expand a planned create into its REST sequence: `PUT` the collection body,
 /// a conditional `PATCH` for update-only params, then one `PUT …/shards` per
 /// custom shard key (the REST projection creates them after the collection,

@@ -249,7 +249,7 @@ fn overwrite_batch_members_plan_and_round_trip() {
     let qql_plan::PlannedOperation::Batch { operations, .. } = &op else {
         panic!("expected Batch, got {op:?}");
     };
-    let (_, labels, _) = qql_plan::build_update_batch(operations).expect("build batch");
+    let (_, labels, _, _) = qql_plan::build_update_batch(operations).expect("build batch");
     assert_eq!(labels, vec!["OVERWRITE_PAYLOAD", "UPDATE_PAYLOAD"]);
 
     // Convert decodes the batch back into the overwrite statement.

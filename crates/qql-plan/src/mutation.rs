@@ -15,15 +15,16 @@ use qql_core::error::QqlError;
 /// points only; executors must route point-param templates through the
 /// point-splice path, never dispatch a template plan directly.
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> Result<UpsertRequest, QqlError> {
+    let points = stmt
+        .points
+        .iter()
+        .filter_map(|point| match point {
+            PointEntry::Inline(inline) => Some(lower_upsert_point(inline)),
+            PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(UpsertRequest {
-        points: stmt
-            .points
-            .iter()
-            .filter_map(|point| match point {
-                PointEntry::Inline(inline) => Some(lower_upsert_point(inline)),
-                PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
-            })
-            .collect(),
+        points,
         update_filter: stmt
             .update_filter
             .as_ref()
@@ -38,7 +39,7 @@ pub fn lower_upsert_request(stmt: &UpsertStmt) -> Result<UpsertRequest, QqlError
     })
 }
 
-fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
+fn lower_upsert_point(point: &UpsertPoint) -> Result<UpsertPointRequest, QqlError> {
     let mut req = UpsertPointRequest {
         id: PlanPointId::from(&point.id),
         vector: None,
@@ -48,9 +49,10 @@ fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
         req.vector = Some(PlanPointVectors::from(vectors));
     }
     if !point.payload.is_empty() {
+        crate::value_serde::validate_finite_pairs(&point.payload)?;
         req.payload = Some(point.payload.clone());
     }
-    req
+    Ok(req)
 }
 
 /// Lower `DELETE` to the `POST /points/delete` body, by IDs or filter.
@@ -96,6 +98,7 @@ pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorReque
 pub fn lower_update_payload_request(
     stmt: &UpdatePayloadStmt,
 ) -> Result<UpdatePayloadRequest, QqlError> {
+    crate::value_serde::validate_finite_pairs(&stmt.payload)?;
     let payload = stmt.payload.clone();
     Ok(match &stmt.selector {
         PointSelector::Id(id) => UpdatePayloadRequest {
@@ -175,6 +178,25 @@ pub fn lower_delete_payload_request(
 pub fn lower_delete_vector_request(
     stmt: &DeleteVectorStmt,
 ) -> Result<DeleteVectorRequest, QqlError> {
+    // OpenAPI `DeleteVectors.vector`: minItems 1, uniqueItems. An empty list
+    // removes nothing and duplicates are a schema violation.
+    if stmt.vector_names.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-DELETE-VECTOR",
+            "DELETE VECTOR requires at least one vector name",
+            None,
+        ));
+    }
+    let mut seen = alloc::collections::BTreeSet::new();
+    for name in &stmt.vector_names {
+        if !seen.insert(name.as_str()) {
+            return Err(QqlError::validation(
+                "QQL-PLAN-DELETE-VECTOR",
+                alloc::format!("DELETE VECTOR contains duplicate vector name '{name}'"),
+                None,
+            ));
+        }
+    }
     Ok(match &stmt.selector {
         PointSelector::Id(id) => DeleteVectorRequest {
             points: Some(vec![point_id_req_typed(id)]),
@@ -273,11 +295,12 @@ pub fn validate_scroll_after(after: Option<&qql_core::ast::PointId>) -> Result<(
 /// plus optional payload selection and payload-key ordering.
 ///
 /// The `after` cursor lowers exclusively (`AFTER n` → `offset n + 1`,
-/// UUIDs to their successor); opaque strings pass through unchanged.
-/// Callers must run [`validate_scroll_after`] first to reject cursors with
-/// no next page (`u64::MAX` / UUID-max).
+/// UUIDs to their successor); opaque strings pass through unchanged, and
+/// cursors with no next page (`u64::MAX` / UUID-max) are rejected here.
+/// A `None` limit means an unbound `LIMIT :param` placeholder (or a hand-built
+/// statement): fail closed instead of planning the server's default page size.
 pub fn lower_scroll_request(
-    limit: u64,
+    limit: Option<u64>,
     filter: Option<&qql_core::ast::FilterExpr>,
     after: Option<&qql_core::ast::PointId>,
     order_by: Option<&qql_core::ast::ScrollOrderBy>,
@@ -285,6 +308,14 @@ pub fn lower_scroll_request(
     with_payload: Option<&qql_core::ast::PayloadSelector>,
     with_vector: Option<&qql_core::ast::VectorSelector>,
 ) -> Result<ScrollRequest, QqlError> {
+    validate_scroll_after(after)?;
+    let Some(limit) = limit else {
+        return Err(QqlError::validation(
+            "QQL-PLAN-SCROLL-LIMIT",
+            "SCROLL requires a LIMIT (an unbound LIMIT placeholder cannot be planned)",
+            None,
+        ));
+    };
     let with_payload = match with_payload {
         None => Some(PayloadSelectorReq::All(true)),
         Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),
@@ -300,6 +331,9 @@ pub fn lower_scroll_request(
             })
         }
     };
+    if let Some(start_from) = order_by.and_then(|order| order.start_from.as_ref()) {
+        crate::value_serde::validate_finite_value(start_from)?;
+    }
     let with_vector = match with_vector {
         Some(qql_core::ast::VectorSelector::All) => Some(VectorSelectorReq::All(true)),
         Some(qql_core::ast::VectorSelector::None) => Some(VectorSelectorReq::All(false)),
@@ -518,54 +552,55 @@ pub fn planned_to_update_operation_owned(
 /// operations for individual retry. Only the small collection `String` is
 /// cloned per member; request payloads move back untouched.
 ///
-/// Rebuilt operations carry `wait: true`, matching ambient batch semantics
-/// ("ambient groups always wait"); the wire batch likewise executes with
-/// `wait=true`, so retry preserves the durability the batch promised.
+/// `wait` is the executing batch's effective `?wait=`; retry must preserve the
+/// durability the batch promised (the member's own flag is not observable
+/// through the wire batch, which carries only the batch header value).
 pub fn update_operation_into_planned(
     collection: &str,
     op: UpdateOperation,
+    wait: bool,
 ) -> crate::plan::PlannedOperation {
     use crate::plan::PlannedOperation;
     match op {
         UpdateOperation::Upsert { upsert } => PlannedOperation::Upsert {
             collection: collection.to_owned(),
             request: upsert,
-            wait: true,
+            wait,
         },
         UpdateOperation::Delete { delete } => PlannedOperation::Delete {
             collection: collection.to_owned(),
             request: delete,
-            wait: true,
+            wait,
         },
         UpdateOperation::SetPayload { set_payload } => PlannedOperation::UpdatePayload {
             collection: collection.to_owned(),
             request: set_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::Overwrite { overwrite_payload } => PlannedOperation::OverwritePayload {
             collection: collection.to_owned(),
             request: overwrite_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::ClearPayload { clear_payload } => PlannedOperation::ClearPayload {
             collection: collection.to_owned(),
             request: clear_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::DeletePayload { delete_payload } => PlannedOperation::DeletePayload {
             collection: collection.to_owned(),
             request: delete_payload,
-            wait: true,
+            wait,
         },
         UpdateOperation::UpdateVectors { update_vectors } => PlannedOperation::UpdateVectors {
             collection: collection.to_owned(),
             request: update_vectors,
-            wait: true,
+            wait,
         },
         UpdateOperation::DeleteVectors { delete_vectors } => PlannedOperation::DeleteVectors {
             collection: collection.to_owned(),
             request: delete_vectors,
-            wait: true,
+            wait,
         },
     }
 }
@@ -573,7 +608,43 @@ pub fn update_operation_into_planned(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qql_core::ast::PointId;
+    use crate::plan::plan;
+    use qql_core::ast::{PointId, Stmt, Value};
+    use qql_core::parser::Parser;
+
+    #[test]
+    fn delete_vector_requires_unique_non_empty_names() {
+        // OpenAPI `DeleteVectors.vector`: minItems 1, uniqueItems.
+        let mut stmt = Parser::parse("DELETE VECTOR dense FROM docs WHERE id = 1;").unwrap();
+        let Stmt::DeleteVector(dv) = &mut stmt else {
+            panic!("expected DeleteVector");
+        };
+        dv.vector_names.clear();
+        let err = lower_delete_vector_request(dv).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-DELETE-VECTOR");
+        assert!(err.message.contains("at least one"), "{err:?}");
+
+        dv.vector_names = vec!["dense".into(), "dense".into()];
+        let err = lower_delete_vector_request(dv).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-DELETE-VECTOR");
+        assert!(err.message.contains("duplicate"), "{err:?}");
+    }
+
+    #[test]
+    fn non_finite_upsert_payload_fails_closed() {
+        // A bound (or hand-built) NaN payload value would serialize as JSON
+        // `null` and write null instead of the number.
+        let mut stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, score: 0.5};").unwrap();
+        let Stmt::Upsert(upsert) = &mut stmt else {
+            panic!("expected Upsert");
+        };
+        let PointEntry::Inline(point) = &mut upsert.points[0] else {
+            panic!("expected inline point");
+        };
+        point.payload[0].1 = Value::Float(f64::NAN);
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-NON-FINITE", "{err:?}");
+    }
 
     #[test]
     fn scroll_after_accepts_incrementable_cursors() {

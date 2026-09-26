@@ -1411,6 +1411,97 @@ fn batch_block_binds_and_injects_into_members() {
     );
 }
 
+/// Count `QueryStmt` nodes (definitions plus inline `PREFETCH` sub-queries).
+fn count_query_stmts(query: &crate::ast::QueryStmt) -> usize {
+    use crate::ast::{PrefetchSource, QueryExpr};
+    let mut count = 1;
+    for cte in &query.ctes {
+        count += count_query_stmts(&cte.query);
+    }
+    let prefetches = match &query.expression {
+        QueryExpr::Nearest { prefetch, .. }
+        | QueryExpr::Recommend { prefetch, .. }
+        | QueryExpr::Context { prefetch, .. }
+        | QueryExpr::Discover { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. }
+        | QueryExpr::RelevanceFeedback { prefetch, .. }
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch.as_slice(),
+        _ => &[],
+    };
+    for prefetch in prefetches {
+        if let PrefetchSource::Query(sub) = &prefetch.source {
+            count += count_query_stmts(sub);
+        }
+    }
+    count
+}
+
+#[test]
+fn cte_chain_stays_linear_in_ast_size() {
+    // Each CTE body references the previous one. Before the scope refactor
+    // every body stored a deep clone of all prior CTEs (~2^n nodes); the
+    // definitions now live once on the root statement, so a 25-CTE chain is
+    // 25 bodies + the root — linear in the number of CTEs.
+    const CTES: usize = 25;
+    let mut source = String::from("WITH ");
+    for i in 0..CTES {
+        if i > 0 {
+            source.push_str(", ");
+        }
+        if i == 0 {
+            source.push_str("a0 AS (QUERY TEXT 't0' FROM docs USING d AS DENSE LIMIT 5)");
+        } else {
+            source.push_str(&format!(
+                "a{i} AS (QUERY TEXT 't{i}' FROM docs USING d AS DENSE PREFETCH (a{prev}) LIMIT 5)",
+                prev = i - 1
+            ));
+        }
+    }
+    source.push_str(" QUERY TEXT 'root' FROM docs USING d AS DENSE PREFETCH (a24) LIMIT 5;");
+
+    let stmt = Parser::parse(&source).expect("25 chained CTEs must parse");
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    assert_eq!(query.ctes.len(), CTES);
+    assert_eq!(
+        count_query_stmts(query),
+        CTES + 1,
+        "AST must stay linear in the number of CTEs"
+    );
+}
+
+#[test]
+fn inline_prefetch_subquery_sees_enclosing_ctes_at_parse() {
+    // Visibility is now a scope rather than a copy: an inline prefetch
+    // sub-query may reference an enclosing CTE, exactly like a CTE body may.
+    let stmt = Parser::parse(
+        "WITH a AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 5) \
+         QUERY FUSION RRF FROM docs \
+         PREFETCH (QUERY TEXT 'y' FROM docs USING dense PREFETCH (a) LIMIT 10) \
+         LIMIT 5;",
+    )
+    .expect("inline sub-query must see the outer CTE scope");
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    // The CTE body stores no copy of the outer definitions.
+    assert!(query.ctes[0].query.ctes.is_empty());
+}
+
+#[test]
+fn forward_cte_reference_is_rejected_at_parse() {
+    let err = Parser::parse(
+        "WITH a AS (QUERY TEXT 'x' FROM docs USING dense PREFETCH (b)), \
+         b AS (QUERY TEXT 'y' FROM docs USING dense LIMIT 5) \
+         QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 5;",
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-PREFETCH-CTE");
+}
+
 #[test]
 fn formula_missing_operand_hints_shell_score_interpolation() {
     let err = Parser::parse("QUERY FORMULA 0.5 * + 0.1 * rating FROM stays;").unwrap_err();

@@ -159,6 +159,17 @@ fn fill_update_collection_config(
         req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
+        // `PATCH /collections/{c}` (CollectionParamsDiff) cannot express shard
+        // topology: `shard_number` / `sharding_method` are create-time only and
+        // `shard_keys` are managed through CREATE/DROP SHARD KEY. Dropping them
+        // silently "succeeds" while doing nothing, so fail closed instead
+        // (mirroring the `datatype` / WAL rejections above).
+        if p.shard_number.is_some() || p.sharding_method.is_some() || p.shard_keys.is_some() {
+            return Err(collection_config_error(
+                "shard_number / sharding_method / shard_keys are supported only for CREATE COLLECTION (use CREATE/DROP SHARD KEY)",
+                None,
+            ));
+        }
         req.params = Some(lower_collection_params(p));
     }
     req.quantization_config = lower_quantization_diff(config);

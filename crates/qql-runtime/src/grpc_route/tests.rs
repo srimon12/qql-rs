@@ -901,42 +901,26 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
     assert!(err.message.contains("9223372036854775808"), "{err}");
 }
 
-/// Errors from list conversion must propagate through the full filter
-/// path (`to_filter` → `to_condition` → `to_match`).
+/// Unrepresentable match lists are rejected at plan time, before any
+/// transport conversion; the transport guards below stay for hand-built plans.
 #[test]
-fn grpc_in_list_errors_propagate_through_filter() {
-    let stmt = Parser::parse(
-        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status IN ('a', 1) LIMIT 5;",
-    )
-    .unwrap();
-    let op = qql_plan::plan(&stmt).unwrap();
-    let (collection, req) = match &op {
-        qql_plan::PlannedOperation::Query {
-            collection,
-            request,
-        } => (collection, request),
-        other => panic!("expected Query, got {other:?}"),
-    };
-    let err = to_query_points(req, collection).unwrap_err();
-    assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-    assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
-
-    // Non-integral floats in IN also propagate.
-    let stmt = Parser::parse(
-        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating IN (1.5, 2.5) LIMIT 5;",
-    )
-    .unwrap();
-    let op = qql_plan::plan(&stmt).unwrap();
-    let (collection, req) = match &op {
-        qql_plan::PlannedOperation::Query {
-            collection,
-            request,
-        } => (collection, request),
-        other => panic!("expected Query, got {other:?}"),
-    };
-    let err = to_query_points(req, collection).unwrap_err();
-    assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
-    assert!(err.message.contains("1.5"), "{err}");
+fn plan_rejects_unrepresentable_match_lists_before_transport() {
+    for (source, offending) in [
+        (
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status IN ('a', 1) LIMIT 5;",
+            "mixes",
+        ),
+        (
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating IN (1.5, 2.5) LIMIT 5;",
+            "1.5",
+        ),
+    ] {
+        let stmt = Parser::parse(source).unwrap();
+        let err = qql_plan::plan(&stmt).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE", "{source}: {err:?}");
+        assert!(err.message.contains(offending), "{source}: {err:?}");
+    }
 }
 
 /// Valid homogeneous lists survive the full parser → plan → gRPC path.

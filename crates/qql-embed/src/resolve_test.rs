@@ -958,6 +958,54 @@ async fn multi_model_batch_restores_walk_order() {
 }
 
 #[tokio::test]
+async fn cte_prefetch_reference_resolves_to_the_embedded_body() {
+    // Regression: `PREFETCH (a)` inside CTE `b` used to be resolved by the
+    // planner against a parse-time clone of `a` that the embedding walk never
+    // visited, so the stage planned as a server-side `Document` instead of
+    // the client-embedded vector. The body is now stored once and both walks
+    // (embed, plan) see the same embedded AST.
+    let mut stmt = Parser::parse(
+        "WITH a AS (QUERY TEXT 'alpha' FROM docs USING dense AS DENSE LIMIT 5), \
+         b AS (QUERY TEXT 'beta' FROM docs USING dense AS DENSE PREFETCH (a) LIMIT 5) \
+         QUERY TEXT 'gamma' FROM docs USING dense AS DENSE PREFETCH (b) LIMIT 5;",
+    )
+    .unwrap();
+    resolve_embeddings(&mut stmt, &OrderMockEmbedder)
+        .await
+        .unwrap();
+
+    let op = qql_plan::plan(&stmt).expect("embedded query must plan");
+    let qql_plan::PlannedOperation::Query { request, .. } = op else {
+        panic!("expected Query, got {op:?}");
+    };
+    let b_stage = request.prefetch[0]
+        .query
+        .as_ref()
+        .expect("outer PREFETCH (b) stage");
+    let a_stage = request.prefetch[0]
+        .prefetch
+        .as_ref()
+        .expect("b's nested PREFETCH list")[0]
+        .query
+        .as_ref()
+        .expect("nested PREFETCH (a) stage");
+    for (label, variant) in [("b", b_stage), ("a", a_stage)] {
+        let qql_plan::QueryVariant::Nearest(nearest) = variant else {
+            panic!("{label} stage must be a nearest query: {variant:?}");
+        };
+        match &nearest.nearest {
+            qql_plan::PlanQueryInput::Vector(qql_plan::PlanVectorValue::Dense(vec)) => {
+                assert_eq!(vec, &first_byte_vec(label));
+            }
+            other => panic!(
+                "{label} stage must carry the client-embedded vector, got {other:?} \
+                 (a Document here means the embedding walk missed the CTE body)"
+            ),
+        }
+    }
+}
+
+#[tokio::test]
 async fn default_batch_loops_cover_single_methods() {
     let e = DefaultEmbedder;
     // Dense batch loops `embed_dense`.

@@ -24,8 +24,9 @@ pub struct ScrollOrderBy {
 pub struct ScrollStmt {
     /// Collection to scroll.
     pub collection: String,
-    /// Maximum number of points per page.
-    pub limit: u64,
+    /// Maximum number of points per page; `None` only while an unbound
+    /// `LIMIT :param` placeholder is present (the planner fails closed).
+    pub limit: Option<u64>,
     /// Optional `WHERE` filter.
     pub filter: Option<Box<FilterExpr>>,
     /// `AFTER` cursor — resume scrolling after this point ID.

@@ -10,10 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
+- **Batch Semantics**: statements with differing `PARAMS (timeout/consistency)` or effective `WAIT` never co-group; every ambient batch executes with its own shared opts (previously REST query batches dropped per-statement read opts and mutation batches forced `WAIT true`).
+- **Plan-Time Representability**: `IN` / `MATCH ANY` / `MATCH EXCEPT` lists must be homogeneous, unique string or int64 arrays (no floats, bools, mixed kinds, or duplicates); `u64` match values above `i64::MAX`, non-finite floats (NaN/infinity) reaching the wire, unknown decay spellings, and out-of-range `SLICE` / `MIN SHOULD` / `RRF k` / `MMR` / `DELETE VECTOR` / `CREATE SHARD KEY` values now fail closed (`QQL-PLAN-*`) instead of lowering schema-invalid bodies.
+- **Lossy Projections Fail Closed**: `ALTER COLLECTION` shard params and single-route `CREATE COLLECTION` with `shard_keys` / `read_fan_out_*` (`QQL-REST-MULTI-STEP`) error instead of silently dropping; `compile()` keeps `stmt_type` with no route.
+- **`SCROLL … LIMIT :n`** stays unbound until binding; planning without a resolved limit is `QQL-PLAN-SCROLL-LIMIT` (previously a silent `LIMIT 10`).
+- **PREFETCH Semantics**: sources carrying `SHARD` or request-level `timeout`/`consistency` fail closed; an outer PREFETCH `WHERE` now composes with the source `WHERE` as `AND` (previously it replaced it).
+- **CTE Visibility**: inline prefetch sub-queries see enclosing CTEs (bodies still see prior definitions only); forward references stay rejected.
 - **Strict Numeric & Config Parsing**: digit-leading integer literals outside `i64`/`u64` fail with `QQL-PARSE-NUMBER` instead of degrading to string matches; `WITH QUANTIZATION` `bits`/`compression`/`query_encoding` and `WITH SPARSE` `modifier` reject wrong-typed values (`QQL-VALIDATION-CONFIG`); `QUERY POINTS … LIMIT :n` / `OFFSET :n` are rejected like their literal spellings; `CREATE SHARD KEY` `shards_number`/`replication_factor` must fit `u32`.
 - **Named Vector `object`**: a list-valued `object` in a vector dict is a named vector, not an `InferenceObject` payload — only an object-valued key claims the inference shape, mirroring `text`/`image`.
 
 ### 🐛 Bug Fixes
+- **CTE Chains**: `WITH` definitions are stored once and resolved by scope, so ~25 chained CTEs parse to a linear AST (was exponential), and a nested `PREFETCH (name)` inside a CTE resolves to the client-embedded body instead of a server-side inference fallback.
+- **Template Vector Binding**: prepared-statement vectors bind inside `QUERY … GROUP BY`, `BATCH` members, `CROSS RERANK` candidates, and prefetch stages below the first level instead of shipping literal `":name"` strings.
 - **Parameter Binding**: `PARAMS (idf = WHERE …)` and `BATCH … PARAMS` placeholders are bound and censused (unbound IDF filters now fail `QQL-BIND-MISSING-PARAM`); `WAL`/`STRICT_MODE`/`METADATA`/`SET QUOTA` config values bind instead of parse-yes/bind-no/validate-no.
 - **Text Binding & Formatting**: the protected-span scanner matches the lexer on `''''`, `""""`, and `r'''…'''`, so placeholders after those runs bind and comments survive formatting; the formatter parenthesizes nested formula negation instead of emitting a `--` comment; glued binary minus (`1-2`, `a-1`) parses as subtraction, and text binding no longer renders `x--2` for `x-:n`.
 - **Diagnostics**: config-block and shard-key validation errors point at the consumed block instead of the following token/EOF; decay functions reject surplus positional arguments; `geo_distance` accepts unsigned coordinates.

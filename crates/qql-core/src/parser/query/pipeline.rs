@@ -16,7 +16,10 @@ pub(crate) struct HybridUsing {
 }
 
 impl<'a> AstLowerer<'a> {
-    pub(crate) fn parse_prefetch_list(&mut self) -> Result<Vec<Prefetch>, QqlError> {
+    /// Parse the `PREFETCH (…)` list. `ctes` is the visible CTE scope, shared
+    /// with inline sub-queries (`PREFETCH (QUERY … PREFETCH (name))` sees the
+    /// same definitions the enclosing statement does).
+    pub(crate) fn parse_prefetch_list(&mut self, ctes: &[Cte]) -> Result<Vec<Prefetch>, QqlError> {
         self.expect(TokenKind::Lparen)?;
         let mut prefetch = Vec::new();
         if self.peek()?.kind == TokenKind::Rparen {
@@ -29,7 +32,7 @@ impl<'a> AstLowerer<'a> {
         loop {
             let source = if self.peek()?.kind == TokenKind::Query {
                 self.advance()?;
-                PrefetchSource::Query(Box::new(self.parse_query_stmt(false, Vec::new())?))
+                PrefetchSource::Query(Box::new(self.parse_query_stmt(false, ctes)?))
             } else {
                 PrefetchSource::Cte(self.parse_identifier()?)
             };

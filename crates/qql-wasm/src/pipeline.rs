@@ -209,7 +209,7 @@ impl Client {
             }
         };
         match key {
-            qql_plan::BatchKey::Query(_) => {
+            qql_plan::BatchKey::Query { .. } => {
                 let retry = match parse_query_batch(&response) {
                     Ok(items) => {
                         if let Err(err) =
@@ -244,7 +244,7 @@ impl Client {
                     retry_members(self, operations, on_error, results).await?;
                 }
             }
-            qql_plan::BatchKey::Mutation(_) => {
+            qql_plan::BatchKey::Mutation { .. } => {
                 // Labels only: derive without cloning requests (the route
                 // body above already carries the wire batch built by
                 // `to_rest_route`, which borrows `operations`).
@@ -313,11 +313,28 @@ impl Client {
         match &operations[0] {
             PlannedOperation::Query { .. } => {
                 // Owned build: each `QueryRequest` moves (zero clones on the
-                // hot path). Success needs only the envelopes; failures move
-                // requests back into operations for retry (cold path only).
-                let (collection, batch) = into_query_batch(operations).map_err(qql_err_to_js)?;
+                // hot path). The group's read opts are uniform by construction
+                // (they are part of the batch key) and ride the batch header.
+                let (collection, opts, batch) =
+                    into_query_batch(operations).map_err(qql_err_to_js)?;
                 let expected = batch.searches.len();
-                let path = format!("/collections/{collection}/points/query/batch");
+                let mut read_opts = Vec::new();
+                qql_plan::query::push_read_opts(
+                    &mut read_opts,
+                    opts.timeout,
+                    opts.consistency.as_ref(),
+                );
+                let mut path = format!("/collections/{collection}/points/query/batch");
+                if !read_opts.is_empty() {
+                    path.push('?');
+                    path.push_str(
+                        &read_opts
+                            .iter()
+                            .map(|(k, v)| format!("{k}={v}"))
+                            .collect::<Vec<_>>()
+                            .join("&"),
+                    );
+                }
                 let body = serde_json::to_value(&batch).map_err(|error| {
                     qql_err_to_js(QqlError::execution("QQL-JSON", error.to_string(), None))
                 })?;
@@ -375,12 +392,13 @@ impl Client {
             }
             _ => {
                 // Owned build: each mutation request moves (zero clones on the
-                // hot path). Success reads upsert counts off the wire batch;
-                // failures move operations back for retry (cold path only).
-                let (collection, labels, batch) =
+                // hot path). The group's effective `wait` is uniform by
+                // construction (it is part of the batch key).
+                let (collection, labels, opts, batch) =
                     into_update_batch(operations).map_err(qql_err_to_js)?;
                 let expected = batch.operations.len();
-                let path = format!("/collections/{collection}/points/batch?wait=true");
+                let wait = opts.wait.unwrap_or(true);
+                let path = format!("/collections/{collection}/points/batch?wait={wait}");
                 let body = serde_json::to_value(&batch).map_err(|error| {
                     qql_err_to_js(QqlError::execution("QQL-JSON", error.to_string(), None))
                 })?;
@@ -433,7 +451,11 @@ impl Client {
                 if retry {
                     for op in batch.operations {
                         self.dispatch_or_collect(
-                            qql_plan::mutation::update_operation_into_planned(&collection, op),
+                            qql_plan::mutation::update_operation_into_planned(
+                                &collection,
+                                op,
+                                wait,
+                            ),
                             on_error,
                             results,
                         )

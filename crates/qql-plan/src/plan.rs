@@ -5,18 +5,18 @@
 
 use crate::ddl::{
     lower_alter_collection, lower_create_collection, lower_create_index, lower_replica_state,
-    lower_set_quota,
+    lower_set_quota, validate_shard_key_counts,
 };
 use crate::mutation::{
     lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
     lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
-    lower_update_vector_request, lower_upsert_request, validate_scroll_after,
+    lower_update_vector_request, lower_upsert_request,
 };
-use crate::query::{lower_query_groups_request, lower_query_request};
+use crate::query::{lower_query_groups_request_with_ctes, lower_query_request_with_ctes};
 use crate::rerank::plan_cross_rerank;
 use crate::types::*;
 use crate::validate::validate_query_stmt;
-use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
+use qql_core::ast::{QueryCollection, QueryExpr, QueryStmt, Stmt};
 use qql_core::error::QqlError;
 
 pub use crate::routing::{RestProjectionError, to_rest_route, try_route};
@@ -327,8 +327,8 @@ impl PlannedOperation {
             PlannedOperation::GetQuotas => "show_quotas",
             PlannedOperation::SetQuotas { .. } => "set_quota",
             PlannedOperation::Batch { key, .. } => match key {
-                BatchKey::Query(_) => "query_batch",
-                BatchKey::Mutation(_) => "update_batch",
+                BatchKey::Query { .. } => "query_batch",
+                BatchKey::Mutation { .. } => "update_batch",
             },
         }
     }
@@ -360,9 +360,7 @@ impl PlannedOperation {
             | PlannedOperation::ListShardKeys { collection }
             | PlannedOperation::GetCollection { collection }
             | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
-            PlannedOperation::Batch { key, .. } => Some(match key {
-                BatchKey::Query(collection) | BatchKey::Mutation(collection) => collection.as_str(),
-            }),
+            PlannedOperation::Batch { key, .. } => Some(key.collection()),
             PlannedOperation::ListCollections
             | PlannedOperation::GetQuotas
             | PlannedOperation::SetQuotas { .. } => None,
@@ -387,21 +385,44 @@ impl PlannedOperation {
         }
     }
 
-    /// Batch grouping key (collection + family) for executor dispatch.
+    /// Batch grouping key (collection + family + per-statement execution
+    /// opts) for executor dispatch.
     ///
     /// Returns `None` for single-shot operations that cannot be grouped.
     pub fn batch_key(&self) -> Option<BatchKey> {
         match self.batch_family() {
             BatchFamily::Query => match self {
-                PlannedOperation::Query { collection, .. } => {
-                    Some(BatchKey::Query(collection.clone()))
-                }
+                PlannedOperation::Query {
+                    collection,
+                    request,
+                } => Some(BatchKey::Query {
+                    collection: collection.clone(),
+                    timeout: request.timeout,
+                    consistency: request.consistency.clone(),
+                }),
                 _ => None,
             },
-            BatchFamily::Mutation => self
-                .collection()
-                .map(|collection| BatchKey::Mutation(collection.to_owned())),
+            BatchFamily::Mutation => self.collection().map(|collection| BatchKey::Mutation {
+                collection: collection.to_owned(),
+                wait: self.mutation_wait().unwrap_or(true),
+            }),
             BatchFamily::Single => None,
+        }
+    }
+
+    /// Effective `?wait=` carried by a mutation operation; `None` for
+    /// non-mutations.
+    pub fn mutation_wait(&self) -> Option<bool> {
+        match self {
+            PlannedOperation::Upsert { wait, .. }
+            | PlannedOperation::Delete { wait, .. }
+            | PlannedOperation::UpdatePayload { wait, .. }
+            | PlannedOperation::OverwritePayload { wait, .. }
+            | PlannedOperation::ClearPayload { wait, .. }
+            | PlannedOperation::DeletePayload { wait, .. }
+            | PlannedOperation::UpdateVectors { wait, .. }
+            | PlannedOperation::DeleteVectors { wait, .. } => Some(*wait),
+            _ => None,
         }
     }
 
@@ -444,8 +465,8 @@ pub enum BatchFamily {
 
 /// Grouping key for statement/operation batching (same collection + family).
 pub use crate::batch::{
-    BatchKey, batch_item_error, build_query_batch, build_update_batch, into_query_batch,
-    into_update_batch, statement_batch_key, verify_batch_cardinality,
+    BatchKey, BatchOpts, batch_item_error, build_query_batch, build_update_batch, into_query_batch,
+    into_update_batch, statement_batch_key, statement_wait, verify_batch_cardinality,
 };
 
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
@@ -477,128 +498,131 @@ pub fn plan_template(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     lower_statement_to_planned(statement)
 }
 
+/// Lower a `QUERY` statement under an explicit CTE reference scope.
+///
+/// The scope is the statement's own `ctes` at the root and the visible prefix
+/// when the statement is a CTE body reached through `PREFETCH (name)`.
+pub(crate) fn lower_query_to_planned(
+    query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
+) -> Result<PlannedOperation, QqlError> {
+    validate_query_stmt(query)?;
+    let collection = match &query.collection {
+        QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
+        QueryCollection::Explicit(_) => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION",
+                "query collection name must not be empty",
+                query.collection_span,
+            ));
+        }
+        QueryCollection::Inherited => {
+            // No collection token exists to point at (the parser
+            // rejects this shape earlier with its own span), so no
+            // span is better than a wrong one.
+            return Err(QqlError::validation(
+                "QQL-PLAN-COLLECTION",
+                "top-level query requires an explicit collection (FROM ...)",
+                None,
+            ));
+        }
+    };
+
+    if matches!(query.expression, QueryExpr::Points { .. }) {
+        let ids = match &query.expression {
+            QueryExpr::Points { ids } => {
+                ids.iter().map(crate::semantic::PlanPointId::from).collect()
+            }
+            _ => unreachable!(),
+        };
+        let (with_payload, with_vector) = crate::query::lower_output_selector_public(&query.output);
+        return Ok(PlannedOperation::GetPoints {
+            collection,
+            request: PointsRequest {
+                ids,
+                with_payload,
+                with_vector,
+                shard_key: query
+                    .shard_key
+                    .as_ref()
+                    .map(crate::semantic::PlanShardKey::from),
+            },
+        });
+    }
+
+    if let QueryExpr::CrossRerank {
+        query: qtext,
+        model,
+        field,
+        prefetch,
+        ..
+    } = &query.expression
+    {
+        return plan_cross_rerank(query, ctes, &collection, qtext, model, field, prefetch);
+    }
+
+    if query.group.is_some() {
+        // GROUP BY is routed to QueryGroups which supports both LIMIT and OFFSET (via group_offset).
+        return Ok(PlannedOperation::QueryGroups {
+            collection,
+            request: lower_query_groups_request_with_ctes(query, ctes)?,
+        });
+    }
+
+    Ok(PlannedOperation::Query {
+        collection,
+        request: lower_query_request_with_ctes(query, ctes)?,
+    })
+}
+
 pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     match statement {
-        Stmt::Query(query) => {
-            validate_query_stmt(query)?;
-            let collection = match &query.collection {
-                QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
-                QueryCollection::Explicit(_) => {
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-COLLECTION",
-                        "query collection name must not be empty",
-                        query.collection_span,
-                    ));
-                }
-                QueryCollection::Inherited => {
-                    // No collection token exists to point at (the parser
-                    // rejects this shape earlier with its own span), so no
-                    // span is better than a wrong one.
-                    return Err(QqlError::validation(
-                        "QQL-PLAN-COLLECTION",
-                        "top-level query requires an explicit collection (FROM ...)",
-                        None,
-                    ));
-                }
-            };
-
-            if matches!(query.expression, QueryExpr::Points { .. }) {
-                let ids = match &query.expression {
-                    QueryExpr::Points { ids } => {
-                        ids.iter().map(crate::semantic::PlanPointId::from).collect()
-                    }
-                    _ => unreachable!(),
-                };
-                let (with_payload, with_vector) =
-                    crate::query::lower_output_selector_public(&query.output);
-                return Ok(PlannedOperation::GetPoints {
-                    collection,
-                    request: PointsRequest {
-                        ids,
-                        with_payload,
-                        with_vector,
-                        shard_key: query
-                            .shard_key
-                            .as_ref()
-                            .map(crate::semantic::PlanShardKey::from),
-                    },
-                });
-            }
-
-            if let QueryExpr::CrossRerank {
-                query: qtext,
-                model,
-                field,
-                prefetch,
-                ..
-            } = &query.expression
-            {
-                return plan_cross_rerank(query, &collection, qtext, model, field, prefetch);
-            }
-
-            if query.group.is_some() {
-                // GROUP BY is routed to QueryGroups which supports both LIMIT and OFFSET (via group_offset).
-                return Ok(PlannedOperation::QueryGroups {
-                    collection,
-                    request: lower_query_groups_request(query)?,
-                });
-            }
-
-            Ok(PlannedOperation::Query {
-                collection,
-                request: lower_query_request(query)?,
-            })
-        }
-        Stmt::Scroll(scroll) => {
-            validate_scroll_after(scroll.after.as_ref())?;
-            Ok(PlannedOperation::Scroll {
-                collection: scroll.collection.clone(),
-                request: lower_scroll_request(
-                    scroll.limit,
-                    scroll.filter.as_deref(),
-                    scroll.after.as_ref(),
-                    scroll.order_by.as_ref(),
-                    scroll.shard_key.clone(),
-                    scroll.with_payload.as_ref(),
-                    scroll.with_vector.as_ref(),
-                )?,
-            })
-        }
+        Stmt::Query(query) => lower_query_to_planned(query, &query.ctes),
+        Stmt::Scroll(scroll) => Ok(PlannedOperation::Scroll {
+            collection: scroll.collection.clone(),
+            request: lower_scroll_request(
+                scroll.limit,
+                scroll.filter.as_deref(),
+                scroll.after.as_ref(),
+                scroll.order_by.as_ref(),
+                scroll.shard_key.clone(),
+                scroll.with_payload.as_ref(),
+                scroll.with_vector.as_ref(),
+            )?,
+        }),
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
             request: lower_upsert_request(upsert)?,
-            wait: upsert
-                .wait
-                .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty()),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
             request: lower_delete_request(delete)?,
-            wait: delete.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
             request: lower_clear_payload_request(clear)?,
-            wait: clear.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
             collection: del.collection.clone(),
             request: lower_delete_payload_request(del)?,
-            wait: del.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
             request: lower_delete_vector_request(del_vec)?,
-            wait: del_vec.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::UpdateVector(update) => Ok(PlannedOperation::UpdateVectors {
             collection: update.collection.clone(),
             request: lower_update_vector_request(update),
-            wait: update.wait.unwrap_or(true),
+            wait: statement_wait(statement).unwrap_or(true),
         }),
         Stmt::UpdatePayload(update) => {
             let request = lower_update_payload_request(update)?;
-            let wait = update.wait.unwrap_or(true);
+            let wait = statement_wait(statement).unwrap_or(true);
             if update.overwrite {
                 Ok(PlannedOperation::OverwritePayload {
                     collection: update.collection.clone(),
@@ -707,16 +731,19 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 },
             })
         }
-        Stmt::CreateShardKey(sk) => Ok(PlannedOperation::CreateShardKey {
-            collection: sk.collection.clone(),
-            request: CreateShardKeyRequest {
-                shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
-                shards_number: sk.shards_number,
-                replication_factor: sk.replication_factor,
-                placement: sk.placement.clone(),
-                initial_state: lower_replica_state(sk.initial_state.as_deref())?,
-            },
-        }),
+        Stmt::CreateShardKey(sk) => {
+            validate_shard_key_counts(sk.shards_number, sk.replication_factor)?;
+            Ok(PlannedOperation::CreateShardKey {
+                collection: sk.collection.clone(),
+                request: CreateShardKeyRequest {
+                    shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
+                    shards_number: sk.shards_number,
+                    replication_factor: sk.replication_factor,
+                    placement: sk.placement.clone(),
+                    initial_state: lower_replica_state(sk.initial_state.as_deref())?,
+                },
+            })
+        }
         Stmt::DropShardKey(sk) => Ok(PlannedOperation::DropShardKey {
             collection: sk.collection.clone(),
             request: DropShardKeyRequest {
@@ -768,7 +795,14 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
         }
     };
     for (member, operation) in batch.statements.iter().zip(operations.iter()) {
-        if operation.batch_key().as_ref() != Some(&key) {
+        // Members must share family + collection; per-statement execution
+        // opts are owned by the BATCH header (`WAIT`, `PARAMS`), so the
+        // per-kind defaults must not split a declared batch.
+        if !operation
+            .batch_key()
+            .as_ref()
+            .is_some_and(|member_key| member_key.same_family(&key))
+        {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-BATCH-MIXED",
                 alloc::format!(
@@ -785,7 +819,7 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
         }
     }
     match &key {
-        BatchKey::Query(_) => {
+        BatchKey::Query { collection, .. } => {
             if batch.wait.is_some() {
                 return Err(QqlError::validation(
                     "QQL-VALIDATION-BATCH-WAIT",
@@ -806,6 +840,11 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                     ));
                 }
             }
+            let key = BatchKey::Query {
+                collection: collection.clone(),
+                timeout,
+                consistency: consistency.clone(),
+            };
             Ok(PlannedOperation::Batch {
                 key,
                 operations,
@@ -814,7 +853,7 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                 consistency,
             })
         }
-        BatchKey::Mutation(_) => {
+        BatchKey::Mutation { collection, .. } => {
             if let Some(params) = batch.params.as_ref()
                 && (params.timeout.is_some() || params.consistency.is_some())
             {
@@ -833,6 +872,17 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                     ));
                 }
             }
+            let wait = batch.wait.unwrap_or(true);
+            // Every member runs with the header WAIT; stamp it on the planned
+            // members so batch building validates the flag the RPC uses.
+            let mut operations = operations;
+            for operation in &mut operations {
+                set_mutation_wait(operation, wait);
+            }
+            let key = BatchKey::Mutation {
+                collection: collection.clone(),
+                wait,
+            };
             Ok(PlannedOperation::Batch {
                 key,
                 operations,
@@ -841,6 +891,21 @@ fn plan_batch(batch: &qql_core::ast::BatchStmt) -> Result<PlannedOperation, QqlE
                 consistency: None,
             })
         }
+    }
+}
+
+/// Stamp a batch's effective `wait` onto one planned mutation member.
+fn set_mutation_wait(operation: &mut PlannedOperation, wait: bool) {
+    match operation {
+        PlannedOperation::Upsert { wait: member, .. }
+        | PlannedOperation::Delete { wait: member, .. }
+        | PlannedOperation::UpdatePayload { wait: member, .. }
+        | PlannedOperation::OverwritePayload { wait: member, .. }
+        | PlannedOperation::ClearPayload { wait: member, .. }
+        | PlannedOperation::DeletePayload { wait: member, .. }
+        | PlannedOperation::UpdateVectors { wait: member, .. }
+        | PlannedOperation::DeleteVectors { wait: member, .. } => *member = wait,
+        _ => {}
     }
 }
 
@@ -1185,7 +1250,7 @@ mod tests {
         let op2 = plan(&s2).unwrap();
         assert_eq!(op1.batch_key(), op2.batch_key());
         assert!(planned_to_update_operation(&op1).is_some());
-        let (collection, labels, batch) = crate::batch::build_update_batch(&[op1, op2]).unwrap();
+        let (collection, labels, _, batch) = crate::batch::build_update_batch(&[op1, op2]).unwrap();
         assert_eq!(collection, "docs");
         assert_eq!(labels, vec!["DELETE_PAYLOAD", "DELETE_PAYLOAD"]);
         assert_eq!(batch.operations.len(), 2);
@@ -1292,6 +1357,28 @@ mod tests {
                 "planned key for {source}"
             );
         }
+    }
+
+    #[test]
+    fn create_shard_key_counts_fail_closed_on_hand_built_ast() {
+        // OpenAPI `CreateShardingKey`: uint32, minimum 1. The parser gates the
+        // literal form; bound/hand-built values must gate here too.
+        let mut stmt = Parser::parse("CREATE SHARD KEY 'a' ON COLLECTION docs;").unwrap();
+        let set = |stmt: &mut Stmt, shards: Option<u64>, replication: Option<u64>| {
+            let Stmt::CreateShardKey(sk) = stmt else {
+                panic!("expected CreateShardKey");
+            };
+            sk.shards_number = shards;
+            sk.replication_factor = replication;
+        };
+        set(&mut stmt, Some(0), None);
+        assert_eq!(plan(&stmt).unwrap_err().code, "QQL-PLAN-SHARD-KEY");
+        set(&mut stmt, Some(u32::MAX as u64 + 1), None);
+        assert_eq!(plan(&stmt).unwrap_err().code, "QQL-PLAN-SHARD-KEY");
+        set(&mut stmt, None, Some(0));
+        assert_eq!(plan(&stmt).unwrap_err().code, "QQL-PLAN-SHARD-KEY");
+        set(&mut stmt, None, Some(2));
+        assert!(plan(&stmt).is_ok());
     }
 
     #[test]

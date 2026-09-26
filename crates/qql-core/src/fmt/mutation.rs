@@ -50,8 +50,8 @@ pub(crate) fn render_scroll(statement: &ScrollStmt) -> String {
     }
     if let Some(param) = &statement.limit_param {
         let _ = write!(out, " LIMIT {}", render_placeholder(param));
-    } else {
-        let _ = write!(out, " LIMIT {}", statement.limit);
+    } else if let Some(limit) = statement.limit {
+        let _ = write!(out, " LIMIT {limit}");
     }
     out
 }
