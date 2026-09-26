@@ -172,7 +172,7 @@ pub struct UpsertPointRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector: Option<PlanPointVectors>,
     /// Payload object stored with the point: pairs serialize as the JSON
-    /// object at the transport boundary (see [`crate::value_serde`]).
+    /// object at the transport boundary.
     #[serde(
         skip_serializing_if = "Option::is_none",
         serialize_with = "crate::value_serde::serialize_ast_pairs_opt"
@@ -223,7 +223,7 @@ pub struct UpdatePayloadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     /// Payload keys to set on the selected points: pairs serialize as the
-    /// JSON object at the transport boundary (see [`crate::value_serde`]).
+    /// JSON object at the transport boundary.
     #[serde(serialize_with = "crate::value_serde::serialize_ast_pairs")]
     pub payload: Vec<(String, qql_core::ast::Value)>,
     /// Nested assignment path (OpenAPI `SetPayload.key`).

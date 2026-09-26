@@ -146,8 +146,8 @@ pub struct ValuesCountParams {
 /// OpenAPI `Match` variants: exact value, text forms, any-of, or exclusion.
 ///
 /// Scalar values are [`qql_core::ast::Value`] rendered to JSON only at the
-/// transport boundary (see [`crate::value_serde`]); the wire shape is
-/// unchanged from the old eager conversion.
+/// transport boundary; the wire shape is unchanged from the old eager
+/// conversion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MatchValue {
