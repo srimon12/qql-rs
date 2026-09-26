@@ -312,10 +312,7 @@ fn test_bound_negative_literal_after_minus_stays_parseable() {
     // `x-:n` bound to -2 must not render `x--2`, which the lexer reads as a
     // line comment (core-audit #7).
     let query = "QUERY FORMULA x-:n FROM docs;";
-    let bound = bind_named(query, |name| {
-        (name == "n").then(|| Value::Int(-2))
-    })
-    .unwrap();
+    let bound = bind_named(query, |name| (name == "n").then_some(Value::Int(-2))).unwrap();
     assert_eq!(bound, "QUERY FORMULA x- -2 FROM docs;");
     Parser::parse(&bound).expect("bound text must re-parse");
 

@@ -84,8 +84,8 @@ fn split_glued_signed_literals(tokens: Vec<Token<'_>>) -> Vec<Token<'_>> {
 
     let mut out: Vec<Token<'_>> = Vec::with_capacity(tokens.len());
     for tok in tokens {
-        let glued = matches!(tok.kind, TokenKind::Integer | TokenKind::Float)
-            && tok.text.starts_with('-');
+        let glued =
+            matches!(tok.kind, TokenKind::Integer | TokenKind::Float) && tok.text.starts_with('-');
         if glued && out.last().is_some_and(|prev| ends_operand(prev.kind)) {
             let start = tok.span.start;
             out.push(Token::new(

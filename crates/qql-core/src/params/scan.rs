@@ -83,9 +83,7 @@ fn has_closing_triple(bytes: &[u8], start: usize, triple: &[u8; 3]) -> bool {
 fn opens_triple_quoted(bytes: &[u8], i: usize, quote: u8) -> bool {
     let triple = [quote, quote, quote];
     has_closing_triple(bytes, i, &triple)
-        && bytes[i + 3..]
-            .windows(3)
-            .any(|window| window == triple)
+        && bytes[i + 3..].windows(3).any(|window| window == triple)
 }
 
 /// Advance past a triple-quoted string (`'''...'''` or `"""..."""`).

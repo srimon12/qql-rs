@@ -315,12 +315,19 @@ impl<'a> AstLowerer<'a> {
         name: &str,
         value: &crate::ast::Value,
     ) -> Result<u64, QqlError> {
+        let span = self.peek()?.span;
         match value {
-            crate::ast::Value::Int(n) if *n > 0 => Ok(*n as u64),
+            crate::ast::Value::Int(n) if *n > 0 => u32::try_from(*n).map(u64::from).map_err(|_| {
+                QqlError::parse(
+                    "QQL-PARSE-SHARD-KEY-CONFIG",
+                    alloc::format!("{} must fit in an unsigned 32-bit integer", name),
+                    span,
+                )
+            }),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-SHARD-KEY-CONFIG",
                 alloc::format!("{} must be a positive integer", name),
-                self.peek()?.span,
+                span,
             )),
         }
     }

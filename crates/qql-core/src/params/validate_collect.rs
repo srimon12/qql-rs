@@ -573,38 +573,10 @@ impl Census {
         self.search_params(query.params.as_ref());
         self.shard_opt(&query.shard_key);
         if let Some(param) = &query.page.limit_param {
-            let span = query.page.limit_span;
-            if let Some(name) = param.strip_prefix(':') {
-                self.record_named(name);
-            } else if let Some(idx_str) = param.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    self.record_pos(idx);
-                } else {
-                    self.max_pos = self.max_pos.max(1);
-                }
-            } else {
-                self.record_named(param);
-            }
-            let full = unbound_param_str_err(param, span);
-            let scalar = unbound_param_str_err(param, span);
-            self.note_both(full, scalar);
+            self.page_limit_param(param, query.page.limit_span);
         }
         if let Some(param) = &query.page.offset_param {
-            let span = query.page.offset_span;
-            if let Some(name) = param.strip_prefix(':') {
-                self.record_named(name);
-            } else if let Some(idx_str) = param.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    self.record_pos(idx);
-                } else {
-                    self.max_pos = self.max_pos.max(1);
-                }
-            } else {
-                self.record_named(param);
-            }
-            let full = unbound_param_str_err(param, span);
-            let scalar = unbound_param_str_err(param, span);
-            self.note_both(full, scalar);
+            self.page_limit_param(param, query.page.offset_span);
         }
     }
 

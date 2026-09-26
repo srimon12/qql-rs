@@ -116,7 +116,7 @@ impl<'a> AstLowerer<'a> {
             }
             TokenKind::Params => {
                 self.advance()?;
-                self.parse_collection_params_config_block(for_alter)
+                self.parse_collection_params_config_block()
             }
             TokenKind::Wal => {
                 self.advance()?;
@@ -357,10 +357,7 @@ impl<'a> AstLowerer<'a> {
         })
     }
 
-    pub fn parse_collection_params_config_block(
-        &mut self,
-        _for_alter: bool,
-    ) -> Result<CollectionConfig, QqlError> {
+    pub fn parse_collection_params_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
         let config = self.parse_config_block()?;
         for (key, value) in &config {
             let lower = key.to_ascii_lowercase();

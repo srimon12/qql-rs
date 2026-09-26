@@ -147,7 +147,10 @@ fn quantization_and_sparse_options_reject_wrong_types() {
             crate::error::ErrorKind::Validation,
             "wrong kind for: {source}"
         );
-        assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "wrong code for: {source}");
+        assert_eq!(
+            err.code, "QQL-VALIDATION-CONFIG",
+            "wrong code for: {source}"
+        );
     }
 
     // The well-typed spellings still parse.

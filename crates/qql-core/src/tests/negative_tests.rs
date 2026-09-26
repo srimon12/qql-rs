@@ -189,11 +189,7 @@ fn query_points_rejects_paging_clauses() {
         "QUERY POINTS (1, 2) FROM docs LIMIT 5 OFFSET :n;",
     ] {
         let err = Parser::parse(source).expect_err(&format!("expected error for: {source}"));
-        assert_eq!(
-            err.kind,
-            ErrorKind::Validation,
-            "wrong kind for: {source}"
-        );
+        assert_eq!(err.kind, ErrorKind::Validation, "wrong kind for: {source}");
         assert_eq!(
             err.code, "QQL-VALIDATION-POINTS-CLAUSE",
             "wrong code for: {source}"
@@ -396,6 +392,9 @@ fn create_shard_key_config_rejects_unknown_keys_and_invalid_values() {
         "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 1.5);",
         "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (foo = 1);",
         "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2, foo = 1);",
+        // The wire fields are u32; a larger value must not reach the backend.
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 5000000000);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 5000000000);",
     ];
     for source in cases {
         let err = Parser::parse(source)

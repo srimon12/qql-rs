@@ -546,19 +546,8 @@ fn parse_formula_function_call(
                 None
             };
 
-            let static_kind: &'static str = match func_name {
-                "exp_decay" => "exp_decay",
-                "gauss_decay" => "gauss_decay",
-                "lin_decay" => "lin_decay",
-                _ => {
-                    return Err(syntax_err(
-                        alloc::format!("unknown decay function: {}", func_name),
-                        span,
-                    ));
-                }
-            };
             Ok(FormulaExpr::Decay {
-                kind: static_kind.to_string(),
+                kind: func_name.to_string(),
                 x: Box::new(x),
                 target,
                 scale,

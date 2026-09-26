@@ -248,7 +248,11 @@ fn decay_surplus_arguments_rejected() {
         "QUERY FORMULA LIN_DECAY(t, 0, 7, 0.5, 99) FROM docs;",
     ] {
         let err = Parser::parse(source).expect_err(&format!("expected arity error for: {source}"));
-        assert_eq!(err.kind, crate::error::ErrorKind::Parse, "wrong kind: {source}");
+        assert_eq!(
+            err.kind,
+            crate::error::ErrorKind::Parse,
+            "wrong kind: {source}"
+        );
     }
     // Four positional args still parse.
     Parser::parse("QUERY FORMULA EXP_DECAY(t, 0, 7, 0.5) FROM docs;")
@@ -259,8 +263,10 @@ fn decay_surplus_arguments_rejected() {
 fn geo_distance_accepts_uint_coordinates() {
     // core-audit #13: an unsigned lat/lon literal (Value::UInt) must not fall
     // through to the misleading "must have 'lat' key" error.
-    Parser::parse("QUERY FORMULA GEO_DISTANCE({lat: 18446744073709551615, lon: 0}, loc) FROM docs;")
-        .expect("UInt lat must be accepted");
+    Parser::parse(
+        "QUERY FORMULA GEO_DISTANCE({lat: 18446744073709551615, lon: 0}, loc) FROM docs;",
+    )
+    .expect("UInt lat must be accepted");
 
     let err = Parser::parse("QUERY FORMULA GEO_DISTANCE({lat: 'x', lon: 122}, loc) FROM docs;")
         .expect_err("non-numeric lat must fail");
@@ -890,8 +896,9 @@ fn named_vector_called_object_is_not_inference_input() {
         crate::ast::VectorValue::Dense(ref values) if values == &[0.1, 0.2]
     ));
 
-    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: {object: {a: 1}, model: 'm'}};")
-        .expect("inference object must parse");
+    let stmt =
+        Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: {object: {a: 1}, model: 'm'}};")
+            .expect("inference object must parse");
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
@@ -901,7 +908,9 @@ fn named_vector_called_object_is_not_inference_input() {
     assert!(
         matches!(
             &point.vectors,
-            Some(crate::ast::PointVectors::Unnamed(crate::ast::VectorValue::Object { .. }))
+            Some(crate::ast::PointVectors::Unnamed(
+                crate::ast::VectorValue::Object { .. }
+            ))
         ),
         "expected inference object, got {:?}",
         point.vectors
