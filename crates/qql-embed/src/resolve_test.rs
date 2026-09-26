@@ -1293,11 +1293,101 @@ async fn default_embed_sparse_rejects_non_default_model() {
 }
 
 #[tokio::test]
-async fn default_embed_joint_propagates_errors_not_swallowed() {
+async fn default_sparse_methods_match_the_shared_pipeline() {
+    // The default trait methods reuse the process-wide pipeline when the
+    // configured text options are the defaults; output must stay
+    // byte-identical to the free-function pipeline wrappers.
     let e = DefaultEmbedder;
-    let err = e.embed_joint("hello", "default").await.unwrap_err();
-    // embed_sparse passes for default model; embed_multi rejects by default.
-    assert_eq!(err.code, "QQL-EMBEDDING-MULTI");
+    for text in [
+        "Recipe for baking chocolate chip cookies",
+        "the and of to in",
+        "",
+    ] {
+        assert_eq!(
+            e.embed_sparse_document(text, "default").await.unwrap(),
+            crate::sparse::embed_document(text),
+            "document output changed for {text:?}"
+        );
+        assert_eq!(
+            e.embed_sparse_query(text, "").await.unwrap(),
+            crate::sparse::embed_query(text),
+            "query output changed for {text:?}"
+        );
+        assert_eq!(
+            e.embed_sparse_document(text, "QDRANT/BM25").await.unwrap(),
+            crate::sparse::embed_document(text),
+            "alias output changed for {text:?}"
+        );
+    }
+}
+
+/// Default sparse methods with a non-default text config (Spanish), so the
+/// per-config pipeline branch is exercised instead of the cached default.
+struct SpanishEmbedder;
+
+#[async_trait]
+impl Embedder for SpanishEmbedder {
+    async fn embed_dense(&self, _text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
+        Ok(vec![0.0])
+    }
+
+    fn bm25_text_config(&self) -> crate::Bm25TextConfig {
+        crate::Bm25TextConfig {
+            language: crate::Language::Spanish,
+            ..crate::Bm25TextConfig::default()
+        }
+    }
+}
+
+#[tokio::test]
+async fn overridden_bm25_text_config_is_honored_by_default_sparse_methods() {
+    let e = SpanishEmbedder;
+    let expected = e
+        .bm25_text_config()
+        .pipeline()
+        .embed_document("la casa")
+        .unwrap();
+    let got = e.embed_sparse_document("la casa", "default").await.unwrap();
+    assert_eq!(got, expected);
+    assert_ne!(
+        got,
+        crate::sparse::embed_document("la casa"),
+        "the Spanish override must not fall back to the English default"
+    );
+    assert_eq!(
+        e.embed_sparse_query("la casa", "qdrant/bm25")
+            .await
+            .unwrap(),
+        e.bm25_text_config()
+            .pipeline()
+            .embed_query("la casa")
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn default_embed_sparse_accepts_qdrant_bm25_alias() {
+    let e = DefaultEmbedder;
+    // The local pipeline *is* `qdrant/bm25`; the server spelling must be
+    // accepted (any case) instead of rejected.
+    for alias in ["qdrant/bm25", "QDRANT/BM25"] {
+        let query = e.embed_sparse_query("hello world", alias).await.unwrap();
+        let document = e.embed_sparse_document("hello world", alias).await.unwrap();
+        assert_eq!(
+            query,
+            e.embed_sparse_query("hello world", "default")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            document,
+            e.embed_sparse_document("hello world", "").await.unwrap()
+        );
+    }
+    // Unrelated models still fail closed with the alias in the message.
+    let err = e.embed_sparse_query("hello", "splade").await.unwrap_err();
+    assert_eq!(err.code, "QQL-EMBEDDING-SPARSE");
+    assert!(err.message.contains("qdrant/bm25"), "got: {}", err.message);
 }
 
 /// Embedder echoing the first text byte as the vector, so per-model batch
@@ -1472,14 +1562,6 @@ async fn default_opt_in_modalities_reject_with_codes() {
             .unwrap_err()
             .code,
         "QQL-EMBEDDING-IMAGE"
-    );
-    // Joint fans out to dense + sparse + multi; multi rejects first.
-    assert_eq!(
-        e.embed_joint_batch(&["x".to_string()], "default")
-            .await
-            .unwrap_err()
-            .code,
-        "QQL-EMBEDDING-MULTI"
     );
 }
 
