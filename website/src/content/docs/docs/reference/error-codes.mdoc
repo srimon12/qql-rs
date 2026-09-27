@@ -152,6 +152,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-BATCH-WAIT` | `WAIT` placed on a member instead of the `BATCH` header, or on a query batch |
 | `QQL-VALIDATION-ANALYZE-BATCH` | `EXPLAIN ANALYZE` does not support `BATCH` scripts; analyze single statements individually |
 | `QQL-VALIDATION-MIN-SHOULD` | `MIN SHOULD` count must be `>= 1` |
+| `QQL-VALIDATION-NESTING` | Query `CTE` / `PREFETCH` nesting exceeds the depth the embedding and topology walks support |
 
 ## Planning
 
@@ -284,7 +285,7 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
 | `QQL-EMBEDDING-UNAVAILABLE` | No embedder is configured or reachable for text/image embedding |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
-| `QQL-EMBEDDING` | The requested dense model is unavailable on this embedder (omit `MODEL` or use `'default'`) |
+| `QQL-EMBEDDING` | Dense embedding failed on this embedder: unavailable model, an unbound `TEXT` parameter about to be client-embedded, or `OPTIONS` that only server-side inference can honor |
 | `QQL-EMBEDDING-DIM` | `embedding_dimension` must be configured when creating collections with `USING MODEL` in local inference mode |
 | `QQL-EMBEDDING-IMAGE` | Image embedding is unavailable (no image/CLIP vision path configured) |
 | `QQL-EMBEDDING-MODEL` | The requested embedding model is not available from the configured embedder |
@@ -670,6 +671,7 @@ QQL-VALIDATION-LIMIT-OVERFLOW
 QQL-VALIDATION-MIN-SHOULD
 QQL-VALIDATION-MMR
 QQL-VALIDATION-MULTI-STMT
+QQL-VALIDATION-NESTING
 QQL-VALIDATION-POINT-ID
 QQL-VALIDATION-POINTS-CLAUSE
 QQL-VALIDATION-PREFETCH

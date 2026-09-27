@@ -8,7 +8,7 @@
 pub use qql_embed::SparseVector;
 pub use qql_embed::bm25_lang::Language;
 pub use qql_embed::bm25_text::{Bm25Pipeline, Bm25TextConfig, Stemmer, Stopwords, Tokenizer};
-pub use qql_embed::embedder::{Embedder, EmbedderBound, SparseEmbedder};
+pub use qql_embed::embedder::{Embedder, EmbedderBound};
 pub use qql_embed::sparse::Bm25Params;
 
 #[cfg(feature = "rest")]

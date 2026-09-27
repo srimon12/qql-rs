@@ -8,9 +8,20 @@
 //! no length limits), and [`Bm25Pipeline`] executes it in Qdrant's exact
 //! stage order: fold → lowercase → stopwords → stem → length check.
 //!
-//! Wire compatibility notes (all verified against Qdrant's implementation):
-//! - Token IDs are Qdrant's `token_id` (murmur3-32 seed 0, `unsigned_abs`).
-//! - The TF formula uses the same fused operation order as `lib/bm25`.
+//! Wire compatibility notes (each item is either pinned by a test here or
+//! flagged as unverified — unverified items are deliberate behavior pins, not
+//! parity claims):
+//! - Token IDs are Qdrant's `token_id` (murmur3-32 seed 0, `unsigned_abs`),
+//!   pinned by the golden test in `sparse_test.rs`.
+//! - The TF formula follows `lib/bm25`'s saturation shape; the math runs in
+//!   `f64` and casts to `f32` once, so weights agree to within f32 rounding.
+//!   Bit-exact parity against the server is **not** asserted here.
+//! - Token-length limits are measured in `chars()` **after** stemming (pinned
+//!   by `token_length_limits_apply_in_chars`). Qdrant's exact measurement
+//!   (bytes vs chars, pre- vs post-stem) is not re-verified here.
+//! - Stopword entries are lowercased but never ASCII-folded at build time,
+//!   while tokens are folded then lowercased: with `ascii_folding` on,
+//!   non-ASCII stopwords do not match. Pinned as behavior; parity unverified.
 //! - `k1 = 0` is accepted (binary weighting), like Qdrant's validator.
 //! - Stopword lists are ported verbatim from Qdrant's segment crate.
 //! - Folding uses Qdrant's Lucene-derived mapping.
@@ -171,10 +182,11 @@ pub struct Bm25TextConfig {
     pub stopwords: Option<Stopwords>,
     /// Stemmer override (`None` = language default).
     pub stemmer: Option<Stemmer>,
-    /// Drop tokens shorter than this (chars, always enforced, like Qdrant).
+    /// Drop tokens shorter than this (`chars()` counted **after** stemming,
+    /// always enforced; Qdrant's exact unit/stage is not re-verified here).
     pub min_token_len: Option<usize>,
-    /// Drop tokens longer than this (chars; on the document path, like
-    /// Qdrant — the prefix query path truncates instead).
+    /// Drop tokens longer than this (`chars()` counted after stemming; on the
+    /// document path, like Qdrant — the prefix query path truncates instead).
     pub max_token_len: Option<usize>,
 }
 
@@ -388,15 +400,6 @@ pub struct Bm25Pipeline {
 }
 
 impl Bm25Pipeline {
-    /// Default text knobs with explicit numeric parameters.
-    pub fn with_params(params: &Bm25Params) -> Self {
-        Bm25TextConfig {
-            params: *params,
-            ..Bm25TextConfig::default()
-        }
-        .pipeline()
-    }
-
     /// Qdrant's stage order: fold → lowercase → stopwords → stem → length.
     /// `check_max_len` is Qdrant's per-call flag: word/whitespace pass true
     /// on both paths; the prefix document path passes false (the n-gram loop
@@ -604,9 +607,10 @@ impl Bm25Pipeline {
             return Ok(SparseVector::default());
         }
         let doc_len = token_ids.len() as f64;
-        // Same fused operation order as Qdrant `lib/bm25`, so weights agree
-        // bit-for-bit absent murmur3 collisions — not just algebraically:
-        // `n * (k1 + 1)` over `k1.mul_add(1 - b + b * doc_len / avgdl, n)`.
+        // Same fused operation order as Qdrant `lib/bm25`'s saturation shape:
+        // `n * (k1 + 1)` over `k1.mul_add(1 - b + b * doc_len / avgdl, n)`,
+        // computed in f64 and cast to f32 once (weights agree to within f32
+        // rounding; bit-exact server parity is not asserted or tested).
         // (On a collision Qdrant counts per string and overwrites while we
         // count per ID and sum, so collided IDs carry no cross-impl contract
         // either way — same caveat as the server documents.)

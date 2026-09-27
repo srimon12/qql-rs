@@ -117,14 +117,14 @@ fn merge_text_overrides(
 
 /// Validate `model` against the embedder's sparse configuration: with a
 /// fastembed sparse model locked in, only that model (or default/empty) is
-/// allowed; without one, only default/empty is allowed (local wire-compatible
-/// BM25 handles it).
+/// allowed; without one, only default/empty/`qdrant/bm25` is allowed (local
+/// wire-compatible BM25 handles it).
 pub(crate) fn ensure_sparse_model_allowed(
     embedder: &FastEmbedder,
     model: &str,
 ) -> Result<(), QqlError> {
     let Some(ref sparse) = embedder.sparse else {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !qql_embed::is_local_bm25_model(model) {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
         return Ok(());

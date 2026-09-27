@@ -1,56 +1,44 @@
+use crate::bm25_text::default_pipeline;
 use crate::sparse;
 
-#[test]
-fn test_for_each_token_id_matches_tokenize_then_token_id() {
-    for text in [
-        "Hello, World! 123",
-        "B-cell anti-NMDA CD19-negative",
-        "Привет мир hello-world",
-        "you'll be in town",
-        "",
-        "the and of to in",
-    ] {
-        let mut streamed = Vec::new();
-        sparse::for_each_token_id(text, |id| streamed.push(id));
-        let expected: Vec<u32> = sparse::tokenize(text)
-            .iter()
-            .map(|t| sparse::token_id(t))
-            .collect();
-        assert_eq!(streamed, expected, "parity for {text:?}");
-    }
+/// Default-pipeline document tokens (test-side view of the shared pipeline).
+fn tokens(text: &str) -> Vec<String> {
+    default_pipeline()
+        .doc_tokens(text)
+        .expect("default word/English pipeline is infallible")
 }
 
 #[test]
 fn test_tokenize_word_boundaries_lowercases_and_stems() {
     // Word tokenizer splits on every non-alphanumeric char (including `_`),
     // lowercases, then applies English snowball stemming.
-    let got = sparse::tokenize("Hello, World! 123 TEST_token");
+    let got = tokens("Hello, World! 123 TEST_token");
     assert_eq!(got, vec!["hello", "world", "123", "test", "token"]);
 }
 
 #[test]
 fn test_tokenize_removes_english_stopwords() {
     // "a", "d", "of", "the" are stopwords; single letters like "b"/"c" are not.
-    let got = sparse::tokenize("a b c d go rs");
+    let got = tokens("a b c d go rs");
     assert_eq!(got, vec!["b", "c", "go", "rs"]);
 }
 
 #[test]
 fn test_tokenize_handles_hyphenated_medical_terms() {
     // Hyphens are word boundaries (server word-tokenizer behavior).
-    let got = sparse::tokenize("B-cell anti-NMDA CD19-negative");
+    let got = tokens("B-cell anti-NMDA CD19-negative");
     assert_eq!(got, vec!["b", "cell", "anti", "nmda", "cd19", "negat"]);
 }
 
 #[test]
 fn test_tokenize_handles_unicode() {
-    let got = sparse::tokenize("Привет мир hello-world");
+    let got = tokens("Привет мир hello-world");
     assert_eq!(got, vec!["привет", "мир", "hello", "world"]);
 }
 
 #[test]
 fn test_tokenize_splits_underscore_like_server() {
-    let got = sparse::tokenize("test_fn main_loop");
+    let got = tokens("test_fn main_loop");
     assert_eq!(got, vec!["test", "fn", "main", "loop"]);
 }
 
@@ -58,14 +46,14 @@ fn test_tokenize_splits_underscore_like_server() {
 fn test_tokenize_apostrophes_and_stopwords() {
     // Mirrors the server's own tokenizer test: "you'll" splits into the
     // stopwords "you" + "ll"; "be" and "in" are stopwords too.
-    let got = sparse::tokenize("you'll be in town");
+    let got = tokens("you'll be in town");
     assert_eq!(got, vec!["town"]);
 }
 
 #[test]
 fn test_tokenize_stems_inflections() {
     // Mirrors the server's snowball stemmer test.
-    let got = sparse::tokenize("interestingly proceeding living");
+    let got = tokens("interestingly proceeding living");
     assert_eq!(got, vec!["interest", "proceed", "live"]);
 }
 
@@ -367,4 +355,97 @@ fn test_bm25_params_resolve_applies_per_field_overrides() {
     assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
     let err = sparse::Bm25Params::resolve(None, None, Some(f64::NAN)).expect_err("NaN rejected");
     assert_eq!(err.code, "QQL-VALIDATION-CONFIG");
+}
+
+// ── Tokenizer property coverage (deterministic, no external dep) ──────────
+
+/// Deterministic xorshift64* generator so the property cases are reproducible
+/// without pulling a fuzz/proptest dependency into the crate.
+struct XorShift64(u64);
+
+impl XorShift64 {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+}
+
+/// Random-ish UTF-8: ASCII words, whitespace, punctuation, CJK, accented and
+/// astral code points, combining marks, and `char::REPLACEMENT_CHARACTER`
+/// surrogates are impossible by construction (they are not `char`s).
+fn generated_utf8(rng: &mut XorShift64, len: usize) -> String {
+    const POOLS: [&[char]; 6] = [
+        &[
+            'a', 'z', 'A', 'Z', '0', '9', '_', '-', '\'', '.', ',', '!', ' ',
+        ],
+        &['é', 'à', 'ü', 'ñ', 'ß', 'ø', 'å'],
+        &['你', '好', '世', '界', '日', '本', '語'],
+        &['😀', '🚀', '🧪', '🦀'],
+        &['\u{0301}', '\u{0308}', '\u{200d}', '\u{200b}', '\u{00ad}'],
+        &['\n', '\t', '\r', '\u{2028}'],
+    ];
+    let mut out = String::new();
+    for _ in 0..len {
+        let pick = (rng.next() % POOLS.len() as u64) as usize;
+        let pool = POOLS[pick];
+        out.push(pool[(rng.next() % pool.len() as u64) as usize]);
+    }
+    out
+}
+
+#[test]
+fn tokenizer_never_panics_and_query_ids_are_sorted_unique() {
+    let mut rng = XorShift64(0x9E37_79B9_7F4A_7C15);
+    for case in 0..2000 {
+        let len = (rng.next() % 40) as usize;
+        let text = generated_utf8(&mut rng, len);
+        let query = sparse::embed_query(&text);
+        assert_eq!(
+            query.indices.len(),
+            query.values.len(),
+            "case {case}: index/value length mismatch for {text:?}"
+        );
+        assert!(
+            query.indices.windows(2).all(|w| w[0] < w[1]),
+            "case {case}: query ids must be sorted and unique for {text:?}"
+        );
+        assert!(
+            query.values.iter().all(|&v| v == 1.0),
+            "case {case}: query weights must be unit"
+        );
+
+        let document = sparse::embed_document(&text);
+        assert_eq!(document.indices.len(), document.values.len());
+        assert!(
+            document.indices.windows(2).all(|w| w[0] < w[1]),
+            "case {case}: document ids must be sorted and unique for {text:?}"
+        );
+        assert!(
+            document.values.iter().all(|v| v.is_finite() && *v > 0.0),
+            "case {case}: document weights must be finite and positive for {text:?}"
+        );
+
+        // Query terms are a subset of document terms for identical text.
+        for &id in &query.indices {
+            assert!(
+                document.indices.contains(&id),
+                "case {case}: query id {id} missing from document ids for {text:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tokenizer_handles_malformed_whitespace_runs() {
+    // Separator-only and mixed-separator inputs must produce empty vectors
+    // rather than panicking on byte slicing.
+    for text in ["", " ", "\u{00a0}\u{2028}\t\r", "_-_.-", "\u{200b}\u{200d}"] {
+        assert!(sparse::embed_query(text).indices.is_empty(), "{text:?}");
+        assert!(sparse::embed_document(text).indices.is_empty(), "{text:?}");
+        assert!(tokens(text).is_empty(), "{text:?}");
+    }
 }

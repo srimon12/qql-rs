@@ -13,13 +13,90 @@ use qql_core::ast::{
 };
 use qql_core::error::QqlError;
 
+/// Maximum `CTE` / `PREFETCH` nesting the synchronous query AST walks
+/// descend. Deeper hand-built trees fail closed with `QQL-VALIDATION-NESTING`
+/// instead of overflowing the stack: the embedding apply pass is boxed, but
+/// the job collect and topology configure passes are plain recursion.
+pub(crate) const MAX_NESTING_DEPTH: usize = 64;
+
+/// Depth-guard error shared by the embedding collect and topology configure
+/// walks.
+pub(crate) fn nesting_depth_error() -> QqlError {
+    QqlError::validation(
+        "QQL-VALIDATION-NESTING",
+        format!(
+            "query nesting exceeds the supported depth of {MAX_NESTING_DEPTH} levels; \
+             flatten the CTE / PREFETCH chain"
+        ),
+        None,
+    )
+}
+
 /// Whether any query target still needs schema-backed kind / name resolution.
+///
+/// Iterative (explicit work stack): the predicate also runs over hand-built
+/// ASTs, where `PREFETCH` / `CTE` nesting depth is unbounded.
 pub fn query_needs_kind_resolution(query: &QueryStmt) -> bool {
-    query
-        .ctes
+    let mut stack = vec![query];
+    while let Some(query) = stack.pop() {
+        if expression_needs_kind(&query.expression, &mut stack) {
+            return true;
+        }
+        stack.extend(query.ctes.iter().map(|cte| &*cte.query));
+    }
+    false
+}
+
+/// Whether this expression's own targets need resolution; nested inline
+/// prefetch sub-queries are pushed onto `stack` for the caller's loop.
+fn expression_needs_kind<'a>(expression: &'a QueryExpr, stack: &mut Vec<&'a QueryStmt>) -> bool {
+    match expression {
+        QueryExpr::Nearest {
+            using, prefetch, ..
+        }
+        | QueryExpr::Recommend {
+            using, prefetch, ..
+        }
+        | QueryExpr::Context {
+            using, prefetch, ..
+        }
+        | QueryExpr::Discover {
+            using, prefetch, ..
+        }
+        | QueryExpr::RelevanceFeedback {
+            using, prefetch, ..
+        }
+        | QueryExpr::Rerank {
+            using, prefetch, ..
+        } => {
+            stack.extend(prefetch_queries(prefetch));
+            target_needs_kind(using)
+        }
+        // Cross-encoder has no USING vector; only nested prefetches need topology.
+        QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. } => {
+            stack.extend(prefetch_queries(prefetch));
+            false
+        }
+        QueryExpr::Hybrid {
+            dense_vector,
+            sparse_vector,
+            ..
+        } => dense_vector.is_none() || sparse_vector.is_none(),
+        QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => false,
+    }
+}
+
+/// Inline prefetch sub-queries of one expression, in order. CTE references
+/// carry no nodes of their own — their bodies live on the root statement.
+fn prefetch_queries(prefetch: &[Prefetch]) -> impl Iterator<Item = &QueryStmt> {
+    prefetch
         .iter()
-        .any(|cte| query_needs_kind_resolution(&cte.query))
-        || expression_needs_kind_resolution(&query.expression)
+        .filter_map(|prefetch| match &prefetch.source {
+            PrefetchSource::Cte(_) => None,
+            PrefetchSource::Query(query) => Some(query.as_ref()),
+        })
 }
 
 /// Dense / sparse / multivector name lists for a collection.
@@ -129,39 +206,6 @@ impl QueryTopology {
     }
 }
 
-fn expression_needs_kind_resolution(expression: &QueryExpr) -> bool {
-    match expression {
-        QueryExpr::Nearest {
-            using, prefetch, ..
-        }
-        | QueryExpr::Recommend {
-            using, prefetch, ..
-        }
-        | QueryExpr::Context {
-            using, prefetch, ..
-        }
-        | QueryExpr::Discover {
-            using, prefetch, ..
-        }
-        | QueryExpr::RelevanceFeedback {
-            using, prefetch, ..
-        } => target_needs_kind(using) || prefetch.iter().any(prefetch_needs_kind),
-        QueryExpr::Rerank {
-            using, prefetch, ..
-        } => target_needs_kind(using) || prefetch.iter().any(prefetch_needs_kind),
-        // Cross-encoder has no USING vector; only nested prefetches need topology.
-        QueryExpr::CrossRerank { prefetch, .. }
-        | QueryExpr::Fusion { prefetch, .. }
-        | QueryExpr::Formula { prefetch, .. } => prefetch.iter().any(prefetch_needs_kind),
-        QueryExpr::Hybrid {
-            dense_vector,
-            sparse_vector,
-            ..
-        } => dense_vector.is_none() || sparse_vector.is_none(),
-        QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => false,
-    }
-}
-
 fn target_needs_kind(target: &Option<VectorTarget>) -> bool {
     needs_kind_resolution(target) || needs_multi_upgrade(target)
 }
@@ -186,28 +230,34 @@ fn needs_multi_upgrade(target: &Option<VectorTarget>) -> bool {
     )
 }
 
-fn prefetch_needs_kind(prefetch: &Prefetch) -> bool {
-    match &prefetch.source {
-        PrefetchSource::Cte(_) => false,
-        PrefetchSource::Query(query) => query_needs_kind_resolution(query),
-    }
-}
-
 fn configure_query(
     collection: &str,
     query: &mut QueryStmt,
     topology: &QueryTopology,
 ) -> Result<(), QqlError> {
-    for cte in &mut query.ctes {
-        configure_query(collection, &mut cte.query, topology)?;
+    configure_query_at(collection, query, topology, 0)
+}
+
+fn configure_query_at(
+    collection: &str,
+    query: &mut QueryStmt,
+    topology: &QueryTopology,
+    depth: usize,
+) -> Result<(), QqlError> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err(nesting_depth_error());
     }
-    configure_expr(collection, &mut query.expression, topology)
+    for cte in &mut query.ctes {
+        configure_query_at(collection, &mut cte.query, topology, depth + 1)?;
+    }
+    configure_expr(collection, &mut query.expression, topology, depth)
 }
 
 fn configure_expr(
     collection: &str,
     expression: &mut QueryExpr,
     topology: &QueryTopology,
+    depth: usize,
 ) -> Result<(), QqlError> {
     match expression {
         QueryExpr::Nearest {
@@ -217,7 +267,7 @@ fn configure_expr(
             ..
         } => {
             resolve_using(collection, using, input_kind(input), topology)?;
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Recommend {
             positive,
@@ -228,7 +278,7 @@ fn configure_expr(
         } => {
             let kind = merge_input_kinds(positive.iter().chain(negative.iter()))?;
             resolve_using(collection, using, kind, topology)?;
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Context {
             pairs,
@@ -241,7 +291,7 @@ fn configure_expr(
                     .flat_map(|pair| [&pair.positive, &pair.negative]),
             )?;
             resolve_using(collection, using, kind, topology)?;
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Discover {
             target,
@@ -257,7 +307,7 @@ fn configure_expr(
                 ),
             )?;
             resolve_using(collection, using, kind, topology)?;
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::RelevanceFeedback {
             target,
@@ -270,19 +320,19 @@ fn configure_expr(
                 core::iter::once(&*target).chain(feedback.iter().map(|item| &item.example)),
             )?;
             resolve_using(collection, using, kind, topology)?;
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Rerank {
             using, prefetch, ..
         } => {
             resolve_using(collection, using, Some(VectorKind::Dense), topology)?;
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::CrossRerank { prefetch, .. } => {
-            configure_prefetches(collection, prefetch, topology)
+            configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Hybrid {
             dense_vector,
@@ -300,10 +350,11 @@ fn configure_prefetches(
     collection: &str,
     prefetches: &mut [Prefetch],
     topology: &QueryTopology,
+    depth: usize,
 ) -> Result<(), QqlError> {
     for prefetch in prefetches {
         if let PrefetchSource::Query(query) = &mut prefetch.source {
-            configure_query(collection, query, topology)?;
+            configure_query_at(collection, query, topology, depth + 1)?;
         }
     }
     Ok(())

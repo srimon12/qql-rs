@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use qql_core::error::QqlError;
-use qql_embed::{Bm25Params, Bm25TextConfig, Embedder, JointEmbeddingOutput, SparseVector};
+use qql_embed::{Bm25Params, Bm25TextConfig, Embedder, SparseVector};
 
 use super::FastEmbedder;
 use super::bm25::{embed_sparse_fastembed_batch, ensure_sparse_model_allowed, to_qql_sparse};
@@ -161,60 +161,6 @@ impl Embedder for FastEmbedder {
             .iter()
             .map(|text| to_qql_sparse(self.bm25.embed_document(text)))
             .collect())
-    }
-
-    /// Single-pass BGE-M3 joint embedding: one `Bgem3Embedding::embed` call
-    /// yields dense, sparse, and ColBERT together. Falls back to the default
-    /// three-call implementation when no BGE-M3 multi model is configured.
-    async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput, QqlError> {
-        let Some(ref multi) = self.multi else {
-            // No BGE-M3 model: delegate to default per-call impl (non-optimal
-            // but correct — no error suppression).
-            let dense = self.embed_dense(text, model).await?;
-            let sparse = self.embed_sparse_document(text, model).await?;
-            let multi_vec = self.embed_multi(text, model).await?;
-            return Ok(JointEmbeddingOutput {
-                dense: Some(dense),
-                sparse: Some(sparse),
-                multi: Some(multi_vec),
-            });
-        };
-
-        if !(self.accepts_multi_model(model)
-            || model.is_empty()
-            || model.eq_ignore_ascii_case("default"))
-        {
-            return Err(err(format!(
-                "local joint embedder uses BGE-M3 '{}' ({}); cannot satisfy MODEL '{model}'",
-                multi.model_name, multi.model_code
-            )));
-        }
-
-        let model_arc = multi.model.clone();
-        let texts = vec![text.to_string()];
-
-        let output = tokio::task::spawn_blocking(move || {
-            let mut m = model_arc
-                .lock()
-                .map_err(|e| err(format!("fastembed joint mutex poisoned: {e}")))?;
-            m.embed(texts, None)
-                .map_err(|e| err(format!("fastembed BGE-M3 joint failed: {e}")))
-        })
-        .await
-        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
-
-        let dense = output.dense.into_iter().next();
-        let sparse = output.sparse.into_iter().next().map(|e| SparseVector {
-            indices: e.indices.iter().map(|&i| i as u32).collect(),
-            values: e.values.clone(),
-        });
-        let colbert = output.colbert.into_iter().next();
-
-        Ok(JointEmbeddingOutput {
-            dense,
-            sparse,
-            multi: colbert,
-        })
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {

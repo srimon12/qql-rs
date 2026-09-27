@@ -25,7 +25,7 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 | `TextEmbedding` (BGE, MiniLM, CLIP **text**, …) | Dense (`TEXT`) |
 | `SparseTextEmbedding` (SPLADE, BGE-M3 sparse) | **Sparse** (`USING SPARSE MODEL '…'`) — real ONNX inference when `sparse_model` is set |
 | `ImageEmbedding` (CLIP vision, …) | Dense (`IMAGE` / `image_model`) |
-| `Bgem3Embedding` (joint dense + sparse + ColBERT) | **Multi** (`MultiDense` via `multi_model`) + single-pass `embed_joint` |
+| `Bgem3Embedding` (joint dense + sparse + ColBERT) | **Multi** (`MultiDense` via `multi_model`) |
 | `TextRerank` (bge-reranker, …) | **`CROSS RERANK`** pair scorer (client-side; not late-interaction `RERANK`) |
 
 CLIP is dual-encoder dense. Multivector is ColBERT bags only. Late-interaction

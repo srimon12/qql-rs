@@ -633,7 +633,7 @@ impl Embedder for HttpEmbedder {
     }
 
     async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !qql_embed::is_local_bm25_model(model) {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
         self.bm25_pipeline.embed_query(text)
@@ -644,7 +644,7 @@ impl Embedder for HttpEmbedder {
         texts: &[String],
         model: &str,
     ) -> Result<Vec<SparseVector>, QqlError> {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !qql_embed::is_local_bm25_model(model) {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
         let mut results = Vec::with_capacity(texts.len());
@@ -667,7 +667,7 @@ impl Embedder for HttpEmbedder {
         text: &str,
         model: &str,
     ) -> Result<SparseVector, QqlError> {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !qql_embed::is_local_bm25_model(model) {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
         self.bm25_pipeline.embed_document(text)
@@ -678,7 +678,7 @@ impl Embedder for HttpEmbedder {
         texts: &[String],
         model: &str,
     ) -> Result<Vec<SparseVector>, QqlError> {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !qql_embed::is_local_bm25_model(model) {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
         let mut results = Vec::with_capacity(texts.len());
