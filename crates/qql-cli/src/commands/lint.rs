@@ -56,8 +56,12 @@ pub struct LintJsonOutput {
 }
 
 fn lint_json(ok: bool, files: Vec<FileLintReport>, content: Option<String>) -> String {
-    serde_json::to_string_pretty(&LintJsonOutput { ok, files, content })
-        .expect("lint report serializes")
+    serde_json::to_string_pretty(&LintJsonOutput { ok, files, content }).unwrap_or_else(|error| {
+        // Unreachable for these plain structs; never panic in the CLI.
+        format!(
+            "{{\"ok\": false, \"files\": [], \"error\": \"lint report serialization failed: {error}\"}}"
+        )
+    })
 }
 
 /// The ONE lint exit rule, shared by every input mode (files, stdin, inline
@@ -478,15 +482,11 @@ fn collect_source_diagnostics(
 
 pub fn handle_lint(
     target: Option<&str>,
-    check: bool,
     fix: bool,
     cli_params: Option<&serde_json::Value>,
     json: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // `--check` is the explicit check-only mode (the default); it exists so CI
-    // reads clearly and conflicts with `--fix` at the clap level.
-    let _ = check;
     let mut files_to_lint: Vec<(String, PathBuf)> = Vec::new();
 
     if let Some(target_str) = target {
@@ -770,7 +770,7 @@ fn lint_string(
         return Err("lint found error(s)".into());
     }
     if !quiet && !json {
-        eprintln!("\x1b[32m✓\x1b[0m query: clean");
+        crate::output::print_success("query: clean");
     }
     Ok(())
 }
@@ -780,8 +780,21 @@ fn walkdir(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
     if dir.is_dir() {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
+            // Symlinked directories can form cycles (`ln -s . loop`) that
+            // would otherwise recurse until ENAMETOOLONG.
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                continue;
+            }
             let path = entry.path();
-            if path.is_dir() {
+            if file_type.is_dir() {
+                // Build/dependency trees are never QQL sources.
+                if matches!(
+                    path.file_name().and_then(|name| name.to_str()),
+                    Some(".git" | "target" | "node_modules")
+                ) {
+                    continue;
+                }
                 files.extend(walkdir(&path)?);
             } else {
                 files.push(path);

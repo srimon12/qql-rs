@@ -481,6 +481,45 @@ jobs:
           assert.equal(wasm.injectShardKey, undefined);
           NODE
 
+      - name: Prototype-safe payload round-trip in WASM output
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          // A payload key named `__proto__` (and `toString`) is data. It must
+          // arrive as an own data property without replacing the object
+          // prototype or resolving inherited members.
+          global.fetch = async () => new Response(
+            JSON.stringify({
+              result: {
+                points: [
+                  {
+                    id: 7,
+                    score: 0.5,
+                    payload: JSON.parse('{"__proto__": {"x": 1}, "toString": "p"}'),
+                  },
+                ],
+              },
+              status: 'ok',
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+          const wasm = require('/tmp/qql-wasm-pkg/qql_wasm.js');
+          (async () => {
+            const client = new wasm.Client('http://localhost:6333', null);
+            const report = await client.execute('QUERY [0.1] FROM docs LIMIT 1');
+            const payload = report.results[0].data[0].payload;
+            assert.equal(Object.prototype.hasOwnProperty.call(payload, '__proto__'), true);
+            assert.deepEqual(payload.__proto__, { x: 1 });
+            assert.equal(Object.getPrototypeOf(payload), Object.prototype);
+            assert.equal(Object.prototype.hasOwnProperty.call(payload, 'toString'), true);
+            assert.equal(payload.toString, 'p');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
       - name: Verify no removed injectShardKey in WASM declarations
         run: |
           set -euo pipefail

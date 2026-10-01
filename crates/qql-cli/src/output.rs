@@ -31,11 +31,31 @@ pub struct VersionResponse {
 }
 
 pub fn print_success(msg: &str) {
-    println!("\x1b[32m\u{2713}\x1b[0m {}", msg);
+    if color_stdout() {
+        println!("\x1b[32m\u{2713}\x1b[0m {}", msg);
+    } else {
+        println!("\u{2713} {}", msg);
+    }
 }
 
 pub fn print_error(msg: &str) {
-    eprintln!("\x1b[31m\u{2717}\x1b[0m {}", msg);
+    if color_stderr() {
+        eprintln!("\x1b[31m\u{2717}\x1b[0m {}", msg);
+    } else {
+        eprintln!("\u{2717} {}", msg);
+    }
+}
+
+/// Whether ANSI color is appropriate on stdout: a terminal and no `NO_COLOR`.
+pub(crate) fn color_stdout() -> bool {
+    use std::io::IsTerminal;
+    std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal()
+}
+
+/// Whether ANSI color is appropriate on stderr: a terminal and no `NO_COLOR`.
+pub(crate) fn color_stderr() -> bool {
+    use std::io::IsTerminal;
+    std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
 }
 
 pub fn print_banner() {

@@ -26,9 +26,10 @@ pub(crate) struct IngestBatch {
 
 struct WindowPage {
     next_after: Option<PlanPointId>,
-    written: usize,
+    /// Upsert records converted from the raw scroll page. Points whose payload
+    /// contains an `id`/`vector` key are dropped here (counted in `skipped`).
+    records: Vec<serde_json::Value>,
     skipped: usize,
-    points: Vec<serde_json::Value>,
 }
 
 /// Scroll the source and upsert into the target, checkpointing after each window.
@@ -59,7 +60,7 @@ pub async fn stream_points(
             .filter(filter)
             .resume(after);
         loop {
-            let window = fill_window(&mut pages, opts).await?;
+            let window = fill_window(&mut pages, opts.workers).await?;
             if window.is_empty() {
                 break;
             }
@@ -120,7 +121,7 @@ pub async fn stream_points(
 }
 
 fn window_totals(window: &[WindowPage]) -> (Option<PlanPointId>, usize, usize, usize) {
-    let written = window.iter().map(|p| p.written).sum();
+    let written = window.iter().map(|p| p.records.len()).sum();
     let skipped = window.iter().map(|p| p.skipped).sum();
     let batches = window.len();
     let next_after = window.last().and_then(|p| p.next_after.clone());
@@ -129,20 +130,25 @@ fn window_totals(window: &[WindowPage]) -> (Option<PlanPointId>, usize, usize, u
 
 async fn fill_window(
     pages: &mut ScrollPages<'_>,
-    opts: &MigrateOptions,
+    workers: usize,
 ) -> Result<Vec<WindowPage>, Box<dyn Error>> {
-    let mut window = Vec::with_capacity(opts.workers.max(1));
-    for _ in 0..opts.workers.max(1) {
+    let mut window = Vec::with_capacity(workers.max(1));
+    for _ in 0..workers.max(1) {
         let Some(points) = pages.next().await? else {
             break;
         };
-        let written = points.iter().filter(|p| p.get("id").is_some()).count();
-        let skipped = points.len() - written;
+        let mut records = Vec::with_capacity(points.len());
+        let mut skipped = 0usize;
+        for point in &points {
+            match point_to_upsert_object(point) {
+                Some(rec) => records.push(rec),
+                None => skipped += 1,
+            }
+        }
         window.push(WindowPage {
             next_after: pages.cursor().cloned(),
-            written,
+            records,
             skipped,
-            points,
         });
     }
     Ok(window)
@@ -160,16 +166,10 @@ async fn upsert_window(
     let mut groups: Vec<IngestBatch> = Vec::new();
     let mut missing = 0usize;
     for page in window {
-        let mut records = Vec::with_capacity(page.points.len());
-        for point in &page.points {
-            if let Some(rec) = point_to_upsert_object(point) {
-                records.push(rec);
-            }
-        }
-        if records.is_empty() {
+        if page.records.is_empty() {
             continue;
         }
-        let (part, skipped) = split_by_shard(records, opts)?;
+        let (part, skipped) = split_by_shard(page.records.clone(), opts)?;
         missing += skipped;
         groups.extend(part);
     }
@@ -366,6 +366,18 @@ async fn upsert_one(
     .await
 }
 
+/// Fill one window from the stream and return its `(written, skipped,
+/// batches)` totals — the exact accounting the migrator checkpoints.
+#[cfg(test)]
+pub(crate) async fn fill_window_totals_for_test(
+    pages: &mut ScrollPages<'_>,
+    workers: usize,
+) -> Result<(usize, usize, usize), Box<dyn Error>> {
+    let window = fill_window(pages, workers).await?;
+    let (_, written, skipped, batches) = window_totals(&window);
+    Ok((written, skipped, batches))
+}
+
 #[cfg(test)]
 pub(crate) fn window_totals_for_test(
     written: &[usize],
@@ -376,9 +388,8 @@ pub(crate) fn window_totals_for_test(
         .zip(skipped)
         .map(|(w, s)| WindowPage {
             next_after: None,
-            written: *w,
+            records: vec![serde_json::Value::Null; *w],
             skipped: *s,
-            points: Vec::new(),
         })
         .collect();
     let (_, w, s, b) = window_totals(&pages);

@@ -310,6 +310,50 @@ fn ddl_corpus_routes_round_trip() {
     }
 }
 
+/// A captured create body carrying `read_fan_out_*` must keep them: the
+/// emitted QQL re-emits `WITH PARAMS`, and planning that statement produces
+/// the deferred PATCH carrying both values.
+#[test]
+fn create_read_fan_out_params_round_trip() {
+    let wrapped = serde_json::json!({
+        "method": "PUT",
+        "path": "/collections/docs",
+        "body": {
+            "vectors": {"size": 8, "distance": "Cosine"},
+            "read_fan_out_factor": 2,
+            "read_fan_out_delay_ms": 500,
+        },
+    })
+    .to_string();
+    let emitted = convert(&wrapped, None).expect("convert create with fan-out");
+    assert_eq!(emitted.len(), 1);
+    assert!(
+        emitted[0].contains("read_fan_out_factor = 2"),
+        "{}",
+        emitted[0]
+    );
+    assert!(
+        emitted[0].contains("read_fan_out_delay_ms = 500"),
+        "{}",
+        emitted[0]
+    );
+
+    let stmt = Parser::parse(&format!("{};", emitted[0])).expect("reparse");
+    let op = plan(&stmt).expect("replan");
+    let qql_plan::PlannedOperation::CreateCollection {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected CreateCollection, got {op:?}");
+    };
+    let steps = qql_plan::ddl::create_collection_rest_steps(collection, request).expect("steps");
+    assert_eq!(steps.len(), 2, "PUT + deferred PATCH expected: {steps:?}");
+    let patch = steps[1].body.to_string();
+    assert!(patch.contains("\"read_fan_out_factor\":2"), "{patch}");
+    assert!(patch.contains("\"read_fan_out_delay_ms\":500"), "{patch}");
+}
+
 #[test]
 fn cross_rerank_is_client_side_and_has_no_rest_route() {
     let stmt = Parser::parse(

@@ -95,7 +95,7 @@ pub fn render_response(
         "SHOW_COLLECTIONS" => {
             print_collections_list(data.and_then(ExecData::collections))?;
         }
-        "SHOW_COLLECTION" | "show_collection" => {
+        "SHOW_COLLECTION" => {
             print_collection_info(data.and_then(ExecData::collection))?;
         }
         "SHOW_SHARD_KEYS" => {

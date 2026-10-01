@@ -364,6 +364,34 @@ fn window_totals_sum_every_page() {
     assert_eq!(batches, 3);
 }
 
+#[tokio::test]
+async fn batch_size_one_scroll_streams_all_points_and_counts_collisions() {
+    use crate::dump::scroll_fake::FakeScrollOps;
+
+    // Three points at batch_size == 1: the inclusive-offset repeat must not
+    // end the stream early. The middle point's payload `id` collides with the
+    // point-object slot, so it is counted as skipped, not migrated.
+    let points = vec![
+        json!({"id": 1, "payload": {"city": "berlin"}}),
+        json!({"id": 2, "payload": {"id": "external-2"}}),
+        json!({"id": 3, "payload": {"city": "paris"}}),
+    ];
+    let ops = FakeScrollOps::new(points);
+    let mut pages = crate::dump::ScrollPages::new(&ops, "docs", 1);
+    let (written, skipped, batches) = super::pipeline::fill_window_totals_for_test(&mut pages, 2)
+        .await
+        .expect("window");
+    assert_eq!((written, skipped, batches), (2, 1, 2));
+    assert!(
+        ops.limits
+            .lock()
+            .expect("limits")
+            .iter()
+            .all(|limit| *limit == 2),
+        "scroll must probe batch_size + 1"
+    );
+}
+
 #[test]
 fn tenant_index_is_promoted_in_plan() {
     let info = sample_info();

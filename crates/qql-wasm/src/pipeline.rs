@@ -5,12 +5,23 @@ use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 use super::client::Client;
-use super::functions::qql_err_to_js;
+use super::functions::{is_transport_error, js_err, qql_err_to_js, thrown_message};
 use super::params::WasmOnError;
 use super::report::{
     WasmReport, exec_response, parsed_update_batch, shaped_query_batch, shaped_success_response,
     shaped_update_batch, shaped_update_response,
 };
+
+/// One ERROR result per batch member, preserving each operation's label.
+fn push_batch_failures(
+    results: &mut Vec<serde_json::Value>,
+    labels: &[&'static str],
+    message: &str,
+) {
+    for label in labels {
+        results.push(exec_response(false, label, message, None));
+    }
+}
 
 #[wasm_bindgen]
 impl Client {
@@ -40,13 +51,9 @@ impl Client {
         if stmts.is_empty() {
             // Fail closed like the executor does for an empty string —
             // an empty array must not return a silently-empty ok report.
-            return Err(JsValue::from_str(
-                &serde_json::to_string(&QqlError::validation(
-                    "QQL-VALIDATION-EMPTY-SCRIPT",
-                    "no statements to execute; the query is empty or contains only whitespace",
-                    None,
-                ))
-                .unwrap_or_else(|_| "no statements to execute".into()),
+            return Err(js_err(
+                "QQL-VALIDATION-EMPTY-SCRIPT",
+                "no statements to execute; the query is empty or contains only whitespace",
             ));
         }
 
@@ -72,7 +79,7 @@ impl Client {
                     results.push(exec_response(
                         false,
                         "PREPARE",
-                        &error.as_string().unwrap_or_default(),
+                        &thrown_message(&error),
                         None,
                     ));
                     continue;
@@ -127,9 +134,7 @@ impl Client {
         let result = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;
-        shaped_success_response(operation, &result).map_err(|error| {
-            JsValue::from_str(&serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
-        })
+        shaped_success_response(operation, &result).map_err(qql_err_to_js)
     }
     pub(crate) async fn dispatch_or_collect(
         &self,
@@ -143,7 +148,7 @@ impl Client {
             Err(error) => results.push(exec_response(
                 false,
                 operation.operation_label(),
-                &error.as_string().unwrap_or_default(),
+                &thrown_message(&error),
                 None,
             )),
         }
@@ -155,6 +160,12 @@ impl Client {
     /// body); the query string is appended to the path because `send_json`
     /// takes no separate query argument. Members always take the batch RPC
     /// path and never merge with neighboring statements.
+    ///
+    /// **Retry policy (at-least-once):** only connection/timeout failures
+    /// re-run members individually; a batch the server answered with a
+    /// cardinality mismatch or an unparsable shape surfaces
+    /// `QQL-BACKEND-BATCH` / `QQL-BACKEND-ENVELOPE` for the members instead
+    /// of re-executing side effects that may already have landed.
     pub(crate) async fn execute_batch_op(
         &self,
         op: qql_plan::PlannedOperation,
@@ -169,7 +180,8 @@ impl Client {
             key, operations, ..
         } = op
         else {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-BIND-TYPE-MISMATCH",
                 "execute_batch_op requires a Batch operation",
             ));
         };
@@ -187,94 +199,73 @@ impl Client {
                     .join("&"),
             );
         }
-        async fn retry_members(
-            client: &Client,
-            operations: Vec<PlannedOperation>,
-            on_error: WasmOnError,
-            results: &mut Vec<serde_json::Value>,
-        ) -> Result<(), JsValue> {
-            for operation in operations {
-                client
-                    .dispatch_or_collect(operation, on_error, results)
-                    .await?;
-            }
-            Ok(())
-        }
+        let labels: Vec<&'static str> = operations
+            .iter()
+            .map(qql_plan::PlannedOperation::operation_label)
+            .collect();
         let response = match self.send_json(&route_method, &path, body).await {
             Ok(response) => response,
             Err(error) => {
                 if on_error == WasmOnError::Stop {
                     return Err(error);
                 }
-                retry_members(self, operations, on_error, results).await?;
+                if is_transport_error(&error) {
+                    for operation in operations {
+                        self.dispatch_or_collect(operation, on_error, results)
+                            .await?;
+                    }
+                } else {
+                    push_batch_failures(results, &labels, &thrown_message(&error));
+                }
                 return Ok(());
             }
         };
-        match key {
-            qql_plan::BatchKey::Query { .. } => {
-                let retry = match shaped_query_batch(&response) {
-                    Ok(items) => {
-                        if let Err(err) =
-                            verify_batch_cardinality("query", operations.len(), items.len())
-                        {
-                            if on_error == WasmOnError::Stop {
-                                return Err(qql_err_to_js(err));
-                            }
-                            true
-                        } else {
-                            results.extend(items);
-                            false
-                        }
+        let expected = operations.len();
+        let batch_error = match key {
+            qql_plan::BatchKey::Query { .. } => match shaped_query_batch(&response) {
+                Ok(items) => match verify_batch_cardinality("query", expected, items.len()) {
+                    Ok(()) => {
+                        results.extend(items);
+                        None
                     }
-                    Err(err) => {
-                        if on_error == WasmOnError::Stop {
-                            return Err(qql_err_to_js(err));
-                        }
-                        true
-                    }
-                };
-                if retry {
-                    retry_members(self, operations, on_error, results).await?;
-                }
-            }
+                    Err(err) => Some(err),
+                },
+                Err(err) => Some(err),
+            },
             qql_plan::BatchKey::Mutation { .. } => {
-                let retry = match shaped_update_batch(&response, &operations) {
-                    Ok(items) => {
-                        if let Err(err) =
-                            verify_batch_cardinality("update", operations.len(), items.len())
-                        {
-                            if on_error == WasmOnError::Stop {
-                                return Err(qql_err_to_js(err));
-                            }
-                            true
-                        } else {
+                match shaped_update_batch(&response, &operations) {
+                    Ok(items) => match verify_batch_cardinality("update", expected, items.len()) {
+                        Ok(()) => {
                             results.extend(items);
-                            false
+                            None
                         }
-                    }
-                    Err(err) => {
-                        if on_error == WasmOnError::Stop {
-                            return Err(qql_err_to_js(err));
-                        }
-                        true
-                    }
-                };
-                if retry {
-                    retry_members(self, operations, on_error, results).await?;
+                        Err(err) => Some(err),
+                    },
+                    Err(err) => Some(err),
                 }
             }
+        };
+        if let Some(err) = batch_error {
+            // The server answered; a member retry cannot fix a shape mismatch
+            // and would repeat side effects (at-least-once is documented on
+            // `Client.execute`).
+            if on_error == WasmOnError::Stop {
+                return Err(qql_err_to_js(err));
+            }
+            push_batch_failures(results, &labels, &err.to_string());
         }
         Ok(())
     }
+    /// Flush an auto-grouped batch. Same at-least-once policy as
+    /// [`Self::execute_batch_op`]: transport failures may re-run members
+    /// individually; an answered shape mismatch surfaces the batch error.
     pub(crate) async fn flush_planned_group(
         &self,
         mut operations: Vec<qql_plan::PlannedOperation>,
         on_error: WasmOnError,
         results: &mut Vec<serde_json::Value>,
     ) -> Result<(), JsValue> {
-        use qql_plan::{
-            PlannedOperation, into_query_batch, into_update_batch, verify_batch_cardinality,
-        };
+        use qql_plan::{PlannedOperation, into_query_batch, into_update_batch};
 
         if operations.is_empty() {
             return Ok(());
@@ -309,48 +300,61 @@ impl Client {
                     );
                 }
                 let body = serde_json::to_value(&batch).map_err(|error| {
-                    qql_err_to_js(QqlError::execution("QQL-JSON", error.to_string(), None))
+                    qql_err_to_js(QqlError::execution(
+                        "QQL-SERIALIZE",
+                        error.to_string(),
+                        None,
+                    ))
                 })?;
-                let retry = match self.send_json("POST", &path, Some(body)).await {
-                    Ok(response) => match shaped_query_batch(&response) {
-                        Ok(items) => {
-                            if let Err(err) =
-                                verify_batch_cardinality("query", expected, items.len())
-                            {
-                                if on_error == WasmOnError::Stop {
-                                    return Err(qql_err_to_js(err));
-                                }
-                                true
-                            } else {
-                                results.extend(items);
-                                false
-                            }
-                        }
-                        Err(err) => {
-                            if on_error == WasmOnError::Stop {
-                                return Err(qql_err_to_js(err));
-                            }
-                            true
-                        }
-                    },
+                let response = match self.send_json("POST", &path, Some(body)).await {
+                    Ok(response) => response,
                     Err(error) => {
                         if on_error == WasmOnError::Stop {
                             return Err(error);
                         }
-                        true
+                        if is_transport_error(&error) {
+                            for request in batch.searches {
+                                self.dispatch_or_collect(
+                                    PlannedOperation::Query {
+                                        collection: collection.clone(),
+                                        request,
+                                    },
+                                    on_error,
+                                    results,
+                                )
+                                .await?;
+                            }
+                        } else {
+                            for _ in 0..expected {
+                                results.push(exec_response(
+                                    false,
+                                    "QUERY",
+                                    &thrown_message(&error),
+                                    None,
+                                ));
+                            }
+                        }
+                        return Ok(());
                     }
                 };
-                if retry {
-                    for request in batch.searches {
-                        self.dispatch_or_collect(
-                            PlannedOperation::Query {
-                                collection: collection.clone(),
-                                request,
-                            },
-                            on_error,
-                            results,
-                        )
-                        .await?;
+                let batch_error = match shaped_query_batch(&response) {
+                    Ok(items) => {
+                        match qql_plan::verify_batch_cardinality("query", expected, items.len()) {
+                            Ok(()) => {
+                                results.extend(items);
+                                None
+                            }
+                            Err(err) => Some(err),
+                        }
+                    }
+                    Err(err) => Some(err),
+                };
+                if let Some(err) = batch_error {
+                    if on_error == WasmOnError::Stop {
+                        return Err(qql_err_to_js(err));
+                    }
+                    for _ in 0..expected {
+                        results.push(exec_response(false, "QUERY", &err.to_string(), None));
                     }
                 }
             }
@@ -358,61 +362,65 @@ impl Client {
                 // Owned build: each mutation request moves (zero clones on the
                 // hot path). The group's effective `wait` is uniform by
                 // construction (it is part of the batch key).
-                let (collection, _labels, opts, batch) =
+                let (collection, labels, opts, batch) =
                     into_update_batch(operations).map_err(qql_err_to_js)?;
                 let expected = batch.operations.len();
                 let wait = opts.wait.unwrap_or(true);
                 let path = format!("/collections/{collection}/points/batch?wait={wait}");
                 let body = serde_json::to_value(&batch).map_err(|error| {
-                    qql_err_to_js(QqlError::execution("QQL-JSON", error.to_string(), None))
+                    qql_err_to_js(QqlError::execution(
+                        "QQL-SERIALIZE",
+                        error.to_string(),
+                        None,
+                    ))
                 })?;
-                let retry = match self.send_json("POST", &path, Some(body)).await {
-                    Ok(response) => match parsed_update_batch(&response) {
-                        Ok(items) => {
-                            if let Err(err) =
-                                verify_batch_cardinality("update", expected, items.len())
-                            {
-                                if on_error == WasmOnError::Stop {
-                                    return Err(qql_err_to_js(err));
-                                }
-                                true
-                            } else {
+                let response = match self.send_json("POST", &path, Some(body)).await {
+                    Ok(response) => response,
+                    Err(error) => {
+                        if on_error == WasmOnError::Stop {
+                            return Err(error);
+                        }
+                        if is_transport_error(&error) {
+                            for op in batch.operations {
+                                self.dispatch_or_collect(
+                                    qql_plan::mutation::update_operation_into_planned(
+                                        &collection,
+                                        op,
+                                        wait,
+                                    ),
+                                    on_error,
+                                    results,
+                                )
+                                .await?;
+                            }
+                        } else {
+                            push_batch_failures(results, &labels, &thrown_message(&error));
+                        }
+                        return Ok(());
+                    }
+                };
+                let batch_error = match parsed_update_batch(&response) {
+                    Ok(items) => {
+                        match qql_plan::verify_batch_cardinality("update", expected, items.len()) {
+                            Ok(()) => {
                                 for (update, item) in batch.operations.iter().zip(items) {
                                     results.push(
                                         shaped_update_response(update, item)
                                             .map_err(qql_err_to_js)?,
                                     );
                                 }
-                                false
+                                None
                             }
+                            Err(err) => Some(err),
                         }
-                        Err(err) => {
-                            if on_error == WasmOnError::Stop {
-                                return Err(qql_err_to_js(err));
-                            }
-                            true
-                        }
-                    },
-                    Err(error) => {
-                        if on_error == WasmOnError::Stop {
-                            return Err(error);
-                        }
-                        true
                     }
+                    Err(err) => Some(err),
                 };
-                if retry {
-                    for op in batch.operations {
-                        self.dispatch_or_collect(
-                            qql_plan::mutation::update_operation_into_planned(
-                                &collection,
-                                op,
-                                wait,
-                            ),
-                            on_error,
-                            results,
-                        )
-                        .await?;
+                if let Some(err) = batch_error {
+                    if on_error == WasmOnError::Stop {
+                        return Err(qql_err_to_js(err));
                     }
+                    push_batch_failures(results, &labels, &err.to_string());
                 }
             }
         }

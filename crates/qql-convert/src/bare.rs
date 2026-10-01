@@ -92,14 +92,22 @@ pub(crate) fn convert(raw: &Value, collection: &str) -> Result<Vec<Stmt>, Conver
             raw, ctx,
         )?))]);
     }
-    // 8. Fusion / sample / order_by / formula query bodies (before the generic
+    // 8. Fusion / sample / formula query bodies (before the generic
     //    query/prefetch rule so a fusion-with-prefetch body synthesizes its
     //    `query` member instead of failing on a missing one).
-    for key in ["fusion", "sample", "order_by", "formula"] {
+    for key in ["fusion", "sample", "formula"] {
         if let Some(value) = obj.get(key) {
             let synthesized = as_query_body(obj, serde_json::json!({ key: value }));
             return query_stmt(&synthesized, ctx, false);
         }
+    }
+    // A top-level `order_by` decodes as a ScrollRequest, but the same shape
+    // nested under `query` is a query-order-by expression: without the
+    // method/path envelope the two are ambiguous, so fail closed.
+    if obj.contains_key("order_by") {
+        return Err(ConvertError::undecodable(
+            "a top-level `order_by` body is ambiguous between QUERY ORDER BY and SCROLL … ORDER BY; wrap the request with method/path",
+        ));
     }
     // 9. QueryRequest / QueryGroupsRequest by `query` / `prefetch`.
     if obj.contains_key("query") || obj.contains_key("prefetch") {

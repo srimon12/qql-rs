@@ -26,22 +26,23 @@ fn render_codeframe(source: &str, line_no: usize, col_no: usize, span_len: usize
 
 pub(crate) fn print_report_text(report: &FileLintReport, source: &str, after_fix: bool) {
     use std::io::Write;
+    let color = crate::output::color_stderr();
     let mut stderr = std::io::stderr().lock();
     if report.diagnostics.is_empty() {
         if report.fixed {
-            let _ = writeln!(stderr, "\x1b[32m✓\x1b[0m {}: fixed", report.file);
+            let _ = writeln!(stderr, "{} {}: fixed", check(color), report.file);
         } else {
-            let _ = writeln!(stderr, "\x1b[32m✓\x1b[0m {}: clean", report.file);
+            let _ = writeln!(stderr, "{} {}: clean", check(color), report.file);
         }
         return;
     }
     for diag in &report.diagnostics {
         let level = if diag.fixable && after_fix {
-            "\x1b[32mfixed\x1b[0m"
+            paint(color, "fixed", "32")
         } else if diag.fixable {
-            "\x1b[33mwarning\x1b[0m"
+            paint(color, "warning", "33")
         } else {
-            "\x1b[31merror\x1b[0m"
+            paint(color, "error", "31")
         };
         let _ = writeln!(
             stderr,
@@ -60,5 +61,22 @@ pub(crate) fn print_report_text(report: &FileLintReport, source: &str, after_fix
         if let Some(hint) = &diag.hint {
             let _ = writeln!(stderr, "  = hint: {}\n", hint);
         }
+    }
+}
+
+/// ANSI-colored label when `color`, plain text otherwise.
+fn paint(color: bool, label: &str, code: &str) -> String {
+    if color {
+        format!("\x1b[{code}m{label}\x1b[0m")
+    } else {
+        label.to_string()
+    }
+}
+
+fn check(color: bool) -> String {
+    if color {
+        "\x1b[32m✓\x1b[0m".to_string()
+    } else {
+        "✓".to_string()
     }
 }

@@ -1,6 +1,6 @@
 //! `qql run` / `explain` / `repl`.
 
-use super::runtime::{executor, explain_query_bound};
+use super::runtime::{executor, explain_query_bound, statements_need_embeddings};
 use crate::output;
 use crate::script;
 
@@ -19,7 +19,16 @@ pub async fn handle_run_smart(
             && !query_or_file.contains(char::is_whitespace));
     let is_file = p.is_file() || (!query_or_file.contains('\n') && looks_like_path);
     if is_file {
-        handle_run_file(url, use_edge, query_or_file, params, stop_on_error).await
+        handle_run_file(
+            url,
+            use_edge,
+            query_or_file,
+            params,
+            stop_on_error,
+            json,
+            quiet,
+        )
+        .await
     } else {
         handle_run(url, use_edge, query_or_file, params, json, quiet).await
     }
@@ -34,7 +43,7 @@ pub async fn handle_run(
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
-    check_embedder_availability(&executor, query)?;
+    check_embedder_availability(&executor, query, params)?;
     let result = match params {
         None => executor.execute(query, qql::executor::OnError::Stop).await,
         Some(serde_json::Value::Object(obj)) => {
@@ -82,13 +91,15 @@ fn ensure_run_ok(failed: usize, report_ref: &str) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-/// The ONE `qql run` script outcome: print the ScriptResponse JSON shape on
-/// stdout, then enforce the shared exit contract. Both Stop and Continue
-/// modes end here so consumers parse one shape.
+/// The ONE `qql run` script outcome: a pretty `ScriptResponse` with `--json`,
+/// a one-line human summary otherwise, then the shared exit contract. Both
+/// Stop and Continue modes end here so consumers get one contract.
 fn finish_script(
     path: &str,
     succeeded: usize,
     failed: usize,
+    json: bool,
+    quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ok = failed == 0;
     let resp = output::ScriptResponse {
@@ -99,16 +110,32 @@ fn finish_script(
         failed,
         message: format!("Ran script {path} ({succeeded} succeeded, {failed} failed)"),
     };
-    println!("{}", serde_json::to_string_pretty(&resp)?);
-    ensure_run_ok(failed, "JSON report on stdout")
+    if !quiet {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        } else {
+            println!("{}", resp.message);
+        }
+    }
+    ensure_run_ok(
+        failed,
+        if json {
+            "JSON report on stdout"
+        } else {
+            "the summary above"
+        },
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_run_file(
     url: &str,
     use_edge: bool,
     path: &str,
     params: Option<&serde_json::Value>,
     stop_on_error: bool,
+    json: bool,
+    quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let statements = script::read_script(path).map_err(|e| format!("{}", e))?;
     // Statement-scoped binding (same contract as the SDK `execute` batch
@@ -121,8 +148,11 @@ pub async fn handle_run_file(
         .transpose()
         .map_err(|e| format!("{}", e))?;
     let executor = executor(url, use_edge)?;
-    for statement in &statements {
-        check_embedder_availability(&executor, statement)?;
+    for (index, statement) in statements.iter().enumerate() {
+        let stmt_params = plan
+            .as_ref()
+            .map(|plan| qql_core::params_json::param_for(plan, index));
+        check_embedder_availability(&executor, statement, stmt_params)?;
     }
     let mut ok_count = 0;
     let mut fail_count = 0;
@@ -181,7 +211,7 @@ pub async fn handle_run_file(
         }
     }
     executor.close().await?;
-    finish_script(path, ok_count, fail_count)
+    finish_script(path, ok_count, fail_count, json, quiet)
 }
 
 pub fn handle_explain(
@@ -208,113 +238,43 @@ pub fn handle_explain(
     Ok(())
 }
 
+/// Fail fast when a statement needs a client-side embedder and none is
+/// configured. Statements are bound first so a placeholder carrying a
+/// precomputed vector does not read as a text input.
+///
+/// Uses the shared walker in [`super::runtime::statements_need_embeddings`],
+/// the same one `qql check` uses — CTEs, prefetch sub-queries, BATCH members,
+/// `RERANK`/`CROSS RERANK`, and upsert embed lists are all covered.
 fn check_embedder_availability(
     executor: &qql::executor::Executor,
     query: &str,
+    params: Option<&serde_json::Value>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if executor.embedder().is_some() {
         return Ok(());
     }
-    // Check if any parsed statement requires an embedder
-    if let Ok(stmts) = qql_core::parser::Parser::parse_all(query) {
-        for stmt in &stmts {
-            if statement_requires_embedder(stmt) {
-                return Err(qql_core::error::QqlError::execution(
-                    "QQL-EMBEDDING-UNAVAILABLE",
-                    "No embedder configured for dense text/image queries.\n\
+    let Ok(mut stmts) = qql_core::parser::Parser::parse_all(query) else {
+        // Parse errors carry their own spans; execution reports them.
+        return Ok(());
+    };
+    if let Some(p) = params {
+        for stmt in &mut stmts {
+            // Best effort: a binding error is reported by execution with the
+            // real placeholder span, so leave the statement unbound here.
+            let _ = qql_core::params_json::bind_stmt_with_params(stmt, p);
+        }
+    }
+    if statements_need_embeddings(&stmts) {
+        return Err(qql_core::error::QqlError::execution(
+            "QQL-EMBEDDING-UNAVAILABLE",
+            "No embedder configured for dense text/image queries.\n\
                     → Pass precomputed vectors via: QUERY :vec ... with --params-file <file.json>\n\
                     → Or configure a remote embedding server: qql config set embed_url http://localhost:11434/v1\n\
                     → Or install with local zero-server ONNX embeddings: cargo install qql-cli --locked --features fastembed\n\
                     → Or install full package: cargo install qql-cli --locked --features full",
-                    None,
-                )
-                .into());
-            }
-        }
+            None,
+        )
+        .into());
     }
     Ok(())
-}
-
-fn statement_requires_embedder(stmt: &qql_core::ast::Stmt) -> bool {
-    match stmt {
-        qql_core::ast::Stmt::Query(q) => query_stmt_requires_embedder(q),
-        qql_core::ast::Stmt::Upsert(u) => u.embedding.is_some(),
-        _ => false,
-    }
-}
-
-fn query_stmt_requires_embedder(q: &qql_core::ast::QueryStmt) -> bool {
-    for cte in &q.ctes {
-        if query_stmt_requires_embedder(&cte.query) {
-            return true;
-        }
-    }
-    query_expr_requires_embedder(&q.expression)
-}
-
-fn query_expr_requires_embedder(expr: &qql_core::ast::QueryExpr) -> bool {
-    use qql_core::ast::{PrefetchSource, QueryExpr};
-    let prefetch_requires = |prefetches: &[qql_core::ast::Prefetch]| {
-        prefetches.iter().any(|p| match &p.source {
-            PrefetchSource::Query(sub) => query_stmt_requires_embedder(sub),
-            _ => false,
-        })
-    };
-    match expr {
-        QueryExpr::Nearest {
-            input, prefetch, ..
-        } => is_embeddable_input(input) || prefetch_requires(prefetch),
-        QueryExpr::Recommend {
-            positive,
-            negative,
-            prefetch,
-            ..
-        } => {
-            positive.iter().any(is_embeddable_input)
-                || negative.iter().any(is_embeddable_input)
-                || prefetch_requires(prefetch)
-        }
-        QueryExpr::Context {
-            pairs, prefetch, ..
-        } => {
-            pairs
-                .iter()
-                .any(|p| is_embeddable_input(&p.positive) || is_embeddable_input(&p.negative))
-                || prefetch_requires(prefetch)
-        }
-        QueryExpr::Discover {
-            target,
-            context,
-            prefetch,
-            ..
-        } => {
-            is_embeddable_input(target)
-                || context
-                    .iter()
-                    .any(|p| is_embeddable_input(&p.positive) || is_embeddable_input(&p.negative))
-                || prefetch_requires(prefetch)
-        }
-        QueryExpr::RelevanceFeedback {
-            target,
-            feedback,
-            prefetch,
-            ..
-        } => {
-            is_embeddable_input(target)
-                || feedback.iter().any(|f| is_embeddable_input(&f.example))
-                || prefetch_requires(prefetch)
-        }
-        QueryExpr::Hybrid { .. } => true,
-        QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-            prefetch_requires(prefetch)
-        }
-        _ => false,
-    }
-}
-
-fn is_embeddable_input(input: &qql_core::ast::QueryInput) -> bool {
-    matches!(
-        input,
-        qql_core::ast::QueryInput::Text { .. } | qql_core::ast::QueryInput::Image { .. }
-    )
 }

@@ -5,11 +5,10 @@ use qql_core::error::QqlError;
 use qql_embed::{Embedder, SparseVector};
 
 use super::client::Client;
+use super::functions::thrown_message;
 
 // ── WASM dense embed collect/apply (mirrors runtime batching) ─────
 
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-// ── qql-embed::Embedder adapter (shared resolve path) ─────────────
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl Embedder for Client {
@@ -20,13 +19,7 @@ impl Embedder for Client {
         let batch = self
             .embed_texts(vec![text.to_string()])
             .await
-            .map_err(|e| {
-                QqlError::execution(
-                    "QQL-EMBEDDING",
-                    e.as_string().unwrap_or_else(|| "embed failed".into()),
-                    None,
-                )
-            })?;
+            .map_err(|e| QqlError::execution("QQL-EMBEDDING", thrown_message(&e), None))?;
         batch.into_iter().next().ok_or_else(|| {
             QqlError::execution("QQL-EMBEDDING", "dense embedding response was empty", None)
         })
@@ -40,13 +33,9 @@ impl Embedder for Client {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::dense_model_unsupported_error(model));
         }
-        self.embed_texts(texts.to_vec()).await.map_err(|e| {
-            QqlError::execution(
-                "QQL-EMBEDDING",
-                e.as_string().unwrap_or_else(|| "embed batch failed".into()),
-                None,
-            )
-        })
+        self.embed_texts(texts.to_vec())
+            .await
+            .map_err(|e| QqlError::execution("QQL-EMBEDDING", thrown_message(&e), None))
     }
 
     async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
@@ -80,7 +69,7 @@ impl Embedder for Client {
             .embed_multi_texts(vec![text.to_string()], model)
             .await
             .map_err(|e| {
-                let msg = e.as_string().unwrap_or_else(|| "multi embed failed".into());
+                let msg = thrown_message(&e);
                 if msg.contains("not available") {
                     qql_embed::multi_unsupported_error(model)
                 } else {
@@ -104,7 +93,7 @@ impl Embedder for Client {
         self.embed_multi_texts(texts.to_vec(), model)
             .await
             .map_err(|e| {
-                let msg = e.as_string().unwrap_or_else(|| "multi embed failed".into());
+                let msg = thrown_message(&e);
                 if msg.contains("not available") {
                     qql_embed::multi_unsupported_error(model)
                 } else {
@@ -118,7 +107,7 @@ impl Embedder for Client {
             .embed_image_sources(vec![source.to_string()], model)
             .await
             .map_err(|e| {
-                let msg = e.as_string().unwrap_or_else(|| "image embed failed".into());
+                let msg = thrown_message(&e);
                 if msg.contains("not available") {
                     qql_embed::image_unsupported_error(model)
                 } else {
@@ -142,7 +131,7 @@ impl Embedder for Client {
         self.embed_image_sources(sources.to_vec(), model)
             .await
             .map_err(|e| {
-                let msg = e.as_string().unwrap_or_else(|| "image embed failed".into());
+                let msg = thrown_message(&e);
                 if msg.contains("not available") {
                     qql_embed::image_unsupported_error(model)
                 } else {
@@ -160,7 +149,7 @@ impl Embedder for Client {
         self.rerank_pair_scores(query, documents, model)
             .await
             .map_err(|e| {
-                let msg = e.as_string().unwrap_or_else(|| "rerank failed".into());
+                let msg = thrown_message(&e);
                 if msg.contains("not available") {
                     qql_embed::cross_rerank_unsupported_error(model)
                 } else {

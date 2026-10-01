@@ -357,7 +357,7 @@ qql --url grpc://localhost:6334 migrate articles \
   --workers 4
 ```
 
-Full guides: [migration guide](crates/qql-cli/src/migrate/README.md), [quickstart](crates/qql-cli/src/migrate/QUICKSTART.md).
+Full guides: [migration guide](crates/qql-cli/examples/migrate/README.md), [quickstart](crates/qql-cli/examples/migrate/QUICKSTART.md).
 
 ### qql convert
 
@@ -394,7 +394,7 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --qql-out app_
 | [Parameters](docs/parameters.md) | `:name` and `?` binding, prepared statements |
 | [Multitenancy](docs/inject_filter.md) | Shard routing, isolation, AST filter injection |
 | [CLI reference](crates/qql-cli/README.md) | Commands, configuration, edge backend, script format |
-| [Cluster migration](crates/qql-cli/src/migrate/README.md) | `qql migrate`, in-flight quantization, resharding |
+| [Cluster migration](crates/qql-cli/examples/migrate/README.md) | `qql migrate`, in-flight quantization, resharding |
 | [Convert and record](skills/qql-skill/references/convert-migration.md) | curl and REST JSON conversion, `qql record` proxy |
 | [Python SDK](crates/pyqql/README.md) | PyO3 client, async usage, offline compilation |
 | [Node.js SDK](crates/nqql/README.md) | N-API client, TypeScript types, streaming scroll |

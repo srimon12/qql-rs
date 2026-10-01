@@ -11,7 +11,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use qql_core::error::{ErrorKind, QqlError};
+use qql_core::error::{QqlError, is_retryable, is_retryable_message};
 
 /// Attempts per call (first try + retries).
 pub(crate) const MAX_ATTEMPTS: u32 = 6;
@@ -54,30 +54,13 @@ impl Circuit {
     }
 }
 
-/// Transport failures and retryable HTTP statuses.
-pub(crate) fn is_retryable(err: &QqlError) -> bool {
-    if err.kind == ErrorKind::Transport {
-        return true;
-    }
-    if let Some(status) = err.field("status_code").and_then(|s| s.parse::<u16>().ok()) {
-        return matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504);
-    }
-    false
-}
-
+/// Retryability for untyped errors: downcast to [`QqlError`] when possible,
+/// else fall back to the shared message classifier.
 fn is_retryable_error(err: &(dyn Error + 'static)) -> bool {
     if let Some(qql) = err.downcast_ref::<QqlError>() {
         return is_retryable(qql);
     }
-    let lower = err.to_string().to_ascii_lowercase();
-    lower.contains("429")
-        || lower.contains("too many requests")
-        || lower.contains("service unavailable")
-        || lower.contains("timed out")
-        || lower.contains("timeout")
-        || lower.contains("connection reset")
-        || lower.contains("connection refused")
-        || lower.contains("temporarily unavailable")
+    is_retryable_message(&err.to_string())
 }
 
 /// Full jitter on exponential backoff: `U(0, min(cap, base*2^attempt))`.
@@ -136,8 +119,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{CIRCUIT_THRESHOLD, Circuit, is_retryable};
-    use qql_core::error::QqlError;
+    use super::{CIRCUIT_THRESHOLD, Circuit};
+    use qql_core::error::{QqlError, is_retryable};
 
     #[test]
     fn transport_and_429_are_retryable_auth_is_not() {
