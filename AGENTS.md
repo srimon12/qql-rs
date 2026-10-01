@@ -93,7 +93,7 @@ builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
 
 ### Crate Division Boundaries
 
-* **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`, `std`. The AST owns `String` types; `Lexer`/`Parser`/`Token`/`ParamPlan` borrow the input.
+* **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`. The AST owns `String` types; `Lexer`/`Parser`/`Token`/`ParamPlan` borrow the input.
 
 * **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` is the REST-specific projection: typed `*Request` structs lower to `Route.body: Option<serde_json::Value>` via `serialize_body`. Dynamic values (payloads, match values, inference `object`/`options`, `OrderBy.start_from`, DDL `metadata`) are held as `qql_core::ast::Value` and rendered to JSON once at the transport boundary (`value_serde`). Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 

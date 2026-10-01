@@ -22,7 +22,7 @@ fastembed-local = ["fastembed"]
 http-embedding = ["qql/rest"]
 
 [dependencies]
-qql-core = { workspace = true, features = ["serde", "json", "std"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
 qql-plan = { workspace = true }
 qql-embed = { workspace = true }
 qql = { workspace = true }
