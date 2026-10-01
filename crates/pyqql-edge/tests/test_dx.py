@@ -366,10 +366,14 @@ class TestDxImprovements(unittest.TestCase):
 
     def test_upsert_many_surface(self):
         # Bulk ingest lives on the client next to execute — one `:rows`
-        # template prepared once, no hand-rolled batch loops. Offline:
-        # surface parity only (live chunking is covered by Rust mock
-        # tests + integration tests, no Qdrant server in CI).
-        self.assertTrue(callable(sdk.Client.upsert_many))
+        # template prepared once, no hand-rolled batch loops. Offline: pin
+        # the batch contract callers rely on (live chunking is covered by
+        # Rust mock tests + integration tests).
+        import inspect
+
+        parameters = inspect.signature(sdk.Client.upsert_many).parameters
+        self.assertEqual(parameters["batch_size"].default, 100)
+        self.assertEqual(parameters["on_error"].default, "stop")
 
 
 if __name__ == "__main__":

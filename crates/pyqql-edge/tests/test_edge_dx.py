@@ -36,6 +36,45 @@ class TestLiveEdgeDx(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+class TestExecuteHitsStatementSelector(unittest.TestCase):
+    """`execute_hits(stmt=)` matches pyqql/nqql: statement N's hits, not 0's."""
+
+    def test_execute_hits_selects_the_requested_statement(self):
+        tmpdir = tempfile.mkdtemp(prefix="pyqql_edge_hits_")
+        try:
+            client = pyqql_edge.local_executor(tmpdir, on_disk_payload=False)
+            self.assertTrue(
+                client.execute("CREATE COLLECTION hits_docs (sparse SPARSE)").ok
+            )
+            self.assertTrue(
+                client.execute(
+                    "UPSERT INTO hits_docs VALUES "
+                    "{id: 1, text: 'one'}, {id: 2, text: 'two'}"
+                ).ok
+            )
+            batch = [
+                "QUERY POINTS (1) FROM hits_docs",
+                "QUERY POINTS (2) FROM hits_docs",
+            ]
+            self.assertEqual([hit.id for hit in client.execute_hits(batch)], [1])
+            self.assertEqual(
+                [hit.id for hit in client.execute_hits(batch, stmt=1)], [2]
+            )
+            client.close()
+            # Module-level helper takes the same `stmt` selector.
+            self.assertEqual(
+                [
+                    hit.id
+                    for hit in pyqql_edge.execute_hits(
+                        batch, stmt=1, data_dir=tmpdir
+                    )
+                ],
+                [2],
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 class TestCloseContract(unittest.TestCase):
     """N5: the edge client's close gate is typed, not a bare RuntimeError."""
 

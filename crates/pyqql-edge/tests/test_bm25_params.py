@@ -80,6 +80,45 @@ class TestBm25ParamsValidation(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+class TestHttpExecutorBm25Forwarding(unittest.TestCase):
+    """Every BM25 knob accepted by http_executor must reach the embedder."""
+
+    def test_stopwords_languages_reach_the_http_executor(self):
+        tmpdir = tempfile.mkdtemp(prefix="pyqql_edge_bm25_http_langs_")
+        try:
+            client = pyqql_edge.http_executor(
+                tmpdir,
+                "http://127.0.0.1:9/v1/embeddings",
+                "",
+                "unused-dense",
+                3,
+                on_disk_payload=False,
+                bm25_language="en",
+                bm25_stopwords_languages=["fr"],
+            )
+            self.assertTrue(
+                client.execute("CREATE COLLECTION bm25_langs (sparse SPARSE)").ok
+            )
+            self.assertTrue(
+                client.execute(
+                    "UPSERT INTO bm25_langs VALUES {id: 1, text: 'cat le chat'}"
+                ).ok
+            )
+            report = client.execute(
+                "QUERY POINTS (1) FROM bm25_langs WITH VECTOR true"
+            )
+            sparse = report.hits(0)[0].vector["sparse"]
+            self.assertEqual(
+                len(sparse["indices"]),
+                2,
+                "the French stopword 'le' must be removed once "
+                "bm25_stopwords_languages reaches the embedder",
+            )
+            client.close()
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 class TestBm25ParamsEndToEnd(unittest.TestCase):
     """Configured params must land in the sparse vector qdrant-edge stores."""
 

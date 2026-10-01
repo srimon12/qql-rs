@@ -104,6 +104,9 @@ class TestParseAPI(unittest.TestCase):
 
     def test_b10_is_valid_false(self):
         self.assertFalse(pyqql_edge.is_valid("SELECT * FROM docs"))
+        # Execution rejects empty/whitespace scripts; `is_valid` agrees.
+        self.assertFalse(pyqql_edge.is_valid(""))
+        self.assertFalse(pyqql_edge.is_valid("   "))
 
     def test_b11_tokenize(self):
         tokens = pyqql_edge.tokenize('QUERY "hello" FROM docs LIMIT 5')
@@ -168,10 +171,10 @@ class TestErrorHandling(unittest.TestCase):
 
     def test_c5_stmt_shard_key_property(self):
         stmts = pyqql_edge.parse("QUERY TEXT 'x' FROM docs SHARD 't' LIMIT 5")
-        assert stmts[0].shard_key == "t"
+        self.assertEqual(stmts[0].shard_key, "t")
         s = pyqql_edge.parse("QUERY TEXT 'x' FROM docs LIMIT 5")[0]
         s.shard_key = "acme"
-        assert s.shard_key == "acme"
+        self.assertEqual(s.shard_key, "acme")
 
 
 class TestLocalExecutor(unittest.TestCase):
