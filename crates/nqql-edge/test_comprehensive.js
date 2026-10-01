@@ -40,6 +40,14 @@ async function testAsync(name, fn) {
   }
 }
 
+/**
+ * Async tests started before the synchronous summary below; the verdict
+ * awaits every one of them first so a late failure cannot be reported as a
+ * pass.
+ * @type {Promise<void>[]}
+ */
+const asyncTests = [];
+
 // ============================================================================
 console.log('\n========== A. Package Inspection ==========');
 
@@ -100,6 +108,27 @@ test('Stmt.shardKey from SHARD clause and property', () => {
   s2.shardKey = 'acme';
   assert.strictEqual(s2.shardKey, 'acme');
 });
+
+test('Stmt.explain mirrors the free explainStmt (nqql parity)', () => {
+  const [s] = nqql.parse('QUERY TEXT "x" FROM docs LIMIT 1');
+  assert.strictEqual(typeof s.explain, 'function');
+  assert.strictEqual(s.explain(), nqql.explainStmt(s));
+});
+
+asyncTests.push(testAsync('server-only connection options are rejected, not ignored', async () => {
+  await assert.rejects(
+    nqql.localExecutor('./data', { url: 'http://localhost:6333' }),
+    /only supported by the server SDK/,
+  );
+  await assert.rejects(
+    nqql.execute('SHOW COLLECTIONS', { apiKey: 'k' }),
+    /only supported by the server SDK/,
+  );
+  await assert.rejects(
+    nqql.execute('SHOW COLLECTIONS', { useGrpc: true }),
+    /only supported by the server SDK/,
+  );
+}));
 
 // ============================================================================
 console.log('\n========== B. Parse API ==========');
@@ -258,21 +287,23 @@ test('listEmbeddingModels returns available models', () => {
 // ============================================================================
 console.log('\n========== F. Local Edge Executor ==========');
 
-testAsync('localExecutor create collection, upsert, count, show collections', async () => {
+asyncTests.push(testAsync('localExecutor create collection, upsert, count, show collections', async () => {
   fs.mkdirSync(TEST_DIR, { recursive: true });
-  const client = nqql.localExecutor(TEST_DIR, { onDiskPayload: false });
+  const client = await nqql.localExecutor(TEST_DIR, { onDiskPayload: false });
+  try {
+    const r1 = await client.execute('CREATE COLLECTION edge_test');
+    assert.strictEqual(r1.ok, true);
 
-  const r1 = await client.execute('CREATE COLLECTION edge_test');
-  assert.strictEqual(r1.ok, true);
+    const r2 = await client.execute('SHOW COLLECTIONS');
+    assert.strictEqual(r2.ok, true);
 
-  const r2 = await client.execute('SHOW COLLECTIONS');
-  assert.strictEqual(r2.ok, true);
-
-  const r3 = await client.execute('COUNT FROM edge_test');
-  assert.strictEqual(r3.ok, true);
-
-  await client.close();
-});
+    const r3 = await client.execute('COUNT FROM edge_test');
+    assert.strictEqual(r3.ok, true);
+  } finally {
+    await client.close();
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  }
+}));
 
 // ============================================================================
 console.log('\n========== G. HTTP embedding (executeStmt via local mock) ==========');
@@ -283,7 +314,7 @@ console.log('\n========== G. HTTP embedding (executeStmt via local mock) =======
 // local Node mock and asserts the embedding request actually went to it —
 // requiring the native default-feature build (http-embedding) to be loaded.
 
-testAsync('executeStmt() honors embedUrl via local mock HTTP endpoint', async () => {
+asyncTests.push(testAsync('executeStmt() honors embedUrl via local mock HTTP endpoint', async () => {
   const embedding = [0.1, 0.2, 0.3, 0.4];
   let received = null;
   const server = http.createServer((req, res) => {
@@ -331,7 +362,81 @@ testAsync('executeStmt() honors embedUrl via local mock HTTP endpoint', async ()
     fs.rmSync(dataDir, { recursive: true, force: true });
     await new Promise((resolve) => server.close(resolve));
   }
-});
+}));
+
+// ============================================================================
+console.log('\n========== H. Exact integers & prototype-safe payloads ==========');
+
+asyncTests.push(testAsync('upsertMany/execute keep >2^32 ids and epoch-millis payloads exact', async () => {
+  const dataDir = path.join(os.tmpdir(), 'nqql_edge_types_' + Date.now());
+  fs.mkdirSync(dataDir, { recursive: true });
+  const client = await nqql.localExecutor(dataDir, { onDiskPayload: false });
+  try {
+    const created = await client.execute('CREATE COLLECTION edge_types (dense VECTOR(2, DOT))');
+    assert.strictEqual(created.ok, true, JSON.stringify(created));
+
+    // An id above 2^32 used to cross the serde boundary as a float and fail
+    // plan-time point-ID validation; its epoch-millis payload became a float.
+    // `__proto__` is a valid own payload key and must round-trip as data.
+    const row = JSON.parse(
+      '{"id": 5000000000, "vector": {"dense": [1.0, 0.0]}, "created_at": 1700000000000, "__proto__": {"x": 1}}',
+    );
+    const upserted = await client.upsertMany('edge_types', [row]);
+    assert.strictEqual(upserted.ok, true, JSON.stringify(upserted));
+
+    const scroll = await client.execute('SCROLL FROM edge_types LIMIT 10');
+    const hit = scroll.hits(0)[0];
+    assert.ok(hit, 'expected the upserted point back');
+    assert.strictEqual(hit.id, 5000000000);
+    assert.strictEqual(hit.payload.created_at, 1700000000000);
+    assert.ok(Number.isInteger(hit.payload.created_at));
+    assert.ok(Object.prototype.hasOwnProperty.call(hit.payload, '__proto__'));
+    assert.deepStrictEqual(hit.payload.__proto__, { x: 1 });
+    assert.strictEqual(hit.get('toString', 'default'), 'default');
+
+    // execute() round-trips the Stmt through toObject() — the same integer
+    // boundary, on the query argument instead of the rows argument.
+    const stmt = nqql.parse(
+      'UPSERT INTO edge_types VALUES {id: 5000000001, vector: {dense: [0.0, 1.0]}, created_at: 1700000000001}',
+    )[0];
+    const viaStmt = await client.execute(stmt);
+    assert.strictEqual(viaStmt.ok, true, JSON.stringify(viaStmt));
+    const count = await client.execute('COUNT FROM edge_types');
+    assert.strictEqual(Number(count.results[0].data.count), 2);
+
+    // A hole in the rows array is documented as `null` (JSON stringify
+    // semantics) and fails with a QQL code, not a code-less napi error.
+    const rowsWithHole = [
+      { id: 7, vector: { dense: [1.0, 1.0] } },
+      ,
+      { id: 8, vector: { dense: [1.0, 1.0] } },
+    ];
+    const holeErr = await client.upsertMany('edge_types', rowsWithHole).then(
+      () => null,
+      (error) => error,
+    );
+    assert.ok(holeErr, 'a hole in rows must reject');
+    assert.strictEqual(holeErr.code, 'QQL-BIND-TYPE-MISMATCH', holeErr.message);
+
+    // Server-only options are rejected on the Client methods too.
+    await assert.rejects(
+      client.execute('SHOW COLLECTIONS', { url: 'http://localhost:6333' }),
+      /only supported by the server SDK/,
+    );
+
+    // close() is idempotent and post-close execution is rejected with the
+    // shared QQL-CLIENT-CLOSED code (same as the server SDK).
+    await client.close();
+    await assert.rejects(
+      client.execute('COUNT FROM edge_types'),
+      (err) => err.code === 'QQL-CLIENT-CLOSED',
+    );
+    await client.close();
+  } finally {
+    await client.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+}));
 
 // ============================================================================
 // Parameter Binding Tests
@@ -372,10 +477,16 @@ test('bind rejects mixed styles', () => {
   assert.throws(() => nqql.bind("WHERE x = :x", [1]), /named placeholder|MIXED-STYLE/);
   assert.throws(() => nqql.bind("WHERE x = ?", { x: 1 }), /positional placeholder|MIXED-STYLE/);
 });
-console.log(`\n========================================`);
-console.log(`  TEST RESULTS: ${passed} passed, ${failed} failed.`);
-console.log(`========================================\n`);
+// The verdict must wait for every async test: `testAsync` catches failures
+// itself, so an unawaited run would print "0 failed" and exit 0 after a real
+// failure (the body only increments `failed` later).
+(async () => {
+  await Promise.all(asyncTests);
+  console.log(`\n========================================`);
+  console.log(`  TEST RESULTS: ${passed} passed, ${failed} failed.`);
+  console.log(`========================================\n`);
 
-if (failed > 0) {
-  process.exitCode = 1;
-}
+  if (failed > 0) {
+    process.exitCode = 1;
+  }
+})();

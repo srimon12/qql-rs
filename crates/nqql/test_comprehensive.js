@@ -450,7 +450,7 @@ testLiveAsync('Client.execute SHOW COLLECTIONS', async () => {
   assert.strictEqual(result.results[0].operation, 'SHOW_COLLECTIONS');
 });
 
-test('Client.execute onError "typo" rejects', async () => {
+await testAsync('Client.execute onError "typo" rejects', async () => {
   try {
     await client.execute('SHOW COLLECTIONS', { onError: 'typo' });
     assert.fail('should have rejected');
@@ -459,7 +459,7 @@ test('Client.execute onError "typo" rejects', async () => {
   }
 });
 
-test('Client.execute onError "continue" on invalid syntax', async () => {
+await testAsync('Client.execute onError "continue" on invalid syntax', async () => {
   const report = await client.execute('GARBAGE', { onError: 'continue' });
   assert.strictEqual(report.ok, false);
   assert.strictEqual(report.failed, 1);
