@@ -109,7 +109,7 @@ pub fn parse(input: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = parseJson, unchecked_return_type = "string")]
 pub fn parse_json(input: &str) -> Result<String, JsValue> {
     let stmts = Parser::parse_all(input).map_err(qql_err_to_js)?;
-    serde_json::to_string(&stmts).map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_json::to_string(&stmts).map_err(|error| js_exec_err("QQL-SERIALIZE", error.to_string()))
 }
 
 #[wasm_bindgen(js_name = isValid)]
@@ -406,7 +406,8 @@ pub fn compile_bytes(query: &str, params: Option<JsValue>) -> Result<js_sys::Uin
     SCRATCH_BUF.with(|cell| {
         let mut buf = cell.borrow_mut();
         buf.clear();
-        serde_json::to_writer(&mut *buf, &output).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::to_writer(&mut *buf, &output)
+            .map_err(|error| js_exec_err("QQL-SERIALIZE", error.to_string()))?;
         Ok(safe_owned_uint8_array(&buf))
     })
 }
