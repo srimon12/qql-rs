@@ -1,60 +1,7 @@
-use qql_core::error::QqlError;
+use qql_core::error::{QqlError, Span};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
-use qql_core::token::TokenKind;
-
-pub fn strip_comments(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    let mut in_string = false;
-    let mut quote_char: u8 = 0;
-
-    while i < bytes.len() {
-        let ch = bytes[i];
-
-        if in_string {
-            push_input_char(&mut out, text, &mut i);
-            if ch == b'\\' && i < bytes.len() {
-                push_input_char(&mut out, text, &mut i);
-                continue;
-            }
-            if ch == quote_char {
-                in_string = false;
-                quote_char = 0;
-            }
-            continue;
-        }
-
-        if ch == b'\'' || ch == b'"' {
-            in_string = true;
-            quote_char = ch;
-            push_input_char(&mut out, text, &mut i);
-            continue;
-        }
-
-        if ch == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
-            i += 2;
-            while i < bytes.len() && bytes[i] != b'\r' && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-
-        push_input_char(&mut out, text, &mut i);
-    }
-
-    out
-}
-
-fn push_input_char(output: &mut String, input: &str, index: &mut usize) {
-    let ch = input[*index..]
-        .chars()
-        .next()
-        .expect("index is always within the input while copying a character");
-    output.push(ch);
-    *index += ch.len_utf8();
-}
+use qql_core::token::{Token, TokenKind};
 
 fn is_contextual_identifier(kind: TokenKind) -> bool {
     matches!(
@@ -70,9 +17,33 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
     )
 }
 
-pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
-    let cleaned = strip_comments(text);
-    let mut lexer = Lexer::new(&cleaned);
+/// Whether the token at `index` opens a top-level statement.
+///
+/// Uses `qql-core`'s authoritative statement table plus `BATCH` (which
+/// `parse_stmt` accepts but the core table omits for recovery purposes).
+/// `WITH` only opens a statement when it is a CTE header (`WITH name AS (…));
+/// the `WITH PAYLOAD` / `WITH PARAMS` clause forms are not statement starts.
+fn is_statement_opener(tokens: &[Token<'_>], index: usize) -> bool {
+    let kind = tokens[index].kind;
+    if kind == TokenKind::With {
+        if index + 2 >= tokens.len() {
+            return false;
+        }
+        let next1 = &tokens[index + 1];
+        let next2 = &tokens[index + 2];
+        let next1_is_ident = next1.kind == TokenKind::Identifier
+            || next1.kind == TokenKind::String
+            || is_contextual_identifier(next1.kind);
+        return next1_is_ident && next2.kind == TokenKind::As;
+    }
+    kind.is_statement_start() || kind == TokenKind::Batch
+}
+
+/// Lex the raw script, keeping every token (comments are skipped by the lexer,
+/// so string literals — including backtick, raw, and triple-quoted forms —
+/// stay intact).
+fn lex_tokens(text: &str) -> Result<Vec<Token<'_>>, QqlError> {
+    let mut lexer = Lexer::new(text);
     let mut tokens = Vec::new();
     loop {
         let tok = lexer.next_token()?;
@@ -81,8 +52,19 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         }
         tokens.push(tok);
     }
+    Ok(tokens)
+}
 
-    let mut starts = Vec::new();
+/// Split a script on top-level statement boundaries.
+///
+/// Boundaries are token spans from the `qql-core` lexer — the same statement
+/// table the parser uses — so comments cannot split a statement and comment
+/// text inside string literals is preserved verbatim. Each returned statement
+/// is trimmed of its trailing `;` and validated with [`Parser::parse`].
+pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
+    let tokens = lex_tokens(text)?;
+
+    let mut starts: Vec<usize> = Vec::new();
     let mut depth: i32 = 0;
     let mut in_with_cte = false;
     for (i, tok) in tokens.iter().enumerate() {
@@ -91,33 +73,10 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         // of the WITH statement.
         if in_with_cte && depth == 0 && matches!(tok.kind, TokenKind::Query | TokenKind::Fusion) {
             in_with_cte = false;
-        } else {
-            let is_starter = match tok.kind {
-                TokenKind::Upsert
-                | TokenKind::Create
-                | TokenKind::Alter
-                | TokenKind::Drop
-                | TokenKind::Show
-                | TokenKind::Query
-                | TokenKind::Scroll
-                | TokenKind::Delete
-                | TokenKind::Update => true,
-                TokenKind::With if i + 2 < tokens.len() => {
-                    let next1 = &tokens[i + 1];
-                    let next2 = &tokens[i + 2];
-                    let next1_is_ident = next1.kind == TokenKind::Identifier
-                        || next1.kind == TokenKind::String
-                        || is_contextual_identifier(next1.kind);
-                    next1_is_ident && next2.kind == TokenKind::As
-                }
-                _ => false,
-            };
-
-            if depth == 0 && is_starter {
-                starts.push(tok.span.start);
-                if tok.kind == TokenKind::With {
-                    in_with_cte = true;
-                }
+        } else if depth == 0 && is_statement_opener(&tokens, i) {
+            starts.push(i);
+            if tok.kind == TokenKind::With {
+                in_with_cte = true;
             }
         }
 
@@ -143,7 +102,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         return Err(QqlError::parse(
             "QQL-PARSE-DELIMITER",
             format!("unexpected end of input: {} unclosed delimiter(s)", depth),
-            qql_core::error::Span::new(0, cleaned.len()),
+            Span::new(0, text.len()),
         ));
     }
 
@@ -153,16 +112,15 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
 
     let mut statements = Vec::new();
     for (idx, &start) in starts.iter().enumerate() {
-        let end = if idx + 1 < starts.len() {
-            starts[idx + 1]
-        } else {
-            cleaned.len()
-        };
-
-        let mut stmt = cleaned[start..end].trim();
-        if stmt.ends_with(';') {
-            stmt = stmt[..stmt.len() - 1].trim();
-        }
+        let end_idx = starts.get(idx + 1).copied().unwrap_or(tokens.len());
+        // The statement's source text runs to its last non-separator token, so
+        // trailing comments and the `;` separator are excluded.
+        let last = tokens[start..end_idx]
+            .iter()
+            .rev()
+            .find(|tok| tok.kind != TokenKind::Semicolon);
+        let Some(last) = last else { continue };
+        let stmt = text[tokens[start].span.start..last.span.end].trim();
 
         if !stmt.is_empty() {
             Parser::parse(stmt)?;
@@ -200,5 +158,59 @@ mod tests {
             split_statements("QUERY 'café' FROM docs LIMIT 1;").expect("script should parse");
 
         assert_eq!(statements, ["QUERY 'café' FROM docs LIMIT 1"]);
+    }
+
+    #[test]
+    fn splits_every_statement_starter() {
+        // Regression: these five starters were missing from the hand-rolled
+        // table, so a script led by them silently executed nothing.
+        let cases = [
+            "COUNT FROM docs",
+            "FACET city FROM docs",
+            "CLEAR PAYLOAD FROM docs WHERE id = 1",
+            "SET QUOTA (enabled = true)",
+            "BATCH { QUERY [0.1] FROM docs LIMIT 1; }",
+        ];
+        for case in cases {
+            let script = format!("{case};");
+            let statements = split_statements(&script)
+                .unwrap_or_else(|e| panic!("'{case}' should split: {e}"));
+            assert_eq!(statements, [case], "starter lost for '{case}'");
+        }
+    }
+
+    #[test]
+    fn splits_a_script_led_by_each_starter() {
+        for leader in [
+            "COUNT FROM docs",
+            "FACET city FROM docs",
+            "CLEAR PAYLOAD FROM docs WHERE id = 1",
+            "SET QUOTA (enabled = true)",
+            "BATCH { QUERY [0.1] FROM docs LIMIT 1; }",
+        ] {
+            let script = format!("{leader};\nSHOW COLLECTIONS;");
+            let statements =
+                split_statements(&script).unwrap_or_else(|e| panic!("'{leader}' failed: {e}"));
+            assert_eq!(statements.len(), 2, "wrong split for '{leader}'");
+            assert_eq!(statements[0], leader);
+            assert_eq!(statements[1], "SHOW COLLECTIONS");
+        }
+    }
+
+    #[test]
+    fn comments_and_string_literals_survive_splitting() {
+        // `--` inside backtick, raw, and triple-quoted strings is content,
+        // not a comment; it must survive byte-identically.
+        let script = concat!(
+            "UPSERT INTO docs VALUES {id: 1, a: `x--y`};\n",
+            "-- a real comment\n",
+            "UPSERT INTO docs VALUES {id: 2, b: r'C:\\x--y'};\n",
+            "QUERY '''line--one''' FROM docs;\n",
+        );
+        let statements = split_statements(script).expect("script should parse");
+        assert_eq!(statements.len(), 3);
+        assert!(statements[0].contains("`x--y`"));
+        assert!(statements[1].contains(r"r'C:\x--y'"), "got: {}", statements[1]);
+        assert!(statements[2].contains("'''line--one'''"));
     }
 }
