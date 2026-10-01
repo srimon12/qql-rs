@@ -16,12 +16,11 @@
 //! | `FieldCondition` geo / `values_count` / `is_empty` / `is_null` | same-named edge types |
 //! | `IsNull`/`IsEmpty`/`HasId`/`HasVector`/`Nested`/`Filter`/`Slice` | same-named edge conditions |
 //!
-//! `FilterCompound::min_should` is the legacy integer form ("at least N of
-//! `should`"). qdrant-edge 0.8 models the modern `MinShould { conditions,
-//! min_count }` object, so the typed lowering moves the `should` clauses into
-//! `MinShould::conditions` and clears `Filter::should`. The planner never emits
-//! the legacy field today (every construction site passes `None`), so this is a
-//! completeness adapter, not a live path.
+//! `FilterCompound` carries both the plain `should` clause list and the
+//! modern `min_should { conditions, min_count }` object; the lowering maps
+//! each to its qdrant-edge counterpart independently. There is no legacy
+//! integer form to adapt — the planner emits `min_should` in object form
+//! (`qql-plan/src/filter.rs`) and plain `should` stays on `Filter::should`.
 //!
 //! No serde fallback is needed: every plan variant maps directly.
 //!

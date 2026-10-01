@@ -6,7 +6,7 @@
 //! (transport-neutral plans plus an optional REST projection) and the executor
 //! crate `qql` (REST / gRPC / edge execution).
 //!
-//! With default features the crate builds without third-party dependencies;
+//! With default features the crate builds without optional dependencies;
 //! `serde` and `json` are opt-in for AST serialization and dynamic-value
 //! conversion. Parser-only consumers — formatters, linters, language servers,
 //! code generators — therefore embed it cheaply.
