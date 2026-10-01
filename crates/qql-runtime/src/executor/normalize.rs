@@ -99,7 +99,18 @@ pub(crate) fn normalize_planned(
                 None,
             ));
         }
-        _ => (format!("{label} ok"), None),
+        // Status-only operations: no typed payload to surface. Listing every
+        // remaining variant (instead of a wildcard) keeps `ExecData` closed
+        // end to end — a new data-returning variant becomes a compile error
+        // here instead of silently dropping its payload.
+        PlannedOperation::CreateCollection { .. }
+        | PlannedOperation::UpdateCollection { .. }
+        | PlannedOperation::DropCollection { .. }
+        | PlannedOperation::CreateIndex { .. }
+        | PlannedOperation::DropIndex { .. }
+        | PlannedOperation::CreateShardKey { .. }
+        | PlannedOperation::DropShardKey { .. }
+        | PlannedOperation::Batch { .. } => (format!("{label} ok"), None),
     };
     Ok(ExecResponse {
         ok: true,
