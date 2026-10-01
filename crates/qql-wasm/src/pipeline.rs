@@ -129,6 +129,41 @@ impl Client {
         &self,
         operation: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, JsValue> {
+        // `CREATE COLLECTION` with a deferred PATCH and/or custom shard keys
+        // has no single REST route: the plan owns the step sequence (PUT body,
+        // conditional PATCH, per-key shard PUTs) and this host sends the steps
+        // through its fetch path, mirroring the native REST adapter.
+        if let qql_plan::PlannedOperation::CreateCollection {
+            collection,
+            request,
+        } = operation
+            && qql_plan::ddl::create_collection_needs_multi_step(request)
+        {
+            let steps = qql_plan::ddl::create_collection_rest_steps(collection, request).map_err(
+                |error| {
+                    qql_err_to_js(QqlError::execution(
+                        "QQL-PLAN-SERIALIZE",
+                        format!("plan IR REST request body serialization failed: {error}"),
+                        None,
+                    ))
+                },
+            )?;
+            let mut last_envelope = None;
+            for step in steps {
+                last_envelope = Some(
+                    self.send_json(step.method.as_str(), &step.path, Some(step.body))
+                        .await?,
+                );
+            }
+            let envelope = last_envelope.ok_or_else(|| {
+                qql_err_to_js(QqlError::execution(
+                    "QQL-PLAN-SERIALIZE",
+                    "create collection projected to no REST steps",
+                    None,
+                ))
+            })?;
+            return shaped_success_response(operation, &envelope).map_err(qql_err_to_js);
+        }
         let route =
             qql_plan::to_rest_route(operation).map_err(|err| qql_err_to_js(err.to_qql_error()))?;
         let result = self
