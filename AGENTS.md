@@ -40,6 +40,7 @@ qql/ (workspace root)
 ├── crates/
 │   ├── qql-core/         # Lexer, parser, typed AST, explain, filter injection
 │   ├── qql-plan/         # Fallible planner: AST → PlannedOperation; REST projection
+│   ├── qql-protocol/     # Qdrant REST protocol: closed result IR, strict OpenAPI parser, schema, telemetry
 │   ├── qql-embed/        # Shared Embedder trait, wire-compatible BM25, resolve_embeddings (batch dense)
 │   ├── qql-convert/      # OpenAPI REST JSON → typed AST → canonical QQL (qql convert / qql record)
 │   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, HttpEmbedder
@@ -86,16 +87,20 @@ Canonical response is `BackendResponse { data: ExecData, telemetry }` where
 The enum is closed: there is no `Raw(Value)` passthrough. gRPC and edge produce
 it **directly** from protobuf / `qdrant_edge` types (no proto→JSON or
 edge→JSON envelope); REST parses its HTTP JSON through the strict per-operation
-OpenAPI parser (`crate::rest_response`) exactly once at the boundary, failing
-`QQL-BACKEND-ENVELOPE` on a missing or mistyped shape. One normalization
-builds `ExecResponse` in all cases; bindings consume `ExecData::Hits` natively
-(native `#[pyclass] ExecutionReport`/`ScoredPoint` in `pyqql-common`).
+OpenAPI parser in `qql-protocol` (`qql_protocol::rest`) exactly once at the
+boundary, failing `QQL-BACKEND-ENVELOPE` on a missing or mistyped shape; the
+runtime re-exports that surface as `qql::executor::*` / `qql::backend::*`.
+One normalization builds `ExecResponse` in all cases; bindings consume
+`ExecData::Hits` natively (native `#[pyclass] ExecutionReport`/`ScoredPoint`
+in `pyqql-common`).
 
 ### Crate Division Boundaries
 
 * **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`. The AST owns `String` types; `Lexer`/`Parser`/`Token`/`ParamPlan` borrow the input.
 
-* **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` is the REST-specific projection: typed `*Request` structs lower to `Route.body: Option<serde_json::Value>` via `serialize_body`. Dynamic values (payloads, match values, inference `object`/`options`, `OrderBy.start_from`, DDL `metadata`) are held as `qql_core::ast::Value` and rendered to JSON once at the transport boundary (`value_serde`). Depends on `qql-core` plus `serde`/`serde_json` and `uuid` (point-ID validation). No networking, no tokio, no reqwest.
+* **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` is the REST-specific projection: typed `*Request` structs lower to `Route.body: Option<serde_json::Value>` via `serialize_body`. Dynamic values (payloads, match values, inference `object`/`options`, `OrderBy.start_from`, DDL `metadata`) are held as `qql_core::ast::Value` and rendered to JSON once at the transport boundary (`value_serde`). Depends on `qql-core` plus `serde`/`serde_json` and `uuid` (point-ID validation). No networking, no tokio, no reqwest, and no response parsing — responses belong to `qql-protocol`.
+
+* **`qql-protocol`**: The Qdrant REST protocol surface, extracted so no protocol knowledge lives in the planner. Holds the closed `ExecData` family (`Hits`, `Groups`, `Count`, `Facet`, `Mutation`, `Collections`, `Collection`, `ShardKeys`, `Quotas`), the strict per-operation OpenAPI response parser (`QQL-BACKEND-ENVELOPE`, no fallbacks, no raw passthrough), the collection-schema reader, server telemetry extraction, and pure `BackendResponse` → `ExecResponse` normalization. Depends on `qql-plan` (plans lower the request) and `qql-core`; no I/O, no transport clients. `qql-runtime` re-exports this surface so `qql::executor::*` / `qql::backend::*` stay source-compatible; `qql-wasm` depends on it directly.
 
 * **`qql-embed`**: Shared embedding layer. Wide host-agnostic `Embedder` trait (dense/sparse/multi/image/rerank plus batch variants; reject-by-default for opt-in modalities). Local BM25 is wire-compatible with Qdrant's `qdrant/bm25` (murmur3-32 token IDs, word tokenizer, English stopwords + snowball stemming; queries embed unit weights, documents tf saturation) except murmur3-collision counting, which has no cross-impl contract. `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags) and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense, batch dense by model). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). Unknown names with an already-declared `AS` kind are kept for offline / empty mock schemas. No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
 
@@ -127,7 +132,7 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest survives only as a test-only harness in `qql-conformance` (dev-dependency that compiles `language/v1/grammar.pest` and gates the fixture corpus), never in `qql-core`. `qql-grammar-gen` instead derives keyword tables, TextMate/TS artifacts, and the generated pest copy from `grammar.pest`
 - `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
 - `CollectionSchema` (qql-runtime `backend.rs` is canonical) — removed duplicate; backend schema is the only source
-- `QdrantOps::execute_planned_typed` and the JSON-returning `QdrantOps::execute_planned` — replaced by the single typed `execute_planned -> BackendResponse`. `BackendResponse::from_envelope` is gone; the old shared envelope parser (`envelope.rs` / `parse_backend_response`) is gone too, replaced by the strict per-operation parser in `crate::rest_response`. Unrelated and current: `ServerTelemetry::from_envelope[_opt]` (telemetry-only extraction, also mirrored in `qql-wasm/src/telemetry.rs`).
+- `QdrantOps::execute_planned_typed` and the JSON-returning `QdrantOps::execute_planned` — replaced by the single typed `execute_planned -> BackendResponse`. `BackendResponse::from_envelope` is gone; the old shared envelope parser (`envelope.rs` / `parse_backend_response`) is gone too, replaced by the strict per-operation parser in `qql-protocol` (`qql_protocol::rest`, re-exported by `qql-runtime`). Unrelated and current: `ServerTelemetry::from_envelope[_opt]` (telemetry-only extraction, in `qql-protocol::telemetry`).
 - `ExecData::Raw` / `as_raw()` — removed; every response shape has a typed variant (`Hits`, `Groups`, `Count`, `Facet`, `Mutation`, `Collections`, `Collection`, `ShardKeys`, `Quotas`) and no JSON passthrough remains
 - Eager `value_to_json` conversion and `serde_json::Value` plan fields — plan IR holds `qql_core::ast::Value`; REST renders it once via `qql-plan/src/value_serde.rs`, gRPC converts straight to proto, edge converts at its own boundary. Unbound-parameter invariant panics live in those boundary renderers, not in lowering
 
@@ -232,6 +237,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 
 - `qql-core`: Serde optional (`default = []`, features `serde` and `json` separately). Parser-only consumers pay for nothing.
 - `qql-plan`: Always depends on serde/serde_json — builds JSON wire bodies matching OpenAPI format exactly. Typed semantic primitives (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`) implement `Serialize` directly.
+- `qql-protocol`: Always depends on serde/serde_json — owns the response side: field-level `Deserialize` over Qdrant envelopes, closed `ExecData` serialization, and telemetry extraction.
 - `qql-runtime`: Uses serde/serde_json in REST adapter. gRPC adapter uses typed protobuf conversion.
 - Bindings: All enable `qql-core/serde` + `qql-core/json` for AST serialization and `Value::from_json()`.
 

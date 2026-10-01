@@ -5,6 +5,7 @@ members = [
     "crates/qql-conformance",
     "crates/qql-grammar-gen",
     "crates/qql-plan",
+    "crates/qql-protocol",
     "crates/qql-embed",
     "crates/qql-runtime",
     "crates/qql-cli",
@@ -38,6 +39,7 @@ missing_docs = "warn"
 qql-convert = { version = "0.4.2", path = "crates/qql-convert" }
 qql-core = { version = "0.4.2", path = "crates/qql-core" }
 qql-plan = { version = "0.4.2", path = "crates/qql-plan" }
+qql-protocol = { version = "0.4.2", path = "crates/qql-protocol" }
 qql-embed = { version = "0.4.2", path = "crates/qql-embed" }
 qql = { version = "0.4.2", path = "crates/qql-runtime", default-features = false }
 qql-edge = { version = "0.4.2", path = "crates/qql-edge", default-features = false }

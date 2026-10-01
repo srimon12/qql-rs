@@ -4,13 +4,13 @@ use std::fmt::Write as _;
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 
-use crate::{
+use qql_plan::{
     PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey, PlanVectorStruct, QuotaConfig,
 };
 
-use crate::surface::schema::CollectionInfo;
+use crate::schema::CollectionInfo;
 
-use crate::surface::telemetry::{PhaseTimings, ServerTelemetry, ServerUsage};
+use crate::telemetry::{PhaseTimings, ServerTelemetry, ServerUsage};
 
 /// Single-statement execution outcome: status, operation label, message, data,
 /// and optional server telemetry.
@@ -243,7 +243,7 @@ impl std::fmt::Write for ScoreBuf {
 /// keeps that double conversion at exactly one call site instead of inline
 /// at every `parse_hit`.
 ///
-/// The sole caller is [`crate::surface::rest`], which is the REST boundary.
+/// The sole caller is [`crate::rest`], which is the REST boundary.
 pub fn score_from_wire(v: f64) -> f64 {
     score_f64(v as f32)
 }

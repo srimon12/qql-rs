@@ -2,16 +2,14 @@
 //!
 //! The report envelope matches the `qql-runtime` contract. Response parsing,
 //! schema reading, telemetry extraction, and normalization all come from
-//! [`qql_plan::surface`], so the browser host reports the same labels,
+//! [`qql_protocol`], so the browser host reports the same labels,
 //! messages, and closed payloads as the native executor.
 
 use qql_core::error::QqlError;
-use qql_plan::surface::normalize::{
-    normalize_planned, normalize_query_item, normalize_update_item,
-};
-use qql_plan::surface::rest::{parse_query_batch, parse_update_batch};
-use qql_plan::surface::telemetry::ServerTelemetry;
 use qql_plan::{PlannedOperation, UpdateOperation};
+use qql_protocol::normalize::{normalize_planned, normalize_query_item, normalize_update_item};
+use qql_protocol::rest::{parse_query_batch, parse_update_batch};
+use qql_protocol::telemetry::ServerTelemetry;
 
 /// Internal execution report matching the qql-runtime contract.
 /// Used so callers can access typed `succeeded`/`failed`/`results`
@@ -121,7 +119,7 @@ pub(crate) fn shaped_success_response(
     operation: &PlannedOperation,
     envelope: &serde_json::Value,
 ) -> Result<serde_json::Value, QqlError> {
-    let parsed = qql_plan::surface::rest::parse_planned(operation, envelope.clone())?;
+    let parsed = qql_protocol::rest::parse_planned(operation, envelope.clone())?;
     let normalized = normalize_planned(operation, parsed)?;
     to_json(&normalized)
 }
@@ -147,7 +145,7 @@ pub(crate) fn shaped_query_batch(
 
 /// Canonical `ExecResponse` JSON for one parsed query-batch member.
 pub(crate) fn shaped_query_response(
-    response: qql_plan::surface::response::BackendResponse,
+    response: qql_protocol::response::BackendResponse,
 ) -> Result<serde_json::Value, QqlError> {
     normalize_query_item(response).and_then(|exec| to_json(&exec))
 }
@@ -155,14 +153,14 @@ pub(crate) fn shaped_query_response(
 /// Parse a `/points/query/batch` envelope into typed responses.
 pub(crate) fn parsed_query_batch(
     envelope: &serde_json::Value,
-) -> Result<Vec<qql_plan::surface::response::BackendResponse>, QqlError> {
+) -> Result<Vec<qql_protocol::response::BackendResponse>, QqlError> {
     parse_query_batch(batch_result(envelope))
 }
 
 /// Parse a `/points/batch` envelope into typed responses.
 pub(crate) fn parsed_update_batch(
     envelope: &serde_json::Value,
-) -> Result<Vec<qql_plan::surface::response::BackendResponse>, QqlError> {
+) -> Result<Vec<qql_protocol::response::BackendResponse>, QqlError> {
     parse_update_batch(batch_result(envelope))
 }
 
@@ -188,7 +186,7 @@ pub(crate) fn shaped_update_batch(
 /// path already holds `UpdateOperation`s).
 pub(crate) fn shaped_update_response(
     update: &UpdateOperation,
-    response: qql_plan::surface::response::BackendResponse,
+    response: qql_protocol::response::BackendResponse,
 ) -> Result<serde_json::Value, QqlError> {
     normalize_update_item(update, response).and_then(|exec| to_json(&exec))
 }

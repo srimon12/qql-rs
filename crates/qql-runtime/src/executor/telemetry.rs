@@ -1,6 +1,6 @@
-//! Shared telemetry types, re-exported from [`qql_plan::surface::telemetry`].
+//! Shared telemetry types, re-exported from [`qql_protocol::telemetry`].
 //!
 //! Phase timings and the server `time`/`usage` envelope live in
-//! `qql-plan::surface` so the runtime and WASM hosts share one shape.
+//! `qql-protocol` so the runtime and WASM hosts share one shape.
 
-pub use qql_plan::surface::telemetry::*;
+pub use qql_protocol::telemetry::*;

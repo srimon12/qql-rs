@@ -14,7 +14,7 @@ use super::client::Client;
 use super::functions::{js_err, qql_err_to_js, to_js_value};
 use super::params::{bind_stmt_values, bind_value_params, extract_ast_stmt, options_params};
 use super::report::shaped_success_response;
-use qql_plan::surface::telemetry::ServerTelemetry;
+use qql_protocol::telemetry::ServerTelemetry;
 
 fn now_ms() -> f64 {
     js_sys::Date::now()

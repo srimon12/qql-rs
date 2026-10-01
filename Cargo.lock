@@ -4472,6 +4472,7 @@ dependencies = [
  "qql-core",
  "qql-embed",
  "qql-plan",
+ "qql-protocol",
  "reqwest 0.12.28",
  "schemars",
  "serde",
@@ -4581,6 +4582,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "qql-protocol"
+version = "0.4.2"
+dependencies = [
+ "qql-core",
+ "qql-plan",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "qql-wasm"
 version = "0.4.2"
 dependencies = [
@@ -4590,6 +4601,7 @@ dependencies = [
  "qql-core",
  "qql-embed",
  "qql-plan",
+ "qql-protocol",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

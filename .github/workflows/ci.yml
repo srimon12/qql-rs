@@ -97,7 +97,7 @@ jobs:
       - name: Clippy (published Rust crates)
         run: >
           cargo clippy --locked --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge -p qql-cli
           -p qql-convert
           --all-targets -- -D warnings
 
@@ -110,7 +110,7 @@ jobs:
       - name: Test (published Rust crates)
         run: >
           cargo test --locked --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge -p qql-cli
           -p qql-convert
 
       # One cargo unit so feature unification (e.g. serde_json/preserve_order
@@ -208,7 +208,7 @@ jobs:
       - name: cargo check on MSRV (${{ steps.msrv.outputs.version }})
         run: >
           cargo check --locked --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge -p qql-cli
           -p qql-convert
 
   docs:
@@ -229,7 +229,7 @@ jobs:
       - name: cargo doc (libraries, deny warnings)
         run: >
           cargo doc --locked --no-deps --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge
           -p qql-convert
 
       - name: cargo doc (CLI, deny warnings)
@@ -268,7 +268,7 @@ jobs:
       - name: Package dependents (list + archive only)
         run: |
           set -euo pipefail
-          for crate in qql-plan qql-embed qql qql-edge qql-cli qql-convert; do
+          for crate in qql-plan qql-protocol qql-embed qql qql-edge qql-cli qql-convert; do
             cargo package --locked --no-verify --exclude-lockfile -p "$crate"
           done
 
@@ -682,7 +682,7 @@ jobs:
             exit 0
           }
           if grep -Eq \
-            '(^website/|^language/v1/|^crates/qql-wasm/|^crates/qql-core/|^crates/qql-plan/|^crates/qql-embed/|^Cargo\.toml$|^Cargo\.lock$|^\.github/workflows/ci\.yml$)' \
+            '(^website/|^language/v1/|^crates/qql-wasm/|^crates/qql-core/|^crates/qql-plan/|^crates/qql-protocol/|^crates/qql-embed/|^Cargo\.toml$|^Cargo\.lock$|^\.github/workflows/ci\.yml$)' \
             <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else

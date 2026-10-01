@@ -2,7 +2,7 @@
 //!
 //! Types in this module are the boundary between QQL compilation and a Qdrant
 //! transport adapter. They deliberately do not depend on generated OpenAPI or
-//! protobuf types. Query hits live on [`crate::surface::response::SearchHit`]; this
+//! protobuf types. Query hits live on [`crate::response::SearchHit`]; this
 //! module holds collection metadata used by `USING` resolution and dump.
 //!
 //! # Deliberate JSON
@@ -18,10 +18,10 @@
 //! - Formula `DEFAULTS`: the expression engine takes JSON values directly
 //!   (`qql-edge`'s formula lowering converts the typed plan tree at the
 //!   boundary).
-//! - REST request/response bodies (`qql_plan::Route`, [`crate::surface::rest`]):
+//! - REST request/response bodies (`qql_plan::Route`, [`crate::rest`]):
 //!   the wire format itself.
 
-use crate::{HnswConfig, OptimizersConfig, QuantizationConfig};
+use qql_plan::{HnswConfig, OptimizersConfig, QuantizationConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
