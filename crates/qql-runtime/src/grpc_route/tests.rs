@@ -903,6 +903,14 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
     assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
     assert_eq!(err.code, "QQL-GRPC-LIST-INT");
     assert!(err.message.contains("9223372036854775808"), "{err}");
+
+    // The scalar form fails closed too (no proto `Match` field can carry it).
+    let err = to_match(&MatchValue::Value {
+        value: qql_core::ast::Value::UInt(oversized),
+    })
+    .unwrap_err();
+    assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+    assert_eq!(err.code, "QQL-GRPC-FLOAT-MATCH");
 }
 
 /// Unrepresentable match lists are rejected at plan time, before any
