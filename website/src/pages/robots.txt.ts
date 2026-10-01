@@ -4,6 +4,7 @@ import { APPS, generateRobotsTxt } from "../config/site";
 export const GET: APIRoute = () => {
 	const content = generateRobotsTxt({
 		sitemapUrl: `${APPS.home.url}/sitemap-index.xml`,
+		disallow: ["/playground/?"],
 	});
 
 	return new Response(content, {

@@ -30,11 +30,13 @@ const ogImageUrl = `${APPS.home.url}/open-graph/${rawId}.png`;
 // already says "QQL documentation", so the suffix duplicated it. Collapse the
 // two only for that exact case; every other page keeps "Page | QQL Documentation".
 const SITE_TITLE = "QQL Documentation";
+const isDocsHome = title.toLowerCase() === "qql documentation";
 const head = (
 	starlightRoute as { head?: { tag: string; content?: string }[] } | undefined
 )?.head;
 const titleTag = head?.find((tag) => tag.tag === "title");
 if (
+	isDocsHome &&
 	titleTag?.content?.toLowerCase() === `${title} | ${SITE_TITLE}`.toLowerCase()
 ) {
 	titleTag.content = title;
