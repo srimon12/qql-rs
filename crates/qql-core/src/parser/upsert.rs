@@ -53,6 +53,32 @@ impl<'a> AstLowerer<'a> {
                 } else {
                     None
                 };
+
+                // Optional point payload suffix: `WITH PAYLOAD { ... }`
+                if self.peek()?.kind == TokenKind::With
+                    && self.peek_nth(1).kind == TokenKind::Payload
+                {
+                    self.advance()?; // WITH
+                    self.advance()?; // PAYLOAD
+                    let suffix_payload = self.parse_payload_dict()?;
+                    for (key, value) in suffix_payload {
+                        if row
+                            .iter()
+                            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+                        {
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-DUPLICATE-KEY",
+                                alloc::format!(
+                                    "duplicate payload key '{}' between flat payload and WITH PAYLOAD suffix",
+                                    key
+                                ),
+                                self.prev_span(),
+                            ));
+                        }
+                        row.push((key, value));
+                    }
+                }
+
                 points.push(PointEntry::Inline(UpsertPoint {
                     id,
                     vectors,

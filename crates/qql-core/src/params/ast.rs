@@ -622,6 +622,26 @@ fn upsert_point_from_items<F>(
 where
     F: Fn(&str) -> Option<Value>,
 {
+    // Reserve exact "$payload" (case-sensitive) as dedicated payload object
+    let suffix_payload = if let Some(idx) = row
+        .iter()
+        .position(|(key, _)| key == crate::ast::PAYLOAD_BIND_KEY)
+    {
+        let (_, value) = row.remove(idx);
+        match value {
+            Value::Dict(entries) => entries,
+            _ => {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-UPSERT-PAYLOAD",
+                    alloc::format!("'{}' must be an object/dict", crate::ast::PAYLOAD_BIND_KEY),
+                    span,
+                ));
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
     let id_index = row
         .iter()
         .position(|(key, _)| key.eq_ignore_ascii_case("id"))
@@ -646,6 +666,23 @@ where
         None
     };
     let mut payload = row;
+    for (key, val) in suffix_payload {
+        if payload
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+        {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-DUPLICATE-KEY",
+                alloc::format!(
+                    "duplicate payload key '{}' between point row and '{}'",
+                    key,
+                    crate::ast::PAYLOAD_BIND_KEY
+                ),
+                span,
+            ));
+        }
+        payload.push((key, val));
+    }
     // Nested placeholders inside the dict compose like inline rows.
     bind_point_id(&mut id, lookup, positional)?;
     if let Some(vectors) = &mut vectors {

@@ -843,3 +843,256 @@ fn test_inject_filter_rejects_unbound_point_param() {
     let formatted = crate::fmt::format_stmt(&stmt);
     assert!(formatted.contains("acme"), "got: {formatted}");
 }
+
+#[test]
+fn test_upsert_point_param_payload_binding_colliding_keys() {
+    use crate::ast::PointEntry;
+
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+    let point_dict = Value::Dict(vec![
+        ("id".into(), Value::Int(42)),
+        (
+            "vector".into(),
+            Value::List(vec![Value::Float(0.1), Value::Float(0.2)]),
+        ),
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Dict(vec![
+                ("id".into(), Value::Str("colliding_id".into())),
+                ("vector".into(), Value::Str("colliding_vector".into())),
+                ("tag".into(), Value::Str("beta".into())),
+            ]),
+        ),
+    ]);
+    bind_stmt(&mut stmt, |_| Some(point_dict.clone()), &[]).unwrap();
+
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!()
+    };
+    let PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!()
+    };
+    assert_eq!(point.id, crate::ast::PointId::Number(42));
+    assert!(point.vectors.is_some());
+    assert_eq!(point.payload.len(), 3);
+    assert_eq!(
+        point.payload[0],
+        ("id".into(), Value::Str("colliding_id".into()))
+    );
+    assert_eq!(
+        point.payload[1],
+        ("vector".into(), Value::Str("colliding_vector".into()))
+    );
+    assert_eq!(point.payload[2], ("tag".into(), Value::Str("beta".into())));
+
+    // Formatting must emit WITH PAYLOAD because payload has colliding keys
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(
+        formatted.contains("WITH PAYLOAD"),
+        "expected WITH PAYLOAD in: {formatted}"
+    );
+    // Re-parsing formatted statement must yield the identical AST
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn test_upsert_point_param_payload_binding_duplicate_key_rejected() {
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+    let point_dict = Value::Dict(vec![
+        ("id".into(), Value::Int(1)),
+        ("tag".into(), Value::Str("alpha".into())),
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Dict(vec![("TAG".into(), Value::Str("duplicate".into()))]),
+        ),
+    ]);
+    let err = bind_stmt(&mut stmt, |_| Some(point_dict.clone()), &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-DUPLICATE-KEY");
+}
+
+#[test]
+fn test_upsert_point_param_payload_binding_non_dict_rejected() {
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+    let point_dict = Value::Dict(vec![
+        ("id".into(), Value::Int(1)),
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Str("not-a-dict".into()),
+        ),
+    ]);
+    let err = bind_stmt(&mut stmt, |_| Some(point_dict.clone()), &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-UPSERT-PAYLOAD");
+}
+
+#[cfg(feature = "json")]
+#[test]
+fn test_upsert_point_param_payload_binding_batch_rows() {
+    use crate::ast::PointEntry;
+
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :rows;").unwrap();
+    let rows = Value::List(vec![
+        Value::Dict(vec![
+            ("id".into(), Value::Int(1)),
+            (
+                crate::ast::PAYLOAD_BIND_KEY.into(),
+                Value::Dict(vec![("id".into(), Value::Str("custom_id_1".into()))]),
+            ),
+        ]),
+        Value::Dict(vec![
+            ("id".into(), Value::Int(2)),
+            ("title".into(), Value::Str("flat".into())),
+        ]),
+    ]);
+    crate::params_json::bind_stmt_with_values(&mut stmt, &Value::Dict(vec![("rows".into(), rows)]))
+        .unwrap();
+
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!()
+    };
+    assert_eq!(upsert.points.len(), 2);
+    let PointEntry::Inline(p1) = &upsert.points[0] else {
+        panic!()
+    };
+    assert_eq!(
+        p1.payload,
+        vec![("id".into(), Value::Str("custom_id_1".into()))]
+    );
+    let PointEntry::Inline(p2) = &upsert.points[1] else {
+        panic!()
+    };
+    assert_eq!(
+        p2.payload,
+        vec![("title".into(), Value::Str("flat".into()))]
+    );
+}
+
+#[test]
+fn test_upsert_point_param_payload_binding_literal_payload_key() {
+    use crate::ast::PointEntry;
+
+    // 1. Nested object-valued literal "$payload" key
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+    let point_dict = Value::Dict(vec![
+        ("id".into(), Value::Int(1)),
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Dict(vec![
+                (
+                    crate::ast::PAYLOAD_BIND_KEY.into(),
+                    Value::Dict(vec![("x".into(), Value::Int(100))]),
+                ),
+                ("title".into(), Value::Str("nested_title".into())),
+            ]),
+        ),
+    ]);
+    bind_stmt(&mut stmt, |_| Some(point_dict.clone()), &[]).unwrap();
+
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!()
+    };
+    let PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!()
+    };
+    assert_eq!(point.payload.len(), 2);
+    assert_eq!(
+        point.payload[0],
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Dict(vec![("x".into(), Value::Int(100))])
+        )
+    );
+    assert_eq!(
+        point.payload[1],
+        ("title".into(), Value::Str("nested_title".into()))
+    );
+
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(
+        formatted.contains("WITH PAYLOAD"),
+        "expected WITH PAYLOAD in: {formatted}"
+    );
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+
+    // 2. Nested scalar-valued literal "$payload" key
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+    let point_dict = Value::Dict(vec![
+        ("id".into(), Value::Int(2)),
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Dict(vec![
+                (
+                    crate::ast::PAYLOAD_BIND_KEY.into(),
+                    Value::Str("scalar_content".into()),
+                ),
+                ("title".into(), Value::Str("scalar_title".into())),
+            ]),
+        ),
+    ]);
+    bind_stmt(&mut stmt, |_| Some(point_dict.clone()), &[]).unwrap();
+
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!()
+    };
+    let PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!()
+    };
+    assert_eq!(point.payload.len(), 2);
+    assert_eq!(
+        point.payload[0],
+        (
+            crate::ast::PAYLOAD_BIND_KEY.into(),
+            Value::Str("scalar_content".into())
+        )
+    );
+    assert_eq!(
+        point.payload[1],
+        ("title".into(), Value::Str("scalar_title".into()))
+    );
+
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(
+        formatted.contains("WITH PAYLOAD"),
+        "expected WITH PAYLOAD in: {formatted}"
+    );
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn test_upsert_point_param_payload_binding_uppercase_payload_stays_flat() {
+    use crate::ast::PointEntry;
+
+    let mut stmt = Parser::parse("UPSERT INTO docs VALUES :p;").unwrap();
+    let point_dict = Value::Dict(vec![
+        ("id".into(), Value::Int(3)),
+        ("$PAYLOAD".into(), Value::Str("flat_val".into())),
+        ("title".into(), Value::Str("flat_title".into())),
+    ]);
+    bind_stmt(&mut stmt, |_| Some(point_dict.clone()), &[]).unwrap();
+
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!()
+    };
+    let PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!()
+    };
+    assert_eq!(point.payload.len(), 2);
+    assert_eq!(
+        point.payload[0],
+        ("$PAYLOAD".into(), Value::Str("flat_val".into()))
+    );
+    assert_eq!(
+        point.payload[1],
+        ("title".into(), Value::Str("flat_title".into()))
+    );
+
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(
+        !formatted.contains("WITH PAYLOAD"),
+        "unexpected WITH PAYLOAD in: {formatted}"
+    );
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}

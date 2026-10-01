@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::io::Write;
 
-use qql_core::ast::ShardKey;
+use qql_core::ast::{PAYLOAD_BIND_KEY, ShardKey, is_point_envelope_key};
 use serde_json::Value;
 
 use super::escape::{escape_string, format_ident, is_simple_ident};
@@ -11,29 +11,32 @@ use super::escape::{escape_string, format_ident, is_simple_ident};
 /// Convert a scroll point JSON object into an UPSERT record object
 /// (`{id, vector?, …payload}`).
 ///
-/// Returns `None` when the point has no usable `id` **or** when a payload key
-/// collides with the point-object `id`/`vector` slots (case-insensitive, the
-/// same rule `qql-convert` enforces). Merging such a key would overwrite the
-/// real point id or silently drop the stored vector, so dump/migrate count the
-/// point as skipped instead of emitting a corrupted UPSERT.
+/// Returns `None` when the point has no usable `id`. When a payload key
+/// collides with the point-object `id`/`vector` slots (case-insensitive),
+/// the payload is preserved under the reserved `$payload` dictionary key
+/// rather than dropping the point.
 pub fn point_to_upsert_object(point: &Value) -> Option<Value> {
     let id = point.get("id")?.clone();
     let mut map = serde_json::Map::new();
     map.insert("id".into(), id);
 
-    if let Some(payload) = point.get("payload").and_then(|p| p.as_object()) {
-        for (k, v) in payload {
-            if k.eq_ignore_ascii_case("id") || k.eq_ignore_ascii_case("vector") {
-                return None;
-            }
-            map.insert(k.clone(), v.clone());
-        }
-    }
-
     if let Some(vector) = point.get("vector")
         && !vector.is_null()
     {
         map.insert("vector".into(), vector.clone());
+    }
+
+    if let Some(payload) = point.get("payload").and_then(|p| p.as_object()) {
+        let has_collision = payload
+            .keys()
+            .any(|k| is_point_envelope_key(k) || k == PAYLOAD_BIND_KEY);
+        if has_collision {
+            map.insert(PAYLOAD_BIND_KEY.into(), Value::Object(payload.clone()));
+        } else {
+            for (k, v) in payload {
+                map.insert(k.clone(), v.clone());
+            }
+        }
     }
 
     Some(Value::Object(map))
@@ -79,33 +82,52 @@ pub fn write_upsert_batch(
     Ok(())
 }
 
-/// Render one point as a QQL object literal: `{id: …, vector: …, …}`.
+/// Render one point as a QQL object literal: `{id: …, vector: …, …}`
+/// or `{id: …, vector: …} WITH PAYLOAD {…}` when payload has envelope collisions.
 pub fn format_point_literal(point: &Value) -> String {
     let Some(obj) = point.as_object() else {
         return "{}".into();
     };
 
-    let mut parts = Vec::new();
+    let mut envelope_parts = Vec::new();
 
     if let Some(id) = obj.get("id") {
-        parts.push(format!("id: {}", format_point_id_value(id)));
+        envelope_parts.push(format!("id: {}", format_point_id_value(id)));
     }
     if let Some(vector) = obj.get("vector") {
-        parts.push(format!("vector: {}", format_qql_value(vector)));
+        envelope_parts.push(format!("vector: {}", format_qql_value(vector)));
     }
 
-    let mut payload_keys: Vec<&String> = obj
-        .keys()
-        .filter(|k| k.as_str() != "id" && k.as_str() != "vector")
-        .collect();
-    payload_keys.sort();
-    for k in payload_keys {
-        if let Some(v) = obj.get(k) {
-            parts.push(format!("{}: {}", format_field_key(k), format_qql_value(v)));
+    if let Some(payload_val) = obj.get(PAYLOAD_BIND_KEY) {
+        let payload_obj = payload_val
+            .as_object()
+            .expect("meta $payload entry must be an object");
+        let mut keys: Vec<&String> = payload_obj.keys().collect();
+        keys.sort();
+        let mut payload_parts = Vec::new();
+        for k in keys {
+            if let Some(v) = payload_obj.get(k) {
+                payload_parts.push(format!("{}: {}", format_field_key(k), format_qql_value(v)));
+            }
         }
-    }
+        format!(
+            "{{{}}} WITH PAYLOAD {{{}}}",
+            envelope_parts.join(", "),
+            payload_parts.join(", ")
+        )
+    } else {
+        let mut parts = envelope_parts;
+        let mut payload_keys: Vec<&String> =
+            obj.keys().filter(|k| !is_point_envelope_key(k)).collect();
+        payload_keys.sort();
+        for k in payload_keys {
+            if let Some(v) = obj.get(k) {
+                parts.push(format!("{}: {}", format_field_key(k), format_qql_value(v)));
+            }
+        }
 
-    format!("{{{}}}", parts.join(", "))
+        format!("{{{}}}", parts.join(", "))
+    }
 }
 
 pub fn format_point_id_value(id: &Value) -> String {

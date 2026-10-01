@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use crate::ConvertError;
-use crate::json::{self, child, index, invalid};
+use crate::json::{self, child, index};
 use qql_core::ast::Value as AstValue;
 
 /// Borrow one `payloads[i]` entry as AST pairs.
@@ -20,9 +20,6 @@ pub(crate) fn payload_at(
 }
 
 /// Decode a payload object into ordered AST pairs.
-///
-/// Payload keys named `id` / `vector` would collide with the point-object
-/// syntax (`{id: …, vector: …}`) and fail closed.
 pub(crate) fn decode_payload(
     value: &Value,
     path: &str,
@@ -30,12 +27,6 @@ pub(crate) fn decode_payload(
     let obj = json::object(value, path)?;
     let mut payload = Vec::with_capacity(obj.len());
     for (key, item) in obj {
-        if key.eq_ignore_ascii_case("id") || key.eq_ignore_ascii_case("vector") {
-            return Err(invalid(
-                child(path, key),
-                format!("payload key '{key}' collides with the point-object id/vector slots"),
-            ));
-        }
         payload.push((
             key.clone(),
             json::json_to_ast_value(item, &child(path, key))?,
