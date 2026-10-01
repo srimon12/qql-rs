@@ -183,7 +183,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-PLAN-INDEX-OPTION` | Invalid or unsupported `CREATE INDEX` option value |
 | `QQL-PLAN-INDEX-TYPE` | Unknown payload index field type |
-| `QQL-PLAN-MATCH-TYPE` | A match value or `IN` / `MATCH ANY` / `MATCH EXCEPT` list has no wire representation (non-int64 integer, float, bool, mixed kinds, or duplicates) |
+| `QQL-PLAN-MATCH-TYPE` | A match value or `IN` / `MATCH ANY` / `MATCH EXCEPT` list has no wire representation (non-int64 integer, float, bool, mixed kinds). Duplicate list entries are deduped, not rejected |
 | `QQL-PLAN-MIN-SHOULD` | `MIN SHOULD` requires `min_count >= 1` (OpenAPI `MinShould` minimum) |
 | `QQL-PLAN-MMR` | `MMR DIVERSITY` outside `[0, 1]` or `CANDIDATES` outside `1..=16384` |
 | `QQL-PLAN-NON-FINITE` | A dynamic value contains NaN/infinity, which JSON cannot represent (it would silently become `null`) |
