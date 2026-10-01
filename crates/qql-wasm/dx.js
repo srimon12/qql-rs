@@ -3,6 +3,31 @@
  * Aligned with pyqql's ExecutionReport and nqql's dx-common.js.
  */
 
+/**
+ * Copy every own enumerable property of `data` onto `target` with
+ * define-data-property semantics.
+ *
+ * `Object.assign`/plain assignment use `[[Set]]`, so an own `"__proto__"`
+ * key (valid JSON payload data) would invoke the inherited
+ * `Object.prototype.__proto__` setter — replacing the instance prototype —
+ * instead of creating an own field. Defining the property keeps the
+ * prototype intact and the key addressable.
+ */
+function defineOwnProperties(target, data) {
+  if (data === null || data === undefined) {
+    return target;
+  }
+  for (const key of Object.keys(data)) {
+    Object.defineProperty(target, key, {
+      value: data[key],
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return target;
+}
+
 export class ScoredPoint {
   constructor(data) {
     if (!data || typeof data !== 'object') {
@@ -17,7 +42,7 @@ export class ScoredPoint {
     this.collection = data.collection ?? null;
     this.vector = data.vector ?? null;
     this.shard_key = data.shard_key ?? null;
-    Object.assign(this, data);
+    defineOwnProperties(this, data);
   }
 
   get(key, defaultValue = null) {
@@ -37,7 +62,13 @@ export class ScoredPoint {
       const value = this[key];
       return value === null || value === undefined ? defaultValue : value;
     }
-    if (this.payload && typeof this.payload === 'object' && key in this.payload) {
+    // Own-property lookup only: `in` would resolve inherited names like
+    // `"toString"` from `Object.prototype` and return them as payload data.
+    if (
+      this.payload &&
+      typeof this.payload === 'object' &&
+      Object.prototype.hasOwnProperty.call(this.payload, key)
+    ) {
       return this.payload[key];
     }
     return defaultValue;
@@ -120,7 +151,7 @@ export class ExecutionReport {
     this.succeeded = 0;
     this.failed = 0;
     this._telemetry = null;
-    Object.assign(this, data);
+    defineOwnProperties(this, data);
     // When the plain report carries no aggregated telemetry but per-result
     // telemetry exists (older payloads), aggregate here so readers always use
     // `report.telemetry` instead of hand-rolling the sum.

@@ -2,13 +2,12 @@
 
 use qql_core::ast;
 
-use super::functions::{SCRATCH_BUF, safe_owned_uint8_array};
-use qql_core::error::QqlError;
+use super::functions::{SCRATCH_BUF, already_bound_err, js_err, qql_err_to_js, safe_owned_uint8_array};
 use qql_core::parser::Parser;
 use qql_plan::routing;
 use wasm_bindgen::prelude::*;
 
-use super::functions::{parse_comparison_op, qql_err_to_js, to_js_value};
+use super::functions::{parse_comparison_op, to_js_value};
 
 // ── Stmt class ─────────────────────────────────────────────────────
 
@@ -60,7 +59,8 @@ impl Stmt {
     pub fn set_shard_key(&mut self, key: JsValue) -> Result<(), JsValue> {
         let key = super::params::jsvalue_to_shard_key(&key).map_err(qql_err_to_js)?;
         if !self.inner.set_shard_key(key) {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-SHARD-UNSUPPORTED",
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
             ));
         }
@@ -77,7 +77,9 @@ impl Stmt {
     /// transport/forwarding without JS parsing.
     #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsValue> {
-        serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&self.inner).map_err(|error| {
+            crate::functions::js_exec_err("QQL-SERIALIZE", error.to_string())
+        })
     }
 
     /// `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).
@@ -103,14 +105,7 @@ impl Stmt {
             .map(|p| !p.is_undefined() && !p.is_null())
             .unwrap_or(false);
         if binds_now && self.bound {
-            return Err(JsValue::from_str(
-                &serde_json::to_string(&QqlError::validation(
-                    "QQL-BIND-ALREADY-BOUND",
-                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
-                    None,
-                ))
-                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
-            ));
+            return Err(already_bound_err());
         }
         let mut stmt = self.inner.clone();
         if binds_now {
@@ -147,14 +142,7 @@ impl Stmt {
             .map(|p| !p.is_undefined() && !p.is_null())
             .unwrap_or(false);
         if binds_now && self.bound {
-            return Err(JsValue::from_str(
-                &serde_json::to_string(&QqlError::validation(
-                    "QQL-BIND-ALREADY-BOUND",
-                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
-                    None,
-                ))
-                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
-            ));
+            return Err(already_bound_err());
         }
         let mut stmt = self.inner.clone();
         if binds_now {
@@ -179,14 +167,7 @@ impl Stmt {
             .map(|p| !p.is_undefined() && !p.is_null())
             .unwrap_or(false);
         if binds_now && self.bound {
-            return Err(JsValue::from_str(
-                &serde_json::to_string(&QqlError::validation(
-                    "QQL-BIND-ALREADY-BOUND",
-                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
-                    None,
-                ))
-                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
-            ));
+            return Err(already_bound_err());
         }
         let mut stmt = self.inner.clone();
         if binds_now {
@@ -199,8 +180,9 @@ impl Stmt {
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();
             buf.clear();
-            serde_json::to_writer(&mut *buf, &output)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            serde_json::to_writer(&mut *buf, &output).map_err(|error| {
+                crate::functions::js_exec_err("QQL-SERIALIZE", error.to_string())
+            })?;
             Ok(safe_owned_uint8_array(&buf))
         })
     }
