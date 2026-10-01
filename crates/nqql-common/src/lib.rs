@@ -4,8 +4,8 @@
 //! but ship an identical parser/parameter surface. Every piece of that logic
 //! lives here so the SDKs cannot drift: the crates keep only thin `#[napi]`
 //! wrappers plus their transport-specific client construction, and the JS
-//! wrapper keeps byte-identical copies of `dx-common.js` + `test_dx.js`
-//! enforced by a CI diff check.
+//! wrapper's `dx-common.js` + `test_dx.js` copies are generated from the
+//! nqql sources by `qql-grammar-gen` (`check` gates drift).
 //!
 //! Errors are returned as [`QqlError`] throughout; the SDK crates convert to
 //! `napi::Error` at their boundary via [`to_napi_err`] / [`serde_napi_err`],

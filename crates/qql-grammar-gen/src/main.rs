@@ -11,6 +11,30 @@ const GENERATED_HEADER: &str = "\
 
 ";
 
+/// Byte-identical generated copies: `(canonical source, generated copy)`.
+///
+/// The SDK/installer pairs are shipped from two paths (npm/pypi packaging and
+/// the website) but edited in one. `generate` mirrors the canonical file,
+/// `check` fails when a copy drifted.
+const COPY_PAIRS: &[(&str, &str)] = &[
+    ("crates/nqql/dx-common.js", "crates/nqql-edge/dx-common.js"),
+    ("crates/nqql/test_dx.js", "crates/nqql-edge/test_dx.js"),
+    (
+        "crates/nqql/test_scroll.js",
+        "crates/nqql-edge/test_scroll.js",
+    ),
+    (
+        "crates/pyqql/pyqql/_errors.py",
+        "crates/pyqql-edge/pyqql_edge/_errors.py",
+    ),
+    (
+        "crates/pyqql/tests/test_dx.py",
+        "crates/pyqql-edge/tests/test_dx.py",
+    ),
+    ("scripts/install.sh", "website/public/install.sh"),
+    ("scripts/install.ps1", "website/public/install.ps1"),
+];
+
 struct Artifact {
     path: PathBuf,
     contents: String,
@@ -78,17 +102,58 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     match command.as_str() {
-        "generate" => artifacts
-            .iter()
-            .try_for_each(|artifact| write_if_changed(&artifact.path, &artifact.contents)),
-        "check" => artifacts
-            .iter()
-            .try_for_each(|artifact| check(&artifact.path, &artifact.contents)),
+        "generate" => {
+            artifacts
+                .iter()
+                .try_for_each(|artifact| write_if_changed(&artifact.path, &artifact.contents))?;
+            COPY_PAIRS
+                .iter()
+                .try_for_each(|(canonical, generated)| generate_copy(&root, canonical, generated))
+        }
+        "check" => {
+            artifacts
+                .iter()
+                .try_for_each(|artifact| check(&artifact.path, &artifact.contents))?;
+            COPY_PAIRS
+                .iter()
+                .try_for_each(|(canonical, generated)| check_copy(&root, canonical, generated))
+        }
         "help" | "-h" | "--help" => {
             println!("Usage: qql-grammar-gen <generate|check>");
             Ok(())
         }
         _ => Err(format!("unknown command '{command}'; expected generate or check").into()),
+    }
+}
+
+/// Mirror a canonical file into its generated copy.
+fn generate_copy(root: &Path, canonical: &str, generated: &str) -> Result<(), Box<dyn Error>> {
+    let source = root.join(canonical);
+    let contents = fs::read_to_string(&source)
+        .map_err(|error| format!("cannot read canonical file {}: {error}", source.display()))?;
+    write_if_changed(&root.join(generated), &contents)
+}
+
+/// Fail when a generated copy is missing or differs from its canonical file.
+fn check_copy(root: &Path, canonical: &str, generated: &str) -> Result<(), Box<dyn Error>> {
+    let source = root.join(canonical);
+    let contents = fs::read_to_string(&source)
+        .map_err(|error| format!("cannot read canonical file {}: {error}", source.display()))?;
+    let target = root.join(generated);
+    match fs::read_to_string(&target) {
+        Ok(actual) if actual == contents => Ok(()),
+        Ok(_) => Err(format!(
+            "{} is generated from {} and has drifted; run `cargo run -p qql-grammar-gen -- generate`",
+            target.display(),
+            canonical
+        )
+        .into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(format!(
+            "{} is missing; run `cargo run -p qql-grammar-gen -- generate`",
+            target.display()
+        )
+        .into()),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -721,6 +786,19 @@ rule = { ^"REAL" ~ "//not a comment" ~ ^"ALSO_REAL" }
             unlexable_keywords(&grammar_literals(&grammar_source), &token_source).is_empty(),
             "every keyword `gen_as_str!` entry must appear in grammar.pest"
         );
+    }
+
+    #[test]
+    fn real_copy_pairs_are_byte_identical() {
+        let root = workspace_root();
+        for (canonical, generated) in COPY_PAIRS {
+            let source = fs::read_to_string(root.join(canonical)).unwrap();
+            let copy = fs::read_to_string(root.join(generated)).unwrap();
+            assert_eq!(
+                source, copy,
+                "{generated} must be generated from {canonical}"
+            );
+        }
     }
 
     #[test]
