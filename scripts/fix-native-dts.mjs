@@ -26,13 +26,17 @@ export type BigIntSafeJson =
   | { [key: string]: BigIntSafeJson };
 `;
 
+// Any declaration form (type alias, interface, class), exported or not, means
+// the generator already owns the name — never append a duplicate.
+const DECLARED = /(?:^|\n)\s*(?:export\s+)?(?:type|interface|class)\s+BigIntSafeJson\b/;
+
 let touched = 0;
 for (const path of process.argv.slice(2)) {
   if (!path.endsWith(".d.ts")) {
     continue;
   }
   const source = readFileSync(path, "utf8");
-  if (!source.includes("BigIntSafeJson") || source.includes("type BigIntSafeJson")) {
+  if (!source.includes("BigIntSafeJson") || DECLARED.test(source)) {
     continue;
   }
   writeFileSync(path, `${source.trimEnd()}\n${DECLARATION}`);
