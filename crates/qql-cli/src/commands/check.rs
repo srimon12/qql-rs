@@ -6,8 +6,9 @@ use super::edge::{collect_indexing_states, count_label};
 use super::runtime::probe_embed_dim;
 use super::runtime::{
     classify_backend_failure, dense_vector_sizes, executor, explain_query_bound,
-    resolve_embed_settings,
+    resolve_embed_settings, statements_need_embeddings,
 };
+use std::collections::HashMap;
 
 /// Triage one statement through the documented debug loop:
 /// format, offline explain, embed probe, topology, doctor.
@@ -221,6 +222,7 @@ pub async fn handle_check(
                 format!("topology: backend unreachable, cannot verify USING ({backend_note})"),
             );
         } else if let Some(exec) = executor.as_ref() {
+            let mut topologies: HashMap<String, CollectionTopology> = HashMap::new();
             let mut ok_all = true;
             for collection in &collections {
                 match exec.client().get_collection_info(collection).await {
@@ -238,80 +240,56 @@ pub async fn handle_check(
                         );
                     }
                     Ok(info) => {
-                        let dense: Vec<String> = info
-                            .schema
-                            .vectors
-                            .iter()
-                            .filter_map(|v| v.name.clone())
-                            .collect();
-                        let sparse: Vec<String> = info
-                            .schema
-                            .sparse_vectors
-                            .iter()
-                            .map(|v| v.name.clone())
-                            .collect();
-                        let unnamed = info.schema.vectors.iter().any(|v| v.name.is_none());
-                        match check_using_names(statements, &dense, &sparse, unnamed) {
-                            Ok(()) => {
-                                if let Some(real) = observed_dim {
-                                    let mut mismatch = false;
-                                    for (vec_name, size) in dense_vector_sizes(&info) {
-                                        if size as usize != real {
-                                            mismatch = true;
-                                            failed = true;
-                                            ok_all = false;
-                                            let label = if vec_name.is_empty() {
-                                                "<default>".to_string()
-                                            } else {
-                                                vec_name
-                                            };
-                                            push(
-                                                "topology",
-                                                "fail",
-                                                Some("QQL-BACKEND-DIMENSION-MISMATCH".to_string()),
-                                                format!(
-                                                    "[QQL-BACKEND-DIMENSION-MISMATCH] topology: collection '{collection}' vector '{label}' size={size} != embed dim={real}; fix: set EMBED_DIM={real} or recreate with VECTOR({real}, ...)"
-                                                ),
-                                            );
-                                        }
-                                    }
-                                    if !mismatch {
-                                        push(
-                                            "topology",
-                                            "ok",
-                                            None,
-                                            format!(
-                                                "topology: USING names resolve on '{collection}' and dim={real} matches"
-                                            ),
-                                        );
-                                    }
-                                } else {
+                        if let Some(real) = observed_dim {
+                            for (vec_name, size) in dense_vector_sizes(&info) {
+                                if size as usize != real {
+                                    ok_all = false;
+                                    failed = true;
+                                    let label = if vec_name.is_empty() {
+                                        "<default>".to_string()
+                                    } else {
+                                        vec_name
+                                    };
                                     push(
                                         "topology",
-                                        "ok",
-                                        None,
-                                        format!("topology: USING names resolve on '{collection}'"),
+                                        "fail",
+                                        Some("QQL-BACKEND-DIMENSION-MISMATCH".to_string()),
+                                        format!(
+                                            "[QQL-BACKEND-DIMENSION-MISMATCH] topology: collection '{collection}' vector '{label}' size={size} != embed dim={real}; fix: set EMBED_DIM={real} or recreate with VECTOR({real}, ...)"
+                                        ),
                                     );
                                 }
                             }
-                            Err((code, msg)) => {
-                                ok_all = false;
-                                failed = true;
-                                push(
-                                    "topology",
-                                    "fail",
-                                    Some(code.clone()),
-                                    format!(
-                                        "[{code}] topology: {msg}; fix: use one of the listed vectors"
-                                    ),
-                                );
-                            }
                         }
+                        topologies.insert(collection.clone(), CollectionTopology::from_info(&info));
                     }
                 }
             }
-            if ok_all && collections.len() > 1 {
-                // Individual per-collection ok lines already pushed; nothing more.
+            // Every USING target is validated against its own collection: a
+            // prefetch sub-query with an explicit FROM is checked against that
+            // collection, everything else inherits the enclosing one.
+            if let Err((code, msg)) = check_using_names(statements, &topologies) {
+                ok_all = false;
+                failed = true;
+                push(
+                    "topology",
+                    "fail",
+                    Some(code.clone()),
+                    format!("[{code}] topology: {msg}; fix: use one of the listed vectors"),
+                );
+            }
+            if ok_all {
+                let summary = match observed_dim {
+                    Some(real) => format!(
+                        "topology: USING names resolve on {} collection(s) and dim={real} matches",
+                        collections.len()
+                    ),
+                    None => format!(
+                        "topology: USING names resolve on {} collection(s)",
+                        collections.len()
+                    ),
+                };
+                push("topology", "ok", None, summary);
             }
         } else {
             push(
@@ -429,156 +407,131 @@ fn parse_and_bind(
     Ok(statements)
 }
 
-fn statements_need_embeddings(stmts: &[qql_core::ast::Stmt]) -> bool {
-    stmts.iter().any(stmt_needs_embeddings)
+/// Topology of one collection: vector names and whether an unnamed default
+/// dense vector exists.
+struct CollectionTopology {
+    dense: Vec<String>,
+    sparse: Vec<String>,
+    unnamed: bool,
 }
 
-fn stmt_needs_embeddings(stmt: &qql_core::ast::Stmt) -> bool {
-    use qql_core::ast::Stmt;
-    match stmt {
-        Stmt::Query(q) => query_stmt_needs_embeddings(q),
-        Stmt::Upsert(u) => u.embedding.is_some() || !u.embed.is_empty(),
-        Stmt::Batch(b) => b.statements.iter().any(stmt_needs_embeddings),
-        _ => false,
-    }
-}
-
-fn query_stmt_needs_embeddings(q: &qql_core::ast::QueryStmt) -> bool {
-    q.ctes.iter().any(|c| query_stmt_needs_embeddings(&c.query))
-        || query_expr_needs_embeddings(&q.expression)
-}
-
-fn query_expr_needs_embeddings(e: &qql_core::ast::QueryExpr) -> bool {
-    use qql_core::ast::{QueryExpr, QueryInput, VectorValue};
-    let input_needs = |input: &QueryInput| match input {
-        QueryInput::Text { .. }
-        | QueryInput::Image { .. }
-        | QueryInput::Param(..)
-        | QueryInput::PositionalParam(..) => true,
-        QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..)) => true,
-        // Custom inference objects resolve server-side (never embedded locally).
-        QueryInput::Object { .. } => false,
-        QueryInput::Vector(_) | QueryInput::Point(_) => false,
-    };
-    let prefetch_needs = |list: &[qql_core::ast::Prefetch]| {
-        list.iter().any(|p| match &p.source {
-            qql_core::ast::PrefetchSource::Query(q) => query_stmt_needs_embeddings(q),
-            qql_core::ast::PrefetchSource::Cte(_) => false,
-        })
-    };
-    match e {
-        QueryExpr::Nearest {
-            input, prefetch, ..
-        } => input_needs(input) || prefetch_needs(prefetch),
-        QueryExpr::Recommend {
-            positive,
-            negative,
-            prefetch,
-            ..
-        } => {
-            positive.iter().any(input_needs)
-                || negative.iter().any(input_needs)
-                || prefetch_needs(prefetch)
-        }
-        QueryExpr::Context {
-            pairs, prefetch, ..
-        } => {
-            pairs
+impl CollectionTopology {
+    fn from_info(info: &qql::client::CollectionInfo) -> Self {
+        Self {
+            dense: info
+                .schema
+                .vectors
                 .iter()
-                .any(|p| input_needs(&p.positive) || input_needs(&p.negative))
-                || prefetch_needs(prefetch)
+                .filter_map(|v| v.name.clone())
+                .collect(),
+            sparse: info
+                .schema
+                .sparse_vectors
+                .iter()
+                .map(|v| v.name.clone())
+                .collect(),
+            unnamed: info.schema.vectors.iter().any(|v| v.name.is_none()),
         }
-        QueryExpr::Discover {
-            target,
-            context,
-            prefetch,
-            ..
-        } => {
-            input_needs(target)
-                || context
-                    .iter()
-                    .any(|p| input_needs(&p.positive) || input_needs(&p.negative))
-                || prefetch_needs(prefetch)
-        }
-        QueryExpr::RelevanceFeedback {
-            target,
-            feedback,
-            prefetch,
-            ..
-        } => {
-            input_needs(target)
-                || feedback.iter().any(|f| input_needs(&f.example))
-                || prefetch_needs(prefetch)
-        }
-        QueryExpr::Hybrid { .. } => true,
-        QueryExpr::Rerank {
-            input, prefetch, ..
-        } => input_needs(input) || prefetch_needs(prefetch),
-        QueryExpr::CrossRerank { prefetch, .. }
-        | QueryExpr::Fusion { prefetch, .. }
-        | QueryExpr::Formula { prefetch, .. } => prefetch_needs(prefetch),
-        QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => false,
     }
 }
 
+fn push_collection(out: &mut Vec<String>, name: &str) {
+    if !name.is_empty() && !out.iter().any(|v| v == name) {
+        out.push(name.to_string());
+    }
+}
+
+/// Every collection a statement touches, including prefetch sub-queries,
+/// CTEs, and BATCH members. Order-stable and deduplicated.
 fn stmt_collections(stmts: &[qql_core::ast::Stmt]) -> Vec<String> {
-    use qql_core::ast::{QueryCollection, Stmt};
-    let mut out: Vec<String> = Vec::new();
-    let mut push = |name: &str| {
-        if !name.is_empty() && !out.iter().any(|v| v == name) {
-            out.push(name.to_string());
-        }
-    };
+    let mut out = Vec::new();
     for stmt in stmts {
-        match stmt {
-            Stmt::Query(q) => {
-                if let QueryCollection::Explicit(name) = &q.collection {
-                    push(name);
-                }
-                for cte in &q.ctes {
-                    if let QueryCollection::Explicit(name) = &cte.query.collection {
-                        push(name);
-                    }
-                }
-            }
-            Stmt::Scroll(s) => push(&s.collection),
-            Stmt::Upsert(u) => push(&u.collection),
-            Stmt::Delete(d) => push(&d.collection),
-            Stmt::ClearPayload(s) => push(&s.collection),
-            Stmt::DeletePayload(s) => push(&s.collection),
-            Stmt::DeleteVector(s) => push(&s.collection),
-            Stmt::UpdateVector(s) => push(&s.collection),
-            Stmt::UpdatePayload(s) => push(&s.collection),
-            Stmt::Count(c) => {
-                if let QueryCollection::Explicit(name) = &c.collection {
-                    push(name);
-                }
-            }
-            Stmt::Facet(f) => {
-                if let QueryCollection::Explicit(name) = &f.collection {
-                    push(name);
-                }
-            }
-            Stmt::Batch(b) => {
-                for name in stmt_collections(&b.statements) {
-                    push(&name);
-                }
-            }
-            _ => {}
-        }
+        collect_stmt_collections(stmt, &mut out);
     }
     out
 }
 
+fn collect_stmt_collections(stmt: &qql_core::ast::Stmt, out: &mut Vec<String>) {
+    use qql_core::ast::Stmt;
+    match stmt {
+        Stmt::Query(q) => collect_query_collections(q, out),
+        Stmt::Scroll(s) => push_collection(out, &s.collection),
+        Stmt::Upsert(u) => push_collection(out, &u.collection),
+        Stmt::Delete(d) => push_collection(out, &d.collection),
+        Stmt::ClearPayload(s) => push_collection(out, &s.collection),
+        Stmt::DeletePayload(s) => push_collection(out, &s.collection),
+        Stmt::DeleteVector(s) => push_collection(out, &s.collection),
+        Stmt::UpdateVector(s) => push_collection(out, &s.collection),
+        Stmt::UpdatePayload(s) => push_collection(out, &s.collection),
+        Stmt::Count(c) => {
+            if let qql_core::ast::QueryCollection::Explicit(name) = &c.collection {
+                push_collection(out, name);
+            }
+        }
+        Stmt::Facet(f) => {
+            if let qql_core::ast::QueryCollection::Explicit(name) = &f.collection {
+                push_collection(out, name);
+            }
+        }
+        Stmt::Batch(b) => {
+            for member in &b.statements {
+                collect_stmt_collections(member, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_query_collections(q: &qql_core::ast::QueryStmt, out: &mut Vec<String>) {
+    if let qql_core::ast::QueryCollection::Explicit(name) = &q.collection {
+        push_collection(out, name);
+    }
+    for cte in &q.ctes {
+        collect_query_collections(&cte.query, out);
+    }
+    collect_expr_collections(&q.expression, out);
+}
+
+fn collect_expr_collections(e: &qql_core::ast::QueryExpr, out: &mut Vec<String>) {
+    use qql_core::ast::QueryExpr;
+    let prefetch = match e {
+        QueryExpr::Nearest { prefetch, .. }
+        | QueryExpr::Recommend { prefetch, .. }
+        | QueryExpr::Context { prefetch, .. }
+        | QueryExpr::Discover { prefetch, .. }
+        | QueryExpr::RelevanceFeedback { prefetch, .. }
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. } => prefetch,
+        QueryExpr::Points { .. }
+        | QueryExpr::OrderBy { .. }
+        | QueryExpr::SampleRandom
+        | QueryExpr::Hybrid { .. } => return,
+    };
+    for p in prefetch {
+        if let qql_core::ast::PrefetchSource::Query(sub) = &p.source {
+            collect_query_collections(sub, out);
+        }
+    }
+}
+
 fn check_using_names(
     stmts: &[qql_core::ast::Stmt],
-    dense: &[String],
-    sparse: &[String],
-    unnamed: bool,
+    topologies: &HashMap<String, CollectionTopology>,
 ) -> Result<(), (String, String)> {
+    use qql_core::ast::Stmt;
     for stmt in stmts {
-        if let qql_core::ast::Stmt::Query(q) = stmt {
-            check_query_using(q, dense, sparse, unnamed)?;
+        match stmt {
+            Stmt::Query(q) => {
+                let collection = match &q.collection {
+                    qql_core::ast::QueryCollection::Explicit(name) => Some(name.as_str()),
+                    qql_core::ast::QueryCollection::Inherited => None,
+                };
+                check_query_using(q, collection, topologies)?;
+            }
+            Stmt::Batch(b) => check_using_names(&b.statements, topologies)?,
+            _ => {}
         }
     }
     Ok(())
@@ -586,35 +539,42 @@ fn check_using_names(
 
 fn check_query_using(
     q: &qql_core::ast::QueryStmt,
-    dense: &[String],
-    sparse: &[String],
-    unnamed: bool,
+    collection: Option<&str>,
+    topologies: &HashMap<String, CollectionTopology>,
 ) -> Result<(), (String, String)> {
     for cte in &q.ctes {
-        check_query_using(&cte.query, dense, sparse, unnamed)?;
+        let cte_collection = match &cte.query.collection {
+            qql_core::ast::QueryCollection::Explicit(name) => Some(name.as_str()),
+            qql_core::ast::QueryCollection::Inherited => collection,
+        };
+        check_query_using(&cte.query, cte_collection, topologies)?;
     }
-    check_expr_using(&q.expression, dense, sparse, unnamed)
+    check_expr_using(&q.expression, collection, topologies)
 }
 
 fn check_expr_using(
     e: &qql_core::ast::QueryExpr,
-    dense: &[String],
-    sparse: &[String],
-    unnamed: bool,
+    collection: Option<&str>,
+    topologies: &HashMap<String, CollectionTopology>,
 ) -> Result<(), (String, String)> {
-    use qql_core::ast::{PrefetchSource, QueryExpr, VectorKind};
+    use qql_core::ast::{PrefetchSource, QueryCollection, QueryExpr, VectorKind};
+    // No fetched topology for this target (inherited or unknown): collection
+    // lookups are already reported separately, so there is nothing to check.
+    let Some(topo) = collection.and_then(|name| topologies.get(name)) else {
+        return Ok(());
+    };
     let check_target =
         |target: &Option<qql_core::ast::VectorTarget>| -> Result<(), (String, String)> {
             if let Some(t) = target {
-                let in_dense = dense.iter().any(|n| n == &t.name);
-                let in_sparse = sparse.iter().any(|n| n == &t.name);
+                let in_dense = topo.dense.iter().any(|n| n == &t.name);
+                let in_sparse = topo.sparse.iter().any(|n| n == &t.name);
                 if !in_dense && !in_sparse {
                     if t.kind.is_some() {
                         return Ok(());
                     }
                     let mut available: Vec<String> =
-                        dense.iter().chain(sparse.iter()).cloned().collect();
-                    if unnamed {
+                        topo.dense.iter().chain(topo.sparse.iter()).cloned().collect();
+                    if topo.unnamed {
                         available.push("<default>".to_string());
                     }
                     return Err((
@@ -648,8 +608,14 @@ fn check_expr_using(
         };
     let check_prefetches = |list: &[qql_core::ast::Prefetch]| -> Result<(), (String, String)> {
         for p in list {
-            if let PrefetchSource::Query(q) = &p.source {
-                check_query_using(q, dense, sparse, unnamed)?;
+            if let PrefetchSource::Query(sub) = &p.source {
+                // A prefetch FROM a different collection validates against
+                // that collection; a FROM-less sub-query inherits the parent.
+                let sub_collection = match &sub.collection {
+                    QueryCollection::Explicit(name) => Some(name.as_str()),
+                    QueryCollection::Inherited => collection,
+                };
+                check_query_using(sub, sub_collection, topologies)?;
             }
         }
         Ok(())
@@ -669,11 +635,8 @@ fn check_expr_using(
         }
         | QueryExpr::RelevanceFeedback {
             using, prefetch, ..
-        } => {
-            check_target(using)?;
-            check_prefetches(prefetch)
         }
-        QueryExpr::Rerank {
+        | QueryExpr::Rerank {
             using, prefetch, ..
         } => {
             check_target(using)?;
@@ -685,24 +648,24 @@ fn check_expr_using(
             ..
         } => {
             if let Some(name) = dense_vector
-                && !dense.iter().any(|n| n == name)
+                && !topo.dense.iter().any(|n| n == name)
             {
                 return Err((
                     "QQL-UNKNOWN-VECTOR".to_string(),
                     format!(
                         "no dense vector named '{name}'. Available dense: {}",
-                        dense.join(", ")
+                        topo.dense.join(", ")
                     ),
                 ));
             }
             if let Some(name) = sparse_vector
-                && !sparse.iter().any(|n| n == name)
+                && !topo.sparse.iter().any(|n| n == name)
             {
                 return Err((
                     "QQL-UNKNOWN-VECTOR".to_string(),
                     format!(
                         "no sparse vector named '{name}'. Available sparse: {}",
-                        sparse.join(", ")
+                        topo.sparse.join(", ")
                     ),
                 ));
             }
@@ -712,5 +675,60 @@ fn check_expr_using(
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. } => check_prefetches(prefetch),
         QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql_core::parser::Parser;
+
+    fn topology(dense: &[&str], sparse: &[&str], unnamed: bool) -> CollectionTopology {
+        CollectionTopology {
+            dense: dense.iter().map(|name| name.to_string()).collect(),
+            sparse: sparse.iter().map(|name| name.to_string()).collect(),
+            unnamed,
+        }
+    }
+
+    #[test]
+    fn stmt_collections_walks_prefetch_sub_queries() {
+        let stmt = Parser::parse(
+            "QUERY [0.1] FROM a PREFETCH (QUERY [0.2] FROM b USING b_vec LIMIT 5) LIMIT 3;",
+        )
+        .expect("parse");
+        assert_eq!(stmt_collections(&[stmt]), ["a", "b"]);
+    }
+
+    #[test]
+    fn cross_collection_prefetch_validates_against_its_own_collection() {
+        let stmt = Parser::parse(
+            "QUERY [0.1] FROM a PREFETCH (QUERY [0.2] FROM b USING b_vec LIMIT 5) LIMIT 3;",
+        )
+        .expect("parse");
+        let mut topologies = HashMap::new();
+        topologies.insert("a".to_string(), topology(&["a_vec"], &[], false));
+        topologies.insert("b".to_string(), topology(&["b_vec"], &[], false));
+        check_using_names(std::slice::from_ref(&stmt), &topologies)
+            .expect("b_vec resolves on collection b, not a");
+
+        // When b lacks the name, the failure reports b's own vector list.
+        topologies.insert("b".to_string(), topology(&["other"], &[], false));
+        let (code, message) =
+            check_using_names(&[stmt], &topologies).expect_err("b_vec must not resolve");
+        assert_eq!(code, "QQL-UNKNOWN-VECTOR");
+        assert!(message.contains("b_vec"), "{message}");
+    }
+
+    #[test]
+    fn inherited_cte_prefetch_uses_the_parent_collection() {
+        let stmt = Parser::parse(
+            "WITH c AS (QUERY [0.2] USING a_vec LIMIT 5) \
+             QUERY [0.1] FROM a USING a_vec PREFETCH (c) LIMIT 3;",
+        )
+        .expect("parse");
+        let mut topologies = HashMap::new();
+        topologies.insert("a".to_string(), topology(&["a_vec"], &[], false));
+        check_using_names(&[stmt], &topologies).expect("inherited collection resolves");
     }
 }
