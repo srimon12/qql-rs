@@ -3,7 +3,7 @@ use qql::executor::{Executor, OnError};
 use qql_core::parser::Parser;
 use qql_plan::{
     PlanFacetValue, PlanGroupId, PlanPointId, PlanVectorStruct, PlanVectorValue, PlannedOperation,
-    plan,
+    PointsRequest, plan,
 };
 use serde_json::json;
 
@@ -669,6 +669,9 @@ fn engine_dimension_mismatch_reports_dimension_code() {
 
 /// Non-UUID string point IDs are rejected before the engine call, with the
 /// dedicated id-conversion code.
+///
+/// The planner rejects these earlier with `QQL-PLAN-POINT-ID`, so this builds
+/// the plan directly to pin the edge-side refusal as a last line of defense.
 #[test]
 fn invalid_string_point_id_reports_code() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -686,8 +689,17 @@ fn invalid_string_point_id_reports_code() {
             .await
             .expect("create collection");
 
+        let unvalidated = PlannedOperation::GetPoints {
+            collection: "docs".into(),
+            request: PointsRequest {
+                ids: vec![PlanPointId::String("doc-1".into())],
+                with_payload: None,
+                with_vector: None,
+                shard_key: None,
+            },
+        };
         let error = backend
-            .execute_planned(&plan_one("QUERY POINTS ('doc-1') FROM docs"))
+            .execute_planned(&unvalidated)
             .await
             .expect_err("non-UUID string id must fail");
         assert_eq!(error.code, "QQL-EDGE-INVALID-POINT-ID");

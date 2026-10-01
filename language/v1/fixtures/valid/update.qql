@@ -25,7 +25,7 @@ UPDATE docs SET VECTOR = {dense: [0.1, 0.2, 0.3], sparse: {indices: [0, 3], valu
 UPDATE docs SET VECTOR VALUES {id: 1, vector: [0.1, 0.2, 0.3]}, {id: 2, vector: {dense: [0.4, 0.5, 0.6]}};
 
 -- Update with string UUID
-UPDATE docs SET PAYLOAD = {status: 'updated'} WHERE id = 'a1b2c3d4';
+UPDATE docs SET PAYLOAD = {status: 'updated'} WHERE id = '550e8400-e29b-41d4-a716-446655440015';
 
 
 

@@ -25,6 +25,7 @@ pub mod mutation;
 mod mutation_types;
 mod params;
 pub mod plan;
+mod point_id_validate;
 mod prefetch;
 /// Query lowering: `QUERY` statements into `/points/query` request bodies.
 pub mod query;
@@ -35,6 +36,8 @@ pub mod routing;
 pub mod semantic;
 /// AST → plan and plan → wire conversions for [`semantic`] primitives.
 mod semantic_conv;
+/// Shared REST-boundary response surface (parser, schema, telemetry).
+pub mod surface;
 /// Wire and plan-IR request types shared by the REST projection and gRPC conversion.
 pub mod types;
 mod validate;

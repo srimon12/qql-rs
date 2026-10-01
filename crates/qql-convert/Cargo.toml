@@ -14,7 +14,7 @@ keywords = ["qql", "qdrant", "converter", "query-language"]
 categories = ["database", "parser-implementations"]
 
 [dependencies]
-qql-core = { workspace = true, features = ["serde", "json", "std"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]

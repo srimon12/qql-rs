@@ -256,7 +256,10 @@ async fn test_do_select_returns_record_or_nil() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
-        .execute("QUERY POINTS ('pt-1') FROM docs", OnError::Stop)
+        .execute(
+            "QUERY POINTS ('550e8400-e29b-41d4-a716-446655440001') FROM docs",
+            OnError::Stop,
+        )
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 

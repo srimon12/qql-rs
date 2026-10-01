@@ -4,7 +4,7 @@
 DELETE FROM docs WHERE id = 42;
 
 -- Delete by string ID
-DELETE FROM docs WHERE id = 'uuid-here';
+DELETE FROM docs WHERE id = '550e8400-e29b-41d4-a716-446655440010';
 
 -- Delete by field filter
 DELETE FROM docs WHERE status = 'archived';

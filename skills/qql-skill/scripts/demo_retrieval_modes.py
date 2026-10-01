@@ -201,7 +201,7 @@ EXAMPLES = [
         "mode": "context",
         "when": "Use when you have pairwise relevance signals (this is better than that) and want context-aware search.",
         "query": (
-            "QUERY CONTEXT (POSITIVE POINT 'uuid-1' NEGATIVE POINT 'uuid-2', POSITIVE POINT 'uuid-3' NEGATIVE POINT 'uuid-4') FROM docs USING dense LIMIT 10"
+            "QUERY CONTEXT (POSITIVE POINT '550e8400-e29b-41d4-a716-446655440001' NEGATIVE POINT '550e8400-e29b-41d4-a716-446655440002', POSITIVE POINT '550e8400-e29b-41d4-a716-446655440003' NEGATIVE POINT '550e8400-e29b-41d4-a716-446655440004') FROM docs USING dense LIMIT 10"
         ),
         "setup": [],
         "requires_index": [],
@@ -210,7 +210,7 @@ EXAMPLES = [
         "mode": "discover",
         "when": "Use when you have a target item and context pairs to explore an interesting region of the vector space.",
         "query": (
-            "QUERY DISCOVER TARGET POINT 'uuid-1' CONTEXT (POSITIVE POINT 'uuid-2' NEGATIVE POINT 'uuid-3') FROM docs USING dense LIMIT 10"
+            "QUERY DISCOVER TARGET POINT '550e8400-e29b-41d4-a716-446655440001' CONTEXT (POSITIVE POINT '550e8400-e29b-41d4-a716-446655440002' NEGATIVE POINT '550e8400-e29b-41d4-a716-446655440003') FROM docs USING dense LIMIT 10"
         ),
         "setup": [],
         "requires_index": [],

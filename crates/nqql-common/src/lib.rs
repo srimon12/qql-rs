@@ -4,8 +4,8 @@
 //! but ship an identical parser/parameter surface. Every piece of that logic
 //! lives here so the SDKs cannot drift: the crates keep only thin `#[napi]`
 //! wrappers plus their transport-specific client construction, and the JS
-//! wrapper keeps byte-identical copies of `dx-common.js` + `test_dx.js`
-//! enforced by a CI diff check.
+//! wrapper's `dx-common.js` + `test_dx.js` copies are generated from the
+//! nqql sources by `qql-grammar-gen` (`check` gates drift).
 //!
 //! Errors are returned as [`QqlError`] throughout; the SDK crates convert to
 //! `napi::Error` at their boundary via [`to_napi_err`] / [`serde_napi_err`],
@@ -118,7 +118,7 @@ pub fn stmt_compile_route(
     params: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, QqlError> {
     let bound = stmt_bind(stmt, params)?;
-    compile_bound_route(&bound)
+    Ok(routing::compile_statement(&bound)?.to_route_json())
 }
 
 /// Compile a statement AST with already-typed [`Value`] parameters.
@@ -129,32 +129,7 @@ pub fn stmt_compile_route_value(
     params: Option<&Value>,
 ) -> Result<serde_json::Value, QqlError> {
     let bound = stmt_bind_value(stmt, params)?;
-    compile_bound_route(&bound)
-}
-
-fn compile_bound_route(bound: &ast::Stmt) -> Result<serde_json::Value, QqlError> {
-    let compiled = routing::compile_statement(bound)?;
-    let (method, path, payload) = match compiled.route {
-        Some(route) => {
-            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-            (
-                serde_json::Value::String(route.method.as_str().into()),
-                serde_json::Value::String(route.path),
-                payload,
-            )
-        }
-        None => (
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-        ),
-    };
-    Ok(serde_json::json!({
-        "stmt_type": compiled.stmt_type,
-        "method": method,
-        "path": path,
-        "payload": payload,
-    }))
+    Ok(routing::compile_statement(&bound)?.to_route_json())
 }
 
 // ═══════════════════════════════════════════════════════════════════

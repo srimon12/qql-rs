@@ -4578,6 +4578,7 @@ dependencies = [
  "qql-core",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

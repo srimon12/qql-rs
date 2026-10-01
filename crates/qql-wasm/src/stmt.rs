@@ -8,7 +8,7 @@ use qql_core::parser::Parser;
 use qql_plan::routing;
 use wasm_bindgen::prelude::*;
 
-use super::functions::{compiled_route_json, parse_comparison_op, qql_err_to_js, to_js_value};
+use super::functions::{parse_comparison_op, qql_err_to_js, to_js_value};
 
 // ── Stmt class ─────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ impl Stmt {
             super::params::bind_stmt_values(&mut stmt, &parsed)?;
         }
         let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
-        let output = compiled_route_json(&compiled);
+        let output = compiled.to_route_json();
         to_js_value(&output)
     }
 
@@ -195,7 +195,7 @@ impl Stmt {
             super::params::bind_stmt_values(&mut stmt, &parsed)?;
         }
         let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
-        let output = compiled_route_json(&compiled);
+        let output = compiled.to_route_json();
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();
             buf.clear();

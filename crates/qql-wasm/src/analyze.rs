@@ -14,8 +14,8 @@ use wasm_bindgen::prelude::*;
 use super::client::Client;
 use super::functions::{qql_err_to_js, to_js_value};
 use super::params::{bind_stmt_values, bind_value_params, extract_ast_stmt, options_params};
-use super::response::wasm_success_response;
-use super::telemetry::telemetry_from_envelope;
+use super::report::shaped_success_response;
+use qql_plan::surface::telemetry::ServerTelemetry;
 
 fn now_ms() -> f64 {
     js_sys::Date::now()
@@ -115,8 +115,8 @@ impl Client {
             .await?;
         let dispatch_ms = now_ms() - dispatch_start;
         let decode_start = now_ms();
-        let telemetry = telemetry_from_envelope(&envelope);
-        let mut resp = wasm_success_response(&planned, &envelope).map_err(|error| {
+        let telemetry = ServerTelemetry::from_envelope_opt(&envelope);
+        let mut resp = shaped_success_response(&planned, &envelope).map_err(|error| {
             JsValue::from_str(&serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
         })?;
         // Ensure the key exists (null when absent) so JS readers never branch

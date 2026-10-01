@@ -30,7 +30,7 @@ full = ["fastembed", "edge"]
 
 [dependencies]
 qql-convert = { workspace = true }
-qql-core = { workspace = true, features = ["serde", "json", "std"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true, optional = true }

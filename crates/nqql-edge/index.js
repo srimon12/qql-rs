@@ -49,7 +49,7 @@ try {
 }
 
 // Shared DX layer (error mapping, typed result classes, Stmt-aware bind) —
-// byte-identical with nqql-edge; a CI check diffs the two copies.
+// generated from the nqql copy by qql-grammar-gen (`check` gates drift).
 const dx = require('./dx-common.js');
 dx.installStmtToJSON(nativeBinding.Stmt);
 
