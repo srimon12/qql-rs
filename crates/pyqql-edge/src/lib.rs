@@ -21,7 +21,6 @@
 //! this crate keeps the edge client, executor constructors, and one-shot
 //! helpers.
 
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,7 +34,6 @@ use pyqql_common as common;
 #[pyclass(name = "Client", subclass)]
 pub struct PyClient {
     pub(crate) inner: std::sync::Arc<qql::executor::Executor>,
-    pub(crate) runtime: tokio::runtime::Runtime,
     pub(crate) closed: AtomicBool,
 }
 
@@ -50,78 +48,67 @@ impl PyClient {
     fn execute<'py>(
         &self,
         py: Python<'py>,
-        query: &Bound<'_, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        query: &Bound<'py, PyAny>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed.load(Ordering::Acquire) {
             return Err(common::client_closed_error());
         }
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(query, params)?;
-        let report = py.detach(|| common::run_input(&self.inner, &self.runtime, input, oe))?;
-        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
+        common::client::run_execute(py, &self.inner, query, params, on_error)
     }
 
+    /// Async variant — accepts the same input types as `execute`.
+    ///
+    /// The request runs on the process-wide Tokio runtime shared with the
+    /// storage engine, so it cannot be killed by collecting the client.
+    /// Cancelling the returned awaitable detaches the request instead of
+    /// aborting it: it runs to completion.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute_async<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed.load(Ordering::Acquire) {
             return Err(common::client_closed_error());
         }
-        let inner = self.inner.clone();
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(&query, params)?;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let report = common::run_async(&inner, input, oe)
-                .await
-                .map_err(common::qql_py_error)?;
-            Python::attach(|py| {
-                Ok(common::PyExecutionReport::wrap(py, report)?
-                    .into_any()
-                    .unbind())
-            })
-        })
+        common::client::run_execute_async(py, &self.inner, query, params, on_error)
     }
 
-    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
+    /// Run `execute` and return the hits of statement `stmt`
+    /// (Python-style index, `0` = first statement).
+    #[pyo3(signature = (query, *, params=None, on_error="stop", stmt=0))]
     fn execute_hits<'py>(
         &self,
         py: Python<'py>,
-        query: &Bound<'_, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        query: &Bound<'py, PyAny>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
+        stmt: isize,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let rep = self.execute(py, query, params, on_error)?;
-        rep.call_method1("hits", (0,))
+        if self.closed.load(Ordering::Acquire) {
+            return Err(common::client_closed_error());
+        }
+        common::client::run_execute_hits(py, &self.inner, query, params, on_error, stmt)
     }
 
-    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
+    /// Async variant of `execute_hits`.
+    #[pyo3(signature = (query, *, params=None, on_error="stop", stmt=0))]
     fn execute_async_hits<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
+        stmt: isize,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let inner = self.inner.clone();
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(&query, params)?;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let report = common::run_async(&inner, input, oe)
-                .await
-                .map_err(common::qql_py_error)?;
-            Python::attach(|py| {
-                let report = common::PyExecutionReport::wrap(py, report)?;
-                let hits = report.call_method1("hits", (0,))?;
-                Ok(hits.unbind())
-            })
-        })
+        if self.closed.load(Ordering::Acquire) {
+            return Err(common::client_closed_error());
+        }
+        common::client::run_execute_async_hits(py, &self.inner, query, params, on_error, stmt)
     }
 
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
@@ -137,17 +124,14 @@ impl PyClient {
     fn explain_analyze<'py>(
         &self,
         py: Python<'py>,
-        query: &Bound<'_, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        query: &Bound<'py, PyAny>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed.load(Ordering::Acquire) {
             return Err(common::client_closed_error());
         }
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(query, params)?;
-        let out = py.detach(|| common::run_analyze_input(&self.inner, &self.runtime, input, oe))?;
-        pythonize::pythonize(py, &out).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        common::client::run_explain_analyze(py, &self.inner, query, params, on_error)
     }
 
     /// Compile a QQL query to its transport route without executing (parity
@@ -173,32 +157,14 @@ impl PyClient {
         &self,
         py: Python<'py>,
         collection: &str,
-        rows: &Bound<'_, PyAny>,
+        rows: &Bound<'py, PyAny>,
         batch_size: usize,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed.load(Ordering::Acquire) {
             return Err(common::client_closed_error());
         }
-        let oe = common::parse_on_error(on_error)?;
-        let items: Vec<Bound<'_, PyAny>> = rows.extract().map_err(|_| {
-            common::qql_py_value_error(qql_core::error::QqlError::validation(
-                "QQL-BIND-TYPE-MISMATCH",
-                "upsert_many rows must be a list of point objects ({id, vector, …payload})",
-                None,
-            ))
-        })?;
-        let values: Vec<qql_core::ast::Value> = items
-            .iter()
-            .map(common::py_to_value)
-            .collect::<PyResult<_>>()?;
-        let report = py
-            .detach(|| {
-                self.runtime
-                    .block_on(self.inner.upsert_many(collection, values, batch_size, oe))
-            })
-            .map_err(common::qql_py_error)?;
-        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
+        common::client::run_upsert_many(py, &self.inner, collection, rows, batch_size, on_error)
     }
 
     /// Flush and release edge storage. Idempotent.
@@ -206,7 +172,8 @@ impl PyClient {
         if self.closed.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        Python::attach(|py| py.detach(|| self.runtime.block_on(self.inner.close())))
+        let runtime = common::shared_runtime()?;
+        Python::attach(|py| py.detach(|| runtime.block_on(self.inner.close())))
             .map_err(common::qql_py_error)
     }
 
@@ -217,11 +184,9 @@ impl PyClient {
         if self.closed.load(Ordering::Acquire) {
             return Err(common::client_closed_error());
         }
-        py.detach(|| {
-            self.runtime
-                .block_on(self.inner.client().optimize_collection(collection))
-        })
-        .map_err(common::qql_py_error)
+        let runtime = common::shared_runtime()?;
+        py.detach(|| runtime.block_on(self.inner.client().optimize_collection(collection)))
+            .map_err(common::qql_py_error)
     }
 
     /// Whether `close()` has been called on this client.

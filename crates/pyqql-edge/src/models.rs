@@ -1,10 +1,11 @@
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use qql_core::error::QqlError;
 use std::sync::atomic::AtomicBool;
 
 use crate::PyClient;
-use pyqql_common::qql_py_value_error;
+use pyqql_common::{qql_py_value_error, validate_bm25_text};
 
 /// Parse ``wal_segment_mb`` (whole MiB) into the byte capacity
 /// [`qql_edge::LocalExecutorOptions::wal_segment_capacity`] expects.
@@ -60,6 +61,7 @@ pub fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, wal_segment_mb=None, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords=None, bm25_stemmer=None, bm25_stopwords_languages=None))]
 pub fn local_executor(
+    py: Python<'_>,
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
@@ -98,89 +100,56 @@ pub fn local_executor(
         bm25_max_token_len,
         bm25_stopwords_languages.clone(),
     )?;
-    let exec = qql_edge::local_executor_with_options(
-        data_dir,
-        qql_edge::LocalExecutorOptions {
-            on_disk_payload,
-            wal_segment_capacity,
-            model,
-            sparse_model,
-            multi_model,
-            image_model,
-            reranker_model,
-            cache_dir: cache_dir.map(std::path::PathBuf::from),
-            show_download_progress,
-            bm25_k1,
-            bm25_b,
-            bm25_avg_len,
-            bm25_language,
-            bm25_tokenizer,
-            bm25_lowercase,
-            bm25_ascii_folding,
-            bm25_min_token_len,
-            bm25_max_token_len,
-            bm25_stopwords,
-            bm25_stemmer,
-            bm25_stopwords_languages,
-        },
-    )
-    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    // A cold fastembed load downloads ONNX weights from HuggingFace; release
+    // the GIL for the whole construction so no other Python thread freezes,
+    // and make sure the process-wide runtime exists before returning.
+    let exec = py.detach(|| {
+        pyqql_common::shared_runtime()?;
+        qql_edge::local_executor_with_options(
+            data_dir,
+            qql_edge::LocalExecutorOptions {
+                on_disk_payload,
+                wal_segment_capacity,
+                model,
+                sparse_model,
+                multi_model,
+                image_model,
+                reranker_model,
+                cache_dir: cache_dir.map(std::path::PathBuf::from),
+                show_download_progress,
+                bm25_k1,
+                bm25_b,
+                bm25_avg_len,
+                bm25_language,
+                bm25_tokenizer,
+                bm25_lowercase,
+                bm25_ascii_folding,
+                bm25_min_token_len,
+                bm25_max_token_len,
+                bm25_stopwords,
+                bm25_stemmer,
+                bm25_stopwords_languages,
+            },
+        )
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    })?;
     Ok(PyClient {
         inner: std::sync::Arc::new(exec),
-        runtime: rt,
         closed: AtomicBool::new(false),
     })
 }
 
-/// Validate client-side BM25 overrides eagerly so bad values raise
-/// `ValueError` (`QQL-VALIDATION-CONFIG`) before any model is loaded.
-/// Single choke point over the engine's own resolver.
-#[allow(clippy::too_many_arguments)]
-#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
-fn validate_bm25_text(
-    k1: Option<f64>,
-    b: Option<f64>,
-    avg_len: Option<f64>,
-    language: Option<&str>,
-    tokenizer: Option<&str>,
-    lowercase: Option<bool>,
-    ascii_folding: Option<bool>,
-    stopwords: Option<Vec<String>>,
-    stemmer: Option<&str>,
-    min_token_len: Option<usize>,
-    max_token_len: Option<usize>,
-    stopwords_languages: Option<Vec<String>>,
-) -> PyResult<()> {
-    qql::embedder::Bm25TextConfig::resolve(
-        k1,
-        b,
-        avg_len,
-        language,
-        tokenizer,
-        lowercase,
-        ascii_folding,
-        stopwords,
-        stemmer,
-        min_token_len,
-        max_token_len,
-        stopwords_languages,
-    )
-    .map(|_| ())
-    .map_err(qql_py_value_error)
-}
-
 /// One-shot local execution. Prefer a long-lived `Client` for repeated calls
-/// so the model and edge shards stay open.
+/// so the model and edge shards stay open. Close errors are propagated
+/// (matching the async one-shot) after a successful statement.
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (query, *, params=None, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords=None, bm25_stemmer=None, bm25_stopwords_languages=None, on_error="stop"))]
 pub fn execute<'py>(
     py: Python<'py>,
-    query: &Bound<'_, PyAny>,
-    params: Option<&Bound<'_, PyAny>>,
+    query: &Bound<'py, PyAny>,
+    params: Option<&Bound<'py, PyAny>>,
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
@@ -205,6 +174,7 @@ pub fn execute<'py>(
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = local_executor(
+        py,
         data_dir,
         on_disk_payload,
         model,
@@ -228,9 +198,14 @@ pub fn execute<'py>(
         bm25_stemmer,
         bm25_stopwords_languages,
     )?;
+    // Statement errors win over a secondary close error; a successful
+    // statement still fails when the flush does (no silent data loss).
     let res = client.execute(py, query, params, on_error);
-    let _ = client.close();
-    res
+    match (res, client.close()) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(report), Ok(())) => Ok(report),
+    }
 }
 
 /// One-shot asynchronous local execution with the same options as `execute`.
@@ -266,6 +241,7 @@ pub fn execute_async<'py>(
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = local_executor(
+        py,
         data_dir,
         on_disk_payload,
         model,
@@ -292,9 +268,18 @@ pub fn execute_async<'py>(
     let input = pyqql_common::prepare_input(&query, params)?;
     let on_error = pyqql_common::parse_on_error(on_error)?;
     let inner = client.inner.clone();
+    let runtime = pyqql_common::shared_runtime()?;
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let result = pyqql_common::run_async(&inner, input, on_error).await;
-        let close_result = inner.close().await;
+        let (result, close_result) = runtime
+            .spawn(async move {
+                let result = pyqql_common::run_async(&inner, input, on_error).await;
+                let close_result = inner.close().await;
+                (result, close_result)
+            })
+            .await
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("execute_async background task failed: {error}"))
+            })?;
         let report = result.map_err(pyqql_common::qql_py_error)?;
         close_result.map_err(pyqql_common::qql_py_error)?;
         Python::attach(|py| {
@@ -305,11 +290,58 @@ pub fn execute_async<'py>(
     })
 }
 
+/// Build the `HttpEmbedderOptions` for `http_executor`, forwarding every
+/// BM25 knob — including `bm25_stopwords_languages`, the one that used to be
+/// validated and then swallowed by `..Default::default()`.
+///
+/// Exposed for the forwarding test; production callers use `http_executor`.
+#[cfg(feature = "http-embedding")]
+#[allow(clippy::too_many_arguments)]
+fn http_embedder_options(
+    url: &str,
+    embed_key: &str,
+    embed_model: &str,
+    embed_dim: usize,
+    bm25_k1: Option<f64>,
+    bm25_b: Option<f64>,
+    bm25_avg_len: Option<f64>,
+    bm25_language: Option<String>,
+    bm25_tokenizer: Option<String>,
+    bm25_lowercase: Option<bool>,
+    bm25_ascii_folding: Option<bool>,
+    bm25_stopwords: Option<Vec<String>>,
+    bm25_stemmer: Option<String>,
+    bm25_min_token_len: Option<usize>,
+    bm25_max_token_len: Option<usize>,
+    bm25_stopwords_languages: Option<Vec<String>>,
+) -> qql::embedder::HttpEmbedderOptions {
+    qql::embedder::HttpEmbedderOptions {
+        endpoint: url.to_string(),
+        api_key: embed_key.to_string(),
+        model: embed_model.to_string(),
+        dimension: embed_dim,
+        bm25_k1,
+        bm25_b,
+        bm25_avg_len,
+        bm25_language,
+        bm25_tokenizer,
+        bm25_lowercase,
+        bm25_ascii_folding,
+        bm25_stopwords,
+        bm25_stemmer,
+        bm25_min_token_len,
+        bm25_max_token_len,
+        bm25_stopwords_languages,
+        ..Default::default()
+    }
+}
+
 #[cfg(feature = "http-embedding")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (data_dir, url, embed_key, embed_model, embed_dim, on_disk_payload=true, *, bm25_k1=None, bm25_b=None, bm25_avg_len=None, bm25_language=None, bm25_tokenizer=None, bm25_lowercase=None, bm25_ascii_folding=None, bm25_stopwords=None, bm25_stemmer=None, bm25_min_token_len=None, bm25_max_token_len=None, bm25_stopwords_languages=None))]
 pub fn http_executor(
+    py: Python<'_>,
     data_dir: &str,
     url: &str,
     embed_key: &str,
@@ -343,35 +375,31 @@ pub fn http_executor(
         bm25_max_token_len,
         bm25_stopwords_languages.clone(),
     )?;
-    let exec = qql_edge::http_executor_with_options_and_wal(
-        data_dir,
-        on_disk_payload,
-        None,
-        qql::embedder::HttpEmbedderOptions {
-            endpoint: url.to_string(),
-            api_key: embed_key.to_string(),
-            model: embed_model.to_string(),
-            dimension: embed_dim,
-            bm25_k1,
-            bm25_b,
-            bm25_avg_len,
-            bm25_language,
-            bm25_tokenizer,
-            bm25_lowercase,
-            bm25_ascii_folding,
-            bm25_stopwords,
-            bm25_stemmer,
-            bm25_min_token_len,
-            bm25_max_token_len,
-            ..Default::default()
-        },
-    )
-    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let options = http_embedder_options(
+        url,
+        embed_key,
+        embed_model,
+        embed_dim,
+        bm25_k1,
+        bm25_b,
+        bm25_avg_len,
+        bm25_language,
+        bm25_tokenizer,
+        bm25_lowercase,
+        bm25_ascii_folding,
+        bm25_stopwords,
+        bm25_stemmer,
+        bm25_min_token_len,
+        bm25_max_token_len,
+        bm25_stopwords_languages,
+    );
+    let exec = py.detach(|| {
+        pyqql_common::shared_runtime()?;
+        qql_edge::http_executor_with_options_and_wal(data_dir, on_disk_payload, None, options)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    })?;
     Ok(PyClient {
         inner: std::sync::Arc::new(exec),
-        runtime: rt,
         closed: AtomicBool::new(false),
     })
 }
@@ -395,5 +423,47 @@ mod tests {
                 .expect_err(&format!("wal_segment_mb={bad} must fail closed"));
             assert_eq!(err.code, "QQL-VALIDATION-CONFIG", "wal_segment_mb={bad}");
         }
+    }
+
+    #[cfg(feature = "http-embedding")]
+    #[test]
+    fn http_executor_forwards_every_bm25_knob() {
+        let options = http_embedder_options(
+            "http://localhost:9/v1/embeddings",
+            "key",
+            "model",
+            3,
+            Some(2.0),
+            Some(0.5),
+            Some(8.0),
+            Some("spanish".to_string()),
+            Some("whitespace".to_string()),
+            Some(false),
+            Some(true),
+            Some(vec!["el".to_string()]),
+            Some("none".to_string()),
+            Some(2),
+            Some(9),
+            Some(vec!["fr".to_string()]),
+        );
+        assert_eq!(options.bm25_k1, Some(2.0));
+        assert_eq!(options.bm25_b, Some(0.5));
+        assert_eq!(options.bm25_avg_len, Some(8.0));
+        assert_eq!(options.bm25_language.as_deref(), Some("spanish"));
+        assert_eq!(options.bm25_tokenizer.as_deref(), Some("whitespace"));
+        assert_eq!(options.bm25_lowercase, Some(false));
+        assert_eq!(options.bm25_ascii_folding, Some(true));
+        assert_eq!(
+            options.bm25_stopwords.as_deref(),
+            Some(&["el".to_string()][..])
+        );
+        assert_eq!(options.bm25_stemmer.as_deref(), Some("none"));
+        assert_eq!(options.bm25_min_token_len, Some(2));
+        assert_eq!(options.bm25_max_token_len, Some(9));
+        assert_eq!(
+            options.bm25_stopwords_languages.as_deref(),
+            Some(&["fr".to_string()][..]),
+            "bm25_stopwords_languages must reach the embedder options"
+        );
     }
 }
