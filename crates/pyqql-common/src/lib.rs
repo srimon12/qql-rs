@@ -12,7 +12,7 @@
 //! `QQL-BIND-BATCH-LENGTH` otherwise); every other shape applies to every
 //! statement identically.
 
-use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use qql_core::ast::{self, Value};
@@ -168,8 +168,20 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(v) = value.extract::<bool>() {
         return Ok(serde_json::Value::Bool(v));
     }
-    if let Ok(v) = value.extract::<i64>() {
-        return Ok(serde_json::Value::Number(v.into()));
+    if value.is_instance_of::<PyInt>() {
+        // Python ints are unbounded: try `u64` first so point ids above
+        // `i64::MAX` keep their exact value, then `i64`. Never fall through
+        // to `f64` — that would silently change the bound type and lose
+        // precision above 2^53 (e.g. snowflake ids).
+        if let Ok(v) = value.extract::<u64>() {
+            return Ok(serde_json::Value::Number(v.into()));
+        }
+        if let Ok(v) = value.extract::<i64>() {
+            return Ok(serde_json::Value::Number(v.into()));
+        }
+        return Err(PyOverflowError::new_err(
+            "integer parameter out of range: QQL binds integers that fit in i64 or u64",
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
@@ -294,8 +306,18 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(v) = value.extract::<bool>() {
         return Ok(Value::Bool(v));
     }
-    if let Ok(v) = value.extract::<i64>() {
-        return Ok(Value::Int(v));
+    if value.is_instance_of::<PyInt>() {
+        // Mirror `py_to_json`: `u64` first (`Value::UInt`), then `i64`,
+        // never a lossy `f64` fallback.
+        if let Ok(v) = value.extract::<u64>() {
+            return Ok(Value::UInt(v));
+        }
+        if let Ok(v) = value.extract::<i64>() {
+            return Ok(Value::Int(v));
+        }
+        return Err(PyOverflowError::new_err(
+            "integer parameter out of range: QQL binds integers that fit in i64 or u64",
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
