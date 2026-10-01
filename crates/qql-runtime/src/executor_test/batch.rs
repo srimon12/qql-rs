@@ -497,6 +497,24 @@ async fn empty_script_fails_closed_like_double_semicolon() {
 }
 
 #[tokio::test]
+async fn close_reaches_backend_close_once() {
+    let mock = MockQdrantClient::default();
+    let close_calls = Arc::clone(&mock.close_call_count);
+    let executor = Executor::new(Box::new(mock), Some(test_config()));
+    executor
+        .close()
+        .await
+        .expect("close forwards to the backend");
+    assert_eq!(*close_calls.lock().unwrap(), 1);
+    executor.close().await.expect("close twice is fine");
+    assert_eq!(
+        *close_calls.lock().unwrap(),
+        1,
+        "the backend is closed exactly once"
+    );
+}
+
+#[tokio::test]
 async fn closed_client_fails_every_execution_entry_point() {
     let executor = Executor::new(Box::new(MockQdrantClient::default()), Some(test_config()));
     executor.close().await.expect("close is idempotent");

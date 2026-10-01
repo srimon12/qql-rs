@@ -123,10 +123,7 @@ pub(crate) async fn execute_create_collection(
             .unwrap_or_default(),
         ..Default::default()
     };
-    let resp = client
-        .create_collection_raw(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None))?;
+    let resp = client.create_collection_raw(grpc_req).await?;
     let time = resp.time;
     if let Some(params) = deferred_params {
         client
@@ -135,10 +132,7 @@ pub(crate) async fn execute_create_collection(
                 params: Some(params),
                 ..Default::default()
             })
-            .await
-            .map_err(|e| {
-                QqlError::backend("QQL-GRPC", format!("update_collection_params: {e}"), None)
-            })?;
+            .await?;
     }
     if let Some(shard_keys) = &request.shard_keys {
         for shard_key in shard_keys {
@@ -151,14 +145,7 @@ pub(crate) async fn execute_create_collection(
                     }),
                     ..Default::default()
                 })
-                .await
-                .map_err(|e| {
-                    QqlError::backend(
-                        "QQL-GRPC",
-                        format!("create_shard_key {shard_key}: {e}"),
-                        None,
-                    )
-                })?;
+                .await?;
         }
     }
     Ok(collection_mutation_to_typed(time))
@@ -210,10 +197,7 @@ pub(crate) async fn execute_update_collection(
             .unwrap_or_default(),
         ..Default::default()
     };
-    let resp = client
-        .update_collection_raw(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None))?;
+    let resp = client.update_collection_raw(grpc_req).await?;
     Ok(collection_mutation_to_typed(resp.time))
 }
 
@@ -226,10 +210,7 @@ pub(crate) async fn execute_drop_collection(
         collection_name: collection.to_owned(),
         ..Default::default()
     };
-    let resp = client
-        .delete_collection_raw(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None))?;
+    let resp = client.delete_collection_raw(grpc_req).await?;
     Ok(collection_mutation_to_typed(resp.time))
 }
 
@@ -248,10 +229,7 @@ pub(crate) async fn execute_create_index(
         field_index_params: Some(payload_index_params(request)),
         ..Default::default()
     };
-    let resp = client
-        .create_field_index(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None))?;
+    let resp = client.create_field_index(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -266,10 +244,7 @@ pub(crate) async fn execute_drop_index(
         field_name: field.to_owned(),
         ..Default::default()
     };
-    let resp = client
-        .delete_field_index(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None))?;
+    let resp = client.delete_field_index(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -295,10 +270,7 @@ pub(crate) async fn execute_create_shard_key(
         }),
         ..Default::default()
     };
-    let resp = client
-        .create_shard_key(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None))?;
+    let resp = client.create_shard_key(grpc_req).await?;
     Ok(collection_mutation_to_typed(resp.time))
 }
 
@@ -315,10 +287,7 @@ pub(crate) async fn execute_drop_shard_key(
         }),
         ..Default::default()
     };
-    let resp = client
-        .delete_shard_key(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None))?;
+    let resp = client.delete_shard_key(grpc_req).await?;
     Ok(collection_mutation_to_typed(resp.time))
 }
 
@@ -326,10 +295,7 @@ pub(crate) async fn execute_drop_shard_key(
 pub(crate) async fn execute_list_collections(
     client: &GrpcQdrant,
 ) -> Result<BackendResponse, QqlError> {
-    let resp = client
-        .list_collections_raw()
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("list: {e}"), None))?;
+    let resp = client.list_collections_raw().await?;
     let telemetry = telemetry_from_proto(resp.time, None);
     Ok(BackendResponse {
         data: ExecData::Collections(resp.collections.into_iter().map(|c| c.name).collect()),
@@ -342,10 +308,7 @@ pub(crate) async fn execute_get_collection(
     client: &GrpcQdrant,
     collection: &str,
 ) -> Result<BackendResponse, QqlError> {
-    let resp = client
-        .collection_info_raw(collection.to_owned())
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None))?;
+    let resp = client.collection_info_raw(collection.to_owned()).await?;
     let info = resp.result.ok_or_else(|| {
         QqlError::backend(
             "QQL-GRPC-NO-RESULT",
@@ -369,10 +332,7 @@ pub(crate) async fn execute_list_shard_keys(
     let grpc_req = qdrant::ListShardKeysRequest {
         collection_name: collection.to_owned(),
     };
-    let resp = client
-        .list_shard_keys(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("list_shard_keys: {e}"), None))?;
+    let resp = client.list_shard_keys(grpc_req).await?;
     let telemetry = telemetry_from_proto(resp.time, None);
     let keys = resp
         .shard_keys

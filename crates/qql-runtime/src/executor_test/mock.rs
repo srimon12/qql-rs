@@ -44,6 +44,8 @@ pub struct MockQdrantClient {
     /// When set, `execute_planned` returns it directly instead of the mock's
     /// default per-op typed response (backend-response injection).
     pub typed_response: Arc<Mutex<Option<BackendResponse>>>,
+    /// Counts `close()` calls forwarded by the executor.
+    pub close_call_count: Arc<Mutex<usize>>,
 }
 
 impl Default for MockQdrantClient {
@@ -69,12 +71,17 @@ impl Default for MockQdrantClient {
             fail_query_batch: Arc::new(Mutex::new(false)),
             fail_execute_planned_call: Arc::new(Mutex::new(0)),
             typed_response: Arc::new(Mutex::new(None)),
+            close_call_count: Arc::new(Mutex::new(0)),
         }
     }
 }
 
 #[async_trait]
 impl QdrantOps for MockQdrantClient {
+    async fn close(&self) -> Result<(), QqlError> {
+        *self.close_call_count.lock().unwrap() += 1;
+        Ok(())
+    }
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         Ok(self.collections.clone())
     }

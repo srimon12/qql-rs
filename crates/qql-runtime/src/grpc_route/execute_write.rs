@@ -59,10 +59,7 @@ pub(crate) async fn execute_upsert(
         update_mode: request.update_mode.map(to_update_mode),
         ..Default::default()
     };
-    let resp = client
-        .upsert_points(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))?;
+    let resp = client.upsert_points(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -81,10 +78,7 @@ pub(crate) async fn execute_delete(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .delete_points(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
+    let resp = client.delete_points(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -103,10 +97,7 @@ pub(crate) async fn execute_clear_payload(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .clear_payload(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
+    let resp = client.clear_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -126,10 +117,7 @@ pub(crate) async fn execute_delete_payload(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .delete_payload(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_payload: {e}"), None))?;
+    let resp = client.delete_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -151,10 +139,7 @@ pub(crate) async fn execute_delete_vectors(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .delete_vectors(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
+    let resp = client.delete_vectors(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -182,10 +167,7 @@ pub(crate) async fn execute_update_vectors(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .update_vectors(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None))?;
+    let resp = client.update_vectors(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -211,10 +193,7 @@ pub(crate) async fn execute_update_payload(
         key: request.key.clone(),
         ..Default::default()
     };
-    let resp = client
-        .set_payload(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
+    let resp = client.set_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -240,10 +219,7 @@ pub(crate) async fn execute_overwrite_payload(
         key: request.key.clone(),
         ..Default::default()
     };
-    let resp = client
-        .overwrite_payload(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("overwrite_payload: {e}"), None))?;
+    let resp = client.overwrite_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -272,19 +248,52 @@ pub async fn execute_update_batch_grpc(
         ..Default::default()
     };
 
-    let resp = client
-        .update_batch(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_batch: {e}"), None))?;
+    let resp = client.update_batch(grpc_req).await?;
 
-    Ok(resp
-        .result
+    resp.result
         .into_iter()
-        .map(|_| BackendResponse {
+        .map(update_result_to_typed)
+        .collect()
+}
+
+/// Convert one proto `UpdateResult` into a status-only response.
+///
+/// Mirrors the REST `UpdateResult` policy: `acknowledged` / `completed` are
+/// success; `wait_timeout` (write not confirmed) and `clock_rejected` surface
+/// through the batch error path; unknown status values fail closed as backend
+/// contract violations instead of reading as success.
+pub(crate) fn update_result_to_typed(
+    result: qdrant::UpdateResult,
+) -> Result<BackendResponse, QqlError> {
+    use qdrant::UpdateStatus;
+    let status = UpdateStatus::try_from(result.status).map_err(|_| {
+        QqlError::backend(
+            "QQL-BACKEND-ENVELOPE",
+            format!("update batch item carries unknown status {}", result.status),
+            None,
+        )
+    })?;
+    match status {
+        UpdateStatus::Acknowledged | UpdateStatus::Completed => Ok(BackendResponse {
             data: ExecData::Mutation { affected: None },
             telemetry: None,
-        })
-        .collect())
+        }),
+        UpdateStatus::WaitTimeout => Err(QqlError::backend(
+            "QQL-BACKEND-BATCH",
+            "update batch item was not confirmed before the server wait timeout (status: wait_timeout)",
+            None,
+        )),
+        UpdateStatus::ClockRejected => Err(QqlError::backend(
+            "QQL-BACKEND-BATCH",
+            "update batch item was rejected due to an outdated clock",
+            None,
+        )),
+        UpdateStatus::UnknownUpdateStatus => Err(QqlError::backend(
+            "QQL-BACKEND-ENVELOPE",
+            "update batch item carries an unknown update status",
+            None,
+        )),
+    }
 }
 
 pub(crate) fn to_points_update_operation(

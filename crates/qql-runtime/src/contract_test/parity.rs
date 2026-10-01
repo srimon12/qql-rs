@@ -119,6 +119,131 @@ fn rest_grpc_query_parity_timeout_consistency_shard_multi() {
     }
 }
 
+/// REST `"payload": {}` survives as `Some({})`; the gRPC empty proto map must
+/// read the same, not `None`. Needs both transports (REST-only strict parser
+/// plus the gRPC converter).
+#[cfg(feature = "rest")]
+#[test]
+fn rest_grpc_empty_payload_parity() {
+    use std::collections::HashMap;
+
+    // REST `"payload": {}` survives as `Some({})`; the gRPC empty proto map
+    // must read the same, not `None`.
+    let stmt = Parser::parse("SCROLL FROM docs LIMIT 1;").unwrap();
+    let op = plan(&stmt).unwrap();
+    let rest = crate::rest_response::parse_planned(
+        &op,
+        serde_json::json!({"result": {"points": [{"id": 1, "payload": {}}]}, "status": "ok"}),
+    )
+    .expect("REST empty payload parses");
+    let rest_hit = &rest.data.hits().expect("hits")[0];
+    assert_eq!(rest_hit.payload, Some(HashMap::new()));
+
+    let grpc_hit = test_api::retrieved_point_to_hit(qdrant::RetrievedPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(1)),
+        }),
+        payload: Default::default(),
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    })
+    .expect("gRPC empty payload converts");
+    assert_eq!(grpc_hit.payload, rest_hit.payload);
+}
+
+#[test]
+fn rest_grpc_geo_polygon_parity() {
+    // The same polygon must be present in the REST body and the proto field
+    // condition — a missing proto conversion silently matches different rows.
+    let stmt = Parser::parse(
+        "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE area GEO_POLYGON \
+         {exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}], \
+          interiors: [[{lat: -50.0, lon: -50.0}, {lat: 50.0, lon: -50.0}, {lat: 50.0, lon: 50.0}, {lat: -50.0, lon: 50.0}]]};",
+    )
+    .unwrap();
+    let op = plan(&stmt).unwrap();
+    let PlannedOperation::Query {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected Query");
+    };
+
+    let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+    let rest_polygon = &body["filter"]["must"][0]["geo_polygon"];
+    assert_eq!(
+        rest_polygon["exterior"]["points"].as_array().map(Vec::len),
+        Some(4)
+    );
+    assert_eq!(rest_polygon["interiors"].as_array().map(Vec::len), Some(1));
+    assert_eq!(rest_polygon["exterior"]["points"][0]["lat"], -70.0);
+
+    let grpc = test_api::to_query_points(request, collection).unwrap();
+    let condition = grpc
+        .filter
+        .expect("gRPC filter converts")
+        .must
+        .swap_remove(0);
+    let Some(qdrant::condition::ConditionOneOf::Field(field)) = condition.condition_one_of else {
+        panic!("expected a field condition");
+    };
+    let proto_polygon = field.geo_polygon.expect("REST body has geo_polygon");
+    let exterior = proto_polygon.exterior.expect("exterior ring");
+    assert_eq!(exterior.points.len(), 4);
+    assert_eq!(exterior.points[0].lat, -70.0);
+    assert_eq!(proto_polygon.interiors.len(), 1);
+}
+
+#[test]
+fn rest_grpc_scroll_order_by_parity() {
+    let stmt = Parser::parse("SCROLL FROM docs ORDER BY ts DESC START FROM 7 LIMIT 5;").unwrap();
+    let op = plan(&stmt).unwrap();
+    let PlannedOperation::Scroll {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected Scroll");
+    };
+
+    let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+    assert_eq!(body["order_by"]["key"], "ts");
+    assert_eq!(body["order_by"]["direction"], "desc");
+    assert_eq!(body["order_by"]["start_from"], 7);
+
+    let grpc = test_api::to_scroll_points(request, collection).unwrap();
+    let order_by = grpc.order_by.expect("REST body has order_by");
+    assert_eq!(order_by.key, "ts");
+    assert_eq!(order_by.direction, Some(qdrant::Direction::Desc as i32));
+    match order_by.start_from.and_then(|sf| sf.value) {
+        Some(qdrant::start_from::Value::Integer(7)) => {}
+        other => panic!("expected integer START FROM 7, got {other:?}"),
+    }
+}
+
+#[test]
+fn rest_grpc_count_exact_parity() {
+    let stmt = Parser::parse("COUNT FROM docs WITH (exact = false);").unwrap();
+    let op = plan(&stmt).unwrap();
+    let PlannedOperation::Count {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected Count");
+    };
+    let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+    assert_eq!(body["exact"], false);
+    assert_eq!(
+        test_api::to_count_points(request, collection)
+            .unwrap()
+            .exact,
+        Some(false)
+    );
+}
+
 #[test]
 fn rest_grpc_relevance_feedback_parity() {
     let stmt = Parser::parse(

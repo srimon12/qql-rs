@@ -5,8 +5,10 @@ use qql_core::error::QqlError;
 /// Convert a [`tonic::Status`] into a structured `QqlError` that preserves
 /// the gRPC status code and operation name as machine-readable context.
 ///
-/// The error code is `QQL-GRPC` and the message includes the original status
-/// message. The gRPC status code is attached via `.with_field("grpc_code", ...)`.
+/// The error code is classified (`QQL-BACKEND-AUTH`,
+/// `QQL-BACKEND-COLLECTION-NOT-FOUND`, …, falling back to `QQL-GRPC`) and the
+/// message includes the original status message. The gRPC status code is
+/// attached via `.with_field("grpc_code", ...)`.
 /// `request_id` is the client-generated correlation id recorded by the
 /// interceptor for the outgoing RPC, so a failure can be matched against
 /// Qdrant's log lines (mirrors the REST `x-request-id` echo). An empty id
@@ -100,6 +102,23 @@ mod tests {
             "QQL-BACKEND-STRICT-MODE"
         );
         assert_eq!(code_for(tonic::Code::Unknown, "boom"), "QQL-GRPC");
+    }
+
+    #[test]
+    fn typed_code_and_request_id_survive_propagation() {
+        // The dispatch layers propagate `grpc_error` output unchanged (no
+        // re-wrap), so the typed code and correlation fields must be present
+        // on the error itself, not only inside a display string.
+        let err = grpc_error(
+            "upsert",
+            tonic::Status::permission_denied("invalid api key"),
+            "req-42",
+        );
+        assert_eq!(err.code, "QQL-BACKEND-AUTH");
+        assert_eq!(err.field("request_id"), Some("req-42"));
+        assert_eq!(err.field("operation"), Some("upsert"));
+        // tonic::Code::PermissionDenied == 7.
+        assert_eq!(err.field("grpc_code"), Some("7"));
     }
 
     #[test]

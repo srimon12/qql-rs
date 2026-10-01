@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`qql-embed` Surface Trimmed**: `SparseEmbedder`, `Embedder::embed_joint` / `embed_joint_batch` (plus `JointEmbeddingOutput` and the edge override), and `sparse::for_each_token` / `for_each_token_id` are removed — all had zero product callers.
 
 ### 🐛 Bug Fixes
+- **gRPC Parity**: `GEO_POLYGON` filters, `SCROLL … ORDER BY` (including `START FROM`), and `COUNT … EXACT false` now reach the wire on gRPC instead of being dropped or forced exact; unknown order-by directions, unrepresentable `START FROM` values, and unknown recommend strategies fail closed.
+- **Batch Item Statuses**: `/points/batch` and gRPC `UpdateBatch` items are parsed as `UpdateResult`; `wait_timeout` / `clock_rejected` are per-item failures instead of silent success, and malformed items fail `QQL-BACKEND-ENVELOPE`.
+- **gRPC Error Taxonomy**: classified errors (`QQL-BACKEND-AUTH`, `QQL-BACKEND-COLLECTION-NOT-FOUND`, …) and the `request_id` field survive dispatch instead of being flattened into a bare `QQL-GRPC`.
+- **Timeouts**: `request_timeout` covers the prepared-statement and `upsert_many` fast paths; `HttpEmbedder` gets total/connect client timeouts so a wedged endpoint cannot hang a caller.
+- **Lifecycle**: `Executor::close` now closes the backend (flushing embedded stores) exactly once and propagates its error.
+- **Response Fidelity**: an empty payload reads as `Some({})` on both transports; server-answered batch cardinality mismatches are no longer retried, and the `unwrap_err` panic paths are gone.
 - **CTE Chains**: `WITH` definitions are stored once and resolved by scope, so ~25 chained CTEs parse to a linear AST (was exponential), and a nested `PREFETCH (name)` inside a CTE resolves to the client-embedded body instead of a server-side inference fallback.
 - **Auto-Embed Field Priority**: the no-clause UPSERT fallback searches the same ordered default text fields (`text`, `body`, `content`, `title`, …) as `USING` / `EMBED` instead of only `text`/`body`/`content` in payload order, so the embedded field no longer depends on payload key order and a `title`-only point embeds like its explicit-spec counterpart.
 - **`MODEL 'qdrant/bm25'`**: accepted (ASCII case-insensitive) as an alias of the local wire-compatible BM25 pipeline on the trait defaults and the HTTP/edge local paths, instead of being rejected.

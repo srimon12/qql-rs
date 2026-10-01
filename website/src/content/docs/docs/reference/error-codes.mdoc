@@ -210,8 +210,10 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC` | Generic gRPC transport failure |
 | `QQL-GRPC-BATCH` | `BATCH` runs through the batch RPCs, not a single gRPC route |
 | `QQL-GRPC-DDL-RANGE` | A DDL value exceeds the bundled Qdrant proto `uint32` range |
+| `QQL-GRPC-DIRECTION` | An `ORDER BY` direction is neither `asc` nor `desc` on the gRPC path |
 | `QQL-GRPC-FLOAT-MATCH` | A float equality value has no `double` field in the bundled Qdrant proto `Match`; use a `RANGE` filter or an exact integer value |
 | `QQL-GRPC-FUSION` | Unsupported fusion method on the gRPC path |
+| `QQL-GRPC-GEO-POLYGON` | A `GEO_POLYGON` ring has fewer than 3 vertices and cannot be represented on the gRPC path |
 | `QQL-GRPC-LIST-INT` | An integer value is out of the gRPC `int64` range |
 | `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
 | `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
@@ -221,6 +223,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC-RRF-K` | An `rrf_k` value exceeds the bundled Qdrant proto `uint32` range |
 | `QQL-GRPC-RRF-WEIGHT` | An `rrf_weights` value is not exactly representable as gRPC `f32` |
 | `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
+| `QQL-GRPC-START-FROM` | An `ORDER BY … START FROM` value has no gRPC `StartFrom` representation; use an integer, float, or ISO-8601 datetime |
+| `QQL-GRPC-STRATEGY` | Unsupported recommend strategy on the gRPC path |
 | `QQL-BACKEND` | Generic backend or transport failure |
 | `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
 | `QQL-BACKEND-BATCH` | A batched query/update item reported an error in its status field |
@@ -517,8 +521,10 @@ QQL-FMT-NON-CANONICAL
 QQL-GRPC
 QQL-GRPC-BATCH
 QQL-GRPC-DDL-RANGE
+QQL-GRPC-DIRECTION
 QQL-GRPC-FLOAT-MATCH
 QQL-GRPC-FUSION
+QQL-GRPC-GEO-POLYGON
 QQL-GRPC-LIST-INT
 QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
@@ -528,6 +534,8 @@ QQL-GRPC-RANGE-TYPE
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
 QQL-GRPC-SCROLL-LIMIT
+QQL-GRPC-START-FROM
+QQL-GRPC-STRATEGY
 QQL-IDIOM-REDUNDANT-PAYLOAD
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER

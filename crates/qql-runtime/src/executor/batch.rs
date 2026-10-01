@@ -61,23 +61,8 @@ impl Executor {
         on_error: OnError,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         self.ensure_open()?;
-        if let Some(secs) = self.request_timeout() {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                self.execute_batch_nodes_inner(stmts, on_error),
-            )
+        self.with_timeout(self.execute_batch_nodes_inner(stmts, on_error))
             .await
-            {
-                Ok(res) => res,
-                Err(_) => Err(QqlError::transport(
-                    "QQL-TIMEOUT",
-                    format!("batch execution timed out after {secs}s"),
-                    None,
-                )),
-            }
-        } else {
-            self.execute_batch_nodes_inner(stmts, on_error).await
-        }
     }
 
     async fn execute_batch_nodes_inner(
@@ -240,13 +225,27 @@ impl Executor {
                     false
                 }
                 Ok(responses) => {
-                    let error =
+                    // The server answered with the wrong item count: it is a
+                    // backend contract violation, not a transport failure, so
+                    // the group is never retried. Report one failure per
+                    // expected member.
+                    if let Err(error) =
                         qql_plan::verify_batch_cardinality("query", expected, responses.len())
-                            .unwrap_err();
-                    if stop_on_error {
-                        return Err(error);
+                    {
+                        if stop_on_error {
+                            return Err(error);
+                        }
+                        for _ in 0..expected {
+                            results.push(ExecResponse {
+                                ok: false,
+                                operation: "QUERY".to_string(),
+                                message: error.to_string(),
+                                data: None,
+                                telemetry: None,
+                            });
+                        }
                     }
-                    true
+                    false
                 }
                 Err(error) => {
                     if stop_on_error {
@@ -256,6 +255,11 @@ impl Executor {
                 }
             };
             if retry {
+                // Transport failure: the batch RPC may have applied some or
+                // all members server-side, so individual retries are
+                // at-least-once. Every QQL mutation is idempotent in effect
+                // (upsert/delete/set/overwrite/clear/delete payload/vectors),
+                // which is what makes this safe today.
                 std::hint::cold_path();
                 let operations = batch
                     .searches
@@ -340,12 +344,26 @@ impl Executor {
                 false
             }
             Ok(responses) => {
-                let error = qql_plan::verify_batch_cardinality("update", expected, responses.len())
-                    .unwrap_err();
-                if stop_on_error {
-                    return Err(error);
+                // Server-answered cardinality mismatch: never retried (the
+                // server may already have applied members). One failure per
+                // expected member.
+                if let Err(error) =
+                    qql_plan::verify_batch_cardinality("update", expected, responses.len())
+                {
+                    if stop_on_error {
+                        return Err(error);
+                    }
+                    for op in &batch.operations {
+                        results.push(ExecResponse {
+                            ok: false,
+                            operation: op.operation_name().to_string(),
+                            message: error.to_string(),
+                            data: None,
+                            telemetry: None,
+                        });
+                    }
                 }
-                true
+                false
             }
             Err(error) => {
                 if stop_on_error {
@@ -355,6 +373,8 @@ impl Executor {
             }
         };
         if retry {
+            // Transport failure: see the query arm for the at-least-once
+            // rationale.
             std::hint::cold_path();
             let operations = batch
                 .operations
@@ -409,14 +429,23 @@ impl Executor {
                         }
                     }
                     Ok(responses) => {
-                        let error =
+                        // Server-answered cardinality mismatch: no retry.
+                        if let Err(error) =
                             qql_plan::verify_batch_cardinality("query", expected, responses.len())
-                                .unwrap_err();
-                        if stop_on_error {
-                            return Err(error);
+                        {
+                            if stop_on_error {
+                                return Err(error);
+                            }
+                            for operation in operations {
+                                results.push(ExecResponse {
+                                    ok: false,
+                                    operation: operation.operation_label().to_string(),
+                                    message: error.to_string(),
+                                    data: None,
+                                    telemetry: None,
+                                });
+                            }
                         }
-                        self.retry_forced_members_individually(operations, results)
-                            .await?;
                     }
                     Err(error) => {
                         if stop_on_error {
@@ -441,14 +470,23 @@ impl Executor {
                         }
                     }
                     Ok(responses) => {
-                        let error =
+                        // Server-answered cardinality mismatch: no retry.
+                        if let Err(error) =
                             qql_plan::verify_batch_cardinality("update", expected, responses.len())
-                                .unwrap_err();
-                        if stop_on_error {
-                            return Err(error);
+                        {
+                            if stop_on_error {
+                                return Err(error);
+                            }
+                            for operation in operations {
+                                results.push(ExecResponse {
+                                    ok: false,
+                                    operation: operation.operation_label().to_string(),
+                                    message: error.to_string(),
+                                    data: None,
+                                    telemetry: None,
+                                });
+                            }
                         }
-                        self.retry_forced_members_individually(operations, results)
-                            .await?;
                     }
                     Err(error) => {
                         if stop_on_error {

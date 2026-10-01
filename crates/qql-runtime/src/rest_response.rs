@@ -118,7 +118,6 @@ pub(crate) fn parse_query_batch(result: Value) -> Result<Vec<BackendResponse>, Q
     items
         .into_iter()
         .map(|item| {
-            ensure_batch_item_ok(&item)?;
             // Telemetry reads borrowed fields; the points below move out.
             let telemetry = ServerTelemetry::from_envelope_opt(&item);
             let mut map = match item {
@@ -150,8 +149,15 @@ pub(crate) fn parse_query_batch(result: Value) -> Result<Vec<BackendResponse>, Q
         .collect()
 }
 
-/// Parse one `/points/batch` result array. Per-item `UpdateResult`s are
-/// status-only: the executor derives upsert counts from the request.
+/// Parse one `/points/batch` result array: each item must be an OpenAPI
+/// `UpdateResult` (`status` ∈ `acknowledged | completed | wait_timeout`,
+/// optional `operation_id`). Per-item results are status-only: the executor
+/// derives upsert counts from the request.
+///
+/// `wait_timeout` means the server did not confirm the write inside the
+/// batch's wait window, so it is surfaced as a per-item failure through the
+/// existing batch error path (`QQL-BACKEND-BATCH`) — never reported as
+/// success. Unknown or malformed items fail closed (`QQL-BACKEND-ENVELOPE`).
 pub(crate) fn parse_update_batch(result: Value) -> Result<Vec<BackendResponse>, QqlError> {
     let items = match result {
         Value::Array(items) => items,
@@ -161,16 +167,33 @@ pub(crate) fn parse_update_batch(result: Value) -> Result<Vec<BackendResponse>, 
             ));
         }
     };
-    items
-        .into_iter()
-        .map(|item| {
-            ensure_batch_item_ok(&item)?;
-            Ok(BackendResponse {
-                data: ExecData::Mutation { affected: None },
-                telemetry: None,
-            })
-        })
-        .collect()
+    items.into_iter().map(parse_update_batch_item).collect()
+}
+
+/// Parse one OpenAPI `UpdateResult` into a status-only mutation response.
+fn parse_update_batch_item(item: Value) -> Result<BackendResponse, QqlError> {
+    let mut item = match item {
+        Value::Object(map) => map,
+        _ => return Err(envelope_err("update batch item is not an object")),
+    };
+    let status = match item.remove("status") {
+        Some(Value::String(status)) => status,
+        _ => return Err(envelope_err("update batch item is missing a string status")),
+    };
+    match status.as_str() {
+        "acknowledged" | "completed" => Ok(BackendResponse {
+            data: ExecData::Mutation { affected: None },
+            telemetry: None,
+        }),
+        "wait_timeout" => Err(QqlError::backend(
+            "QQL-BACKEND-BATCH",
+            "update batch item was not confirmed before the server wait timeout (status: wait_timeout)",
+            None,
+        )),
+        other => Err(envelope_err(format!(
+            "update batch item status '{other}' is not a valid UpdateStatus (acknowledged|completed|wait_timeout)"
+        ))),
+    }
 }
 
 /// Parse `GET /collections` (`result.collections[*].name`).
@@ -549,16 +572,6 @@ fn parse_quotas(envelope: Value) -> Result<qql_plan::QuotaConfig, QqlError> {
     }
 }
 
-/// Qdrant batch endpoints answer per item; a 200 response can still carry
-/// per-item failures (`status: "error"`). Surface the first one as a batch
-/// error so the executor's continue path retries the group individually.
-fn ensure_batch_item_ok(item: &Value) -> Result<(), QqlError> {
-    match qql_plan::batch_item_error(item) {
-        Some(message) => Err(QqlError::backend("QQL-BACKEND-BATCH", message, None)),
-        None => Ok(()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -805,9 +818,39 @@ mod tests {
         assert_eq!(items[0].data.hits().unwrap().len(), 2);
         assert_eq!(items[1].data.hits().unwrap()[0].id, PlanPointId::Number(3));
 
-        // Per-item failures surface as a batch error.
+        // A query item without its `points` array is an envelope violation,
+        // regardless of any extra status-like keys.
         let err = parse_query_batch(json!([{"status": "error", "error": "point 42 not found"}]))
             .unwrap_err();
+        assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+    }
+
+    #[test]
+    fn parses_update_batch_statuses_strictly() {
+        // The OpenAPI `UpdateResult` statuses: acknowledged/completed are
+        // success, wait_timeout is a write that was not confirmed.
+        let items = parse_update_batch(json!([
+            {"status": "acknowledged", "operation_id": 1},
+            {"status": "completed"},
+        ]))
+        .expect("valid statuses parse");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].data, ExecData::Mutation { affected: None });
+
+        let err = parse_update_batch(json!([{"status": "wait_timeout"}]))
+            .expect_err("wait_timeout is a per-item failure");
         assert_eq!(err.code, "QQL-BACKEND-BATCH");
+        assert!(err.message.contains("wait_timeout"));
+
+        // Unknown or malformed statuses fail closed instead of reading as
+        // success.
+        for bad in [
+            json!([{"status": "error", "error": "boom"}]),
+            json!([{"operation_id": 3}]),
+            json!(["completed"]),
+        ] {
+            let err = parse_update_batch(bad).expect_err("malformed item must fail");
+            assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+        }
     }
 }

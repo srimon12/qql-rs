@@ -87,6 +87,12 @@ jobs:
         with:
           shared-key: rust-stable
           cache-on-failure: true
+          # ort-sys (fastembed) bakes the absolute path of the ONNX Runtime it
+          # downloads into its build-script output. Caching that output without
+          # the download makes the restored fingerprint point at a missing
+          # library and `cargo test` fails to link; cache the download
+          # alongside the target dir so both always restore together.
+          cache-directories: ~/.cache/ort.pyke.io
 
       - name: Clippy (published Rust crates)
         run: >
