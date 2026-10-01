@@ -298,6 +298,52 @@ fn split_by_payload_field_rejects_missing() {
 }
 
 #[test]
+fn split_by_payload_field_with_packed_payload() {
+    let mut opts = base_opts();
+    opts.shard_key_field = Some("tenant_id".into());
+    // Record 1 & 3 have $payload meta due to id/vector collisions
+    let records = vec![
+        json!({"id": 1, "$payload": {"tenant_id": "acme", "id": "sub_1"}}),
+        json!({"id": 2, "tenant_id": "globex"}),
+        json!({"id": 3, "$payload": {"tenant_id": "acme", "vector": "custom"}}),
+    ];
+    let (mut groups, skipped) = split_by_shard(records, &opts).unwrap();
+    assert_eq!(skipped, 0);
+    groups.sort_by_key(|g| g.shard_key.as_ref().map(|k| k.to_string()));
+    assert_eq!(groups.len(), 2);
+    assert_eq!(
+        groups[0].shard_key.as_ref().and_then(|k| k.as_keyword()),
+        Some("acme")
+    );
+    assert_eq!(groups[0].rows.len(), 2);
+    assert_eq!(
+        groups[1].shard_key.as_ref().and_then(|k| k.as_keyword()),
+        Some("globex")
+    );
+    assert_eq!(groups[1].rows.len(), 1);
+}
+
+#[test]
+fn split_by_payload_field_targeting_payload_id() {
+    let mut opts = base_opts();
+    opts.shard_key_field = Some("id".into());
+
+    // Record with colliding payload 'id' must route by the payload id, not the point id
+    let records = vec![json!({"id": 1, "$payload": {"id": "tenant_from_payload"}})];
+    let (groups, skipped) = split_by_shard(records, &opts).unwrap();
+    assert_eq!(skipped, 0);
+    assert_eq!(
+        groups[0].shard_key.as_ref().and_then(|k| k.as_keyword()),
+        Some("tenant_from_payload")
+    );
+
+    // Flat record without payload 'id' must fail as missing, never fall back to point id
+    let flat_records = vec![json!({"id": 2, "title": "flat"})];
+    let err = split_by_shard(flat_records, &opts).unwrap_err();
+    assert!(err.to_string().contains("missing"));
+}
+
+#[test]
 fn fingerprint_ignores_workers_and_batch() {
     let a = base_opts();
     let mut b = base_opts();
@@ -370,7 +416,7 @@ async fn batch_size_one_scroll_streams_all_points_and_counts_collisions() {
 
     // Three points at batch_size == 1: the inclusive-offset repeat must not
     // end the stream early. The middle point's payload `id` collides with the
-    // point-object slot, so it is counted as skipped, not migrated.
+    // point-object slot, so it is preserved under $payload and migrated without data loss.
     let points = vec![
         json!({"id": 1, "payload": {"city": "berlin"}}),
         json!({"id": 2, "payload": {"id": "external-2"}}),
@@ -381,7 +427,7 @@ async fn batch_size_one_scroll_streams_all_points_and_counts_collisions() {
     let (written, skipped, batches) = super::pipeline::fill_window_totals_for_test(&mut pages, 2)
         .await
         .expect("window");
-    assert_eq!((written, skipped, batches), (2, 1, 2));
+    assert_eq!((written, skipped, batches), (3, 0, 2));
     assert!(
         ops.limits
             .lock()

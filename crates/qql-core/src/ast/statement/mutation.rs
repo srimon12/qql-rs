@@ -114,6 +114,22 @@ pub struct UpsertPoint {
     pub payload: Vec<(String, Value)>,
 }
 
+/// Parameter/JSON envelope key used to bind payload entries explicitly (avoiding id/vector collision).
+pub const PAYLOAD_BIND_KEY: &str = "$payload";
+
+/// Check if a key case-insensitively collides with point envelope keys (`id` or `vector`).
+pub fn is_point_envelope_key(key: &str) -> bool {
+    key.eq_ignore_ascii_case("id") || key.eq_ignore_ascii_case("vector")
+}
+
+/// Check if any key in `payload` collides with point envelope keys (`id` or `vector`)
+/// or matches the dedicated parameter binding key (`$payload`).
+pub fn payload_has_envelope_collision(payload: &[(String, Value)]) -> bool {
+    payload
+        .iter()
+        .any(|(k, _)| is_point_envelope_key(k) || k == PAYLOAD_BIND_KEY)
+}
+
 /// One entry of an `UPSERT INTO … VALUES` list: either an inline point
 /// object or a whole-point placeholder (`:name` / `?`) bound later to a
 /// point dict (or a list of point dicts, splicing several points).

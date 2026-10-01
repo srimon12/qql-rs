@@ -26,10 +26,13 @@ UPSERT INTO docs VALUES
 Key decisions:
 
 - Rows are inline dicts with `id` plus payload plus vector inputs. Vector inputs are literal arrays, named maps, or inference dicts.
+- Point-level `WITH PAYLOAD { ... }` suffix avoids collision when payload fields are named `id` or `vector`:
+  `UPSERT INTO docs VALUES { id: 1, vector: [0.1, 0.2] } WITH PAYLOAD { id: 'legacy_id', vector: 'sparse_v1', category: 'tech' };`
+  Flat envelope remainder entries and suffix entries cannot duplicate keys case-insensitively (`QQL-PARSE-DUPLICATE-KEY`).
 - `USING DENSE MODEL '...'` embeds a text field into a dense vector. `ON FIELD <field>` selects the source field. `INTO <vector>` selects the destination vector. Omit both when the mapping is unambiguous.
 - Multiple `USING` legs map distinct fields to distinct named vectors.
 - Text and sparse and multi resolution follows `qql-embeddings.md`. Schema topology fills kinds before embedding.
-- Whole-point params avoid string building. `UPSERT INTO c VALUES :rows` binds one point dict or a list of them. Pair with prepared statements and `upsert_many` helpers in SDKs.
+- Whole-point params avoid string building. `UPSERT INTO c VALUES :rows` binds one point dict or a list of them. Pair with prepared statements and `upsert_many` helpers in SDKs. The exact-case key `"$payload"` (dictionary) is reserved to bind colliding payload entries without envelope collision (`{ id: 1, "$payload": { id: "ext", category: "c" } }`). To store a literal `"$payload"` key in payload, nest it inside `"$payload"` (`{ id: 1, "$payload": { "$payload": "val" } }`). Other casings like `"$PAYLOAD"` stay flat literal payload keys.
 - Shard routing appends `SHARD 'key'`. `UPSERT INTO sec10k VALUES {id: 1, tenant_id: 'honeywell'} SHARD 'honeywell'`.
 
 ## Precomputed vectors on upsert

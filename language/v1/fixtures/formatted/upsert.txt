@@ -66,3 +66,8 @@ UPSERT INTO docs VALUES {id: 9, text: 'durable write'} WAIT true;
 
 -- Without waiting for durability
 UPSERT INTO docs VALUES {id: 10, text: 'fire and forget'} WAIT false;
+
+-- With explicit payload suffix (avoids id/vector collision)
+UPSERT INTO docs VALUES
+  {id: 1, vector: [0.1, 0.2]} WITH PAYLOAD {id: 'legacy_1', vector: 'custom_v1', category: 'books'},
+  {id: 2, title: 'flat sugar still works'};

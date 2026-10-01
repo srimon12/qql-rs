@@ -378,12 +378,16 @@ facet_config_key = { ^"exact" | ^"limit" | string }
 
 upsert = {
     ^"UPSERT" ~ ^"INTO" ~ collection ~ ^"VALUES"
-    ~ point_object ~ ("," ~ point_object)*
+    ~ upsert_point ~ ("," ~ upsert_point)*
     ~ embedding_options?
     ~ embed_clause?
     ~ upsert_guard*
     ~ (^"SHARD" ~ shard_key)?
     ~ (^"WAIT" ~ boolean)?
+}
+
+upsert_point = {
+    point_object ~ (^"WITH" ~ ^"PAYLOAD" ~ object)?
 }
 
 // Trailing upsert guards: conditional-write filter and write mode. Each may

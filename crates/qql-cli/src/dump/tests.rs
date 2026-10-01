@@ -198,10 +198,9 @@ fn point_without_id_is_skipped() {
 }
 
 #[test]
-fn payload_keys_colliding_with_id_or_vector_are_skipped() {
-    // Payload `id`/`vector` keys cannot be represented next to the
-    // point-object slots; merging them would rewrite the point id or drop the
-    // stored vector, so the point is skipped (counted by dump/migrate).
+fn payload_keys_colliding_with_id_or_vector_are_preserved_under_payload_key() {
+    // Payload `id`/`vector` keys collide with the envelope slots, so they are
+    // preserved under the dedicated $payload object for migration / format_point_literal.
     for payload in [
         json!({ "id": "external-id" }),
         json!({ "ID": "external-id" }),
@@ -213,12 +212,22 @@ fn payload_keys_colliding_with_id_or_vector_are_skipped() {
             "payload": payload,
             "vector": [0.1, 0.2],
         });
+        let rec =
+            point_to_upsert_object(&point).expect("colliding payload must not skip the point");
+        assert_eq!(rec["id"], 42);
+        assert_eq!(rec["vector"], json!([0.1, 0.2]));
+        assert!(rec.get(qql_core::ast::PAYLOAD_BIND_KEY).is_some());
+
+        // Literal formatting must produce valid WITH PAYLOAD syntax that parses
+        let lit = format_point_literal(&rec);
         assert!(
-            point_to_upsert_object(&point).is_none(),
-            "payload collision must skip the point: {point}"
+            lit.contains("WITH PAYLOAD"),
+            "expected WITH PAYLOAD in: {lit}"
         );
+        let stmt = format!("UPSERT INTO docs VALUES {};", lit);
+        qql_core::parser::Parser::parse(&stmt).expect("WITH PAYLOAD upsert should parse");
     }
-    // Non-colliding case-insensitive names still export.
+    // Non-colliding case-insensitive names still export flat without $payload.
     let point = json!({
         "id": 42,
         "payload": { "id_field": 1, "vectors": 2 },
@@ -228,6 +237,68 @@ fn payload_keys_colliding_with_id_or_vector_are_skipped() {
     assert_eq!(rec["id_field"], 1);
     assert_eq!(rec["vectors"], 2);
     assert_eq!(rec["vector"], json!([0.1]));
+    assert!(rec.get(qql_core::ast::PAYLOAD_BIND_KEY).is_none());
+
+    let lit = format_point_literal(&rec);
+    assert!(!lit.contains("WITH PAYLOAD"));
+    let stmt = format!("UPSERT INTO docs VALUES {};", lit);
+    qql_core::parser::Parser::parse(&stmt).expect("flat upsert should parse");
+}
+
+#[test]
+fn payload_literal_payload_key_is_preserved_under_meta_payload() {
+    // 1. Payload with object-valued literal "$payload" key
+    let point = json!({
+        "id": 1,
+        "payload": {
+            "$payload": { "x": 1 },
+            "title": "sample"
+        },
+        "vector": [0.1, 0.2]
+    });
+    let rec = point_to_upsert_object(&point).expect("must not skip");
+    assert!(rec.get(qql_core::ast::PAYLOAD_BIND_KEY).is_some());
+    let lit = format_point_literal(&rec);
+    assert!(lit.contains("WITH PAYLOAD"));
+    assert!(lit.contains("'$payload': {x: 1}"));
+    assert!(lit.contains("title: 'sample'"));
+    let stmt = format!("UPSERT INTO docs VALUES {};", lit);
+    let parsed = qql_core::parser::Parser::parse(&stmt).expect("must parse");
+    let qql_core::ast::Stmt::Upsert(u) = parsed else {
+        panic!()
+    };
+    let qql_core::ast::PointEntry::Inline(p) = &u.points[0] else {
+        panic!()
+    };
+    assert_eq!(p.payload.len(), 2);
+    assert!(p.payload.iter().any(|(k, _)| k == "$payload"));
+    assert!(p.payload.iter().any(|(k, _)| k == "title"));
+
+    // 2. Payload with scalar-valued literal "$payload" key
+    let point_scalar = json!({
+        "id": 2,
+        "payload": {
+            "$payload": "scalar_data",
+            "title": "another"
+        }
+    });
+    let rec_scalar = point_to_upsert_object(&point_scalar).expect("must not skip");
+    assert!(rec_scalar.get(qql_core::ast::PAYLOAD_BIND_KEY).is_some());
+    let lit_scalar = format_point_literal(&rec_scalar);
+    assert!(lit_scalar.contains("WITH PAYLOAD"));
+    assert!(lit_scalar.contains("'$payload': 'scalar_data'"));
+    assert!(lit_scalar.contains("title: 'another'"));
+    let stmt_scalar = format!("UPSERT INTO docs VALUES {};", lit_scalar);
+    let parsed_scalar = qql_core::parser::Parser::parse(&stmt_scalar).expect("must parse");
+    let qql_core::ast::Stmt::Upsert(u) = parsed_scalar else {
+        panic!()
+    };
+    let qql_core::ast::PointEntry::Inline(p) = &u.points[0] else {
+        panic!()
+    };
+    assert_eq!(p.payload.len(), 2);
+    assert!(p.payload.iter().any(|(k, _)| k == "$payload"));
+    assert!(p.payload.iter().any(|(k, _)| k == "title"));
 }
 
 #[test]

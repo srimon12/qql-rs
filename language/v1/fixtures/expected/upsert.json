@@ -746,6 +746,64 @@
         "shard_key": null,
         "wait": false
       }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "id",
+                {
+                  "Str": "legacy_1"
+                }
+              ],
+              [
+                "vector",
+                {
+                  "Str": "custom_v1"
+                }
+              ],
+              [
+                "category",
+                {
+                  "Str": "books"
+                }
+              ]
+            ],
+            "vectors": {
+              "Unnamed": {
+                "Dense": [
+                  0.1,
+                  0.2
+                ]
+              }
+            }
+          },
+          {
+            "id": {
+              "Number": 2
+            },
+            "payload": [
+              [
+                "title",
+                {
+                  "Str": "flat sugar still works"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null,
+        "wait": null
+      }
     }
   ]
 }

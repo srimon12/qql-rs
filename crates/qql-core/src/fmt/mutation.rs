@@ -4,7 +4,7 @@ use crate::ast::{
     ClearPayloadStmt, CountStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, EmbedDirective,
     EmbedKind, EmbeddingSpec, FacetStmt, OrderDirection, PointEntry, PointSelector, PointVectors,
     QueryCollection, ScrollStmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
-    UpsertUpdateMode, escape_string,
+    UpsertUpdateMode, escape_string, payload_has_envelope_collision,
 };
 use crate::fmt::expr::{
     render_name, render_payload_selector, render_placeholder, render_point_id, render_value,
@@ -335,14 +335,31 @@ pub(crate) fn render_point_entry(entry: &PointEntry) -> String {
 }
 
 pub(crate) fn render_point(point: &UpsertPoint) -> String {
-    let mut parts = vec![format!("id: {}", render_point_id(&point.id))];
-    if let Some(vectors) = &point.vectors {
-        parts.push(format!("vector: {}", render_point_vectors(vectors)));
+    if payload_has_envelope_collision(&point.payload) {
+        let mut envelope_parts = vec![format!("id: {}", render_point_id(&point.id))];
+        if let Some(vectors) = &point.vectors {
+            envelope_parts.push(format!("vector: {}", render_point_vectors(vectors)));
+        }
+        let payload_parts: Vec<String> = point
+            .payload
+            .iter()
+            .map(|(key, value)| format!("{}: {}", render_name(key), render_value(value)))
+            .collect();
+        format!(
+            "{{{}}} WITH PAYLOAD {{{}}}",
+            envelope_parts.join(", "),
+            payload_parts.join(", ")
+        )
+    } else {
+        let mut parts = vec![format!("id: {}", render_point_id(&point.id))];
+        if let Some(vectors) = &point.vectors {
+            parts.push(format!("vector: {}", render_point_vectors(vectors)));
+        }
+        for (key, value) in &point.payload {
+            parts.push(format!("{}: {}", render_name(key), render_value(value)));
+        }
+        format!("{{{}}}", parts.join(", "))
     }
-    for (key, value) in &point.payload {
-        parts.push(format!("{}: {}", render_name(key), render_value(value)));
-    }
-    format!("{{{}}}", parts.join(", "))
 }
 
 pub(crate) fn render_point_vectors(vectors: &PointVectors) -> String {

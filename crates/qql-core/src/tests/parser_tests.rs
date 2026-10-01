@@ -1,6 +1,6 @@
 use crate::ast::{
-    ComparisonOp, EmbeddingSpec, FilterExpr, FormulaExpr, FusionMethod, QueryCollection, QueryExpr,
-    QueryInput, Stmt, Value,
+    ComparisonOp, EmbeddingSpec, FilterExpr, FormulaExpr, FusionMethod, PointEntry, PointId,
+    QueryCollection, QueryExpr, QueryInput, Stmt, Value,
 };
 use crate::parser::Parser;
 
@@ -1511,4 +1511,57 @@ fn formula_missing_operand_hints_shell_score_interpolation() {
         "expected shell interpolation hint, got: {}",
         err.message
     );
+}
+
+#[test]
+fn upsert_point_with_payload_suffix_parses_and_formats() {
+    let source = "UPSERT INTO docs VALUES { id: 1, vector: [0.1, 0.2] } WITH PAYLOAD { id: 'legacy', vector: 'custom', title: 'hello' };";
+    let stmt = Parser::parse(source).unwrap();
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!("expected Inline point");
+    };
+    assert_eq!(point.id, PointId::Number(1));
+    assert!(point.vectors.is_some());
+    assert_eq!(point.payload.len(), 3);
+    assert_eq!(point.payload[0].0, "id");
+    assert_eq!(point.payload[1].0, "vector");
+    assert_eq!(point.payload[2].0, "title");
+
+    // Formatter idempotence test
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("WITH PAYLOAD"));
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn upsert_point_flat_payload_remains_backward_compatible() {
+    let source = "UPSERT INTO docs VALUES { id: 1, payload: { a: 1 } };";
+    let stmt = Parser::parse(source).unwrap();
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let PointEntry::Inline(point) = &upsert.points[0] else {
+        panic!("expected Inline point");
+    };
+    assert_eq!(point.id, PointId::Number(1));
+    assert_eq!(point.payload.len(), 1);
+    assert_eq!(point.payload[0].0, "payload");
+
+    // Formats flat without WITH PAYLOAD
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(!formatted.contains("WITH PAYLOAD"));
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(crate::fmt::format_stmt(&reparsed), formatted);
+}
+
+#[test]
+fn upsert_point_duplicate_key_between_envelope_and_suffix_is_rejected() {
+    let source =
+        "UPSERT INTO docs VALUES { id: 1, title: 'hello' } WITH PAYLOAD { TITLE: 'world' };";
+    let err = Parser::parse(source).unwrap_err();
+    assert_eq!(err.code, "QQL-PARSE-DUPLICATE-KEY");
 }

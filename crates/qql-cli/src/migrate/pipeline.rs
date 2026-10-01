@@ -26,8 +26,8 @@ pub(crate) struct IngestBatch {
 
 struct WindowPage {
     next_after: Option<PlanPointId>,
-    /// Upsert records converted from the raw scroll page. Points whose payload
-    /// contains an `id`/`vector` key are dropped here (counted in `skipped`).
+    /// Upsert records converted from the raw scroll page. Points with colliding
+    /// payload keys are preserved under `$payload`; only points missing an id are dropped.
     records: Vec<serde_json::Value>,
     skipped: usize,
 }
@@ -278,7 +278,15 @@ fn shard_key_from_payload(
 ) -> Result<ShardKey, Box<dyn Error>> {
     let err_msg =
         || format!("payload field '{field}' must be a non-empty string or non-negative integer");
-    match rec.get(field) {
+    let val = if let Some(meta) = rec.get(qql_core::ast::PAYLOAD_BIND_KEY) {
+        meta.get(field)
+    } else if qql_core::ast::is_point_envelope_key(field) {
+        // Flat records have no collision, so they do not contain payload keys 'id' or 'vector'
+        None
+    } else {
+        rec.get(field)
+    };
+    match val {
         Some(serde_json::Value::String(s)) if !s.is_empty() => Ok(ShardKey::Keyword(s.clone())),
         Some(serde_json::Value::Number(n)) => {
             if let Some(u) = n.as_u64() {
