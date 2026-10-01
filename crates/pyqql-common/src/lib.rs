@@ -174,7 +174,18 @@ pub(crate) fn serialize_error(error: impl std::fmt::Display) -> PyErr {
 //  Shared Tokio runtime
 // ═══════════════════════════════════════════════════════════════════
 
-static SHARED_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+/// The shared runtime plus the PID that created it.
+struct SharedRuntimeCell {
+    /// `std::process::id()` captured when `runtime` was built.
+    pid: u32,
+    /// The leaked runtime. Leaked so callers can hold `&'static Runtime`
+    /// across the process lifetime and so a forked child can abandon (never
+    /// drop) the runtime it inherited.
+    runtime: &'static tokio::runtime::Runtime,
+}
+
+/// Process-wide runtime slot, replaced after `fork` (see [`shared_runtime`]).
+static SHARED_RUNTIME: std::sync::Mutex<Option<SharedRuntimeCell>> = std::sync::Mutex::new(None);
 
 /// Process-wide Tokio runtime shared by every Python client.
 ///
@@ -182,20 +193,50 @@ static SHARED_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync:
 /// transports, blocking `execute`, and `execute_async` on the same runtime:
 /// a transport built with this runtime entered can never outlive it, and a
 /// future spawned here is guaranteed a live executor for the whole request.
-/// The runtime lives until process exit.
+///
+/// # Fork safety
+///
+/// A `multiprocessing` / Gunicorn / Celery forked child inherits the runtime
+/// *struct* but none of its worker threads; tokio documents that a forked
+/// runtime must not be reused. The accessor therefore compares
+/// `std::process::id()` with the PID captured at creation and, in a forked
+/// child, builds a fresh runtime for that child. The inherited runtime is
+/// leaked rather than dropped: its worker threads do not exist in the child,
+/// so shutting it down would block or abort. Each generation's runtime lives
+/// until process exit, exactly like the original one.
 pub fn shared_runtime() -> PyResult<&'static tokio::runtime::Runtime> {
-    if let Some(runtime) = SHARED_RUNTIME.get() {
-        return Ok(runtime);
-    }
-    let runtime = tokio::runtime::Runtime::new().map_err(|error| {
+    runtime_for_pid(
+        std::process::id(),
+        &SHARED_RUNTIME,
+        tokio::runtime::Runtime::new,
+    )
+    .map_err(|error| {
         PyRuntimeError::new_err(format!("cannot start the QQL Tokio runtime: {error}"))
-    })?;
-    // A concurrent caller may win the race; the loser drops its runtime and
-    // uses the winner (both are equivalent).
-    let _ = SHARED_RUNTIME.set(runtime);
-    SHARED_RUNTIME
-        .get()
-        .ok_or_else(|| PyRuntimeError::new_err("cannot start the QQL Tokio runtime"))
+    })
+}
+
+/// PID-aware core behind [`shared_runtime`], unit-testable without forking:
+/// reuse the stored runtime only when it was created by `pid`, otherwise
+/// build (and leak) a replacement and store it.
+fn runtime_for_pid(
+    pid: u32,
+    cell: &std::sync::Mutex<Option<SharedRuntimeCell>>,
+    create: impl FnOnce() -> std::io::Result<tokio::runtime::Runtime>,
+) -> std::io::Result<&'static tokio::runtime::Runtime> {
+    // A poisoned lock cannot leave a half-initialized cell behind (the only
+    // mutation is replacing the whole option), so recover instead of panicking
+    // during interpreter shutdown.
+    let mut guard = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = guard.as_ref()
+        && existing.pid == pid
+    {
+        return Ok(existing.runtime);
+    }
+    // New process (or first call): the stored runtime belongs to a different
+    // PID and must be abandoned, not dropped.
+    let runtime: &'static tokio::runtime::Runtime = Box::leak(Box::new(create()?));
+    *guard = Some(SharedRuntimeCell { pid, runtime });
+    Ok(runtime)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -852,5 +893,43 @@ pub fn bind<'py>(
         Err(pyo3::exceptions::PyTypeError::new_err(
             "query must be a str or Stmt",
         ))
+    }
+}
+
+#[cfg(test)]
+mod shared_runtime_tests {
+    use super::runtime_for_pid;
+    use std::sync::Mutex;
+
+    /// Cheap stand-in for the multi-thread runtime: the PID logic is
+    /// runtime-agnostic and this keeps the tests fast.
+    fn build_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+        tokio::runtime::Builder::new_current_thread().build()
+    }
+
+    #[test]
+    fn same_pid_reuses_the_stored_runtime() {
+        let cell = Mutex::new(None);
+        let first = runtime_for_pid(1, &cell, build_runtime).expect("first runtime");
+        let second =
+            runtime_for_pid(1, &cell, || panic!("same PID must not rebuild")).expect("reuse");
+        assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn changed_pid_replaces_the_runtime_without_dropping_the_inherited_one() {
+        // The "child" PID is arbitrary — no fork is needed to exercise the
+        // swap. The parent runtime is abandoned (leaked), never dropped.
+        let cell = Mutex::new(None);
+        let parent = runtime_for_pid(7, &cell, build_runtime).expect("parent runtime");
+        let child = runtime_for_pid(8, &cell, build_runtime).expect("child runtime");
+        assert!(
+            !std::ptr::eq(parent, child),
+            "a different PID gets a fresh runtime"
+        );
+        let again =
+            runtime_for_pid(8, &cell, || panic!("child PID must not rebuild")).expect("reuse");
+        assert!(std::ptr::eq(child, again));
+        assert_eq!(cell.lock().unwrap().as_ref().unwrap().pid, 8);
     }
 }

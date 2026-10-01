@@ -357,12 +357,15 @@ fn oversized_match_error(value: &Value) -> QqlError {
 ///
 /// OpenAPI `AnyVariants` is `string[] (uniqueItems) | int64[] (uniqueItems)`;
 /// the gRPC/edge `Match` carries the same homogeneous string-or-int64 pair.
-/// Floats, bools, nulls, mixed kinds, oversized `u64`, and duplicate entries
-/// produce a stable plan error (`QQL-PLAN-MATCH-TYPE`) instead of a
-/// schema-invalid body some transports reject and others reinterpret.
+/// Floats, bools, nulls, mixed kinds, and oversized `u64` produce a stable
+/// plan error (`QQL-PLAN-MATCH-TYPE`) instead of a schema-invalid body some
+/// transports reject and others reinterpret. Duplicate entries are valid SQL
+/// (`x IN ('a', 'b', 'a')`), so they are deduped order-preservingly: the wire
+/// list keeps the first occurrence of each value and satisfies `uniqueItems`.
 fn lower_match_list(field: &str, values: &[Value], except: bool) -> Result<FilterClause, QqlError> {
     let mut kind: Option<MatchListKind> = None;
     let mut seen = alloc::collections::BTreeSet::new();
+    let mut lowered: Vec<Value> = Vec::with_capacity(values.len());
     for (index, value) in values.iter().enumerate() {
         let (entry_kind, key) = match_list_entry(value)?;
         match kind {
@@ -381,18 +384,10 @@ fn lower_match_list(field: &str, values: &[Value], except: bool) -> Result<Filte
             }
             Some(_) => {}
         }
-        if !seen.insert(key) {
-            return Err(QqlError::validation(
-                "QQL-PLAN-MATCH-TYPE",
-                format!(
-                    "match list contains duplicate value {}: wire match lists are sets (uniqueItems)",
-                    crate::value_serde::value_error_text(value)
-                ),
-                value.param_span(),
-            ));
+        if seen.insert(key) {
+            lowered.push(value.clone());
         }
     }
-    let lowered: Vec<_> = values.to_vec();
     Ok(field_condition(field, |fc| {
         fc.r#match = Some(if except {
             MatchValue::Except { except: lowered }
@@ -826,21 +821,49 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_match_lists_fail_closed() {
+    fn duplicate_match_lists_dedupe_in_order() {
+        // SQL allows `x IN ('a', 'b', 'a')`; the wire list is a set
+        // (`uniqueItems`), so duplicates collapse to the first occurrence
+        // without reordering the rest.
         let f = FilterExpr::MatchAny {
             field: "code".into(),
-            values: vec![Value::Int(1), Value::Int(1)],
+            values: vec![
+                Value::Int(2),
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+                Value::Int(1),
+            ],
         };
-        let err = lower_filter(&f).unwrap_err();
-        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE");
-        assert!(err.message.contains("duplicate"), "{err:?}");
+        assert_json(
+            &lower_filter(&f).unwrap(),
+            json!({"key": "code", "match": {"any": [2, 1, 3]}}),
+        );
 
-        // `Int(1)` and a small `UInt(1)` are the same wire integer.
+        // `Int(1)` and a small `UInt(1)` are the same wire integer: the first
+        // spelling wins, the duplicate is dropped.
         let f = FilterExpr::In {
             field: "code".into(),
             values: vec![Value::Int(1), Value::UInt(1)],
         };
-        assert_eq!(lower_filter(&f).unwrap_err().code, "QQL-PLAN-MATCH-TYPE");
+        assert_json(
+            &lower_filter(&f).unwrap(),
+            json!({"key": "code", "match": {"any": [1]}}),
+        );
+
+        // `MATCH EXCEPT` dedupes through the same path.
+        let f = FilterExpr::MatchExcept {
+            field: "tag".into(),
+            values: vec![
+                Value::Str("old".into()),
+                Value::Str("stale".into()),
+                Value::Str("old".into()),
+            ],
+        };
+        assert_json(
+            &lower_filter(&f).unwrap(),
+            json!({"key": "tag", "match": {"except": ["old", "stale"]}}),
+        );
     }
 
     #[test]

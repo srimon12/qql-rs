@@ -1,7 +1,7 @@
-//! Shared response surface, re-exported from [`qql_plan::surface::response`].
+//! Shared response surface, re-exported from [`qql_protocol::response`].
 //!
 //! The closed `ExecData` family, score normalization, and response envelopes
-//! live in `qql-plan::surface` so the runtime and WASM hosts share one shape.
+//! live in `qql-protocol` so the runtime and WASM hosts share one shape.
 //! This module keeps the historical `crate::executor::*` paths stable.
 
-pub use qql_plan::surface::response::*;
+pub use qql_protocol::response::*;

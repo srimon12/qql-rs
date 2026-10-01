@@ -10,22 +10,22 @@
 //! ([`ServerTelemetry::from_envelope_opt`]): absent or misshapen telemetry
 //! degrades to `None` and never fails a successful response.
 //!
-//! [`ServerTelemetry::from_envelope_opt`]: crate::surface::telemetry::ServerTelemetry::from_envelope_opt
+//! [`ServerTelemetry::from_envelope_opt`]: crate::telemetry::ServerTelemetry::from_envelope_opt
 
 use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::{
+use qql_core::error::QqlError;
+use qql_plan::{
     PlanFacetValue, PlanGroupId, PlanPointId, PlanShardKey, PlanVectorStruct, PlannedOperation,
 };
-use qql_core::error::QqlError;
 
-use crate::surface::response::{
+use crate::response::{
     BackendResponse, ExecData, FacetHit, GroupedSearchResult, SearchHit, score_from_wire,
 };
-use crate::surface::schema::CollectionInfo;
-use crate::surface::telemetry::ServerTelemetry;
+use crate::schema::CollectionInfo;
+use crate::telemetry::ServerTelemetry;
 
 fn envelope_err(message: impl Into<String>) -> QqlError {
     QqlError::backend("QQL-BACKEND-ENVELOPE", message.into(), None)
@@ -289,7 +289,7 @@ pub fn parse_collection_info(envelope: Value) -> Result<CollectionInfo, QqlError
         // null both read as "not reported".
         indexed_vectors_count: result.get("indexed_vectors_count").and_then(Value::as_u64),
         segments_count,
-        schema: crate::surface::schema::schema_from_rest_result(&result),
+        schema: crate::schema::schema_from_rest_result(&result),
     })
 }
 
@@ -552,8 +552,8 @@ fn parse_shard_keys(envelope: Value) -> Result<Vec<PlanShardKey>, QqlError> {
     }
 }
 
-/// Parse `GET /quotas` (`result.config` → [`QuotaConfig`](crate::QuotaConfig)).
-fn parse_quotas(envelope: Value) -> Result<crate::QuotaConfig, QqlError> {
+/// Parse `GET /quotas` (`result.config` → [`QuotaConfig`](qql_plan::QuotaConfig)).
+fn parse_quotas(envelope: Value) -> Result<qql_plan::QuotaConfig, QqlError> {
     let mut envelope = match envelope {
         Value::Object(map) => map,
         _ => return Err(envelope_err("get quotas response is missing result.config")),
@@ -575,7 +575,7 @@ mod tests {
     use serde_json::json;
 
     fn planned(sql: &str) -> PlannedOperation {
-        crate::plan::plan(&qql_core::parser::Parser::parse(sql).expect("parse")).expect("plan")
+        qql_plan::plan::plan(&qql_core::parser::Parser::parse(sql).expect("parse")).expect("plan")
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(hits[0].score, 0.75);
         assert_eq!(
             hits[0].vector,
-            Some(PlanVectorStruct::Single(crate::PlanVectorValue::Dense(
+            Some(PlanVectorStruct::Single(qql_plan::PlanVectorValue::Dense(
                 vec![0.5, 0.25]
             )))
         );

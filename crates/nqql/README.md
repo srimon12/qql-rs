@@ -52,6 +52,13 @@ await client.execute(stmt);
 console.log(version, isValid("SHOW COLLECTIONS"), compile("SHOW COLLECTIONS"));
 ```
 
+## Exact integers by design
+
+JS `Number` holds integers exactly up to `2^53 - 1`. Pass larger values
+(epoch-nanosecond payloads, snowflake point IDs) as `BigInt`; by design `nqql`
+fails closed instead of rounding them, and results map values above the safe
+range back to `BigInt`.
+
 ## API summary
 
 | Export | Role |

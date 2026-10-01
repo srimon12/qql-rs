@@ -1,0 +1,26 @@
+[package]
+name = "qql-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Qdrant REST protocol surface for QQL: closed result IR, strict OpenAPI response parsing, schema and telemetry"
+documentation = "https://docs.rs/qql-protocol"
+readme = "README.md"
+keywords = ["qql", "qdrant", "rest", "openapi", "protocol"]
+categories = ["database"]
+
+[features]
+default = []
+
+[dependencies]
+qql-core = { workspace = true, features = ["serde", "json"] }
+qql-plan = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

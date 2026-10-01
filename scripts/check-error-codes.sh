@@ -19,6 +19,7 @@ REF="$ROOT/website/src/content/docs/docs/reference/error-codes.mdoc"
 SCAN_ROOTS=(
   crates/qql-core/src
   crates/qql-plan/src
+  crates/qql-protocol/src
   crates/qql-edge/src
   crates/qql-embed/src
   crates/qql-runtime/src

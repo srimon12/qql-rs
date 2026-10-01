@@ -21,6 +21,7 @@ rest = ["dep:reqwest", "tokio/rt", "tokio/fs", "tokio/io-util"]
 [dependencies]
 qql-core = { workspace = true, features = ["serde", "json"] }
 qql-plan = { workspace = true }
+qql-protocol = { workspace = true }
 qql-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

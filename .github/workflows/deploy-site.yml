@@ -11,6 +11,7 @@ on:
       - "language/v1/fixtures/**"
       - "crates/qql-core/**"
       - "crates/qql-plan/**"
+      - "crates/qql-protocol/**"
       - "crates/qql-embed/**"
       - "crates/qql-wasm/**"
       - "Cargo.toml"

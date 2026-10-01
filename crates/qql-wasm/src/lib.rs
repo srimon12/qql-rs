@@ -10,7 +10,7 @@
 //! `report` is pure JSON shaping with no transport or `wasm-bindgen`
 //! dependency, so it also compiles on the host for unit coverage. Response
 //! parsing, schema reading, telemetry, and normalization come from
-//! [`qql_plan::surface`], shared with the native runtime.
+//! [`qql_protocol`], shared with the native runtime.
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 mod analyze;

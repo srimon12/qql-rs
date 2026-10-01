@@ -78,6 +78,7 @@ jobs:
           # workspace lockfile; the publish job verifies each crate after its
           # dependencies have propagated through the registry.
           cargo package --locked --no-verify --exclude-lockfile -p qql-plan
+          cargo package --locked --no-verify --exclude-lockfile -p qql-protocol
           cargo package --locked --no-verify --exclude-lockfile -p qql-embed
           cargo package --locked --no-verify --exclude-lockfile -p qql-convert
           cargo package --locked --no-verify --exclude-lockfile -p qql
@@ -525,6 +526,7 @@ jobs:
 
           publish_crate qql-core
           publish_crate qql-plan
+          publish_crate qql-protocol
           publish_crate qql-embed
           publish_crate qql-convert
           publish_crate qql

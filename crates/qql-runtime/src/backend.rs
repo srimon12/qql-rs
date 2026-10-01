@@ -1,9 +1,9 @@
 //! Transport-neutral collection metadata, re-exported from
-//! [`qql_plan::surface::schema`].
+//! [`qql_protocol::schema`].
 //!
 //! Types in this module are the boundary between QQL compilation and a Qdrant
-//! transport adapter. They live in `qql-plan::surface` so the runtime, the
-//! WASM host, and the CLI share one schema reader. Query hits live on
+//! transport adapter. They live in `qql-protocol` so the runtime, the WASM
+//! host, and the CLI share one schema reader. Query hits live on
 //! [`crate::executor::SearchHit`].
 //!
 //! # Deliberate JSON
@@ -19,7 +19,7 @@
 //! - Formula `DEFAULTS`: the expression engine takes JSON values directly
 //!   (`qql-edge`'s formula lowering converts the typed plan tree at the
 //!   boundary).
-//! - REST request/response bodies (`qql_plan::Route`, `crate::surface::rest`):
+//! - REST request/response bodies (`qql_plan::Route`, `qql_protocol::rest`):
 //!   the wire format itself.
 
-pub use qql_plan::surface::schema::*;
+pub use qql_protocol::schema::*;

@@ -7,9 +7,9 @@
 
 use qql_core::error::QqlError;
 
-use crate::PlannedOperation;
+use qql_plan::PlannedOperation;
 
-use crate::surface::response::{BackendResponse, ExecData, ExecResponse, GroupedSearchResult};
+use crate::response::{BackendResponse, ExecData, ExecResponse, GroupedSearchResult};
 
 /// Trim a grouped result set by the client-side `group_offset` (which has no
 /// wire representation) exactly once.
@@ -141,17 +141,17 @@ pub fn normalize_query_item(mut response: BackendResponse) -> Result<ExecRespons
 
 /// Normalize one mutation-batch member response from its owned wire operation.
 ///
-/// [`crate::mutation_types::UpdateOperation::operation_name`] matches [`PlannedOperation::operation_label`]
+/// [`qql_plan::types::UpdateOperation::operation_name`] matches [`PlannedOperation::operation_label`]
 /// for every mutation variant, and the upsert point count rides on the wire
 /// `UpsertRequest` — so this reproduces [`normalize_planned`] exactly without
 /// borrowing the original operation vector.
 pub fn normalize_update_item(
-    op: &crate::mutation_types::UpdateOperation,
+    op: &qql_plan::types::UpdateOperation,
     mut response: BackendResponse,
 ) -> Result<ExecResponse, QqlError> {
     let telemetry = response.telemetry.take();
     let (message, data) = match op {
-        crate::mutation_types::UpdateOperation::Upsert { upsert } => {
+        qql_plan::types::UpdateOperation::Upsert { upsert } => {
             let n = upsert.points.len();
             (
                 format!("Upserted {n} point(s)"),
@@ -177,9 +177,9 @@ pub fn normalize_update_item(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::surface::response::{BackendResponse, ExecData, SearchHit};
-    use crate::surface::telemetry::ServerTelemetry;
-    use crate::{PlanPointId, PlannedOperation};
+    use crate::response::{BackendResponse, ExecData, SearchHit};
+    use crate::telemetry::ServerTelemetry;
+    use qql_plan::{PlanPointId, PlannedOperation};
 
     fn hit(id: u64, score: f64) -> SearchHit {
         SearchHit {
@@ -192,7 +192,7 @@ mod tests {
     }
 
     fn planned(sql: &str) -> PlannedOperation {
-        crate::plan::plan(&qql_core::parser::Parser::parse(sql).expect("parse")).expect("plan")
+        qql_plan::plan::plan(&qql_core::parser::Parser::parse(sql).expect("parse")).expect("plan")
     }
 
     #[test]
@@ -237,7 +237,7 @@ mod tests {
 
         for sql in cases {
             let op = planned(sql);
-            let (_, wire_op) = crate::mutation::planned_to_update_operation(&op)
+            let (_, wire_op) = qql_plan::mutation::planned_to_update_operation(&op)
                 .unwrap_or_else(|| panic!("failed to convert {sql} to UpdateOperation"));
 
             let resp = BackendResponse {
@@ -261,7 +261,7 @@ mod tests {
                                     {id: 2, vector: [0.3, 0.4]}, \
                                     {id: 3, vector: [0.5, 0.6]};",
         );
-        let (_, wire_op) = crate::mutation::planned_to_update_operation(&op).unwrap();
+        let (_, wire_op) = qql_plan::mutation::planned_to_update_operation(&op).unwrap();
         let resp = BackendResponse {
             data: ExecData::Mutation { affected: None },
             telemetry: None,
@@ -285,11 +285,11 @@ mod tests {
         );
         let groups = vec![
             GroupedSearchResult {
-                group_id: crate::PlanGroupId::Unsigned(1),
+                group_id: qql_plan::PlanGroupId::Unsigned(1),
                 hits: vec![hit(1, 0.9)],
             },
             GroupedSearchResult {
-                group_id: crate::PlanGroupId::Unsigned(2),
+                group_id: qql_plan::PlanGroupId::Unsigned(2),
                 hits: vec![hit(2, 0.8)],
             },
         ];
