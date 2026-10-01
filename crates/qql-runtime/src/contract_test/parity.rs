@@ -119,6 +119,10 @@ fn rest_grpc_query_parity_timeout_consistency_shard_multi() {
     }
 }
 
+/// REST `"payload": {}` survives as `Some({})`; the gRPC empty proto map must
+/// read the same, not `None`. Needs both transports (REST-only strict parser
+/// plus the gRPC converter).
+#[cfg(feature = "rest")]
 #[test]
 fn rest_grpc_empty_payload_parity() {
     use std::collections::HashMap;

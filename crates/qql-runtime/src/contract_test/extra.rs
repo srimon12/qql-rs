@@ -105,7 +105,7 @@ fn facet_contract_matches_openapi_and_grpc() {
 }
 
 #[test]
-fn batch_item_fixtures_match_openapi_and_parser_policy() {
+fn batch_item_fixtures_match_openapi() {
     use serde_json::json;
 
     let Some(openapi) = openapi_or_skip() else {
@@ -122,6 +122,22 @@ fn batch_item_fixtures_match_openapi_and_parser_policy() {
         validate_ref(&openapi, "UpdateResult", &item);
     }
 
+    // Query batch items validate against `QueryResponse`; `points` is required.
+    for item in [
+        json!({"points": []}),
+        json!({"points": [{"id": 1, "score": 0.5, "version": 3}]}),
+    ] {
+        validate_ref(&openapi, "QueryResponse", &item);
+    }
+}
+
+/// The REST parser accepts exactly those fixtures' statuses and fails closed
+/// on everything else (REST-only: the strict parser lives behind `rest`).
+#[cfg(feature = "rest")]
+#[test]
+fn batch_update_item_parser_policy() {
+    use serde_json::json;
+
     let parsed = crate::rest_response::parse_update_batch(json!([
         {"status": "acknowledged", "operation_id": 1},
         {"status": "completed"},
@@ -136,12 +152,4 @@ fn batch_item_fixtures_match_openapi_and_parser_policy() {
     let err = crate::rest_response::parse_update_batch(json!([{"status": "error", "error": "x"}]))
         .expect_err("schema-orphaned error items fail closed");
     assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
-
-    // Query batch items validate against `QueryResponse`; `points` is required.
-    for item in [
-        json!({"points": []}),
-        json!({"points": [{"id": 1, "score": 0.5, "version": 3}]}),
-    ] {
-        validate_ref(&openapi, "QueryResponse", &item);
-    }
 }
