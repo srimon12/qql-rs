@@ -198,6 +198,39 @@ fn point_without_id_is_skipped() {
 }
 
 #[test]
+fn payload_keys_colliding_with_id_or_vector_are_skipped() {
+    // Payload `id`/`vector` keys cannot be represented next to the
+    // point-object slots; merging them would rewrite the point id or drop the
+    // stored vector, so the point is skipped (counted by dump/migrate).
+    for payload in [
+        json!({ "id": "external-id" }),
+        json!({ "ID": "external-id" }),
+        json!({ "vector": [0.9] }),
+        json!({ "Vector": { "dense": [0.9] } }),
+    ] {
+        let point = json!({
+            "id": 42,
+            "payload": payload,
+            "vector": [0.1, 0.2],
+        });
+        assert!(
+            point_to_upsert_object(&point).is_none(),
+            "payload collision must skip the point: {point}"
+        );
+    }
+    // Non-colliding case-insensitive names still export.
+    let point = json!({
+        "id": 42,
+        "payload": { "id_field": 1, "vectors": 2 },
+        "vector": [0.1],
+    });
+    let rec = point_to_upsert_object(&point).expect("no collision");
+    assert_eq!(rec["id_field"], 1);
+    assert_eq!(rec["vectors"], 2);
+    assert_eq!(rec["vector"], json!([0.1]));
+}
+
+#[test]
 fn format_point_literal_matches_upsert_grammar() {
     let rec = json!({
         "id": 1,
@@ -356,14 +389,69 @@ fn drop_resumed_point_drops_only_the_cursor() {
     assert!(drop_resumed_point(Vec::new(), Some(&PlanPointId::Number(7))).is_empty());
 }
 
+#[tokio::test]
+async fn scroll_pages_batch_size_one_streams_every_point() {
+    use super::scroll_fake::FakeScrollOps;
+
+    let points = vec![
+        json!({"id": 1, "payload": {"n": "a"}}),
+        json!({"id": 2, "payload": {"n": "b"}}),
+        json!({"id": 3, "payload": {"n": "c"}}),
+    ];
+    let ops = FakeScrollOps::new(points);
+    let mut pages = ScrollPages::new(&ops, "docs", 1);
+    let mut seen = Vec::new();
+    while let Some(page) = pages.next().await.expect("scroll") {
+        for point in page {
+            seen.push(point["id"].as_u64().expect("numeric id"));
+        }
+    }
+    assert_eq!(seen, [1, 2, 3], "batch_size=1 must not truncate the stream");
+    // Every fetch probes one point past the batch size.
+    assert!(
+        ops.limits.lock().expect("limits").iter().all(|limit| *limit == 2),
+        "scroll must probe batch_size + 1"
+    );
+}
+
+#[tokio::test]
+async fn scroll_pages_batch_size_one_with_exactly_two_points() {
+    use super::scroll_fake::FakeScrollOps;
+
+    let points = vec![
+        json!({"id": 10, "payload": {"n": "a"}}),
+        json!({"id": 11, "payload": {"n": "b"}}),
+    ];
+    let ops = FakeScrollOps::new(points);
+    let mut pages = ScrollPages::new(&ops, "docs", 1);
+    let mut seen = Vec::new();
+    while let Some(page) = pages.next().await.expect("scroll") {
+        for point in page {
+            seen.push(point["id"].as_u64().expect("numeric id"));
+        }
+    }
+    assert_eq!(seen, [10, 11]);
+}
+
 #[test]
 fn dumped_script_splits_cleanly() {
     let create = "CREATE COLLECTION docs (dense VECTOR(4, COSINE));";
     let index = "CREATE INDEX ON COLLECTION docs FOR title TYPE text;";
     let upsert = "UPSERT INTO docs VALUES\n  {id: 1, vector: [0.1, 0.2, 0.3, 0.4], title: 'x'};";
-    let script = format!("{}\n\n{}\n\n{}\n", create, index, upsert);
+    // Every statement starter a user may append to validate the dump.
+    let count = "COUNT FROM docs;";
+    let facet = "FACET title FROM docs LIMIT 5;";
+    let clear = "CLEAR PAYLOAD FROM docs WHERE title = 'x';";
+    let quota = "SET QUOTA (enabled = true);";
+    let batch = "BATCH { QUERY [0.1, 0.2, 0.3, 0.4] FROM docs LIMIT 1; };";
+    let script = format!(
+        "{create}\n\n{index}\n\n{upsert}\n\n{count}\n\n{facet}\n\n{clear}\n\n{quota}\n\n{batch}\n"
+    );
     let stmts = crate::script::split_statements(&script).expect("split");
-    assert_eq!(stmts.len(), 3);
+    assert_eq!(stmts.len(), 8);
+    for stmt in &stmts {
+        qql_core::parser::Parser::parse(stmt).expect("each split statement must re-parse");
+    }
 }
 
 #[test]
