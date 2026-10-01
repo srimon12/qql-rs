@@ -46,3 +46,6 @@ unicode-width = "0.2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+async-trait = { workspace = true }

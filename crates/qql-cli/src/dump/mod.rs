@@ -16,6 +16,8 @@ mod indexes;
 mod point;
 mod quant;
 mod schema;
+#[cfg(test)]
+pub(crate) mod scroll_fake;
 
 use std::error::Error;
 use std::fs::{self, File};
@@ -312,16 +314,22 @@ impl<'a> ScrollPages<'a> {
     }
 
     /// Next page, or `None` when the stream is exhausted.
+    ///
+    /// Fetches `batch_size + 1` points: the inclusive-offset repeat can
+    /// consume a whole page at `batch_size == 1`, so the stream only ends on a
+    /// page shorter than the probe (or an empty page after dropping the
+    /// repeat), never because a repeat-only page came back full.
     pub(crate) async fn next(&mut self) -> Result<Option<Vec<serde_json::Value>>, Box<dyn Error>> {
         if self.done {
             return Ok(None);
         }
+        let probe_limit = u64::from(self.batch_size) + 1;
         let op = PlannedOperation::Scroll {
             collection: self.collection.clone(),
             request: ScrollRequest {
                 filter: self.filter.clone(),
                 offset: self.after.clone(),
-                limit: Some(self.batch_size as u64),
+                limit: Some(probe_limit),
                 with_payload: Some(self.with_payload.clone()),
                 with_vector: Some(self.with_vector.clone()),
                 order_by: None,
@@ -330,6 +338,8 @@ impl<'a> ScrollPages<'a> {
         };
         let response = self.ops.execute_planned(&op).await?;
         let (points, next) = extract_scroll_page(&response);
+        // A full probe page (or a server cursor) proves more points follow.
+        let saw_more = next.is_some() || points.len() as u64 > u64::from(self.batch_size);
         let mut points = points;
         if self.fell_back {
             points = drop_resumed_point(points, self.after.as_ref());
@@ -340,6 +350,9 @@ impl<'a> ScrollPages<'a> {
         }
         self.fell_back = next.is_none();
         self.after = next_scroll_cursor(next, &points);
+        if !saw_more {
+            self.done = true;
+        }
         Ok(Some(points))
     }
 }

@@ -4489,6 +4489,7 @@ dependencies = [
 name = "qql-cli"
 version = "0.4.2"
 dependencies = [
+ "async-trait",
  "axum",
  "clap",
  "mimalloc",
