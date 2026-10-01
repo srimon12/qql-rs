@@ -594,7 +594,7 @@ mod tests {
         let s = Parser::parse("QUERY POINTS (1, 2) FROM docs;").unwrap();
         let compiled = compile_statement(&s).unwrap();
         let json = compiled.to_route_json();
-        assert_eq!(json["stmt_type"], "query_points");
+        assert_eq!(json["stmt_type"], "points");
         assert_eq!(json["method"], "POST");
         assert_eq!(json["path"], "/collections/docs/points");
         assert_eq!(json["payload"]["ids"], serde_json::json!([1, 2]));
@@ -946,7 +946,7 @@ mod tests {
                 "/collections/docs/points/delete",
             ),
             (
-                "UPDATE docs SET VECTOR = [0.1] WHERE id = 'x';",
+                "UPDATE docs SET VECTOR = [0.1] WHERE id = '550e8400-e29b-41d4-a716-446655440000';",
                 Method::Put,
                 "/collections/docs/points/vectors",
             ),
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn points_lookup_full() {
         let s = Parser::parse(
-            "QUERY POINTS (42, 'uuid-v4') FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR ('dense');",
+            "QUERY POINTS (42, '550e8400-e29b-41d4-a716-446655440000') FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR ('dense');",
         )
         .unwrap();
         let r = try_route(&s).unwrap();
@@ -1104,13 +1104,13 @@ mod tests {
     }
 
     #[test]
-    fn scroll_with_vector_after_string_id() {
+    fn scroll_rejects_non_uuid_after_cursor() {
+        // Opaque strings are not Qdrant point IDs; they used to ride through
+        // to the server and fail there with a transport-specific code.
         let s = Parser::parse("SCROLL FROM docs AFTER 'id-with-quote' WITH VECTOR true LIMIT 10;")
             .unwrap();
-        let r = try_route(&s).unwrap();
-        let json = r.body_json().unwrap();
-        assert_eq!(json["offset"], "id-with-quote");
-        assert_eq!(json["with_vector"], true);
+        let err = try_route(&s).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-POINT-ID");
     }
 
     #[test]

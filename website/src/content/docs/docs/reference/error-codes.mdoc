@@ -187,6 +187,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-MMR` | `MMR DIVERSITY` outside `[0, 1]` or `CANDIDATES` outside `1..=16384` |
 | `QQL-PLAN-NON-FINITE` | A dynamic value contains NaN/infinity, which JSON cannot represent (it would silently become `null`) |
 | `QQL-PLAN-PARAMS` | A hand-built `PARAMS` combination the parser rejects (`max_selectivity` without `acorn`) |
+| `QQL-PLAN-POINT-ID` | A string point ID is not a UUID; point IDs must be unsigned integers or UUIDs |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-PREFETCH-PARAMS` | A `PREFETCH` source carries request-level `timeout` / `consistency`, which prefetch stages cannot express |
@@ -617,6 +618,7 @@ QQL-PLAN-MIN-SHOULD
 QQL-PLAN-MMR
 QQL-PLAN-NON-FINITE
 QQL-PLAN-PARAMS
+QQL-PLAN-POINT-ID
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-PREFETCH-PARAMS

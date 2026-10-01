@@ -254,11 +254,9 @@ fn increment_uuid_point_id(s: &str) -> Option<String> {
 /// instead of emitting a request that silently re-scans or loops forever:
 /// - `u64::MAX` / UUID-max are already the last representable ID, so there
 ///   is no next page (`saturating_add` would echo the anchor back forever).
-///
-/// Opaque (non-UUID) strings pass through: they have no computable
-/// successor, so lowering resumes at the anchor unchanged (pinned by
-/// `scroll_with_vector_after_string_id`). Only integer and UUID cursors get
-/// exclusive advancement.
+/// - Opaque (non-UUID) strings are not representable Qdrant point IDs and are
+///   rejected by the plan-wide point-ID walk with `QQL-PLAN-POINT-ID`; they
+///   are left unchanged here so the walk reports them once, uniformly.
 ///
 /// Placeholders (`:name` / `?N`) pass through: they are gated earlier by
 /// `ensure_no_unbound_params` (or bound before planning), so there is no
@@ -283,8 +281,8 @@ pub fn validate_scroll_after(after: Option<&qql_core::ast::PointId>) -> Result<(
                 "SCROLL AFTER is already the maximum UUID; there is no next page",
                 None,
             )),
-            // UUIDs advance to their successor; opaque strings have no
-            // successor and lower unchanged (see `lower_scroll_request`).
+            // UUIDs advance to their successor; non-UUID strings are rejected
+            // by the plan-wide point-ID walk after lowering.
             _ => Ok(()),
         },
         qql_core::ast::PointId::Param(..) | qql_core::ast::PointId::PositionalParam(..) => Ok(()),
@@ -295,8 +293,9 @@ pub fn validate_scroll_after(after: Option<&qql_core::ast::PointId>) -> Result<(
 /// plus optional payload selection and payload-key ordering.
 ///
 /// The `after` cursor lowers exclusively (`AFTER n` → `offset n + 1`,
-/// UUIDs to their successor); opaque strings pass through unchanged, and
-/// cursors with no next page (`u64::MAX` / UUID-max) are rejected here.
+/// UUIDs to their successor); cursors with no next page (`u64::MAX` /
+/// UUID-max) are rejected here, and non-UUID strings by the plan-wide
+/// point-ID walk.
 /// A `None` limit means an unbound `LIMIT :param` placeholder (or a hand-built
 /// statement): fail closed instead of planning the server's default page size.
 pub fn lower_scroll_request(

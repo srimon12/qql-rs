@@ -12,6 +12,7 @@ use crate::mutation::{
     lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
     lower_update_vector_request, lower_upsert_request,
 };
+use crate::point_id_validate::validate_planned_point_ids;
 use crate::query::{lower_query_groups_request_with_ctes, lower_query_request_with_ctes};
 use crate::rerank::plan_cross_rerank;
 use crate::types::*;
@@ -485,7 +486,9 @@ pub fn ensure_no_unbound_params(statement: &Stmt) -> Result<(), QqlError> {
 /// Fallible planner — the single source of truth for statement → operation.
 pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     ensure_no_unbound_params(statement)?;
-    lower_statement_to_planned(statement)
+    let op = lower_statement_to_planned(statement)?;
+    validate_planned_point_ids(&op)?;
+    Ok(op)
 }
 
 /// Fallible template planner for prepared statements.
@@ -495,7 +498,9 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
 /// (e.g. filters, pagination, point IDs) which cannot be bound at the IR layer.
 pub fn plan_template(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     qql_core::params::validate_no_unbound_scalar_params(statement)?;
-    lower_statement_to_planned(statement)
+    let op = lower_statement_to_planned(statement)?;
+    validate_planned_point_ids(&op)?;
+    Ok(op)
 }
 
 /// Lower a `QUERY` statement under an explicit CTE reference scope.

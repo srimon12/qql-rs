@@ -352,7 +352,7 @@ fn test_contract_all_query_variants_match_openapi_json() {
     validate_ref(&openapi, "ScrollRequest", &scroll_json);
 
     let points_stmt =
-        Parser::parse("QUERY POINTS (42, 'uuid-v4') FROM docs WITH PAYLOAD INCLUDE ('title');")
+        Parser::parse("QUERY POINTS (42, '550e8400-e29b-41d4-a716-446655440006') FROM docs WITH PAYLOAD INCLUDE ('title');")
             .unwrap();
     let points_json = try_route(&points_stmt).unwrap().body_json().unwrap();
     validate_ref(&openapi, "PointRequest", &points_json);

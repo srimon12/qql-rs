@@ -76,7 +76,7 @@ fn assert_parity(source: &str) {
 /// controls the runtime actually serializes.
 const QUERY_CORPUS: &[&str] = &[
     // 1. POINTS
-    "QUERY POINTS (1, 'pt-2') FROM docs SHARD 'acme' WITH PAYLOAD false WITH VECTOR (dense);",
+    "QUERY POINTS (1, '550e8400-e29b-41d4-a716-446655440010') FROM docs SHARD 'acme' WITH PAYLOAD false WITH VECTOR (dense);",
     // 2. NEAREST
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE k = 1 LIMIT 5 OFFSET 2;",
     "QUERY VECTOR [0.1, 0.2] FROM docs USING dense SCORE THRESHOLD 0.5 LIMIT 5;",
@@ -142,7 +142,7 @@ const QUERY_CORPUS: &[&str] = &[
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH PREFIX 'pre' LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE a IS NULL OR b IS EMPTY LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE id = 7 LIMIT 5;",
-    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE id IN (1, 2, 'pt-3') LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE id IN (1, 2, '550e8400-e29b-41d4-a716-446655440011') LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE age BETWEEN 18 AND 65 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE rating = 4.5 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH ANY (1, 2) LIMIT 5;",
@@ -182,7 +182,6 @@ const MUTATION_CORPUS: &[&str] = &[
     "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
     "SCROLL FROM docs AFTER 7 SHARD 'acme' LIMIT 10;",
     "SCROLL FROM docs AFTER '550e8400-e29b-41d4-a716-446655440000' LIMIT 10;",
-    "SCROLL FROM docs AFTER 'not-a-uuid' LIMIT 10;",
     "SCROLL FROM docs WITH VECTOR (dense) LIMIT 5;",
     // W2: SCROLL ordering, payload selectors, and the combined shape.
     "SCROLL FROM docs ORDER BY created_at DESC LIMIT 10;",
@@ -200,11 +199,11 @@ const MUTATION_CORPUS: &[&str] = &[
     "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2], title: 'hello'};",
     "UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1], sparse: {indices: [1], values: [0.5]}}};",
     "UPSERT INTO docs VALUES {id: 1, vector: [[0.1, 0.2], [0.3, 0.4]]};",
-    "UPSERT INTO docs VALUES {id: 'pt-1', payload: true} SHARD 'acme';",
+    "UPSERT INTO docs VALUES {id: '550e8400-e29b-41d4-a716-446655440013', payload: true} SHARD 'acme';",
     "DELETE FROM docs WHERE id = 1;",
     "DELETE FROM docs WHERE id = 1 WAIT true;",
     "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT true;",
-    "DELETE FROM docs WHERE id IN (1, 2, 'pt-3');",
+    "DELETE FROM docs WHERE id IN (1, 2, '550e8400-e29b-41d4-a716-446655440011');",
     "DELETE FROM docs WHERE category = 'archived' SHARD 101;",
     "CLEAR PAYLOAD FROM docs WHERE k = 1;",
     "CLEAR PAYLOAD FROM docs WHERE id IN (1, 2);",

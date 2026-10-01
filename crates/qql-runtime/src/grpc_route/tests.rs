@@ -134,7 +134,7 @@ fn grpc_update_collection_default_vector_uses_params_variant() {
 fn test_grpc_route_conversion_all_statements() {
     let statements = [
         "QUERY TEXT 'search' MODEL 'test-model' FROM docs USING dense LIMIT 10;",
-        "QUERY POINTS (1, 2, 'uuid-str') FROM docs WITH PAYLOAD INCLUDE ('title');",
+        "QUERY POINTS (1, 2, '550e8400-e29b-41d4-a716-446655440005') FROM docs WITH PAYLOAD INCLUDE ('title');",
         "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
         "UPSERT INTO docs VALUES {id: 1, text: 'hello', category: 'tech'} USING DENSE MODEL 'm';",
         "DELETE FROM docs WHERE category = 'old';",

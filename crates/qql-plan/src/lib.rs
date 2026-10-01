@@ -25,6 +25,7 @@ pub mod mutation;
 mod mutation_types;
 mod params;
 pub mod plan;
+mod point_id_validate;
 mod prefetch;
 /// Query lowering: `QUERY` statements into `/points/query` request bodies.
 pub mod query;

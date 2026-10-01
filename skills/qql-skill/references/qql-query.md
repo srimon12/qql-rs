@@ -39,7 +39,7 @@ Key decisions:
 Problem: fetch known IDs without vector scoring.
 
 ```sql
-QUERY POINTS (1, 2, 'uuid-3') FROM docs;
+QUERY POINTS (1, 2, '550e8400-e29b-41d4-a716-446655440000') FROM docs;
 
 QUERY POINTS (:a, :b) FROM docs;
 ```
