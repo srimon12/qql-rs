@@ -5,10 +5,10 @@ use super::ddl::{
     strict_mode_config_from_plan, vector_params, vectors_config_diff, wal_config_from_plan,
 };
 use super::execute_write::to_points_update_operation;
-use super::filter::to_match;
+use super::filter::{to_condition, to_match};
 use super::query::{
-    plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
-    to_vector_input, to_vectors,
+    plan_vector_to_proto, to_count_points, to_facet_counts, to_query_groups, to_query_points,
+    to_scroll_points, to_vector_input, to_vectors,
 };
 use super::typed::{
     collection_mutation_to_typed, facet_hit_to_typed, mutation_response_to_typed,
@@ -19,7 +19,9 @@ use crate::executor::{ExecData, ServerUsage};
 use crate::qdrant_grpc::qdrant;
 use qql_core::ast::{VectorDatatype, VectorDistance};
 use qql_core::parser::Parser;
-use qql_plan::types::{FilterExpression, MatchValue};
+use qql_plan::types::{
+    FieldCondition, FilterClause, FilterExpression, GeoLineString, GeoPoint, GeoPolygon, MatchValue,
+};
 use qql_plan::{
     DenseVectorParams, PlanFacetValue, PlanGroupId, PlanPointVectors, PlanQueryInput,
     PlanVectorStruct, PlanVectorValue,
@@ -1033,6 +1035,163 @@ fn scroll_limit_overflow_is_rejected_in_grpc() {
     let err = to_scroll_points(req, collection).unwrap_err();
     assert_eq!(err.code, "QQL-GRPC-SCROLL-LIMIT");
     assert!(err.message.contains("scroll limit"));
+}
+
+/// `GEO_POLYGON` must reach the proto `FieldCondition.geo_polygon` or REST and
+/// gRPC match different rows for the same query text.
+#[test]
+fn query_points_filter_geo_polygon_maps_proto() {
+    let stmt = Parser::parse(
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE area GEO_POLYGON \
+         {exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}], \
+          interiors: [[{lat: -50.0, lon: -50.0}, {lat: 50.0, lon: -50.0}, {lat: 50.0, lon: 50.0}, {lat: -50.0, lon: 50.0}]]};",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp = to_query_points(req, collection).unwrap();
+    let condition = qp
+        .filter
+        .expect("filter should be set")
+        .must
+        .swap_remove(0);
+    let Some(qdrant::condition::ConditionOneOf::Field(field)) = condition.condition_one_of else {
+        panic!("expected a field condition, got {condition:?}");
+    };
+    let polygon = field.geo_polygon.expect("geo_polygon must map to proto");
+    let exterior = polygon.exterior.expect("exterior ring must map");
+    assert_eq!(exterior.points.len(), 4);
+    assert_eq!(exterior.points[0].lat, -70.0);
+    assert_eq!(exterior.points[0].lon, -70.0);
+    assert_eq!(exterior.points[3].lon, 60.0);
+    assert_eq!(polygon.interiors.len(), 1, "interior holes must map");
+    assert_eq!(polygon.interiors[0].points.len(), 4);
+    assert_eq!(polygon.interiors[0].points[2].lat, 50.0);
+}
+
+/// A hand-built degenerate ring fails closed instead of reaching the wire as a
+/// polygon the server cannot interpret.
+#[test]
+fn geo_polygon_degenerate_ring_fails_closed() {
+    let ring = |n: usize| GeoLineString {
+        points: (0..n)
+            .map(|i| GeoPoint {
+                lat: i as f64,
+                lon: i as f64,
+            })
+            .collect(),
+    };
+    let clause = FilterClause::Field(Box::new(FieldCondition {
+        key: "area".into(),
+        geo_polygon: Some(GeoPolygon {
+            exterior: ring(2),
+            interiors: Vec::new(),
+        }),
+        ..Default::default()
+    }));
+    let err = to_condition(&clause).unwrap_err();
+    assert_eq!(err.code, "QQL-GRPC-GEO-POLYGON");
+    assert!(err.message.contains("at least 3"));
+
+    let clause = FilterClause::Field(Box::new(FieldCondition {
+        key: "area".into(),
+        geo_polygon: Some(GeoPolygon {
+            exterior: ring(3),
+            interiors: vec![ring(1)],
+        }),
+        ..Default::default()
+    }));
+    let err = to_condition(&clause).unwrap_err();
+    assert_eq!(err.code, "QQL-GRPC-GEO-POLYGON");
+    assert!(err.message.contains("interior"));
+}
+
+/// `SCROLL … ORDER BY` must reach `ScrollPoints.order_by`; dropping it makes
+/// gRPC scroll in ID order while REST scrolls in payload order.
+#[test]
+fn scroll_points_order_by_maps_proto() {
+    let stmt = Parser::parse("SCROLL FROM docs ORDER BY ts DESC START FROM 42 LIMIT 10;").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Scroll {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Scroll, got {other:?}"),
+    };
+    let sp = to_scroll_points(req, collection).unwrap();
+    let order_by = sp.order_by.expect("scroll order_by must map to proto");
+    assert_eq!(order_by.key, "ts");
+    assert_eq!(order_by.direction, Some(qdrant::Direction::Desc as i32));
+    match order_by.start_from.and_then(|sf| sf.value) {
+        Some(qdrant::start_from::Value::Integer(42)) => {}
+        other => panic!("expected integer START FROM 42, got {other:?}"),
+    }
+}
+
+/// `ORDER BY … START FROM` must reach the proto `StartFrom` oneof too (the
+/// query arm used to drop it).
+#[test]
+fn query_order_by_start_from_maps_proto() {
+    let stmt = Parser::parse(
+        "QUERY ORDER BY created_at ASC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 10;",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp = to_query_points(req, collection).unwrap();
+    match qp.query.and_then(|q| q.variant) {
+        Some(qdrant::query::Variant::OrderBy(order_by)) => {
+            assert_eq!(order_by.key, "created_at");
+            assert_eq!(order_by.direction, Some(qdrant::Direction::Asc as i32));
+            match order_by.start_from.and_then(|sf| sf.value) {
+                Some(qdrant::start_from::Value::Datetime(text)) => {
+                    assert_eq!(text, "2024-01-01T00:00:00Z");
+                }
+                other => panic!("expected datetime START FROM, got {other:?}"),
+            }
+        }
+        other => panic!("expected OrderBy variant, got {other:?}"),
+    }
+}
+
+/// `COUNT … EXACT false` must stay approximate on gRPC; it used to be forced
+/// exact.
+#[test]
+fn count_points_forwards_exact() {
+    let stmt = Parser::parse("COUNT FROM docs WITH (exact = false);").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Count {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Count, got {other:?}"),
+    };
+    assert_eq!(to_count_points(req, collection).unwrap().exact, Some(false));
+
+    let stmt = Parser::parse("COUNT FROM docs;").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Count {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Count, got {other:?}"),
+    };
+    assert_eq!(to_count_points(req, collection).unwrap().exact, Some(true));
 }
 
 #[test]
