@@ -49,7 +49,11 @@ impl QdrantOps for EdgeQdrant {
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
-        Ok(self.collection_path(name).join("segments").exists())
+        // Filesystem metadata is blocking I/O; keep it off the async worker.
+        let path = self.collection_path(name);
+        tokio::task::spawn_blocking(move || path.join("segments").exists())
+            .await
+            .map_err(|e| spawn_error("collection_exists", e))
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
@@ -273,14 +277,20 @@ impl QdrantOps for EdgeQdrant {
         Ok(())
     }
 
+    /// Drop a collection and all of its points.
+    ///
+    /// A collection that was never created reports
+    /// `QQL-EDGE-COLLECTION-NOT-FOUND`, matching the remote backends' 404 and
+    /// the edge read paths; dropping is not silently idempotent.
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
         let path = self.collection_path(name);
         let shard = {
             let mut shards = self.shards.write().await;
             shards.remove(name)
         };
+        let had_shard = shard.is_some();
         {
-            let mut opening = self.opening.lock().await;
+            let mut opening = lock_map(&self.opening);
             opening.remove(name);
         }
         if let Some(shard) = shard {
@@ -295,7 +305,16 @@ impl QdrantOps for EdgeQdrant {
                     .with_collection(name.to_string())
                 })?;
         }
+        let collection = name.to_string();
         tokio::task::spawn_blocking(move || {
+            if !had_shard && !path.join("segments").exists() {
+                return Err(QqlError::execution(
+                    "QQL-EDGE-COLLECTION-NOT-FOUND",
+                    format!("collection '{collection}' does not exist"),
+                    None,
+                )
+                .with_collection(collection));
+            }
             if path.exists() {
                 std::fs::remove_dir_all(&path).map_err(|e| {
                     QqlError::execution(

@@ -13,12 +13,24 @@ use qql_plan::{
 use super::hnsw::{edge_hnsw_config, edge_hnsw_config_over, edge_optimizers_config};
 use super::quantization::{edge_datatype, edge_quantization_config};
 use super::shared::{edge_config_error, resolve_on_disk};
-use crate::backend::unsupported::EdgeUnsupported;
+use crate::backend::unsupported::{
+    EdgeUnsupported, reject_collection_params, reject_collection_sharding,
+};
 
 pub(crate) fn build_edge_config(
     req: &CreateCollectionRequest,
     on_disk_payload: bool,
 ) -> Result<qdrant_edge::EdgeConfig, QqlError> {
+    // Fail closed on every create-time option qdrant-edge cannot persist, so
+    // both entry points (the `CREATE COLLECTION` statement and a direct
+    // `QdrantOps::create_collection` call) reject them instead of silently
+    // building a single-shard, single-replica collection.
+    reject_collection_sharding(
+        req.shard_number,
+        req.sharding_method,
+        req.shard_keys.as_deref(),
+    )?;
+    reject_collection_params(req.params.as_ref())?;
     if req.wal_config.is_some() {
         return Err(EdgeUnsupported::Wal.error());
     }
