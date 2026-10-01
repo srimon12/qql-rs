@@ -149,8 +149,8 @@ impl Executor {
 
     /// Close the executor: prevents new executions, clears the schema cache,
     /// and closes the backend (flushing/releasing resources; embedded
-    /// backends override [`QdrantOps::close`](crate::client::QdrantOps::close)
-    /// to release their store). In-flight statements that already passed
+    /// backends override [`QdrantOps::close`] to release their store).
+    /// In-flight statements that already passed
     /// `ensure_open` run to completion.
     ///
     /// Idempotent: a second call is a no-op and the backend is closed once.
