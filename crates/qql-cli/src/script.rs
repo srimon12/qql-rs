@@ -173,8 +173,8 @@ mod tests {
         ];
         for case in cases {
             let script = format!("{case};");
-            let statements = split_statements(&script)
-                .unwrap_or_else(|e| panic!("'{case}' should split: {e}"));
+            let statements =
+                split_statements(&script).unwrap_or_else(|e| panic!("'{case}' should split: {e}"));
             assert_eq!(statements, [case], "starter lost for '{case}'");
         }
     }
@@ -210,7 +210,11 @@ mod tests {
         let statements = split_statements(script).expect("script should parse");
         assert_eq!(statements.len(), 3);
         assert!(statements[0].contains("`x--y`"));
-        assert!(statements[1].contains(r"r'C:\x--y'"), "got: {}", statements[1]);
+        assert!(
+            statements[1].contains(r"r'C:\x--y'"),
+            "got: {}",
+            statements[1]
+        );
         assert!(statements[2].contains("'''line--one'''"));
     }
 }

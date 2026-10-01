@@ -93,10 +93,7 @@ impl QdrantOps for FakeScrollOps {
         unimplemented!("FakeScrollOps only implements scroll")
     }
 
-    async fn execute_planned(
-        &self,
-        op: &PlannedOperation,
-    ) -> Result<BackendResponse, QqlError> {
+    async fn execute_planned(&self, op: &PlannedOperation) -> Result<BackendResponse, QqlError> {
         let PlannedOperation::Scroll { request, .. } = op else {
             unimplemented!("FakeScrollOps only implements scroll")
         };
@@ -116,14 +113,11 @@ impl QdrantOps for FakeScrollOps {
             .map(|point| SearchHit {
                 id: point_id(point),
                 score: 0.0,
-                payload: point
-                    .get("payload")
-                    .and_then(|p| p.as_object())
-                    .map(|map| {
-                        map.iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect::<HashMap<_, _>>()
-                    }),
+                payload: point.get("payload").and_then(|p| p.as_object()).map(|map| {
+                    map.iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect::<HashMap<_, _>>()
+                }),
                 collection: None,
                 vector: None,
             })

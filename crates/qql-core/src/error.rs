@@ -455,7 +455,11 @@ mod tests {
 
     #[test]
     fn retry_helpers_cover_transport_and_transient_statuses() {
-        assert!(is_retryable(&QqlError::transport("QQL-TRANSPORT", "reset", None)));
+        assert!(is_retryable(&QqlError::transport(
+            "QQL-TRANSPORT",
+            "reset",
+            None
+        )));
         assert!(is_retryable(
             &QqlError::backend("QQL-BACKEND-HTTP", "too many requests", None).with_status(429)
         ));
@@ -463,7 +467,8 @@ mod tests {
             &QqlError::backend("QQL-BACKEND-AUTH", "forbidden", None).with_status(403)
         ));
         assert!(!is_retryable(
-            &QqlError::backend("QQL-BACKEND-COLLECTION-NOT-FOUND", "missing", None).with_status(404)
+            &QqlError::backend("QQL-BACKEND-COLLECTION-NOT-FOUND", "missing", None)
+                .with_status(404)
         ));
         assert!(is_retryable_message("HTTP 503 Service Unavailable"));
         assert!(!is_retryable_message("vector size mismatch"));

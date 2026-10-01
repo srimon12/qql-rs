@@ -94,11 +94,15 @@ impl Client {
             let parse_ms = now_ms() - parse_start;
             if let Some(ref p) = params {
                 let plan = qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
-                stmt = bind_analyzed_statement(&s, qql_core::params_json::param_value_for(&plan, 0))?;
+                stmt =
+                    bind_analyzed_statement(&s, qql_core::params_json::param_value_for(&plan, 0))?;
             }
             return self.analyze_stmt(stmt, parse_ms, total_start).await;
         }
-        Err(js_err("QQL-BIND-TYPE-MISMATCH", "query must be a string or Stmt"))
+        Err(js_err(
+            "QQL-BIND-TYPE-MISMATCH",
+            "query must be a string or Stmt",
+        ))
     }
 
     async fn analyze_stmt(

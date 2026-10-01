@@ -19,7 +19,16 @@ pub async fn handle_run_smart(
             && !query_or_file.contains(char::is_whitespace));
     let is_file = p.is_file() || (!query_or_file.contains('\n') && looks_like_path);
     if is_file {
-        handle_run_file(url, use_edge, query_or_file, params, stop_on_error, json, quiet).await
+        handle_run_file(
+            url,
+            use_edge,
+            query_or_file,
+            params,
+            stop_on_error,
+            json,
+            quiet,
+        )
+        .await
     } else {
         handle_run(url, use_edge, query_or_file, params, json, quiet).await
     }
@@ -108,7 +117,14 @@ fn finish_script(
             println!("{}", resp.message);
         }
     }
-    ensure_run_ok(failed, if json { "JSON report on stdout" } else { "the summary above" })
+    ensure_run_ok(
+        failed,
+        if json {
+            "JSON report on stdout"
+        } else {
+            "the summary above"
+        },
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

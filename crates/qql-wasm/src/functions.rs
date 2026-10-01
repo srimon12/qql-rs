@@ -87,7 +87,12 @@ pub(crate) fn is_transport_error(value: &JsValue) -> bool {
     };
     serde_json::from_str::<serde_json::Value>(&text)
         .ok()
-        .and_then(|parsed| parsed.get("kind").and_then(|k| k.as_str()).map(str::to_owned))
+        .and_then(|parsed| {
+            parsed
+                .get("kind")
+                .and_then(|k| k.as_str())
+                .map(str::to_owned)
+        })
         .as_deref()
         == Some("Transport")
 }
@@ -325,11 +330,8 @@ pub(crate) fn json_value_to_js(value: &serde_json::Value) -> JsValue {
             // inherited `Object.prototype.__proto__` setter (`Reflect::set`)
             // and silently replace the prototype.
             let descriptor = js_sys::Object::new();
-            let _ = js_sys::Reflect::set(
-                &descriptor,
-                &JsValue::from_str("writable"),
-                &JsValue::TRUE,
-            );
+            let _ =
+                js_sys::Reflect::set(&descriptor, &JsValue::from_str("writable"), &JsValue::TRUE);
             let _ = js_sys::Reflect::set(
                 &descriptor,
                 &JsValue::from_str("enumerable"),
@@ -345,11 +347,8 @@ pub(crate) fn json_value_to_js(value: &serde_json::Value) -> JsValue {
                 let _ = js_sys::Reflect::set(&descriptor, &JsValue::from_str("value"), &value);
                 // Infallible on a fresh object with string keys; a host trap
                 // here is unrecoverable, so there is no `QqlError` to carry.
-                let _ = js_sys::Reflect::define_property(
-                    &object,
-                    &JsValue::from_str(key),
-                    &descriptor,
-                );
+                let _ =
+                    js_sys::Reflect::define_property(&object, &JsValue::from_str(key), &descriptor);
             }
             object.into()
         }

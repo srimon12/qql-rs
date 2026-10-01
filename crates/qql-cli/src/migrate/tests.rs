@@ -378,13 +378,16 @@ async fn batch_size_one_scroll_streams_all_points_and_counts_collisions() {
     ];
     let ops = FakeScrollOps::new(points);
     let mut pages = crate::dump::ScrollPages::new(&ops, "docs", 1);
-    let (written, skipped, batches) =
-        super::pipeline::fill_window_totals_for_test(&mut pages, 2)
-            .await
-            .expect("window");
+    let (written, skipped, batches) = super::pipeline::fill_window_totals_for_test(&mut pages, 2)
+        .await
+        .expect("window");
     assert_eq!((written, skipped, batches), (2, 1, 2));
     assert!(
-        ops.limits.lock().expect("limits").iter().all(|limit| *limit == 2),
+        ops.limits
+            .lock()
+            .expect("limits")
+            .iter()
+            .all(|limit| *limit == 2),
         "scroll must probe batch_size + 1"
     );
 }

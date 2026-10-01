@@ -211,7 +211,8 @@ impl Client {
                 }
                 if is_transport_error(&error) {
                     for operation in operations {
-                        self.dispatch_or_collect(operation, on_error, results).await?;
+                        self.dispatch_or_collect(operation, on_error, results)
+                            .await?;
                     }
                 } else {
                     push_batch_failures(results, &labels, &thrown_message(&error));
@@ -299,7 +300,11 @@ impl Client {
                     );
                 }
                 let body = serde_json::to_value(&batch).map_err(|error| {
-                    qql_err_to_js(QqlError::execution("QQL-SERIALIZE", error.to_string(), None))
+                    qql_err_to_js(QqlError::execution(
+                        "QQL-SERIALIZE",
+                        error.to_string(),
+                        None,
+                    ))
                 })?;
                 let response = match self.send_json("POST", &path, Some(body)).await {
                     Ok(response) => response,
@@ -333,17 +338,15 @@ impl Client {
                     }
                 };
                 let batch_error = match shaped_query_batch(&response) {
-                    Ok(items) => match qql_plan::verify_batch_cardinality(
-                        "query",
-                        expected,
-                        items.len(),
-                    ) {
-                        Ok(()) => {
-                            results.extend(items);
-                            None
+                    Ok(items) => {
+                        match qql_plan::verify_batch_cardinality("query", expected, items.len()) {
+                            Ok(()) => {
+                                results.extend(items);
+                                None
+                            }
+                            Err(err) => Some(err),
                         }
-                        Err(err) => Some(err),
-                    },
+                    }
                     Err(err) => Some(err),
                 };
                 if let Some(err) = batch_error {
@@ -365,7 +368,11 @@ impl Client {
                 let wait = opts.wait.unwrap_or(true);
                 let path = format!("/collections/{collection}/points/batch?wait={wait}");
                 let body = serde_json::to_value(&batch).map_err(|error| {
-                    qql_err_to_js(QqlError::execution("QQL-SERIALIZE", error.to_string(), None))
+                    qql_err_to_js(QqlError::execution(
+                        "QQL-SERIALIZE",
+                        error.to_string(),
+                        None,
+                    ))
                 })?;
                 let response = match self.send_json("POST", &path, Some(body)).await {
                     Ok(response) => response,
@@ -393,22 +400,20 @@ impl Client {
                     }
                 };
                 let batch_error = match parsed_update_batch(&response) {
-                    Ok(items) => match qql_plan::verify_batch_cardinality(
-                        "update",
-                        expected,
-                        items.len(),
-                    ) {
-                        Ok(()) => {
-                            for (update, item) in batch.operations.iter().zip(items) {
-                                results.push(
-                                    shaped_update_response(update, item)
-                                        .map_err(qql_err_to_js)?,
-                                );
+                    Ok(items) => {
+                        match qql_plan::verify_batch_cardinality("update", expected, items.len()) {
+                            Ok(()) => {
+                                for (update, item) in batch.operations.iter().zip(items) {
+                                    results.push(
+                                        shaped_update_response(update, item)
+                                            .map_err(qql_err_to_js)?,
+                                    );
+                                }
+                                None
                             }
-                            None
+                            Err(err) => Some(err),
                         }
-                        Err(err) => Some(err),
-                    },
+                    }
                     Err(err) => Some(err),
                 };
                 if let Some(err) = batch_error {

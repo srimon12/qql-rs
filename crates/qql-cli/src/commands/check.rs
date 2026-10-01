@@ -572,8 +572,12 @@ fn check_expr_using(
                     if t.kind.is_some() {
                         return Ok(());
                     }
-                    let mut available: Vec<String> =
-                        topo.dense.iter().chain(topo.sparse.iter()).cloned().collect();
+                    let mut available: Vec<String> = topo
+                        .dense
+                        .iter()
+                        .chain(topo.sparse.iter())
+                        .cloned()
+                        .collect();
                     if topo.unnamed {
                         available.push("<default>".to_string());
                     }

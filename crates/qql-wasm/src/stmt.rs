@@ -2,7 +2,9 @@
 
 use qql_core::ast;
 
-use super::functions::{SCRATCH_BUF, already_bound_err, js_err, qql_err_to_js, safe_owned_uint8_array};
+use super::functions::{
+    SCRATCH_BUF, already_bound_err, js_err, qql_err_to_js, safe_owned_uint8_array,
+};
 use qql_core::parser::Parser;
 use qql_plan::routing;
 use wasm_bindgen::prelude::*;
@@ -77,9 +79,8 @@ impl Stmt {
     /// transport/forwarding without JS parsing.
     #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsValue> {
-        serde_json::to_string(&self.inner).map_err(|error| {
-            crate::functions::js_exec_err("QQL-SERIALIZE", error.to_string())
-        })
+        serde_json::to_string(&self.inner)
+            .map_err(|error| crate::functions::js_exec_err("QQL-SERIALIZE", error.to_string()))
     }
 
     /// `JSON.stringify` hook: BigInt-safe plain object, same as [`to_object`](Self::to_object).

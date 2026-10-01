@@ -442,9 +442,8 @@ fn quoted_collection_names_with_spaces_are_accepted() {
 
 #[test]
 fn legacy_match_integer_accepts_negative_values() {
-    let stmts = convert(
-        r#"{"filter": {"must": [{"key": "code", "match": {"integer": -5}}]}, "limit": 1}"#,
-    );
+    let stmts =
+        convert(r#"{"filter": {"must": [{"key": "code", "match": {"integer": -5}}]}, "limit": 1}"#);
     assert!(stmts[0].contains("code = -5"), "{}", stmts[0]);
 }
 

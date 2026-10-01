@@ -340,7 +340,11 @@ fn create_read_fan_out_params_round_trip() {
 
     let stmt = Parser::parse(&format!("{};", emitted[0])).expect("reparse");
     let op = plan(&stmt).expect("replan");
-    let qql_plan::PlannedOperation::CreateCollection { collection, request } = &op else {
+    let qql_plan::PlannedOperation::CreateCollection {
+        collection,
+        request,
+    } = &op
+    else {
         panic!("expected CreateCollection, got {op:?}");
     };
     let steps = qql_plan::ddl::create_collection_rest_steps(collection, request).expect("steps");

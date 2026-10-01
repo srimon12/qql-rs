@@ -19,13 +19,7 @@ impl Embedder for Client {
         let batch = self
             .embed_texts(vec![text.to_string()])
             .await
-            .map_err(|e| {
-                QqlError::execution(
-                    "QQL-EMBEDDING",
-                    thrown_message(&e),
-                    None,
-                )
-            })?;
+            .map_err(|e| QqlError::execution("QQL-EMBEDDING", thrown_message(&e), None))?;
         batch.into_iter().next().ok_or_else(|| {
             QqlError::execution("QQL-EMBEDDING", "dense embedding response was empty", None)
         })
@@ -39,13 +33,9 @@ impl Embedder for Client {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::dense_model_unsupported_error(model));
         }
-        self.embed_texts(texts.to_vec()).await.map_err(|e| {
-            QqlError::execution(
-                "QQL-EMBEDDING",
-                thrown_message(&e),
-                None,
-            )
-        })
+        self.embed_texts(texts.to_vec())
+            .await
+            .map_err(|e| QqlError::execution("QQL-EMBEDDING", thrown_message(&e), None))
     }
 
     async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {

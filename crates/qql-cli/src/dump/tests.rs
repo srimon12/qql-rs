@@ -409,7 +409,11 @@ async fn scroll_pages_batch_size_one_streams_every_point() {
     assert_eq!(seen, [1, 2, 3], "batch_size=1 must not truncate the stream");
     // Every fetch probes one point past the batch size.
     assert!(
-        ops.limits.lock().expect("limits").iter().all(|limit| *limit == 2),
+        ops.limits
+            .lock()
+            .expect("limits")
+            .iter()
+            .all(|limit| *limit == 2),
         "scroll must probe batch_size + 1"
     );
 }

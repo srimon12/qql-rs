@@ -268,7 +268,10 @@ pub fn handle_config_get(key: &str) -> Result<(), Box<dyn std::error::Error>> {
         // BM25 keys mirror `config set` exactly; unset knobs print empty.
         "bm25-k1" => config.bm25_k1.map(|v| v.to_string()).unwrap_or_default(),
         "bm25-b" => config.bm25_b.map(|v| v.to_string()).unwrap_or_default(),
-        "bm25-avg-len" => config.bm25_avg_len.map(|v| v.to_string()).unwrap_or_default(),
+        "bm25-avg-len" => config
+            .bm25_avg_len
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
         "bm25-language" => config.bm25_language.unwrap_or_default(),
         "bm25-tokenizer" => config.bm25_tokenizer.unwrap_or_default(),
         "bm25-stemmer" => config.bm25_stemmer.unwrap_or_default(),
