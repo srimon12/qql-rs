@@ -63,6 +63,15 @@ class Client {
      * Accepts a string, a Stmt, or an array of either. Always returns a stable
      * `ExecutionReport` object:
      * `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
+     *
+     * **Batch retry (at-least-once):** auto-grouped statements and explicit
+     * `BATCH` blocks are sent as one RPC. A connection/timeout failure
+     * re-runs the members individually, so members that already landed are
+     * applied again — keep mutations idempotent (or use `UPDATE MODE`
+     * deliberately). A batch the server answered with a cardinality
+     * mismatch or an unparsable shape is never re-executed; its members
+     * report `QQL-BACKEND-BATCH` / `QQL-BACKEND-ENVELOPE` instead. Single
+     * statements are never retried.
      * @param {string | Stmt | (string | Stmt)[]} query
      * @param {ExecuteOptions} [options]
      * @returns {ExecutionReport}
@@ -1119,6 +1128,10 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).call(getObject(arg1), getObject(arg2));
             return addHeapObject(ret);
         }, arguments); },
+        __wbg_defineProperty_8a37abacf958bd67: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = Reflect.defineProperty(getObject(arg0), getObject(arg1), getObject(arg2));
+            return ret;
+        }, arguments); },
         __wbg_done_cffed884d87aa22e: function(arg0) {
             const ret = getObject(arg0).done;
             return ret;
@@ -1342,7 +1355,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_265(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_266(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1489,7 +1502,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 36, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_261);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_262);
             return addHeapObject(ret);
         },
         __wbindgen_generic_0000000000000002: function(arg0) {
@@ -1526,14 +1539,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_265(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_265(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_266(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_266(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
-function __wasm_bindgen_func_elem_261(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_262(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_261(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_262(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.5.0] - 2026-10-01
 
 ### ⚠️ Breaking Changes & Invariant Enforcements
 - **Per-statement batch semantics**: statements with differing `PARAMS (timeout/consistency)` or effective `WAIT` never co-group; each ambient batch executes with its own shared opts ([#191](https://github.com/srimon12/qql-rs/pull/191), [#194](https://github.com/srimon12/qql-rs/pull/194)).
