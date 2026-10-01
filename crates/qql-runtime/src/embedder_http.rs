@@ -23,6 +23,15 @@ use qql_embed::sparse::{Bm25Params, SparseVector};
 #[cfg(feature = "rest")]
 use super::embedder::HttpEmbedderOptions;
 
+/// Total per-request timeout for embedding/rerank HTTP calls. A wedged
+/// embedding server must not hang the calling task forever (`request_timeout`
+/// cannot cover the embedder itself when it is disabled).
+#[cfg(feature = "rest")]
+const EMBED_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Connect timeout for embedding/rerank HTTP calls.
+#[cfg(feature = "rest")]
+const EMBED_HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Serialize)]
 struct EmbedRequest<'a> {
@@ -128,13 +137,17 @@ impl HttpEmbedder {
         let bm25_text = opts.bm25_text_config()?;
         let bm25_pipeline = bm25_text.pipeline();
 
-        let client = Client::builder().build().map_err(|e| {
-            QqlError::execution(
-                "QQL-EMBEDDING",
-                format!("failed to create HTTP client: {}", e),
-                None,
-            )
-        })?;
+        let client = Client::builder()
+            .timeout(EMBED_HTTP_TIMEOUT)
+            .connect_timeout(EMBED_HTTP_CONNECT_TIMEOUT)
+            .build()
+            .map_err(|e| {
+                QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!("failed to create HTTP client: {}", e),
+                    None,
+                )
+            })?;
 
         Ok(HttpEmbedder {
             endpoint: opts.endpoint,

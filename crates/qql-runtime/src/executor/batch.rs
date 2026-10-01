@@ -61,23 +61,8 @@ impl Executor {
         on_error: OnError,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         self.ensure_open()?;
-        if let Some(secs) = self.request_timeout() {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                self.execute_batch_nodes_inner(stmts, on_error),
-            )
+        self.with_timeout(self.execute_batch_nodes_inner(stmts, on_error))
             .await
-            {
-                Ok(res) => res,
-                Err(_) => Err(QqlError::transport(
-                    "QQL-TIMEOUT",
-                    format!("batch execution timed out after {secs}s"),
-                    None,
-                )),
-            }
-        } else {
-            self.execute_batch_nodes_inner(stmts, on_error).await
-        }
     }
 
     async fn execute_batch_nodes_inner(

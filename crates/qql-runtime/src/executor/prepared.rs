@@ -307,7 +307,7 @@ impl Executor {
                 },
                 &|_| None,
             );
-            return self.dispatch_planned(&op).await;
+            return self.with_timeout(self.dispatch_planned(&op)).await;
         }
         // Load-bearing clone: `prepared` is a reusable template behind a `&`
         // receiver (callers execute it repeatedly with different params, and
@@ -399,7 +399,7 @@ impl Executor {
                     .get(idx)
                     .and_then(qql_plan::PlanVectorValue::from_value)
             });
-            return self.dispatch_planned(&op).await;
+            return self.with_timeout(self.dispatch_planned(&op)).await;
         }
         // Load-bearing clone: same reusable-template contract as
         // `execute_prepared` — `bind_stmt` mutates in place, so the per-exec
@@ -455,7 +455,7 @@ impl Executor {
             request,
             wait,
         };
-        self.dispatch_planned(&op).await
+        self.with_timeout(self.dispatch_planned(&op)).await
     }
 }
 
