@@ -72,11 +72,6 @@ fn validate_compound(compound: &FilterCompound) -> Result<(), QqlError> {
 fn validate_clause(clause: &FilterClause) -> Result<(), QqlError> {
     match clause {
         FilterClause::HasId(has_id) => validate_ids(&has_id.has_id),
-        FilterClause::MinShould(min_should) => min_should
-            .min_should
-            .conditions
-            .iter()
-            .try_for_each(validate_clause),
         FilterClause::Nested(nested) => validate_filter(&nested.nested.filter),
         FilterClause::Filter(compound) => validate_compound(compound),
         _ => Ok(()),
