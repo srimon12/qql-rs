@@ -11,7 +11,9 @@ use qql_core::params_json::{
 };
 use qql_core::parser::Parser;
 
-use crate::{PyStmt, already_bound_error, py_to_value, qql_py_syntax_error, qql_py_value_error};
+use crate::{
+    PyStmt, already_bound_error, py_to_value_params, qql_py_syntax_error, qql_py_value_error,
+};
 
 /// Executor error mode: stop the batch on the first failure, or continue.
 pub type OnError = qql::executor::OnError;
@@ -54,7 +56,7 @@ pub fn prepare_input(
         // Convert params once; the shared planner enforces the scoped
         // length contract (QQL-BIND-BATCH-LENGTH on mismatch).
         let value_params = match params_opt {
-            Some(p) => Some(py_to_value(p)?),
+            Some(p) => Some(py_to_value_params(p)?),
             None => None,
         };
         let plan = match &value_params {
@@ -103,7 +105,7 @@ pub fn prepare_input(
         }
         let mut stmt = py_stmt.inner.clone();
         if let Some(p) = params_opt {
-            let value_params = py_to_value(p)?;
+            let value_params = py_to_value_params(p)?;
             let plan = plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
             bind_stmt_with_values(&mut stmt, param_value_for(&plan, 0))
                 .map_err(qql_py_value_error)?;
@@ -113,7 +115,7 @@ pub fn prepare_input(
 
     if let Ok(s) = query.extract::<String>() {
         if let Some(p) = params_opt {
-            let value_params = py_to_value(p)?;
+            let value_params = py_to_value_params(p)?;
             // A params list of containers is a scoped candidate for scripts:
             // parse once to count statements, then plan.
             let scoped_candidate = matches!(&value_params, qql_core::ast::Value::List(arr)
@@ -230,7 +232,13 @@ pub fn run_analyze_input(
             )));
         }
     };
-    Ok(serde_json::to_value(&report).unwrap_or_default())
+    serde_json::to_value(&report).map_err(|error| {
+        crate::qql_py_error(QqlError::execution(
+            "QQL-SERIALIZE",
+            error.to_string(),
+            None,
+        ))
+    })
 }
 
 /// Run a normalized [`Input`] through `explain_analyze` on an existing async
@@ -251,5 +259,6 @@ pub async fn run_analyze_async(
             ));
         }
     };
-    Ok(serde_json::to_value(&report).unwrap_or_default())
+    serde_json::to_value(&report)
+        .map_err(|error| QqlError::execution("QQL-SERIALIZE", error.to_string(), None))
 }
