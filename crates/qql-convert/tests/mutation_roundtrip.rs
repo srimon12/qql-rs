@@ -41,10 +41,16 @@ fn upsert_shapes() {
 
 #[test]
 fn upsert_payload_envelope_collision_roundtrip() {
+    // Payload inputs are written in sorted key order: canonical QQL keeps the
+    // decoder's map order, and serde_json's map is insertion-ordered whenever a
+    // transitive dependency (qdrant-edge via qql-edge) unifies
+    // `serde_json/preserve_order` into the build graph. Sorted inputs keep these
+    // assertions identical in both feature configurations.
+    //
     // Single point with payload keys 'id' and 'vector' converts with WITH PAYLOAD suffix
     assert_eq!(
         convert(
-            r#"{"points": [{"id": 1, "vector": [0.1, 0.2], "payload": {"id": "legacy_123", "vector": "sparse_v1", "title": "hello"}}]}"#
+            r#"{"points": [{"id": 1, "vector": [0.1, 0.2], "payload": {"id": "legacy_123", "title": "hello", "vector": "sparse_v1"}}]}"#
         ),
         [
             "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]} WITH PAYLOAD {id: 'legacy_123', title: 'hello', vector: 'sparse_v1'}"
@@ -54,7 +60,7 @@ fn upsert_payload_envelope_collision_roundtrip() {
     // Batch upsert where one point has collision and another does not
     assert_eq!(
         convert(
-            r#"{"batch": {"ids": [1, 2], "vectors": [[0.1], [0.2]], "payloads": [{"id": "sub_1", "category": "news"}, {"title": "plain"}]}}"#
+            r#"{"batch": {"ids": [1, 2], "vectors": [[0.1], [0.2]], "payloads": [{"category": "news", "id": "sub_1"}, {"title": "plain"}]}}"#
         ),
         [
             "UPSERT INTO docs VALUES\n  {id: 1, vector: [0.1]} WITH PAYLOAD {category: 'news', id: 'sub_1'},\n  {id: 2, vector: [0.2], title: 'plain'}"
