@@ -205,15 +205,26 @@ pub(crate) fn is_reranker_alias(name: &str) -> bool {
 }
 
 /// Resolve offline sparse model (SPLADE, BGE-M3 sparse).
+///
+/// `"bm25"` is deliberately **not** an alias: it names the built-in
+/// `qdrant/bm25`-compatible encoder, which is used when no `sparse_model` is
+/// configured. Failing here prevents a "use local BM25" request from silently
+/// downloading SPLADE.
 pub(crate) fn resolve_sparse_model(name: &str) -> Result<SparseModel, QqlError> {
     let name = name.trim();
     if name.is_empty()
         || matches!(
             name.to_ascii_lowercase().as_str(),
-            "splade" | "spladeppv1" | "splade_pp_en_v1" | "sparse" | "bm25"
+            "splade" | "spladeppv1" | "splade_pp_en_v1" | "sparse"
         )
     {
         return Ok(SparseModel::default());
+    }
+    if matches!(name.to_ascii_lowercase().as_str(), "bm25" | "qdrant/bm25") {
+        return Err(err(
+            "'bm25' is the built-in wire-compatible encoder and needs no sparse model: \
+             omit `sparse_model` to use it, or pass 'splade' / 'bge-m3' to load an ONNX sparse model",
+        ));
     }
     if matches!(name.to_ascii_lowercase().as_str(), "bge-m3" | "bgem3") {
         return Ok(SparseModel::BGEM3);
@@ -238,7 +249,7 @@ pub(crate) fn resolve_sparse_model(name: &str) -> Result<SparseModel, QqlError> 
 pub(crate) fn is_sparse_alias(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "splade" | "spladeppv1" | "splade_pp_en_v1" | "sparse" | "bm25" | "bge-m3" | "bgem3"
+        "splade" | "spladeppv1" | "splade_pp_en_v1" | "sparse" | "bge-m3" | "bgem3"
     )
 }
 

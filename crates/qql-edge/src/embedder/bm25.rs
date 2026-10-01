@@ -166,7 +166,7 @@ pub(crate) async fn embed_sparse_fastembed_batch(
         .into_iter()
         .map(|e| SparseVector {
             indices: e.indices.iter().map(|&i| i as u32).collect(),
-            values: e.values.clone(),
+            values: e.values,
         })
         .collect())
 }
