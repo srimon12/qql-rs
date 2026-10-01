@@ -50,7 +50,7 @@
     {
       "Scroll": {
         "after": {
-          "String": "page-2"
+          "String": "550e8400-e29b-41d4-a716-446655440013"
         },
         "collection": "docs",
         "filter": {

@@ -33,7 +33,7 @@ UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3]}, text: 'hello'}
 UPSERT INTO docs VALUES {id: 1, vector: {colbert: [[0.1, 0.2], [0.3, 0.4]]}, text: 'hello'};
 
 -- With EMBED directive: route specific fields to specific named vectors
-UPSERT INTO arxiv VALUES {id: '2104.01234', text: 'chunk text', title: 'Paper Title', abstract: 'Full abstract'}
+UPSERT INTO arxiv VALUES {id: '550e8400-e29b-41d4-a716-446655440014', text: 'chunk text', title: 'Paper Title', abstract: 'Full abstract'}
 EMBED text INTO dense_chunk USING DENSE,
   title INTO dense_title USING DENSE,
   abstract INTO dense_abstract USING DENSE,

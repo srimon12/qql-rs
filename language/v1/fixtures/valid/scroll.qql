@@ -10,7 +10,7 @@ SCROLL FROM docs WHERE status = 'active' LIMIT 50;
 SCROLL FROM docs AFTER 42 LIMIT 50;
 
 -- Scroll with filter and AFTER
-SCROLL FROM docs WHERE status = 'archived' AFTER 'page-2' LIMIT 50;
+SCROLL FROM docs WHERE status = 'archived' AFTER '550e8400-e29b-41d4-a716-446655440013' LIMIT 50;
 
 -- Scroll with vector selector
 SCROLL FROM docs WITH VECTOR false LIMIT 50;
