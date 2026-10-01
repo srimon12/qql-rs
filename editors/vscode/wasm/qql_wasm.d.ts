@@ -134,6 +134,15 @@ export class Client {
      * Accepts a string, a Stmt, or an array of either. Always returns a stable
      * `ExecutionReport` object:
      * `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
+     *
+     * **Batch retry (at-least-once):** auto-grouped statements and explicit
+     * `BATCH` blocks are sent as one RPC. A connection/timeout failure
+     * re-runs the members individually, so members that already landed are
+     * applied again — keep mutations idempotent (or use `UPDATE MODE`
+     * deliberately). A batch the server answered with a cardinality
+     * mismatch or an unparsable shape is never re-executed; its members
+     * report `QQL-BACKEND-BATCH` / `QQL-BACKEND-ENVELOPE` instead. Single
+     * statements are never retried.
      */
     execute(query: string | Stmt | (string | Stmt)[], options?: ExecuteOptions): Promise<ExecutionReport>;
     /**

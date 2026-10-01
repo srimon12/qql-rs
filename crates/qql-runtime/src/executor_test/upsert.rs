@@ -15,14 +15,17 @@ async fn test_dml_missing_collection_errors() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp_delete = executor
-        .execute("DELETE FROM nonexistent WHERE id = 'abc'", OnError::Stop)
+        .execute(
+            "DELETE FROM nonexistent WHERE id = '550e8400-e29b-41d4-a716-446655440002'",
+            OnError::Stop,
+        )
         .await;
     assert!(resp_delete.is_err());
     assert!(resp_delete.unwrap_err().message.contains("does not exist"));
 
     let resp_update = executor
         .execute(
-            "UPDATE nonexistent SET PAYLOAD = {k: 'v'} WHERE id = 'abc'",
+            "UPDATE nonexistent SET PAYLOAD = {k: 'v'} WHERE id = '550e8400-e29b-41d4-a716-446655440002'",
             OnError::Stop,
         )
         .await;
@@ -135,7 +138,7 @@ async fn test_update_by_id() {
 
     let resp = executor
         .execute(
-            "UPDATE docs SET VECTOR dense = [1.0, 2.0] WHERE id = 'p1'",
+            "UPDATE docs SET VECTOR dense = [1.0, 2.0] WHERE id = '550e8400-e29b-41d4-a716-446655440003'",
             OnError::Stop,
         )
         .await;
@@ -155,7 +158,7 @@ async fn test_upsert_into_collection_creates_missing() {
 
     let resp = executor
         .execute(
-            "UPSERT INTO docs VALUES {id: 'pt-1', text: 'hello'}",
+            "UPSERT INTO docs VALUES {id: '550e8400-e29b-41d4-a716-446655440004', text: 'hello'}",
             OnError::Stop,
         )
         .await;

@@ -28,10 +28,7 @@ pub(crate) async fn execute_query(
     request: &qql_plan::types::QueryRequest,
 ) -> Result<BackendResponse, QqlError> {
     let grpc_req = to_query_points(request, collection)?;
-    let resp = client
-        .query(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))?;
+    let resp = client.query(grpc_req).await?;
     let hits = resp
         .result
         .into_iter()
@@ -53,10 +50,7 @@ pub(crate) async fn execute_query_groups(
     request: &qql_plan::types::QueryGroupsRequest,
 ) -> Result<BackendResponse, QqlError> {
     let grpc_req = to_query_groups(request, collection)?;
-    let resp = client
-        .query_groups(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_groups: {e}"), None))?;
+    let resp = client.query_groups(grpc_req).await?;
     let result = resp
         .result
         .ok_or_else(|| QqlError::backend("QQL-GRPC", "missing groups result", None))?;
@@ -79,10 +73,7 @@ pub(crate) async fn execute_get_points(
     request: &qql_plan::types::PointsRequest,
 ) -> Result<BackendResponse, QqlError> {
     let grpc_req = to_get_points(request, collection);
-    let resp = client
-        .get_points(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_points: {e}"), None))?;
+    let resp = client.get_points(grpc_req).await?;
     let hits = resp
         .result
         .into_iter()
@@ -105,10 +96,7 @@ pub(crate) async fn execute_scroll(
     request: &qql_plan::types::ScrollRequest,
 ) -> Result<BackendResponse, QqlError> {
     let grpc_req = to_scroll_points(request, collection)?;
-    let resp = client
-        .scroll(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("scroll: {e}"), None))?;
+    let resp = client.scroll(grpc_req).await?;
     let hits = resp
         .result
         .into_iter()
@@ -127,10 +115,7 @@ pub(crate) async fn execute_count(
     request: &qql_plan::types::CountRequest,
 ) -> Result<BackendResponse, QqlError> {
     let grpc_req = to_count_points(request, collection)?;
-    let resp = client
-        .count_points(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))?;
+    let resp = client.count_points(grpc_req).await?;
     let count = resp
         .result
         .ok_or_else(|| {
@@ -154,10 +139,7 @@ pub(crate) async fn execute_facet(
     request: &qql_plan::types::FacetRequest,
 ) -> Result<BackendResponse, QqlError> {
     let grpc_req = to_facet_counts(request, collection)?;
-    let resp = client
-        .facet(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("facet: {e}"), None))?;
+    let resp = client.facet(grpc_req).await?;
     let hits = resp
         .hits
         .into_iter()
@@ -197,10 +179,7 @@ pub async fn execute_query_batch_grpc(
         timeout,
     };
 
-    let resp = client
-        .query_batch(grpc_req)
-        .await
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_batch: {e}"), None))?;
+    let resp = client.query_batch(grpc_req).await?;
 
     resp.result
         .into_iter()

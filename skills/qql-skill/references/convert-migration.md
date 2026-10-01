@@ -60,11 +60,11 @@ LIMIT 5;
 Bare bodies have no path. Pass `--collection` explicitly. Without it, bare input fails with `MissingCollection` rather than inventing a name.
 
 ```bash
-echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
+echo '{"ids": [1, "7c9e6679-7425-40de-944b-e07fc1f90ae7"]}' | qql convert --collection docs
 ```
 
 ```sql
-QUERY POINTS (1, 'point-2') FROM docs;
+QUERY POINTS (1, '7c9e6679-7425-40de-944b-e07fc1f90ae7') FROM docs;
 ```
 
 ## Paste shapes: HTTP snippets and curl

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple, Union
 
 __version__: str
 
@@ -129,6 +129,7 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]: ...
     async def execute_async_hits(
         self,
@@ -136,6 +137,7 @@ class Client:
         *,
         params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
+        stmt: int = 0,
     ) -> List[ScoredPoint]: ...
     def explain(self, query: Union[str, Stmt]) -> Dict[str, Any]: ...
     def explain_analyze(
@@ -193,7 +195,7 @@ def local_executor(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
-    wal_segment_mb: Optional[int] = None,
+    wal_segment_mb: Optional[float] = None,
     bm25_k1: Optional[float] = None,
     bm25_b: Optional[float] = None,
     bm25_avg_len: Optional[float] = None,
@@ -201,8 +203,6 @@ def local_executor(
     bm25_tokenizer: Optional[str] = None,
     bm25_lowercase: Optional[bool] = None,
     bm25_ascii_folding: Optional[bool] = None,
-    bm25_min_token_len: Optional[int] = None,
-    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
     bm25_min_token_len: Optional[int] = None,
@@ -224,8 +224,6 @@ def http_executor(
     bm25_tokenizer: Optional[str] = None,
     bm25_lowercase: Optional[bool] = None,
     bm25_ascii_folding: Optional[bool] = None,
-    bm25_min_token_len: Optional[int] = None,
-    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
     bm25_min_token_len: Optional[int] = None,
@@ -253,8 +251,6 @@ def execute(
     bm25_tokenizer: Optional[str] = None,
     bm25_lowercase: Optional[bool] = None,
     bm25_ascii_folding: Optional[bool] = None,
-    bm25_min_token_len: Optional[int] = None,
-    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
     bm25_min_token_len: Optional[int] = None,
@@ -282,8 +278,6 @@ async def execute_async(
     bm25_tokenizer: Optional[str] = None,
     bm25_lowercase: Optional[bool] = None,
     bm25_ascii_folding: Optional[bool] = None,
-    bm25_min_token_len: Optional[int] = None,
-    bm25_max_token_len: Optional[int] = None,
     bm25_stopwords: Optional[List[str]] = None,
     bm25_stemmer: Optional[str] = None,
     bm25_min_token_len: Optional[int] = None,
@@ -304,7 +298,20 @@ def execute_hits(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
+    bm25_k1: Optional[float] = None,
+    bm25_b: Optional[float] = None,
+    bm25_avg_len: Optional[float] = None,
+    bm25_language: Optional[str] = None,
+    bm25_tokenizer: Optional[str] = None,
+    bm25_lowercase: Optional[bool] = None,
+    bm25_ascii_folding: Optional[bool] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords: Optional[List[str]] = None,
+    bm25_stemmer: Optional[str] = None,
+    bm25_stopwords_languages: Optional[List[str]] = None,
     on_error: str = "stop",
+    stmt: int = 0,
 ) -> List[ScoredPoint]: ...
 async def execute_async_hits(
     query: Query,
@@ -319,5 +326,41 @@ async def execute_async_hits(
     reranker_model: Optional[str] = None,
     cache_dir: Optional[str] = None,
     show_download_progress: bool = False,
+    bm25_k1: Optional[float] = None,
+    bm25_b: Optional[float] = None,
+    bm25_avg_len: Optional[float] = None,
+    bm25_language: Optional[str] = None,
+    bm25_tokenizer: Optional[str] = None,
+    bm25_lowercase: Optional[bool] = None,
+    bm25_ascii_folding: Optional[bool] = None,
+    bm25_min_token_len: Optional[int] = None,
+    bm25_max_token_len: Optional[int] = None,
+    bm25_stopwords: Optional[List[str]] = None,
+    bm25_stemmer: Optional[str] = None,
+    bm25_stopwords_languages: Optional[List[str]] = None,
     on_error: str = "stop",
+    stmt: int = 0,
 ) -> List[ScoredPoint]: ...
+
+def scroll_cursor(
+    client: Any,
+    collection: str,
+    *,
+    batch_size: int = 100,
+    where: str = "",
+    params: Optional[Dict[str, Any]] = None,
+    with_payload: bool = True,
+    with_vector: bool = False,
+    shard_key: Optional[Union[str, int]] = None,
+) -> Iterator[ScoredPoint]: ...
+async def scroll_cursor_async(
+    client: Any,
+    collection: str,
+    *,
+    batch_size: int = 100,
+    where: str = "",
+    params: Optional[Dict[str, Any]] = None,
+    with_payload: bool = True,
+    with_vector: bool = False,
+    shard_key: Optional[Union[str, int]] = None,
+) -> AsyncIterator[ScoredPoint]: ...

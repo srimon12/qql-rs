@@ -72,7 +72,13 @@ where
                             span,
                         ));
                     }
-                    out.push_str(&value_to_literal(&val)?);
+                    let literal = value_to_literal(&val)?;
+                    // `x-:n` bound to -2 must not render `x--2`: the lexer
+                    // eats `--` as a line comment.
+                    if literal.starts_with('-') && out.ends_with('-') {
+                        out.push(' ');
+                    }
+                    out.push_str(&literal);
                 } else {
                     return Err(QqlError::validation(
                         "QQL-BIND-MISSING-PARAM",
@@ -139,7 +145,12 @@ pub fn bind_positional(source: &str, params: &[Value]) -> Result<String, QqlErro
                     ));
                 }
                 out.push_str(&source[run..i]);
-                out.push_str(&value_to_literal(&params[param_index])?);
+                let literal = value_to_literal(&params[param_index])?;
+                // `x-?` bound to -2 must not render `x--2` (line comment).
+                if literal.starts_with('-') && out.ends_with('-') {
+                    out.push(' ');
+                }
+                out.push_str(&literal);
                 param_index += 1;
                 i += 1;
                 run = i;

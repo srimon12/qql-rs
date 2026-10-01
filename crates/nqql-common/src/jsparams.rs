@@ -20,6 +20,13 @@
 //! Nested `undefined` inside arrays becomes `Null` and object keys holding
 //! `undefined` are dropped — JSON `stringify` semantics, matching what the
 //! serde layer did for the shapes it accepted.
+//!
+//! [`unknown_to_json_exact`] is the same walk with a JSON result: it exists
+//! because napi's serde layer routes integral `number`s above `u32::MAX`
+//! through `f64` (`1700000000000` arrives as a JSON float) and mangles typed
+//! arrays into index-keyed objects, so the `execute(query)` / `upsert_many`
+//! entry points cannot use `serde_json::Value` argument conversion without
+//! corrupting values.
 
 use napi::JsValue as _;
 use napi::ValueType;
@@ -90,7 +97,7 @@ pub fn unknown_to_value(v: Unknown) -> Result<ast::Value, QqlError> {
             // is already rounded by the time it arrives as f64, so it fails
             // closed naming BigInt instead of mistargeting a point.
             if n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
-                if n.abs() > MAX_SAFE_INTEGER_F64 {
+                if n.abs() > crate::jsoutput::MAX_SAFE_INTEGER as f64 {
                     return Err(invalid_params(
                         "integer parameter exceeds the exact-integer range (2^53 - 1); pass a BigInt instead",
                     ));
@@ -200,6 +207,25 @@ fn unknown_object_to_value(v: Unknown) -> Result<ast::Value, QqlError> {
     Ok(ast::Value::Dict(entries))
 }
 
+/// Convert any JS value to a JSON value **exactly**.
+///
+/// The typed walk in [`unknown_to_value`] decides integer-ness before
+/// anything sees an `f64`, so an integral JS `number` in the `(2^32, 2^53]`
+/// band stays a JSON integer (`Int`/`UInt` downstream) instead of degrading
+/// to `Float` through napi's serde layer. `BigInt` values convert exactly up
+/// to `u64`; larger magnitudes fail closed naming `BigInt`. Array holes and
+/// explicit `undefined` become `Null`, and object keys holding `undefined`
+/// are dropped — the same JSON `stringify` semantics as the `Unknown`
+/// surface.
+///
+/// Use this for every argument the SDK turns into QQL data (queries as
+/// `Stmt` objects, `upsert_many` rows, options bags). Direct serde argument
+/// conversion is only safe for values that cannot carry integers above
+/// `u32::MAX` or typed arrays.
+pub fn unknown_to_json_exact(v: Unknown) -> Result<serde_json::Value, QqlError> {
+    unknown_to_value(v)?.to_json()
+}
+
 /// `None` for absent (`undefined`/`null`) params, mirroring the old
 /// `Option<serde_json::Value>` signatures where `null` meant "no params".
 pub fn unknown_opt_to_value(v: Unknown) -> Result<Option<ast::Value>, QqlError> {
@@ -214,10 +240,6 @@ pub fn unknown_opt_to_value(v: Unknown) -> Result<Option<ast::Value>, QqlError> 
 fn shard_key_type_mismatch(message: impl Into<String>) -> QqlError {
     QqlError::validation("QQL-BIND-TYPE-MISMATCH", message.into(), None)
 }
-
-/// Largest integer a JS `number` holds exactly. Larger shard keys must arrive
-/// as `BigInt`; silently rounding them would mistarget the request.
-const MAX_SAFE_INTEGER_F64: f64 = 9007199254740991.0;
 
 /// Convert any JS value to a typed shard routing key (`None` clears).
 ///
@@ -250,7 +272,7 @@ pub fn unknown_opt_to_shard_key(v: Unknown) -> Result<Option<ast::ShardKey>, Qql
                     "shardKey number must be a non-negative integer",
                 ));
             }
-            if n > MAX_SAFE_INTEGER_F64 {
+            if n > crate::jsoutput::MAX_SAFE_INTEGER as f64 {
                 return Err(shard_key_type_mismatch(
                     "shardKey number exceeds the exact-integer range; pass a BigInt instead",
                 ));

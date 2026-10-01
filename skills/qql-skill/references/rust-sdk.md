@@ -6,9 +6,9 @@ Three crates, three responsibilities. Use only what you need. Self-contained. Sh
 
 ```toml
 [dependencies]
-qql-core = "0.1"    # parser + inject_filter (no I/O, no networking)
-qql-plan = "0.1"    # AST -> typed Route { method, path, body }
-qql = "0.1"         # runtime executor (REST, gRPC, embedding)
+qql-core = "0.4"    # parser + inject_filter (no I/O, no networking)
+qql-plan = "0.4"    # AST -> typed plan / REST route projection
+qql = "0.4"         # runtime executor (REST, gRPC, embedding)
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 ```

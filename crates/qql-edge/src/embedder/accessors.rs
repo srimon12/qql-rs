@@ -6,7 +6,7 @@ use qql_core::error::QqlError;
 
 use super::catalog::short_alias_matches;
 use super::catalog::{is_image_alias, is_multi_alias, is_reranker_alias, is_sparse_alias};
-use super::{FastEmbedder, FastEmbedderOptions};
+use super::{FastEmbedder, FastEmbedderOptions, err};
 
 impl FastEmbedder {
     /// Construct with default options (dense `BGESmallENV15`, no sparse/multi/image/rerank).
@@ -208,6 +208,32 @@ impl FastEmbedder {
             || short_alias_matches(r, &multi.model_code)
             || is_multi_alias(r)
     }
+}
+
+/// Validate `model` against the embedder's multi configuration.
+///
+/// Mirrors [`super::bm25::ensure_sparse_model_allowed`]: with a fastembed
+/// multi model locked in, only that model (or an empty / `"default"` id) is
+/// allowed. Callers check for an unconfigured multi slot first and report the
+/// unsupported-modality error; keeping one check here means the scalar and
+/// batch multi paths cannot drift (the dense model id is not a multi id).
+pub(crate) fn ensure_multi_model_allowed(
+    embedder: &FastEmbedder,
+    model: &str,
+) -> Result<(), QqlError> {
+    let Some(ref multi) = embedder.multi else {
+        return Ok(());
+    };
+    if embedder.accepts_multi_model(model)
+        || model.is_empty()
+        || model.eq_ignore_ascii_case("default")
+    {
+        return Ok(());
+    }
+    Err(err(format!(
+        "local multi embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
+        multi.model_name, multi.model_code
+    )))
 }
 
 impl std::fmt::Debug for FastEmbedder {

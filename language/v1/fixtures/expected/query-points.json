@@ -77,10 +77,10 @@
           "Points": {
             "ids": [
               {
-                "String": "a1b2c3"
+                "String": "550e8400-e29b-41d4-a716-446655440011"
               },
               {
-                "String": "d4e5f6"
+                "String": "550e8400-e29b-41d4-a716-446655440012"
               }
             ]
           }
@@ -113,7 +113,7 @@
                 "Number": 1
               },
               {
-                "String": "uuid-here"
+                "String": "550e8400-e29b-41d4-a716-446655440010"
               },
               {
                 "Number": 100

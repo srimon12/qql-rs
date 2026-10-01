@@ -1,6 +1,6 @@
 use crate::ast::{
-    Cte, FilterExpr, FusionMethod, GroupSpec, LookupSpec, Prefetch, PrefetchSource, QueryExpr,
-    QueryInput, VectorTarget,
+    Cte, FilterExpr, FusionMethod, GroupSpec, LookupSpec, PageSpec, Prefetch, PrefetchSource,
+    QueryExpr, QueryInput, VectorTarget,
 };
 use crate::error::{QqlError, Span};
 use crate::parser::{AstLowerer, ascii_equal};
@@ -16,7 +16,10 @@ pub(crate) struct HybridUsing {
 }
 
 impl<'a> AstLowerer<'a> {
-    pub(crate) fn parse_prefetch_list(&mut self) -> Result<Vec<Prefetch>, QqlError> {
+    /// Parse the `PREFETCH (…)` list. `ctes` is the visible CTE scope, shared
+    /// with inline sub-queries (`PREFETCH (QUERY … PREFETCH (name))` sees the
+    /// same definitions the enclosing statement does).
+    pub(crate) fn parse_prefetch_list(&mut self, ctes: &[Cte]) -> Result<Vec<Prefetch>, QqlError> {
         self.expect(TokenKind::Lparen)?;
         let mut prefetch = Vec::new();
         if self.peek()?.kind == TokenKind::Rparen {
@@ -29,7 +32,7 @@ impl<'a> AstLowerer<'a> {
         loop {
             let source = if self.peek()?.kind == TokenKind::Query {
                 self.advance()?;
-                PrefetchSource::Query(Box::new(self.parse_query_stmt(false, Vec::new())?))
+                PrefetchSource::Query(Box::new(self.parse_query_stmt(false, ctes)?))
             } else {
                 PrefetchSource::Cte(self.parse_identifier()?)
             };
@@ -326,15 +329,13 @@ pub(crate) fn validate_prefetch_references(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_common_clauses(
     expression: &QueryExpr,
     filter: Option<&FilterExpr>,
     params: Option<&crate::ast::SearchParams>,
     score_threshold: Option<f64>,
     group: Option<&GroupSpec>,
-    limit: Option<u64>,
-    offset: Option<u64>,
+    page: &PageSpec,
     span: Span,
 ) -> Result<(), QqlError> {
     if let Some(score) = score_threshold
@@ -346,13 +347,17 @@ pub(crate) fn validate_common_clauses(
             Some(span),
         ));
     }
+    // Paging clause presence includes placeholders: `LIMIT :n` must be as
+    // illegal on QUERY POINTS as the literal `LIMIT 5` (core-audit #3).
     if matches!(expression, QueryExpr::Points { .. })
         && (filter.is_some()
             || params.is_some()
             || score_threshold.is_some()
             || group.is_some()
-            || limit.is_some()
-            || offset.is_some())
+            || page.limit.is_some()
+            || page.offset.is_some()
+            || page.limit_param.is_some()
+            || page.offset_param.is_some())
     {
         return Err(QqlError::validation(
             "QQL-VALIDATION-POINTS-CLAUSE",

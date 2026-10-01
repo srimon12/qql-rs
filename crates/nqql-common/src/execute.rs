@@ -17,15 +17,25 @@ use std::future::Future;
 use crate::{jsparams, to_napi_err};
 
 /// Parse the `onError` option (`"stop"` default, `"continue"`).
-pub fn on_error_from(options: Option<&serde_json::Value>) -> qql::executor::OnError {
-    options
-        .and_then(|o| o.get("onError"))
-        .and_then(|v| v.as_str())
-        .map(|s| match s {
-            "continue" => qql::executor::OnError::Continue,
-            _ => qql::executor::OnError::Stop,
-        })
-        .unwrap_or(qql::executor::OnError::Stop)
+///
+/// Fail-closed: a present unknown value is rejected with
+/// `QQL-VALIDATION-CONFIG` instead of silently falling back to `stop`.
+pub fn on_error_from(
+    options: Option<&serde_json::Value>,
+) -> Result<qql::executor::OnError, QqlError> {
+    match options.and_then(|o| o.get("onError")) {
+        None => Ok(qql::executor::OnError::Stop),
+        Some(value) if value.is_null() => Ok(qql::executor::OnError::Stop),
+        Some(value) => match value.as_str() {
+            Some("stop") => Ok(qql::executor::OnError::Stop),
+            Some("continue") => Ok(qql::executor::OnError::Continue),
+            _ => Err(QqlError::validation(
+                "QQL-VALIDATION-CONFIG",
+                "onError must be 'stop' or 'continue'",
+                None,
+            )),
+        },
+    }
 }
 
 // ── Typed execute options (P0-1) ─────────────────────────────────
@@ -60,11 +70,12 @@ impl FromNapiValue for ExecOptionsInput {
     ) -> napi::Result<Self> {
         // SAFETY: napi invokes argument conversion synchronously on the JS
         // thread with valid handles (trait contract). Everything below uses
-        // the safe `Unknown` / `Object` / serde wrappers; only owned values
-        // escape into the async future, so it stays `Send + 'static`.
-        let raw = unsafe { serde_json::Value::from_napi_value(env, napi_val) }
-            .map_err(|e| napi::Error::from_reason(format!("invalid options object: {e}")))?;
+        // the safe `Unknown` / `Object` wrappers; only owned values escape
+        // into the async future, so it stays `Send + 'static`.
         let unknown = unsafe { Unknown::from_napi_value(env, napi_val) }?;
+        // Params first: typed arrays must bind as packed vectors (the JSON
+        // walk would only produce plain lists), while `raw` is the JSON view
+        // the client/option readers consume.
         let params = match unknown.get_type()? {
             napi::ValueType::Object => {
                 let param_value: Option<Unknown> = Object::from_unknown(unknown)
@@ -77,17 +88,64 @@ impl FromNapiValue for ExecOptionsInput {
             }
             _ => None,
         };
+        // Typed JSON conversion (not napi's serde): integral numbers above
+        // `u32::MAX` stay integers and `undefined` holes in `params` follow
+        // the documented array-hole → `Null` semantics instead of dying in
+        // the serde layer with a code-less error.
+        let raw = jsparams::unknown_to_json_exact(unknown).map_err(to_napi_err)?;
         Ok(Self { raw, params })
+    }
+}
+
+/// A QQL query argument (string, `Stmt` object, or array of either)
+/// converted exactly through the typed JS walk.
+///
+/// napi's serde conversion would turn integral `Stmt` fields above
+/// `u32::MAX` (point IDs, `LIMIT`s, payload integers from `toObject()`)
+/// into JSON floats, so `execute`/`explainAnalyze` take this wrapper and
+/// deserialize the (owned) JSON after the JS thread released the handles.
+pub struct ExecQueryInput(pub serde_json::Value);
+
+impl FromNapiValue for ExecQueryInput {
+    unsafe fn from_napi_value(
+        env: napi::sys::napi_env,
+        napi_val: napi::sys::napi_value,
+    ) -> napi::Result<Self> {
+        // SAFETY: as for `ExecOptionsInput` — argument conversion runs
+        // synchronously on the JS thread; only the owned JSON value escapes.
+        let unknown = unsafe { Unknown::from_napi_value(env, napi_val) }?;
+        jsparams::unknown_to_json_exact(unknown)
+            .map(Self)
+            .map_err(to_napi_err)
+    }
+}
+
+/// `upsertMany` rows converted through the typed JS walk, so `Float32Array`
+/// / `Float64Array` vectors cross in one memcpy and epoch-millis integers
+/// stay integers (`Float` only for real fractional values).
+pub struct ExecRowsInput(pub ast::Value);
+
+impl FromNapiValue for ExecRowsInput {
+    unsafe fn from_napi_value(
+        env: napi::sys::napi_env,
+        napi_val: napi::sys::napi_value,
+    ) -> napi::Result<Self> {
+        // SAFETY: as for `ExecOptionsInput` — argument conversion runs
+        // synchronously on the JS thread; only the owned `ast::Value` escapes.
+        let unknown = unsafe { Unknown::from_napi_value(env, napi_val) }?;
+        jsparams::unknown_to_value(unknown)
+            .map(Self)
+            .map_err(to_napi_err)
     }
 }
 
 /// Split an [`ExecOptionsInput`] (or its absence) into dispatch inputs.
 pub fn typed_dispatch_inputs(
     options: Option<&ExecOptionsInput>,
-) -> (qql::executor::OnError, Option<&ast::Value>) {
+) -> Result<(qql::executor::OnError, Option<&ast::Value>), QqlError> {
     match options {
-        Some(o) => (on_error_from(Some(&o.raw)), o.params.as_ref()),
-        None => (qql::executor::OnError::Stop, None),
+        Some(o) => Ok((on_error_from(Some(&o.raw))?, o.params.as_ref())),
+        None => Ok((qql::executor::OnError::Stop, None)),
     }
 }
 
@@ -312,6 +370,44 @@ pub async fn execute_dispatch_typed(
             }
             let results = executor.execute_batch_nodes(vec![s], on_error).await?;
             Ok(qql::executor::ExecutionReport::from_results(results))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql::executor::OnError;
+
+    #[test]
+    fn on_error_accepts_only_the_documented_literals() {
+        assert!(matches!(on_error_from(None), Ok(OnError::Stop)));
+        assert!(matches!(
+            on_error_from(Some(&serde_json::json!({}))),
+            Ok(OnError::Stop)
+        ));
+        assert!(matches!(
+            on_error_from(Some(&serde_json::json!({ "onError": null }))),
+            Ok(OnError::Stop)
+        ));
+        assert!(matches!(
+            on_error_from(Some(&serde_json::json!({ "onError": "stop" }))),
+            Ok(OnError::Stop)
+        ));
+        assert!(matches!(
+            on_error_from(Some(&serde_json::json!({ "onError": "continue" }))),
+            Ok(OnError::Continue)
+        ));
+        // Unknown spellings/cases fail closed instead of silently stopping.
+        for bad in [
+            serde_json::json!("Continue"),
+            serde_json::json!("typo"),
+            serde_json::json!(1),
+            serde_json::json!(true),
+        ] {
+            let options = serde_json::json!({ "onError": bad });
+            let error = on_error_from(Some(&options)).expect_err("must reject");
+            assert_eq!(error.code, "QQL-VALIDATION-CONFIG");
         }
     }
 }

@@ -9,7 +9,7 @@
 //! Without this, report JSON text round-trips through `JSON.parse` and every
 //! u64 above 2^53 silently rounds (`1479834607549681654` → `...700`).
 
-use napi::bindgen_prelude::{BigInt, Env, Null, Object, ToNapiValue};
+use napi::bindgen_prelude::{BigInt, Env, JsObjectValue as _, Null, Object, Property, ToNapiValue};
 
 /// Largest-magnitude integers a JS `Number` holds exactly. Larger ones must
 /// cross as `BigInt`; silently rounding them would mistarget points.
@@ -93,11 +93,21 @@ unsafe fn exact_to_napi_value(
             unsafe { ToNapiValue::to_napi_value(env, nested) }
         }
         serde_json::Value::Object(fields) => {
-            let mut object = Object::new(&Env::from(env))?;
+            let raw_env = env;
+            let env = Env::from(raw_env);
+            let mut object = Object::new(&env)?;
             for (key, item) in fields {
-                object.set(key, Exact(item))?;
+                // `define_properties`, never `set`: an own data property
+                // named `__proto__` (a JSON payload key) must round-trip as
+                // an own field instead of hitting the inherited
+                // `Object.prototype.__proto__` setter and mutating the
+                // object's prototype.
+                let property = Property::new()
+                    .with_name(&env, key.as_str())?
+                    .with_napi_value(&env, Exact(item))?;
+                object.define_properties(&[property])?;
             }
-            unsafe { Object::to_napi_value(env, object) }
+            unsafe { Object::to_napi_value(raw_env, object) }
         }
     }
 }

@@ -363,21 +363,20 @@ fn collection_config_fail_closed_edges() {
     )
     .expect("parse");
     assert!(plan(&stmt).is_err(), "ranges are enforced at plan time");
-    // Create-time fan-out is accepted (applied via deferred PATCH, so the
-    // PUT body itself never carries it).
+    // Create-time fan-out is accepted (applied via a deferred PATCH), so the
+    // single-route projection must refuse to emit a body that silently drops
+    // it: the runtime applies the multi-step sequence.
     let stmt = Parser::parse(
         "CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH PARAMS (read_fan_out_factor = 2);",
     )
     .expect("parse");
     let op = plan(&stmt).expect("plan");
-    let route = to_rest_route(&op).expect("route");
-    assert!(
-        route
-            .body_json()
-            .expect("body")
-            .get("read_fan_out_factor")
-            .is_none()
-    );
+    assert!(matches!(
+        to_rest_route(&op),
+        Err(qql_plan::RestProjectionError::MultiStep {
+            stmt_type: "create_collection"
+        })
+    ));
 }
 
 #[test]

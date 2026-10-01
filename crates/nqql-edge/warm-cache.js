@@ -12,19 +12,26 @@
 
 const os = require("os");
 const path = require("path");
+const fs = require("fs");
 const nqql = require("./index.js");
 
-const fs = require("fs");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nqql-warm-"));
 
-const cacheRoot = process.env.HF_HOME
-  ? process.env.HF_HOME
-  : process.env.FASTEMBED_CACHE_DIR || path.join(".fastembed_cache");
-console.log("warming fastembed cache:", path.resolve(cacheRoot));
-
-try {
-  nqql.localExecutor(tmp);
+async function main() {
+  // The cache root is whatever fastembed resolves (HF_HOME > FASTEMBED_CACHE_DIR
+  // > ./.fastembed_cache); CI pins HF_HOME, so do not log a guess here.
+  const client = await nqql.localExecutor(tmp);
+  // Close before deleting the data dir: the native executor holds the shard
+  // and WAL files open until the executor is flushed.
+  await client.close();
   console.log("model cache ready (default model initialized)");
-} finally {
-  fs.rmSync(tmp, { recursive: true, force: true });
 }
+
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });

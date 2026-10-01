@@ -5,7 +5,9 @@
 //! selectors, search params, and point-vectors helpers.
 
 use qql_core::error::QqlError;
-use qql_plan::types::{FilterExpression, PayloadSelectorReq, VectorSelectorReq, WithLookupValue};
+use qql_plan::types::{
+    FilterExpression, OrderByQuery, PayloadSelectorReq, VectorSelectorReq, WithLookupValue,
+};
 use qql_plan::{PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue};
 
 use crate::qdrant_grpc::qdrant;
@@ -79,6 +81,74 @@ pub(crate) fn to_query_groups(
         read_consistency: req.consistency.as_ref().map(to_read_consistency),
         ..Default::default()
     })
+}
+
+/// Convert a plan `OrderBy` into the proto message.
+///
+/// Shared by `QUERY ORDER BY` and `SCROLL … ORDER BY` so both transports page
+/// through the same keys. Unknown directions and `START FROM` values with no
+/// proto representation fail closed instead of silently ordering wrong.
+pub(crate) fn to_order_by(order_by: &OrderByQuery) -> Result<qdrant::OrderBy, QqlError> {
+    let direction = match order_by.direction.as_deref() {
+        None => None,
+        Some("asc") => Some(qdrant::Direction::Asc as i32),
+        Some("desc") => Some(qdrant::Direction::Desc as i32),
+        Some(other) => {
+            return Err(QqlError::validation(
+                "QQL-GRPC-DIRECTION",
+                format!(
+                    "unsupported order_by direction '{other}' on the gRPC path; use 'asc' or 'desc'"
+                ),
+                None,
+            ));
+        }
+    };
+    Ok(qdrant::OrderBy {
+        key: order_by.key.clone(),
+        direction,
+        start_from: order_by
+            .start_from
+            .as_ref()
+            .map(to_start_from)
+            .transpose()?,
+    })
+}
+
+/// Convert an `ORDER BY … START FROM` value to the proto `StartFrom` oneof.
+///
+/// The proto carries `integer` / `float` / `datetime` only: other scalars have
+/// no wire representation and error instead of dropping the paging origin.
+fn to_start_from(value: &qql_core::ast::Value) -> Result<qdrant::StartFrom, QqlError> {
+    use qdrant::start_from::Value as Sf;
+    use qql_core::ast::Value;
+    let start = match value {
+        Value::Int(n) => Sf::Integer(*n),
+        Value::UInt(n) => Sf::Integer(i64::try_from(*n).map_err(|_| {
+            QqlError::validation(
+                "QQL-GRPC-START-FROM",
+                format!(
+                    "order_by START FROM integer {n} cannot be represented on the gRPC path: the bundled Qdrant proto stores it as int64 (max {})",
+                    i64::MAX
+                ),
+                None,
+            )
+        })?),
+        Value::Float(f) => Sf::Float(*f),
+        Value::Str(text) if qql_core::ast::looks_like_iso_datetime(text) => {
+            Sf::Datetime(text.clone())
+        }
+        other => {
+            return Err(QqlError::validation(
+                "QQL-GRPC-START-FROM",
+                format!(
+                    "order_by START FROM {} cannot be represented on the gRPC path; use an integer, float, or ISO-8601 datetime",
+                    qql_plan::value_error_text(other)
+                ),
+                None,
+            ));
+        }
+    };
+    Ok(qdrant::StartFrom { value: Some(start) })
 }
 
 pub(crate) fn to_read_consistency(
@@ -187,12 +257,22 @@ pub(crate) fn to_query_variant(
                 .iter()
                 .map(to_vector_input)
                 .collect::<Result<Vec<_>, _>>()?,
-            strategy: recommend.strategy.as_deref().map(|s| match s {
-                "average_vector" => qdrant::RecommendStrategy::AverageVector as i32,
-                "best_score" => qdrant::RecommendStrategy::BestScore as i32,
-                "sum_scores" => qdrant::RecommendStrategy::SumScores as i32,
-                _ => qdrant::RecommendStrategy::AverageVector as i32,
-            }),
+            strategy: recommend
+                .strategy
+                .as_deref()
+                .map(|s| match s {
+                    "average_vector" => Ok(qdrant::RecommendStrategy::AverageVector as i32),
+                    "best_score" => Ok(qdrant::RecommendStrategy::BestScore as i32),
+                    "sum_scores" => Ok(qdrant::RecommendStrategy::SumScores as i32),
+                    other => Err(QqlError::validation(
+                        "QQL-GRPC-STRATEGY",
+                        format!(
+                            "unsupported recommend strategy '{other}' on the gRPC path; use average_vector, best_score, or sum_scores"
+                        ),
+                        None,
+                    )),
+                })
+                .transpose()?,
         }),
         QueryVariant::Context { context } => Variant::Context(qdrant::ContextInput {
             pairs: context
@@ -220,18 +300,7 @@ pub(crate) fn to_query_variant(
                     .collect::<Result<Vec<_>, QqlError>>()?,
             }),
         }),
-        QueryVariant::OrderBy { order_by } => {
-            let dir = order_by.direction.as_deref().map(|d| match d {
-                "asc" => qdrant::Direction::Asc as i32,
-                "desc" => qdrant::Direction::Desc as i32,
-                _ => qdrant::Direction::Asc as i32,
-            });
-            Variant::OrderBy(qdrant::OrderBy {
-                key: order_by.key.clone(),
-                direction: dir,
-                ..Default::default()
-            })
-        }
+        QueryVariant::OrderBy { order_by } => Variant::OrderBy(to_order_by(order_by)?),
         QueryVariant::Sample { .. } => Variant::Sample(0),
         QueryVariant::Fusion { fusion } => {
             let val = match fusion.as_str() {
@@ -636,7 +705,8 @@ pub(crate) fn to_get_points(
 }
 
 /// Build `CountPoints` from a planned count request — shared by the JSON and
-/// typed read paths. QQL always counts exactly (`exact: Some(true)`).
+/// typed read paths. The plan's `exact` is forwarded verbatim; when the user
+/// is silent the server-side default (exact) applies.
 pub(crate) fn to_count_points(
     request: &qql_plan::types::CountRequest,
     collection: &str,
@@ -644,7 +714,7 @@ pub(crate) fn to_count_points(
     Ok(qdrant::CountPoints {
         collection_name: collection.to_owned(),
         filter: to_filter_opt(request.filter.as_ref())?,
-        exact: Some(true),
+        exact: request.exact.or(Some(true)),
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     })
@@ -678,6 +748,7 @@ pub(crate) fn to_scroll_points(
         with_payload: request.with_payload.as_ref().map(to_payload_selector),
         with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
         shard_key_selector: shard_key_selector(&request.shard_key),
+        order_by: request.order_by.as_ref().map(to_order_by).transpose()?,
         ..Default::default()
     })
 }

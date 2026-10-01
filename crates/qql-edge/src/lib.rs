@@ -81,7 +81,8 @@ pub struct LocalExecutorOptions {
     /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
     /// e.g. `"splade"`, `"bge-m3"`. When set, sparse embedding uses real ONNX
     /// inference. `None` → local wire-compatible BM25 (Qdrant
-    /// `qdrant/bm25`-identical token IDs) for sparse requests.
+    /// `qdrant/bm25`-identical token IDs) for sparse requests. `"bm25"` names
+    /// the built-in encoder, not an ONNX model: leave this unset to use it.
     #[cfg(feature = "fastembed-local")]
     pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT). e.g. `"bge-m3"`.
@@ -186,7 +187,9 @@ pub fn wal_segment_capacity_bytes(
 /// [`local_executor_with_options`] when you need a different model or cache dir.
 ///
 /// No network calls are made at inference time — embedding runs on-device via ONNX.
-/// Models are downloaded from HuggingFace on first use and cached locally.
+/// The model is downloaded from HuggingFace (when not already cached on disk)
+/// and loaded before this function returns, so the first construction may
+/// block for minutes; construct once and share the executor.
 #[cfg(feature = "fastembed-local")]
 pub fn local_executor(
     data_dir: impl Into<PathBuf>,
@@ -202,6 +205,10 @@ pub fn local_executor(
 }
 
 /// Build a fully-local [`Executor`] with explicit model / cache options.
+///
+/// Like [`local_executor`], every configured model slot is downloaded (when
+/// needed) and loaded synchronously before this returns. Loaded sessions are
+/// shared process-wide and released when the last embedder using them drops.
 #[cfg(feature = "fastembed-local")]
 pub fn local_executor_with_options(
     data_dir: impl Into<PathBuf>,

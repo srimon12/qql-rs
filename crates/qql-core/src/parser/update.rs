@@ -126,13 +126,6 @@ impl<'a> AstLowerer<'a> {
             }
             self.advance()?;
         }
-        if points.is_empty() {
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-UPDATE-VECTOR",
-                "UPDATE VECTOR VALUES requires at least one point",
-                Some(self.prev_span()),
-            ));
-        }
         Ok(points)
     }
 

@@ -17,6 +17,7 @@ use qql_core::error::QqlError;
 
 use crate::embedder::Embedder;
 use crate::sparse::SparseVector;
+use crate::topology::{MAX_NESTING_DEPTH, nesting_depth_error};
 
 /// Default named dense vector for auto-embedding.
 pub const DENSE_VECTOR_NAME: &str = "dense";
@@ -50,13 +51,21 @@ fn require_embed_target(target: &Option<VectorTarget>) -> Result<EmbedTarget, Qq
     }
 }
 
-pub(crate) fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
+/// Fail closed when a host's batch embedding returned the wrong cardinality.
+///
+/// `entry_point` names the host method that was called so the message points
+/// at the right override (`embed_dense_batch` vs `embed_sparse_document_batch`)
+/// instead of blaming the dense batch for a sparse-leg bug.
+pub(crate) fn ensure_batch_len(
+    got: usize,
+    expected: usize,
+    model: &str,
+    entry_point: &str,
+) -> Result<(), QqlError> {
     if got != expected {
         return Err(QqlError::execution(
             "QQL-EMBEDDING",
-            format!(
-                "embed_dense_batch returned {got} vectors for {expected} texts (model={model})"
-            ),
+            format!("{entry_point} returned {got} vectors for {expected} texts (model={model})"),
             None,
         ));
     }
@@ -73,7 +82,7 @@ pub(crate) async fn resolve_query_embeddings(
     embedder: &dyn Embedder,
 ) -> Result<(), QqlError> {
     let mut jobs = Vec::new();
-    collect_query_jobs(query, &mut jobs)?;
+    collect_query_jobs(query, &mut jobs, 0)?;
 
     let outputs = batch_query_jobs(embedder, &jobs).await?;
 
@@ -127,26 +136,50 @@ fn modality_code(modality: JobModality) -> (&'static str, &'static str) {
     }
 }
 
-fn collect_query_jobs(query: &QueryStmt, jobs: &mut Vec<QueryJob>) -> Result<(), QqlError> {
-    for cte in &query.ctes {
-        collect_expr_jobs(&cte.query.expression, jobs)?;
+/// Collect every embedding job reachable from one statement.
+///
+/// The walk is definition-order and total: CTE bodies are visited once (they
+/// are stored once on the root statement), and inline prefetch sub-queries
+/// recurse through [`collect_query_jobs`], which is the same shape
+/// [`apply_query_embeddings`] consumes. CTE *references* (`PREFETCH (name)`)
+/// carry no jobs of their own — the plan resolves them to the bodies visited
+/// here.
+///
+/// This walk is plain synchronous recursion (unlike the boxed apply pass), so
+/// `depth` guards hand-built ASTs: past [`MAX_NESTING_DEPTH`] it fails closed
+/// with `QQL-VALIDATION-NESTING` instead of overflowing the stack.
+fn collect_query_jobs(
+    query: &QueryStmt,
+    jobs: &mut Vec<QueryJob>,
+    depth: usize,
+) -> Result<(), QqlError> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err(nesting_depth_error());
     }
-    collect_expr_jobs(&query.expression, jobs)
+    for cte in &query.ctes {
+        collect_query_jobs(&cte.query, jobs, depth + 1)?;
+    }
+    collect_expr_jobs(&query.expression, jobs, depth)
 }
 
 fn collect_prefetches_jobs(
     prefetches: &[Prefetch],
     jobs: &mut Vec<QueryJob>,
+    depth: usize,
 ) -> Result<(), QqlError> {
     for pref in prefetches {
         if let PrefetchSource::Query(sub) = &pref.source {
-            collect_query_jobs(sub, jobs)?;
+            collect_query_jobs(sub, jobs, depth + 1)?;
         }
     }
     Ok(())
 }
 
-fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), QqlError> {
+fn collect_expr_jobs(
+    expr: &QueryExpr,
+    jobs: &mut Vec<QueryJob>,
+    depth: usize,
+) -> Result<(), QqlError> {
     match expr {
         QueryExpr::Nearest {
             input,
@@ -155,7 +188,7 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
             ..
         } => {
             collect_input_jobs(input, require_embed_target(using)?, "default", jobs)?;
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::Recommend {
             positive,
@@ -168,7 +201,7 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
             for input in positive.iter().chain(negative.iter()) {
                 collect_input_jobs(input, target, "default", jobs)?;
             }
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::Context {
             pairs,
@@ -181,7 +214,7 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
                 collect_input_jobs(&pair.positive, target, "default", jobs)?;
                 collect_input_jobs(&pair.negative, target, "default", jobs)?;
             }
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::Discover {
             target,
@@ -196,10 +229,10 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
                 collect_input_jobs(&pair.positive, emb, "default", jobs)?;
                 collect_input_jobs(&pair.negative, emb, "default", jobs)?;
             }
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::RelevanceFeedback {
             target,
@@ -213,9 +246,17 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
             for fb in feedback {
                 collect_input_jobs(&fb.example, emb, "default", jobs)?;
             }
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
-        QueryExpr::Hybrid { text, model, .. } => {
+        QueryExpr::Hybrid {
+            text,
+            model,
+            text_param,
+            ..
+        } => {
+            if text_param.is_some() {
+                return Err(unbound_text_param_error());
+            }
             // The sparse leg shares `Hybrid.model` with the dense leg (there
             // is no dedicated sparse-model field); apply consumes dense first.
             let m = model.as_deref().unwrap_or("default").to_string();
@@ -232,7 +273,7 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
         }
         QueryExpr::CrossRerank { prefetch, .. } => {
             // Query string is scored by the pair model, not embedded.
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::Rerank {
             input,
@@ -252,11 +293,43 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
                 ));
             }
             collect_input_jobs(input, emb, model.as_str(), jobs)?;
-            collect_prefetches_jobs(prefetch, jobs)?;
+            collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         _ => {}
     }
     Ok(())
+}
+
+/// Error for a `TEXT :param` input reaching a client embedder before binding.
+///
+/// The old path embedded the empty placeholder text: dense failed later on an
+/// empty vector, while the sparse leg silently produced an empty sparse vector
+/// and erased the placeholder. Failing here keeps both modalities loud and
+/// preserves the placeholder for a later bind.
+fn unbound_text_param_error() -> QqlError {
+    QqlError::execution(
+        "QQL-EMBEDDING",
+        "cannot client-embed TEXT with an unbound parameter; bind the statement before embedding",
+        None,
+    )
+}
+
+/// Error for inference `OPTIONS` on an input that is about to be
+/// client-embedded.
+///
+/// `OPTIONS {…}` is passed to the **server's** inference model as-is. A client
+/// embedder's trait surface has no options channel, so silently dropping the
+/// options would make the same statement embed differently depending on host
+/// configuration — fail closed instead.
+fn client_options_unsupported_error(input: &str) -> QqlError {
+    QqlError::execution(
+        "QQL-EMBEDDING",
+        format!(
+            "OPTIONS on {input} requires server-side inference; the configured client embedder \
+             cannot honor it. Remove the OPTIONS clause or detach the client embedder"
+        ),
+        None,
+    )
 }
 
 /// Classify one query input into its modality batch. TEXT joins the dense
@@ -264,6 +337,10 @@ fn collect_expr_jobs(expr: &QueryExpr, jobs: &mut Vec<QueryJob>) -> Result<(), Q
 /// separately. IMAGE always joins the image batch (target validated here so
 /// misconfigured queries fail before any batch RPC runs — same errors as
 /// [`apply_input`]).
+///
+/// Inputs the client cannot faithfully embed fail closed here rather than
+/// producing a vector the server path would not have produced: unbound text
+/// parameters and inference `OPTIONS`.
 fn collect_input_jobs(
     input: &QueryInput,
     target: EmbedTarget,
@@ -271,7 +348,18 @@ fn collect_input_jobs(
     jobs: &mut Vec<QueryJob>,
 ) -> Result<(), QqlError> {
     match input {
-        QueryInput::Text { text, model, .. } => {
+        QueryInput::Text {
+            text,
+            model,
+            text_param,
+            options,
+        } => {
+            if text_param.is_some() {
+                return Err(unbound_text_param_error());
+            }
+            if !options.is_empty() {
+                return Err(client_options_unsupported_error("TEXT"));
+            }
             let m = model.as_deref().unwrap_or(default_model).to_string();
             let modality = if target.kind == VectorKind::Sparse {
                 JobModality::Sparse
@@ -286,7 +374,14 @@ fn collect_input_jobs(
                 text: text.clone(),
             });
         }
-        QueryInput::Image { source, model, .. } => {
+        QueryInput::Image {
+            source,
+            model,
+            options,
+        } => {
+            if !options.is_empty() {
+                return Err(client_options_unsupported_error("IMAGE"));
+            }
             check_image_target(target)?;
             let m = model.as_deref().unwrap_or(default_model).to_string();
             jobs.push(QueryJob {
@@ -510,7 +605,9 @@ async fn batch_query_jobs(
                     &sub,
                     "QQL-EMBEDDING",
                     "dense",
-                    ensure_batch_len,
+                    |got, expected, model| {
+                        ensure_batch_len(got, expected, model, "embed_dense_batch")
+                    },
                     DenseBatchCall,
                 )
                 .await?;
@@ -694,7 +791,7 @@ fn apply_query_embeddings<'a>(
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
         for cte in &mut query.ctes {
-            apply_expr_embeddings(&mut cte.query.expression, cursor).await?;
+            apply_query_embeddings(&mut cte.query, cursor).await?;
         }
         apply_expr_embeddings(&mut query.expression, cursor).await?;
         Ok(())

@@ -13,24 +13,35 @@ pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> Result<PrefetchRequ
     lower_prefetch_with_ctes(prefetch, &[])
 }
 
-/// Lower a `PREFETCH` clause, resolving `CTE` sources against `ctes`.
+/// Lower a `PREFETCH` clause, resolving `CTE` sources against the visible
+/// scope `ctes`.
+///
+/// `ctes` is the list visible at the *reference site*: the root statement's
+/// definitions, or the prefix visible where an enclosing CTE body was
+/// defined. Resolving a name at index `i` lowers that CTE's body under
+/// `&ctes[..i]` — exactly the prior-only visibility the parser enforced when
+/// it accepted the reference — so resolution strictly moves backwards and
+/// always terminates. Inline `QUERY` sub-sources inherit the current scope,
+/// matching the parser.
 pub fn lower_prefetch_with_ctes(
     prefetch: &qql_core::ast::Prefetch,
     ctes: &[qql_core::ast::Cte],
 ) -> Result<PrefetchRequest, QqlError> {
-    let source_query: &QueryStmt = match &prefetch.source {
-        PrefetchSource::Cte(name) => ctes
-            .iter()
-            .find(|c| c.name.eq_ignore_ascii_case(name))
-            .map(|c| c.query.as_ref())
-            .ok_or_else(|| {
-                QqlError::validation(
-                    "QQL-PLAN-PREFETCH-CTE",
-                    format!("PREFETCH references unknown CTE '{name}'"),
-                    None,
-                )
-            })?,
-        PrefetchSource::Query(query) => query.as_ref(),
+    let (source_query, source_scope): (&QueryStmt, &[qql_core::ast::Cte]) = match &prefetch.source {
+        PrefetchSource::Cte(name) => {
+            let index = ctes
+                .iter()
+                .position(|c| c.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| {
+                    QqlError::validation(
+                        "QQL-PLAN-PREFETCH-CTE",
+                        format!("PREFETCH references unknown CTE '{name}'"),
+                        None,
+                    )
+                })?;
+            (&ctes[index].query, &ctes[..index])
+        }
+        PrefetchSource::Query(query) => (query.as_ref(), ctes),
     };
 
     // PrefetchRequest cannot represent grouping (no group_by / group_size
@@ -42,9 +53,30 @@ pub fn lower_prefetch_with_ctes(
             None,
         ));
     }
+    // `Prefetch` has no shard_key and the stage is not a request: routing a
+    // source silently would query the wrong shard (a tenant-isolation hazard
+    // in the multitenancy story), so fail closed.
+    if source_query.shard_key.is_some() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-PREFETCH-SHARD",
+            "PREFETCH sources cannot carry SHARD routing; route the outer query instead",
+            None,
+        ));
+    }
+    // Per-request read opts have no prefetch-stage representation either:
+    // they would be silently dropped (unlike body `PARAMS`, which lower).
+    if let Some(params) = source_query.params.as_ref()
+        && (params.timeout.is_some() || params.consistency.is_some())
+    {
+        return Err(QqlError::validation(
+            "QQL-PLAN-PREFETCH-PARAMS",
+            "PREFETCH sources cannot carry PARAMS timeout / consistency",
+            None,
+        ));
+    }
 
     let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) = {
-        let (variant, using, nested) = build_query_with_prefetch(source_query)?;
+        let (variant, using, nested) = build_query_with_prefetch(source_query, source_scope)?;
         (
             Some(variant),
             using,
@@ -67,13 +99,15 @@ pub fn lower_prefetch_with_ctes(
         )
     };
 
-    // Outer PREFETCH WHERE / SCORE THRESHOLD override source-query values when set.
-    let filter = prefetch
+    // Two `WHERE`s read as conjunctive: compose the outer PREFETCH filter with
+    // the source query's own filter instead of replacing it (which silently
+    // dropped, e.g., a tenant predicate).
+    let outer_filter = prefetch
         .filter
         .as_ref()
         .map(|f| top_level_filter(f))
-        .transpose()?
-        .or(source_filter);
+        .transpose()?;
+    let filter = compose_filters(source_filter, outer_filter);
     let score_threshold = prefetch.score_threshold.or(source_score);
 
     Ok(PrefetchRequest {
@@ -92,8 +126,40 @@ pub fn lower_prefetch_with_ctes(
     })
 }
 
+/// Build the wire query variant for a statement, plus its `USING` target and
+/// lowered prefetch stages.
+///
+/// `ctes` is the CTE scope visible where `query` was written (the root
+/// statement's definitions, or the prefix visible to a CTE body).
+/// Compose a source-query filter with an outer PREFETCH-level filter as
+/// `source AND outer`. Either side alone passes through unchanged.
+fn compose_filters(
+    source: Option<FilterExpression>,
+    outer: Option<FilterExpression>,
+) -> Option<FilterExpression> {
+    match (source, outer) {
+        (None, None) => None,
+        (Some(filter), None) | (None, Some(filter)) => Some(filter),
+        (Some(source), Some(outer)) => Some(FilterExpression::Compound(FilterCompound {
+            must: vec![as_clause(source), as_clause(outer)],
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        })),
+    }
+}
+
+/// Present a lowered filter as a single clause so it can nest under `must`.
+fn as_clause(filter: FilterExpression) -> FilterClause {
+    match filter {
+        FilterExpression::Single(clause) => *clause,
+        FilterExpression::Compound(compound) => FilterClause::Filter(Box::new(compound)),
+    }
+}
+
 pub(crate) fn build_query_with_prefetch(
     query: &QueryStmt,
+    ctes: &[qql_core::ast::Cte],
 ) -> Result<(QueryVariant, Option<String>, Vec<PrefetchRequest>), QqlError> {
     match &query.expression {
         QueryExpr::Hybrid {
@@ -209,7 +275,7 @@ pub(crate) fn build_query_with_prefetch(
             }
             let pf_requests: Vec<PrefetchRequest> = prefetch
                 .iter()
-                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
+                .map(|p| lower_prefetch_with_ctes(p, ctes))
                 .collect::<Result<_, _>>()?;
             let nearest_input = match input {
                 QueryInput::Text { text, .. } => PlanQueryInput::Document {
@@ -252,7 +318,7 @@ pub(crate) fn build_query_with_prefetch(
             let prefetches = expression_prefetch(&query.expression);
             let pf_requests: Vec<PrefetchRequest> = prefetches
                 .iter()
-                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
+                .map(|p| lower_prefetch_with_ctes(p, ctes))
                 .collect::<Result<_, _>>()?;
             Ok((variant, using, pf_requests))
         }

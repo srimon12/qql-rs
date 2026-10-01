@@ -14,6 +14,7 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use qql_core::ast::{FormulaExpr, Value};
+use qql_core::error::QqlError;
 
 use crate::filter::lower_filter;
 use crate::filter_types::{FieldCondition, FilterClause, FilterExpression, MatchValue};
@@ -41,13 +42,14 @@ impl PlanDecayKind {
 
     /// Map a parser/backend decay kind spelling to the typed family.
     ///
-    /// Unknown spellings fall back to Gaussian, matching the historical
-    /// lowering.
-    fn from_wire(kind: &str) -> Self {
+    /// Unknown spellings fail closed (`None`): a renamed or hand-built decay
+    /// kind must not silently change the scoring curve family.
+    fn from_wire(kind: &str) -> Option<Self> {
         match kind.to_ascii_lowercase().as_str() {
-            "exp" | "exp_decay" => Self::Exp,
-            "lin" | "lin_decay" => Self::Lin,
-            _ => Self::Gauss,
+            "exp" | "exp_decay" => Some(Self::Exp),
+            "lin" | "lin_decay" => Some(Self::Lin),
+            "gauss" | "gauss_decay" => Some(Self::Gauss),
+            _ => None,
         }
     }
 }
@@ -343,8 +345,17 @@ impl PlanFormula {
                     (FormulaExpr::Variable { name }, true) => Self::DatetimeKey(name.clone()),
                     _ => Self::from_expr(x)?,
                 };
+                let kind = PlanDecayKind::from_wire(kind).ok_or_else(|| {
+                    QqlError::validation(
+                        "QQL-PLAN-FORMULA-DECAY",
+                        alloc::format!(
+                            "unknown decay function '{kind}'; expected EXP_DECAY, LIN_DECAY, or GAUSS_DECAY"
+                        ),
+                        None,
+                    )
+                })?;
                 Self::Decay {
-                    kind: PlanDecayKind::from_wire(kind),
+                    kind,
                     x: Box::new(x),
                     target,
                     scale: *scale,
@@ -800,5 +811,40 @@ mod tests {
             FormulaDefault::from(&Value::F32Array(vec![0.5, 1.0])),
             FormulaDefault::List(vec![FormulaDefault::Float(0.5), FormulaDefault::Float(1.0)])
         );
+    }
+
+    #[test]
+    fn unknown_decay_kind_fails_closed() {
+        // A renamed or hand-built decay spelling must not silently become
+        // Gaussian (a different scoring curve) — fail `QQL-PLAN-FORMULA-DECAY`.
+        let expr = FormulaExpr::Decay {
+            kind: "sigmoid".into(),
+            x: Box::new(FormulaExpr::Variable { name: "x".into() }),
+            target: None,
+            scale: None,
+            midpoint: None,
+        };
+        let err = PlanFormula::from_expr(&expr).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-FORMULA-DECAY");
+        assert!(err.message.contains("sigmoid"), "{err:?}");
+
+        // Alias spellings keep working.
+        for kind in [
+            "exp",
+            "exp_decay",
+            "lin",
+            "lin_decay",
+            "gauss",
+            "gauss_decay",
+        ] {
+            let expr = FormulaExpr::Decay {
+                kind: kind.into(),
+                x: Box::new(FormulaExpr::Variable { name: "x".into() }),
+                target: None,
+                scale: None,
+                midpoint: None,
+            };
+            assert!(PlanFormula::from_expr(&expr).is_ok(), "{kind}");
+        }
     }
 }

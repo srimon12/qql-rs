@@ -491,6 +491,42 @@ fn lexer_double_minus_hazard_suite() {
 }
 
 #[test]
+fn glued_binary_minus_parses_like_spaced_form() {
+    // The lexer folds `-` into a following number, so `1-2` / `a-1` used to
+    // fail although `formula_sum` in grammar.pest accepts them. The lowerer
+    // splits the glued literal when the previous token ends an operand.
+    for source in [
+        "QUERY FORMULA 1-2 FROM docs;",
+        "QUERY FORMULA a-1 FROM docs;",
+        "QUERY FORMULA a -1 FROM docs;",
+        "QUERY FORMULA (a)-1 FROM docs;",
+    ] {
+        let stmt = crate::parser::Parser::parse(source).unwrap_or_else(|e| panic!("{source}: {e}"));
+        let crate::ast::Stmt::Query(q) = stmt else {
+            panic!("expected query for: {source}")
+        };
+        let crate::ast::QueryExpr::Formula { expression, .. } = &q.expression else {
+            panic!("expected formula for: {source}")
+        };
+        assert!(
+            matches!(**expression, crate::ast::FormulaExpr::Sub { .. }),
+            "expected Sub for {source}: {expression:?}"
+        );
+    }
+
+    // Signed literals in value position are untouched.
+    let stmt =
+        crate::parser::Parser::parse("QUERY TEXT 'x' FROM docs WHERE score >= -2.5;").unwrap();
+    let crate::ast::Stmt::Query(q) = stmt else {
+        panic!("expected query")
+    };
+    let Some(crate::ast::FilterExpr::Compare { value, .. }) = q.filter.as_deref() else {
+        panic!("expected compare filter")
+    };
+    assert_eq!(*value, crate::ast::Value::Float(-2.5));
+}
+
+#[test]
 fn comparison_operators() {
     let t = tokens("= != > >= < <=");
     assert_eq!(t[0].0, TokenKind::Equals);

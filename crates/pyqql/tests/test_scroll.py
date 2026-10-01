@@ -86,22 +86,32 @@ class TestScrollCursor(unittest.TestCase):
             client.calls[0]["sql"].index("WHERE"), client.calls[0]["sql"].index("LIMIT")
         )
 
-    def test_with_payload_strips_client_side(self):
+    def test_with_payload_false_strips_server_side(self):
         kept = collect_sync(bind_scroll(FakeClient([rows([1]), []]), "docs"))
         self.assertEqual(kept[0].payload, {"tag": "p-1"})
-        stripped = collect_sync(
-            bind_scroll(FakeClient([rows([1]), []]), "docs", with_payload=False)
-        )
+        client = FakeClient([rows([1]), []])
+        stripped = collect_sync(bind_scroll(client, "docs", with_payload=False))
         self.assertIsNone(stripped[0].payload)
         self.assertEqual(stripped[0].id, 1)
+        # Payloads are stripped by the backend (minimal bandwidth), with the
+        # client-side strip kept as a defensive second layer.
+        self.assertIn("WITH PAYLOAD false", client.calls[0]["sql"])
 
     def test_with_vector_appends_clause_only_when_true(self):
         plain = FakeClient([[]])
         collect_sync(bind_scroll(plain, "docs"))
         self.assertNotIn("WITH VECTOR", plain.calls[0]["sql"])
+        self.assertNotIn("WITH PAYLOAD false", plain.calls[0]["sql"])
         vectors = FakeClient([[]])
-        collect_sync(bind_scroll(vectors, "docs", with_vector=True))
+        collect_sync(
+            bind_scroll(vectors, "docs", with_vector=True, with_payload=False)
+        )
         self.assertIn("WITH VECTOR", vectors.calls[0]["sql"])
+        # Clause order follows the grammar: payload before vector.
+        self.assertLess(
+            vectors.calls[0]["sql"].index("WITH PAYLOAD false"),
+            vectors.calls[0]["sql"].index("WITH VECTOR"),
+        )
 
     def test_backpressure_single_page_buffered(self):
         client = FakeClient([rows([1, 2]), rows([3, 4]), []])

@@ -49,11 +49,11 @@ try {
 }
 
 // Shared DX layer (error mapping, typed result classes, Stmt-aware bind) —
-// byte-identical with nqql-edge; a CI check diffs the two copies.
+// generated from the nqql copy by qql-grammar-gen (`check` gates drift).
 const dx = require('./dx-common.js');
 dx.installStmtToJSON(nativeBinding.Stmt);
 
-const { buildError, callNative, validateOptions, ScoredPoint, ExecutionReport, scrollCursor, scrollStream } = dx;
+const { buildError, callNative, callNativeAsync, validateOptions, ScoredPoint, ExecutionReport, scrollCursor, scrollStream } = dx;
 
 const normalizeQuery = (query) => dx.normalizeQuery(nativeBinding.Stmt, query);
 
@@ -77,7 +77,7 @@ function parseJson(query) {
 }
 
 function isValid(query) {
-  return nativeBinding.isValid(query);
+  return callNative(() => nativeBinding.isValid(query));
 }
 
 function injectFilter(query, field, op, value) {
@@ -104,12 +104,24 @@ function compile(query, params) {
 const {
   normalizeLocalOptions,
   normalizeStandaloneOptions,
+  rejectServerOnlyOptions,
 } = require("./options.js");
+
+/** Reject server-only `execute` options on the long-lived Client methods. */
+function rejectServerOnly(options, where) {
+  if (options !== undefined && options !== null) {
+    rejectServerOnlyOptions(options, where);
+  }
+}
 
 /**
  * Create a fully-local edge executor backed by fastembed-rs.
  * Models are downloaded from HuggingFace on first use and cached locally.
  * No network calls for inference — embedding runs on-device via ONNX.
+ *
+ * Model loading (including the first-use download) runs off the JavaScript
+ * thread, so this returns a promise that resolves once the executor is
+ * ready; `await` it before executing statements.
  *
  * @param {string} dataDir
  * @param {boolean | {
@@ -132,27 +144,34 @@ const {
  *   bm25MinTokenLen?: number,
  *   bm25MaxTokenLen?: number,
  * }} [options] - boolean is legacy `onDiskPayload`; object is preferred.
- * @returns {Client}
+ * @returns {Promise<Client>}
  *
  * @example
- *   const exec = localExecutor('./data');
- *   const exec = localExecutor('./data', false);
- *   const exec = localExecutor('./data', { model: 'AllMiniLML6V2', onDiskPayload: false });
- *   const exec = localExecutor('./data', { sparseModel: 'splade', rerankerModel: 'bge-reranker-base' });
- *   const exec = localExecutor('./data', { walSegmentMb: 8 });  // 8 MiB WAL segments
+ *   const exec = await localExecutor('./data');
+ *   const exec = await localExecutor('./data', false);
+ *   const exec = await localExecutor('./data', { model: 'AllMiniLML6V2', onDiskPayload: false });
+ *   const exec = await localExecutor('./data', { sparseModel: 'splade', rerankerModel: 'bge-reranker-base' });
+ *   const exec = await localExecutor('./data', { walSegmentMb: 8 });  // 8 MiB WAL segments
  */
-function localExecutor(dataDir, options) {
+async function localExecutor(dataDir, options) {
   if (typeof dataDir !== 'string' || !dataDir) {
     throw new TypeError('localExecutor requires a non-empty dataDir string');
   }
   const opts = normalizeLocalOptions(options);
-  const inner = callNative(() => nativeBinding.localExecutor(dataDir, opts));
+  const inner = await callNativeAsync(() => nativeBinding.localExecutor(dataDir, opts));
   return new Client(inner);
 }
 
 /**
- * List dense ONNX models available for localExecutor({ model }).
- * @returns {Array<{ name: string, modelCode: string, dim: number, description: string }>}
+ * List ONNX embedding models available for localExecutor({ model }).
+ * @returns {Array<{
+ *   name: string,
+ *   modelCode: string,
+ *   dim: number,
+ *   description: string,
+ *   multi: boolean,
+ *   image: boolean,
+ * }>}
  */
 function listEmbeddingModels() {
   return callNative(() => nativeBinding.listEmbeddingModels());
@@ -175,9 +194,13 @@ function listEmbeddingModels() {
  *   `bm25Stopwords`, `bm25Stemmer`, `bm25MinTokenLen`, `bm25MaxTokenLen`;
  *   snake_case aliases accepted). Values forward raw; invalid values fail
  *   closed in the native validator (`QQL-VALIDATION-CONFIG`).
- * @returns {Client}
+ *
+ * Store construction runs off the JavaScript thread; `await` the returned
+ * promise before executing statements.
+ *
+ * @returns {Promise<Client>}
  */
-function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload, bm25Options) {
+async function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload, bm25Options) {
   if (typeof dataDir !== 'string' || !dataDir) {
     throw new TypeError('httpExecutor requires a non-empty dataDir string');
   }
@@ -194,7 +217,7 @@ function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayloa
     throw new TypeError('httpExecutor bm25Options must be an object');
   }
   const bm25 = bm25Options ?? {};
-  const inner = callNative(() =>
+  const inner = await callNativeAsync(() =>
     nativeBinding.httpExecutor(
       dataDir,
       url,
@@ -272,6 +295,7 @@ class Client {
 
   async execute(query, options) {
     try {
+      rejectServerOnly(options, "Client.execute");
       const raw = await this._inner.execute(
         normalizeQuery(query),
         validateOptions(options) || undefined,
@@ -297,16 +321,13 @@ class Client {
    */
   async upsertMany(collection, rows, options) {
     try {
-      if (
-        options?.batchSize !== undefined &&
-        (!Number.isInteger(options.batchSize) || options.batchSize < 1)
-      ) {
-        throw new TypeError("options.batchSize must be an integer >= 1");
-      }
-      const normalized = dx.normalizeUpsertRows(rows);
+      rejectServerOnly(options, "Client.upsertMany");
+      // No JS-side batchSize check: the native layer owns that validation
+      // (`QQL-VALIDATION-UPSERT-BATCH`), so both the Client method and a
+      // direct native call fail identically.
       const raw = await this._inner.upsertMany(
         collection,
-        normalized,
+        rows,
         validateOptions(options) || undefined,
       );
       return new ExecutionReport(raw);
@@ -339,6 +360,7 @@ class Client {
    */
   async explainAnalyze(query, options) {
     try {
+      rejectServerOnly(options, "Client.explainAnalyze");
       return await this._inner.explainAnalyze(
         normalizeQuery(query),
         validateOptions(options) || undefined,

@@ -6,9 +6,10 @@
 use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{
     Direction, JsonPath, OrderBy, OrderByInterface, PayloadSelectorExclude, PayloadSelectorInclude,
-    SearchParams, WithPayloadInterface, WithVector,
+    SearchParams, StartFrom, WithPayloadInterface, WithVector,
 };
 
+use qql_core::ast::Value;
 use qql_core::error::QqlError;
 use qql_plan::types::{OrderByQuery, PayloadSelectorReq, SearchParamsRequest, VectorSelectorReq};
 
@@ -86,9 +87,13 @@ pub(crate) fn convert_with_vector(selector: &VectorSelectorReq) -> WithVector {
     }
 }
 
-pub(crate) fn convert_order_by_interface(
-    order_by: &OrderByQuery,
-) -> Result<OrderByInterface, QqlError> {
+/// Lower an `ORDER BY` clause to the engine's [`OrderBy`], shared by the query
+/// path (`QUERY … ORDER BY`) and the scroll interface (`SCROLL … ORDER BY`).
+///
+/// `START FROM` accepts the same value kinds the server accepts (integer,
+/// float, ISO-8601 datetime); every other plan value fails closed so the bound
+/// is never silently dropped.
+pub(crate) fn convert_order_by(order_by: &OrderByQuery) -> Result<OrderBy, QqlError> {
     let direction = match order_by.direction.as_deref() {
         None | Some("asc") => Some(Direction::Asc),
         Some("desc") => Some(Direction::Desc),
@@ -103,43 +108,50 @@ pub(crate) fn convert_order_by_interface(
     let start_from = order_by
         .start_from
         .as_ref()
-        .map(|value| {
-            use qdrant_edge::StartFrom;
-            use qql_core::ast::Value;
-            match value {
-                Value::Int(n) => Ok(StartFrom::Integer(*n)),
-                Value::UInt(n) => i64::try_from(*n)
-                    .map(StartFrom::Integer)
-                    .map_err(|_| edge_error(format!("order_by start_from {n} exceeds i64"))),
-                Value::Float(f) => Ok(StartFrom::Float(*f)),
-                Value::Str(text) => text
-                    .parse::<qdrant_edge::DateTimeWrapper>()
-                    .map(StartFrom::Datetime)
-                    .map_err(|_| {
-                        edge_error(format!(
-                            "order_by start_from '{text}' must be an integer, float, or ISO-8601 datetime"
-                        ))
-                    }),
-                Value::Param(name, _) => {
-                    panic!("invariant violation: unbound parameter :{name} reached edge order_by lowering");
-                }
-                Value::PositionalParam(idx, _) => {
-                    panic!(
-                        "invariant violation: unbound positional parameter ?{idx} reached edge order_by lowering"
-                    );
-                }
-                other => Err(edge_error(format!(
-                    "order_by start_from {} must be an integer, float, or ISO-8601 datetime",
-                    qql_plan::value_error_text(other)
-                ))),
-            }
-        })
+        .map(convert_start_from)
         .transpose()?;
-    Ok(OrderByInterface::Struct(OrderBy {
+    Ok(OrderBy {
         key,
         direction,
         start_from,
-    }))
+    })
+}
+
+/// Lower one `START FROM` bound to the engine's typed [`StartFrom`].
+fn convert_start_from(value: &Value) -> Result<StartFrom, QqlError> {
+    match value {
+        Value::Int(n) => Ok(StartFrom::Integer(*n)),
+        Value::UInt(n) => i64::try_from(*n)
+            .map(StartFrom::Integer)
+            .map_err(|_| edge_error(format!("order_by start_from {n} exceeds i64"))),
+        Value::Float(f) => Ok(StartFrom::Float(*f)),
+        Value::Str(text) => text
+            .parse::<qdrant_edge::DateTimeWrapper>()
+            .map(StartFrom::Datetime)
+            .map_err(|_| {
+                edge_error(format!(
+                    "order_by start_from '{text}' must be an integer, float, or ISO-8601 datetime"
+                ))
+            }),
+        Value::Param(name, _) => {
+            panic!("invariant violation: unbound parameter :{name} reached edge order_by lowering");
+        }
+        Value::PositionalParam(idx, _) => {
+            panic!(
+                "invariant violation: unbound positional parameter ?{idx} reached edge order_by lowering"
+            );
+        }
+        other => Err(edge_error(format!(
+            "order_by start_from {} must be an integer, float, or ISO-8601 datetime",
+            qql_plan::value_error_text(other)
+        ))),
+    }
+}
+
+pub(crate) fn convert_order_by_interface(
+    order_by: &OrderByQuery,
+) -> Result<OrderByInterface, QqlError> {
+    Ok(OrderByInterface::Struct(convert_order_by(order_by)?))
 }
 
 pub(crate) fn parse_json_path(path: &str) -> Result<JsonPath, QqlError> {

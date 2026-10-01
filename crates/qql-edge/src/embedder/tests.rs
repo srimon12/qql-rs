@@ -58,6 +58,62 @@ fn resolve_sparse_model_unknown_errors() {
     assert!(e.message.contains("nonexistent_model"));
 }
 
+/// `"bm25"` names the built-in encoder, not an ONNX sparse model: resolving it
+/// to SPLADE would silently download the wrong model.
+#[test]
+fn resolve_sparse_model_rejects_bm25_alias() {
+    for alias in ["bm25", "BM25", "Qdrant/bm25"] {
+        let e = resolve_sparse_model(alias).unwrap_err();
+        assert!(e.message.contains("built-in"), "{alias}: {e}");
+        assert!(e.message.contains("omit `sparse_model`"), "{alias}: {e}");
+    }
+    assert!(!is_sparse_alias("bm25"));
+    assert!(!is_sparse_alias("Qdrant/bm25"));
+}
+
+/// Cached sessions are shared while live and released (then reloaded) once the
+/// last holder drops, so an unused model is not pinned in RAM forever.
+#[test]
+fn load_cached_shares_and_reloads_after_last_drop() {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use super::cache::ModelCache;
+
+    let cache: ModelCache<u8> = Mutex::new(HashMap::new());
+    let loads = AtomicUsize::new(0);
+    let key = || ("model".to_string(), String::new());
+
+    let first = load_cached("test", &cache, key(), || {
+        loads.fetch_add(1, Ordering::SeqCst);
+        Ok(9)
+    })
+    .expect("first load");
+    let second = load_cached("test", &cache, key(), || {
+        loads.fetch_add(1, Ordering::SeqCst);
+        Ok(9)
+    })
+    .expect("second load reuses the live session");
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(loads.load(Ordering::SeqCst), 1);
+
+    drop(first);
+    drop(second);
+    assert_eq!(loads.load(Ordering::SeqCst), 1, "dropping does not reload");
+    let third = load_cached("test", &cache, key(), || {
+        loads.fetch_add(1, Ordering::SeqCst);
+        Ok(9)
+    })
+    .expect("reload after the last holder dropped");
+    assert_eq!(*third.lock().unwrap(), 9);
+    assert_eq!(
+        loads.load(Ordering::SeqCst),
+        2,
+        "the dead weak entry must be replaced, not reused"
+    );
+}
+
 #[test]
 fn is_sparse_alias_matches() {
     assert!(is_sparse_alias("splade"));

@@ -25,6 +25,7 @@ pub mod mutation;
 mod mutation_types;
 mod params;
 pub mod plan;
+mod point_id_validate;
 mod prefetch;
 /// Query lowering: `QUERY` statements into `/points/query` request bodies.
 pub mod query;
@@ -43,10 +44,10 @@ pub(crate) mod value_serde;
 pub use batch::BatchGrouper;
 pub use formula_types::{FormulaDefault, PlanDecayKind, PlanFormula};
 pub use plan::{
-    BatchFamily, BatchKey, PlannedOperation, RestProjectionError, batch_item_error,
+    BatchFamily, BatchKey, BatchOpts, PlannedOperation, RestProjectionError, batch_item_error,
     build_query_batch, build_update_batch, ensure_no_unbound_params, into_query_batch,
-    into_update_batch, parse_and_plan, plan, plan_template, statement_batch_key, to_rest_route,
-    try_route, verify_batch_cardinality,
+    into_update_batch, parse_and_plan, plan, plan_template, statement_batch_key, statement_wait,
+    to_rest_route, try_route, verify_batch_cardinality,
 };
 pub use routing::{CompiledStatement, compile_statement};
 pub use semantic::{

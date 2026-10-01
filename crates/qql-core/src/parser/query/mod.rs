@@ -19,7 +19,7 @@ use pipeline::{
 impl<'a> AstLowerer<'a> {
     pub fn parse_query(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Query)?;
-        self.parse_query_stmt(true, Vec::new())
+        self.parse_query_stmt(true, &[])
             .map(Box::new)
             .map(Stmt::Query)
     }
@@ -28,12 +28,20 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::With)?;
         let ctes = self.parse_ctes()?;
         self.expect(TokenKind::Query)?;
-        self.parse_query_stmt(true, ctes)
-            .map(Box::new)
-            .map(Stmt::Query)
+        let mut query = self.parse_query_stmt(true, &ctes)?;
+        // The definitions live on the statement; every nested reference
+        // (CTE bodies, inline PREFETCH sub-queries) resolves against this
+        // list or the prefix visible at its definition site. Storing the
+        // list once keeps the AST linear in the number of CTEs.
+        query.ctes = ctes;
+        Ok(Stmt::Query(Box::new(query)))
     }
 
-    fn parse_query_stmt(&mut self, top_level: bool, ctes: Vec<Cte>) -> Result<QueryStmt, QqlError> {
+    /// Parse a `QUERY` body. `ctes` is the *visible scope*: the CTEs defined
+    /// before this point, consulted (and never copied) when validating
+    /// `PREFETCH (name)` references. Only the top-level caller attaches
+    /// definitions to the returned `QueryStmt`.
+    fn parse_query_stmt(&mut self, top_level: bool, ctes: &[Cte]) -> Result<QueryStmt, QqlError> {
         let expression_span = self.peek()?.span;
         let mut expression = self.parse_query_expression()?;
 
@@ -99,7 +107,7 @@ impl<'a> AstLowerer<'a> {
 
         let prefetch = if self.peek()?.kind == TokenKind::Prefetch {
             self.advance()?;
-            self.parse_prefetch_list()?
+            self.parse_prefetch_list(ctes)?
         } else {
             Vec::new()
         };
@@ -233,21 +241,29 @@ impl<'a> AstLowerer<'a> {
             ));
         }
 
+        let page = PageSpec {
+            limit,
+            offset,
+            limit_param,
+            offset_param,
+            limit_span,
+            offset_span,
+        };
+
         attach_pipeline(&mut expression, using, prefetch, expression_span)?;
-        validate_prefetch_references(&expression, &ctes, expression_span)?;
+        validate_prefetch_references(&expression, ctes, expression_span)?;
         validate_common_clauses(
             &expression,
             filter.as_deref(),
             params.as_ref(),
             score_threshold,
             group.as_ref(),
-            limit,
-            offset,
+            &page,
             expression_span,
         )?;
 
         Ok(QueryStmt {
-            ctes,
+            ctes: Vec::new(),
             collection,
             collection_span,
             expression,
@@ -256,14 +272,7 @@ impl<'a> AstLowerer<'a> {
             score_threshold,
             group,
             output: QueryOutput { payload, vectors },
-            page: PageSpec {
-                limit,
-                offset,
-                limit_param,
-                offset_param,
-                limit_span,
-                offset_span,
-            },
+            page,
             shard_key,
         })
     }
@@ -286,7 +295,10 @@ impl<'a> AstLowerer<'a> {
             self.expect(TokenKind::As)?;
             self.expect(TokenKind::Lparen)?;
             self.expect(TokenKind::Query)?;
-            let query = self.parse_query_stmt(false, ctes.clone())?;
+            // Prior-only visibility: a CTE body sees the CTEs defined before
+            // it (no forward references, so resolution always terminates).
+            // The prefix is a borrow, never copied into the body.
+            let query = self.parse_query_stmt(false, &ctes)?;
             self.expect(TokenKind::Rparen)?;
             ctes.push(Cte {
                 name,

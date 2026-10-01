@@ -1291,7 +1291,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1494,7 +1494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2775,9 +2775,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.56.0"
+version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6a806f80c1f5560431009ce5ec29b59d38f950e0cd7db5f1b8925e6d8104e21"
+checksum = "71160ed5f6dbe36a2d6be79f4ca03ee09a99d2866f340faed49458913449aefa"
 dependencies = [
  "ahash",
  "bytecount",
@@ -2806,18 +2806,18 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.56.0"
+version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb862addfa7782108933abcf842fe25334523a9df5b89ea4d9620e3dd7b42181"
+checksum = "48d2120d8466ffcdc1b3be4b88ff0e9191bf5b6b09b1b1af1eef9aff8f465ea3"
 dependencies = [
  "regex-syntax",
 ]
 
 [[package]]
 name = "jsonschema-value"
-version = "0.56.0"
+version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a05cd404c5ff6e2731dbbf7e290a27417750acfb59e329560a1d0af384c93fb0"
+checksum = "3fbfa40a42415369d940b3848f3ce08099f1f1ac04d73e8580f4d652617c4f44"
 dependencies = [
  "ahash",
  "bytecount",
@@ -3152,9 +3152,9 @@ checksum = "a3e7c60ee0b5e809b81d443bab6a735f9c80fe2138ebc5d758cda7b4faa2cdbd"
 
 [[package]]
 name = "napi"
-version = "3.12.6"
+version = "3.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ca373b1769db491f38386d57a882b9a21debb2dcd17c0d3e16d02ec311a1d7c"
+checksum = "3b12638855cec016784a7e17cc4ecbdee7ca8b0a3456aa50640d0ee5ed1a42f8"
 dependencies = [
  "bitflags 2.13.2",
  "ctor",
@@ -3171,15 +3171,15 @@ dependencies = [
 
 [[package]]
 name = "napi-build"
-version = "2.4.4"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9befcb51d87271051c0c11aaf625d09340266b7f1ac3fef5975e62274dc2813f"
+checksum = "0941983559cd62bfa7f04646a16428967a847365adeef27711e4e3927046bbed"
 
 [[package]]
 name = "napi-derive"
-version = "3.6.7"
+version = "3.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76117d85c6ccd9f07102daf39931c7229934483008276d84ecb7c19aa50dfe69"
+checksum = "6b1d232c24dc6754979b27efdf2047a5849efc7c92c1245de87e6bedbb9f5c3c"
 dependencies = [
  "convert_case",
  "ctor",
@@ -3191,9 +3191,9 @@ dependencies = [
 
 [[package]]
 name = "napi-derive-backend"
-version = "6.1.3"
+version = "6.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c1c87a71568f3fe5c736b10878ff55064b250bb4ea4b48c8055713e07b9e463"
+checksum = "fd6856fe1686867da90ed0dc292d7c0c87a695eb7c578b913360f33619ee01e3"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -3204,9 +3204,9 @@ dependencies = [
 
 [[package]]
 name = "napi-sys"
-version = "3.3.1"
+version = "3.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d29a242104e456960e6c6479847570be731c1a92b8f8c05ddfb5439e5c09915"
+checksum = "6801fc65ba4d7035636e93635e281113f00410401a237dcd4f55b1565ead2115"
 dependencies = [
  "libloading",
 ]
@@ -3313,7 +3313,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "nqql"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "napi",
  "napi-derive",
@@ -3328,7 +3328,7 @@ dependencies = [
 
 [[package]]
 name = "nqql-common"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "napi",
  "qql",
@@ -3340,7 +3340,7 @@ dependencies = [
 
 [[package]]
 name = "nqql-edge"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "napi",
  "napi-derive",
@@ -3673,9 +3673,9 @@ dependencies = [
 
 [[package]]
 name = "pest"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d45aeb61b4bf818e12d4205f2466f8c4748f85f4fce0146d1c03d69d753f0ad"
+checksum = "45d3aca230fad2e6f6317ca0a72724338c4960cb97168a85cdee66df4a9a21a8"
 dependencies = [
  "memchr",
  "ucd-trie",
@@ -3683,9 +3683,9 @@ dependencies = [
 
 [[package]]
 name = "pest_derive"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89cc5a242e25ed4e7704d0be240f2cfbe20a8c27e7e252d94835be93d92dc39f"
+checksum = "284b60557f2c4a2e72ad3f2d34d42685a2fa4a6a61d0d2a10c0ae2a5e916c2cf"
 dependencies = [
  "pest",
  "pest_generator",
@@ -3693,9 +3693,9 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7abf21475cc3820fe4b2ca2dc2142902f67a02189f3b5b3a229f4febc01a43e5"
+checksum = "1d9d1f08a115309ee99268cf85e5228e0e56aa9caf8841ec12866b6be07c3109"
 dependencies = [
  "pest",
  "pest_meta",
@@ -3706,9 +3706,9 @@ dependencies = [
 
 [[package]]
 name = "pest_meta"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adba4db388f687393c18c51348d44a41d870ca9df71a2c98172ea3035dc6936e"
+checksum = "ed93ba1a9ffcca32130a5188701c81c0c49cf00d4b7c5007d5148951d743adcb"
 dependencies = [
  "pest",
 ]
@@ -4292,10 +4292,9 @@ dependencies = [
 
 [[package]]
 name = "pyqql"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "pyo3",
- "pyo3-async-runtimes",
  "pyqql-common",
  "pythonize",
  "qql",
@@ -4303,14 +4302,14 @@ dependencies = [
  "qql-plan",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
 name = "pyqql-common"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "pyo3",
+ "pyo3-async-runtimes",
  "pythonize",
  "qql",
  "qql-core",
@@ -4322,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "pyqql-edge"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
@@ -4333,7 +4332,6 @@ dependencies = [
  "qql-edge",
  "qql-plan",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -4462,7 +4460,7 @@ dependencies = [
 
 [[package]]
 name = "qql"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4474,6 +4472,7 @@ dependencies = [
  "qql-core",
  "qql-embed",
  "qql-plan",
+ "qql-protocol",
  "reqwest 0.12.28",
  "schemars",
  "serde",
@@ -4489,8 +4488,9 @@ dependencies = [
 
 [[package]]
 name = "qql-cli"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
+ "async-trait",
  "axum",
  "clap",
  "mimalloc",
@@ -4509,7 +4509,7 @@ dependencies = [
 
 [[package]]
 name = "qql-conformance"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "pest",
  "pest_derive",
@@ -4520,7 +4520,7 @@ dependencies = [
 
 [[package]]
 name = "qql-convert"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "qql-core",
  "qql-plan",
@@ -4529,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "qql-core"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "phf 0.14.0",
  "serde",
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "qql-edge"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "fastembed",
@@ -4556,32 +4556,44 @@ dependencies = [
 
 [[package]]
 name = "qql-embed"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "murmur3_32",
  "phf 0.14.0",
  "qdrant-rust-stemmers",
  "qql-core",
+ "qql-plan",
  "tokio",
 ]
 
 [[package]]
 name = "qql-grammar-gen"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "qql-plan"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "qql-core",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "qql-protocol"
+version = "0.5.0"
+dependencies = [
+ "qql-core",
+ "qql-plan",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "qql-wasm"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "gloo-net",
@@ -4589,6 +4601,7 @@ dependencies = [
  "qql-core",
  "qql-embed",
  "qql-plan",
+ "qql-protocol",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -4667,7 +4680,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4976,9 +4989,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.56.0"
+version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3b4a92fac7e28c27de3ad26df2ecb9e652f227b258e845af034052e5b22c96c"
+checksum = "b06f6798be4fed305e74df8b1fb90cf59c6b8cc17aa3febeb1830c0c6b627b3e"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -5225,7 +5238,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5284,7 +5297,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5868,7 +5881,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6763,7 +6776,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

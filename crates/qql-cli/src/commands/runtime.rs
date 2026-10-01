@@ -43,19 +43,106 @@ pub(crate) fn resolve_embed_settings() -> (Option<String>, String, usize, String
 
 /// Classify a backend failure as unreachable vs auth vs other for doctor output.
 pub(crate) fn classify_backend_failure(code: &str, message: &str) -> &'static str {
-    if code == "QQL-TRANSPORT" || code == "QQL-BACKEND-JSON" && message.contains("request id") {
-        // Transport covers refused connections, DNS, and timeouts.
-        "unreachable"
-    } else if code == "QQL-BACKEND-AUTH" {
-        "auth"
-    } else if message.contains("connection refused")
-        || message.contains("Connection refused")
-        || message.contains("dns error")
-        || message.contains("failed to lookup address")
-    {
-        "unreachable"
-    } else {
-        "other"
+    match qql_core::error::BackendClass::from_code(code, message) {
+        qql_core::error::BackendClass::Unreachable => "unreachable",
+        qql_core::error::BackendClass::Auth => "auth",
+        _ => "other",
+    }
+}
+
+/// Whether any statement (including CTEs, prefetches, BATCH members, and
+/// upsert embed lists) needs a client-side embedder.
+///
+/// Shared by `qql check` and `qql run` so both agree on the same AST shapes.
+pub(crate) fn statements_need_embeddings(stmts: &[qql_core::ast::Stmt]) -> bool {
+    stmts.iter().any(stmt_needs_embeddings)
+}
+
+fn stmt_needs_embeddings(stmt: &qql_core::ast::Stmt) -> bool {
+    use qql_core::ast::Stmt;
+    match stmt {
+        Stmt::Query(q) => query_stmt_needs_embeddings(q),
+        Stmt::Upsert(u) => u.embedding.is_some() || !u.embed.is_empty(),
+        Stmt::Batch(b) => b.statements.iter().any(stmt_needs_embeddings),
+        _ => false,
+    }
+}
+
+fn query_stmt_needs_embeddings(q: &qql_core::ast::QueryStmt) -> bool {
+    q.ctes.iter().any(|c| query_stmt_needs_embeddings(&c.query))
+        || query_expr_needs_embeddings(&q.expression)
+}
+
+fn query_expr_needs_embeddings(e: &qql_core::ast::QueryExpr) -> bool {
+    use qql_core::ast::{PrefetchSource, QueryExpr, QueryInput, VectorValue};
+    let input_needs = |input: &QueryInput| match input {
+        QueryInput::Text { .. }
+        | QueryInput::Image { .. }
+        | QueryInput::Param(..)
+        | QueryInput::PositionalParam(..) => true,
+        QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..)) => true,
+        // Custom inference objects resolve server-side (never embedded locally).
+        QueryInput::Object { .. } => false,
+        QueryInput::Vector(_) | QueryInput::Point(_) => false,
+    };
+    let prefetch_needs = |list: &[qql_core::ast::Prefetch]| {
+        list.iter().any(|p| match &p.source {
+            PrefetchSource::Query(q) => query_stmt_needs_embeddings(q),
+            PrefetchSource::Cte(_) => false,
+        })
+    };
+    match e {
+        QueryExpr::Nearest {
+            input, prefetch, ..
+        } => input_needs(input) || prefetch_needs(prefetch),
+        QueryExpr::Recommend {
+            positive,
+            negative,
+            prefetch,
+            ..
+        } => {
+            positive.iter().any(input_needs)
+                || negative.iter().any(input_needs)
+                || prefetch_needs(prefetch)
+        }
+        QueryExpr::Context {
+            pairs, prefetch, ..
+        } => {
+            pairs
+                .iter()
+                .any(|p| input_needs(&p.positive) || input_needs(&p.negative))
+                || prefetch_needs(prefetch)
+        }
+        QueryExpr::Discover {
+            target,
+            context,
+            prefetch,
+            ..
+        } => {
+            input_needs(target)
+                || context
+                    .iter()
+                    .any(|p| input_needs(&p.positive) || input_needs(&p.negative))
+                || prefetch_needs(prefetch)
+        }
+        QueryExpr::RelevanceFeedback {
+            target,
+            feedback,
+            prefetch,
+            ..
+        } => {
+            input_needs(target)
+                || feedback.iter().any(|f| input_needs(&f.example))
+                || prefetch_needs(prefetch)
+        }
+        QueryExpr::Hybrid { .. } => true,
+        QueryExpr::Rerank {
+            input, prefetch, ..
+        } => input_needs(input) || prefetch_needs(prefetch),
+        QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. } => prefetch_needs(prefetch),
+        QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => false,
     }
 }
 
@@ -425,11 +512,12 @@ pub(crate) fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::er
 // ── Explain implementation ────────────────────────────────────
 
 pub(crate) fn explain_query(query: &str) -> Result<String, String> {
-    // Try multi-statement first — if the input has semicolons we get a
-    // per-statement breakdown.  Falls back to single-statement for simple
-    // queries (parse_all rejects them with a confusing semicolon error).
-    match qql::executor::Executor::explain_all(query) {
-        Ok(plan) if !plan.is_empty() => Ok(plan),
-        Ok(_) | Err(_) => qql::executor::Executor::explain(query).map_err(|e| e.to_string()),
+    // Multi-statement input must not silently fall back to single-statement
+    // explain: the parse error belongs to the caller (a confusing
+    // "trailing/inner semicolon" error from the single-statement path hides
+    // the real one).
+    if query.contains(';') {
+        return qql::executor::Executor::explain_all(query).map_err(|e| e.to_string());
     }
+    qql::executor::Executor::explain(query).map_err(|e| e.to_string())
 }

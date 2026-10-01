@@ -5,7 +5,10 @@
 //! structured validation error, never a silent drop.
 
 use qql_core::error::QqlError;
-use qql_plan::types::{FilterClause, FilterCompound, FilterExpression, MatchValue, PlanRangeBound};
+use qql_plan::types::{
+    FilterClause, FilterCompound, FilterExpression, GeoLineString, GeoPolygon, MatchValue,
+    PlanRangeBound,
+};
 
 use crate::qdrant_grpc::qdrant;
 
@@ -106,6 +109,9 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
                     radius: r.radius as f32,
                 });
             }
+            if let Some(p) = &fc.geo_polygon {
+                field.geo_polygon = Some(to_geo_polygon(p)?);
+            }
             if let Some(vc) = &fc.values_count {
                 field.values_count = Some(qdrant::ValuesCount {
                     gt: vc.gt,
@@ -125,21 +131,6 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
         FilterClause::HasId(h) => ConditionOneOf::HasId(qdrant::HasIdCondition {
             has_id: h.has_id.iter().map(to_point_id).collect(),
         }),
-        FilterClause::MinShould(m) => {
-            let conditions = m
-                .min_should
-                .conditions
-                .iter()
-                .map(to_condition)
-                .collect::<Result<Vec<_>, _>>()?;
-            ConditionOneOf::Filter(qdrant::Filter {
-                min_should: Some(qdrant::MinShould {
-                    conditions,
-                    min_count: m.min_should.min_count,
-                }),
-                ..Default::default()
-            })
-        }
         FilterClause::HasVector(v) => ConditionOneOf::HasVector(qdrant::HasVectorCondition {
             has_vector: v.has_vector.clone(),
         }),
@@ -155,6 +146,52 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
     };
     Ok(qdrant::Condition {
         condition_one_of: Some(condition_one_of),
+    })
+}
+
+/// Convert a plan geo ring to the proto `GeoLineString`.
+///
+/// A ring with fewer than three vertices cannot bound a surface: sending it
+/// would either error server-side or silently match nothing, so it fails
+/// closed instead of reaching the wire.
+fn to_geo_line_string(
+    ring: &GeoLineString,
+    which: &str,
+) -> Result<qdrant::GeoLineString, QqlError> {
+    if ring.points.len() < 3 {
+        return Err(QqlError::validation(
+            "QQL-GRPC-GEO-POLYGON",
+            format!(
+                "geo_polygon {which} ring has {} point(s); a polygon ring needs at least 3 vertices",
+                ring.points.len()
+            ),
+            None,
+        ));
+    }
+    Ok(qdrant::GeoLineString {
+        points: ring
+            .points
+            .iter()
+            .map(|p| qdrant::GeoPoint {
+                lat: p.lat,
+                lon: p.lon,
+            })
+            .collect(),
+    })
+}
+
+/// Convert a plan `geo_polygon` condition to the proto message (exterior plus
+/// interior holes), failing closed on degenerate rings.
+fn to_geo_polygon(polygon: &GeoPolygon) -> Result<qdrant::GeoPolygon, QqlError> {
+    let exterior = to_geo_line_string(&polygon.exterior, "exterior")?;
+    let interiors = polygon
+        .interiors
+        .iter()
+        .map(|ring| to_geo_line_string(ring, "interior"))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(qdrant::GeoPolygon {
+        exterior: Some(exterior),
+        interiors,
     })
 }
 

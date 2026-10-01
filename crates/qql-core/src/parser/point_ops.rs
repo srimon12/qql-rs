@@ -75,9 +75,12 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Limit)?;
         let (limit, limit_param, limit_span) =
             if let Some((param, span)) = self.parse_placeholder_param()? {
-                (10, Some(param), Some(span))
+                // Unlike the other clause defaults, an unbound placeholder
+                // must never fall back to a concrete limit: it stays `None`
+                // until binding, and the planner rejects a `None` limit.
+                (None, Some(param), Some(span))
             } else {
-                (self.parse_positive_u64("SCROLL LIMIT")?, None, None)
+                (Some(self.parse_positive_u64("SCROLL LIMIT")?), None, None)
             };
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
@@ -162,7 +165,7 @@ impl<'a> AstLowerer<'a> {
         let (key, collection) = if self.peek()?.kind == TokenKind::From {
             self.advance()?;
             let coll = crate::ast::QueryCollection::Explicit(self.parse_identifier()?);
-            if self.peek()?.kind == TokenKind::Key || self.peek_word("KEY")? {
+            if self.peek()?.kind == TokenKind::Key {
                 self.advance()?;
             }
             let k = self.parse_identifier()?;

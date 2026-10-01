@@ -851,13 +851,15 @@ pub(crate) fn try_inference_vector_value(
     span: Option<Span>,
 ) -> Result<Option<VectorValue>, QqlError> {
     let find = |key: &str| items.iter().find(|(k, _)| k.eq_ignore_ascii_case(key));
-    // A vector literally named `text` / `image` stays a named vector unless
-    // its value has the inference shape (strings for text/image); only then
-    // is the dict claimed as an inference input. This mirrors the wire, where
-    // `{"text": […]}` resolves as a named-vector map, not a Document.
+    // A vector literally named `text` / `image` / `object` stays a named
+    // vector unless its value has the inference shape (strings for
+    // text/image, an object payload for object); only then is the dict
+    // claimed as an inference input. This mirrors the wire, where
+    // `{"text": […]}` resolves as a named-vector map, not a Document, and a
+    // list-valued `object` is a dense vector (core-audit #14).
     let has_text = matches!(find("text"), Some((_, Value::Str(_))));
     let has_image = matches!(find("image"), Some((_, Value::Str(_))));
-    let has_object = find("object").is_some();
+    let has_object = matches!(find("object"), Some((_, Value::Dict(_))));
     if !has_text && !has_image && !has_object {
         return Ok(None);
     }

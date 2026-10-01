@@ -25,7 +25,8 @@ const {
   localExecutor, listEmbeddingModels, parse, injectFilter, version,
 } = require("@veristamp/nqql-edge");
 
-const client = localExecutor("./qql-data", {
+// Model load (and first-use download) runs off the JS thread — await it.
+const client = await localExecutor("./qql-data", {
   model: "bge-small-en-v1.5",
   onDiskPayload: true,
 });
@@ -52,7 +53,7 @@ dominates the on-disk footprint of small embedded shards. Pass whole MiB to
 `edge_config.json`:
 
 ```javascript
-const client = localExecutor("./qql-data", { walSegmentMb: 8 });
+const client = await localExecutor("./qql-data", { walSegmentMb: 8 });
 ```
 
 When unset, the 32 MiB engine default applies. Zero, negative, fractional, or
@@ -62,9 +63,9 @@ overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
 
 | Export | Role |
 |--------|------|
-| `localExecutor(dataDir, options)` | FastEmbed + edge |
-| `httpExecutor(dataDir, url, key, model, dim)` | Edge + HTTP embedder |
-| `listEmbeddingModels()` | Dense ONNX catalog |
+| `localExecutor(dataDir, options)` → `Promise<Client>` | FastEmbed + edge (model load runs off the JS thread) |
+| `httpExecutor(dataDir, url, key, model, dim)` → `Promise<Client>` | Edge + HTTP embedder |
+| `listEmbeddingModels()` | ONNX model catalog (`multi` / `image` flags included) |
 | `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
 | `injectFilter` | Isolation |
 | `stmt.shardKey` | AST property; edge **rejects** SHARD at execute |
@@ -75,6 +76,13 @@ overflowing values fail closed with `QQL-VALIDATION-CONFIG`.
 Quotas and custom sharding require remote Qdrant; `GROUP BY` runs offline
 (including `SIZE` / `LIMIT` / `OFFSET`, but not `LOOKUP FROM`). Offline sparse
 IDF works: `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.
+
+There is deliberately no `HttpEmbedder` class here: the edge SDK configures its
+embedder at construction through `localExecutor` (on-device ONNX / BM25) or
+`httpExecutor` (OpenAI-compatible endpoint), not per `Client`. Server-only
+options — `url`, `apiKey`/`api_key`, `useGrpc`/`use_grpc`,
+`routeAffinity`/`route_affinity`, `embedder` — are rejected with a `TypeError`
+pointing at `@veristamp/nqql` instead of being silently ignored.
 
 ## Docs
 

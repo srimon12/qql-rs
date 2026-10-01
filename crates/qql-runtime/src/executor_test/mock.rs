@@ -39,11 +39,15 @@ pub struct MockQdrantClient {
     pub point_map: Arc<Mutex<HashMap<String, ExecData>>>,
     /// When true, `execute_query_batch` fails (simulating a batch RPC error).
     pub fail_query_batch: Arc<Mutex<bool>>,
+    /// When true, `execute_update_batch` fails (simulating a batch RPC error).
+    pub fail_update_batch: Arc<Mutex<bool>>,
     /// When non-zero, `execute_planned` fails on that call number (1-based).
     pub fail_execute_planned_call: Arc<Mutex<usize>>,
     /// When set, `execute_planned` returns it directly instead of the mock's
     /// default per-op typed response (backend-response injection).
     pub typed_response: Arc<Mutex<Option<BackendResponse>>>,
+    /// Counts `close()` calls forwarded by the executor.
+    pub close_call_count: Arc<Mutex<usize>>,
 }
 
 impl Default for MockQdrantClient {
@@ -67,14 +71,20 @@ impl Default for MockQdrantClient {
             created_collections: Arc::new(Mutex::new(HashSet::new())),
             point_map: Arc::new(Mutex::new(HashMap::new())),
             fail_query_batch: Arc::new(Mutex::new(false)),
+            fail_update_batch: Arc::new(Mutex::new(false)),
             fail_execute_planned_call: Arc::new(Mutex::new(0)),
             typed_response: Arc::new(Mutex::new(None)),
+            close_call_count: Arc::new(Mutex::new(0)),
         }
     }
 }
 
 #[async_trait]
 impl QdrantOps for MockQdrantClient {
+    async fn close(&self) -> Result<(), QqlError> {
+        *self.close_call_count.lock().unwrap() += 1;
+        Ok(())
+    }
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         Ok(self.collections.clone())
     }
@@ -233,6 +243,13 @@ impl QdrantOps for MockQdrantClient {
         *self.update_batch_call_count.lock().unwrap() += 1;
         *self.last_update_batch_ops_count.lock().unwrap() = batch.operations.len();
         *self.last_update_batch_wait.lock().unwrap() = Some(wait);
+        if *self.fail_update_batch.lock().unwrap() {
+            return Err(QqlError::transport(
+                "QQL-BACKEND-HTTP",
+                "REST 400: batch rejected",
+                None,
+            ));
+        }
         Ok(batch
             .operations
             .iter()

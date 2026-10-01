@@ -89,6 +89,16 @@ Qdrant OpenAPI response field and emit the same JSON shapes as the native SDKs'
 typed reports; a missing or mistyped field fails with `QQL-BACKEND-ENVELOPE`
 (no fallback shapes). Server telemetry stays optional and lenient.
 
+Batched execution is **at-least-once**: when one RPC carries an auto-grouped or
+explicit `BATCH` set and the connection fails or times out, members are retried
+individually — a member that already landed is applied again. Keep mutations
+idempotent (or use `UPDATE MODE` deliberately). A batch the server answered
+with a cardinality mismatch or an unparsable shape is never retried; its
+members report `QQL-BACKEND-BATCH` / `QQL-BACKEND-ENVELOPE` instead. Errors
+thrown across the JS boundary are structured: `err.code`, `err.kind`,
+`err.span`, and `err.fields` (via `dx.js buildError`), including option and
+embedder-config misuse.
+
 ## Features
 
 | Feature | Default | Role |

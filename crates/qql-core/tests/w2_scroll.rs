@@ -102,7 +102,7 @@ fn scroll_order_by_combines_with_other_clauses() {
         panic!("expected SCROLL, got {stmt:?}");
     };
     assert_eq!(scroll.collection, "docs");
-    assert_eq!(scroll.limit, 10);
+    assert_eq!(scroll.limit, Some(10));
     assert!(scroll.filter.is_some());
     assert!(scroll.after.is_some());
     let order = scroll.order_by.as_ref().expect("order_by");

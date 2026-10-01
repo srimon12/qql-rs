@@ -6,10 +6,10 @@ use crate::ast::{
     CollectionMode, CreateCollectionStmt, CreateShardKeyStmt, SparseVectorDef, Stmt, VectorDef,
     VectorDistance,
 };
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
-use super::{AstLowerer, ascii_equal};
+use super::AstLowerer;
 
 impl<'a> AstLowerer<'a> {
     pub fn parse_create(&mut self) -> Result<Stmt, QqlError> {
@@ -45,9 +45,7 @@ impl<'a> AstLowerer<'a> {
                 {
                     let mode = self.advance()?.kind;
                     let tok = self.peek()?;
-                    if tok.kind == TokenKind::Vector
-                        || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
-                    {
+                    if tok.kind == TokenKind::Vector {
                         self.advance()?;
                         let v = self.parse_identifier()?;
                         if mode == TokenKind::Dense {
@@ -139,16 +137,10 @@ impl<'a> AstLowerer<'a> {
                         if self.peek()?.kind == TokenKind::Hnsw {
                             self.advance()?;
                             hnsw = self.parse_hnsw_config_block()?.hnsw;
-                        } else if self.peek()?.kind == TokenKind::Quantization
-                            || (self.peek()?.is_keyword_or_identifier()
-                                && ascii_equal(self.peek()?.text, "QUANTIZATION"))
-                        {
+                        } else if self.peek()?.kind == TokenKind::Quantization {
                             self.advance()?;
                             quant = self.parse_quantization_config_block()?.quantization;
-                        } else if self.peek()?.kind == TokenKind::Multivector
-                            || (self.peek()?.is_keyword_or_identifier()
-                                && ascii_equal(self.peek()?.text, "MULTIVECTOR"))
-                        {
+                        } else if self.peek()?.kind == TokenKind::Multivector {
                             self.advance()?;
                             multiv = Some(self.parse_multivector_config_block()?);
                         } else if self.peek()?.kind == TokenKind::Vector {
@@ -274,23 +266,33 @@ impl<'a> AstLowerer<'a> {
         let mut placement = None;
         let mut initial_state = None;
         if self.peek()?.kind == TokenKind::With {
+            // The config block is consumed before validation; diagnostics use
+            // the `WITH` token instead of whatever follows the block.
+            let block_span = self.peek()?.span;
             self.advance()?;
             let opts = self.parse_config_block()?;
             for (key, value) in &opts {
                 let key_lower = key.to_ascii_lowercase();
                 match key_lower.as_str() {
                     "shards_number" => {
-                        shards_number = Some(self.positive_shard_key_u64("shards_number", value)?);
+                        shards_number = Some(self.positive_shard_key_u64(
+                            "shards_number",
+                            value,
+                            block_span,
+                        )?);
                     }
                     "replication_factor" => {
-                        replication_factor =
-                            Some(self.positive_shard_key_u64("replication_factor", value)?);
+                        replication_factor = Some(self.positive_shard_key_u64(
+                            "replication_factor",
+                            value,
+                            block_span,
+                        )?);
                     }
                     "placement" => {
-                        placement = Some(self.shard_key_placement(value)?);
+                        placement = Some(self.shard_key_placement(value, block_span)?);
                     }
                     "initial_state" => {
-                        initial_state = Some(self.shard_key_initial_state(value)?);
+                        initial_state = Some(self.shard_key_initial_state(value, block_span)?);
                     }
                     _ => {
                         return Err(QqlError::parse(
@@ -299,7 +301,7 @@ impl<'a> AstLowerer<'a> {
                                 "unknown CREATE SHARD KEY parameter '{}'. Expected: shards_number, replication_factor, placement, initial_state",
                                 key
                             ),
-                            self.peek()?.span,
+                            block_span,
                         ));
                     }
                 }
@@ -322,20 +324,31 @@ impl<'a> AstLowerer<'a> {
         &mut self,
         name: &str,
         value: &crate::ast::Value,
+        span: Span,
     ) -> Result<u64, QqlError> {
         match value {
-            crate::ast::Value::Int(n) if *n > 0 => Ok(*n as u64),
+            crate::ast::Value::Int(n) if *n > 0 => u32::try_from(*n).map(u64::from).map_err(|_| {
+                QqlError::parse(
+                    "QQL-PARSE-SHARD-KEY-CONFIG",
+                    alloc::format!("{} must fit in an unsigned 32-bit integer", name),
+                    span,
+                )
+            }),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-SHARD-KEY-CONFIG",
                 alloc::format!("{} must be a positive integer", name),
-                self.peek()?.span,
+                span,
             )),
         }
     }
 
     /// `placement` is the list of peer ids hosting the key's shards
     /// (OpenAPI `CreateShardingKey.placement`).
-    fn shard_key_placement(&mut self, value: &crate::ast::Value) -> Result<Vec<u64>, QqlError> {
+    fn shard_key_placement(
+        &mut self,
+        value: &crate::ast::Value,
+        span: Span,
+    ) -> Result<Vec<u64>, QqlError> {
         match value {
             crate::ast::Value::List(items) if !items.is_empty() => items
                 .iter()
@@ -344,22 +357,25 @@ impl<'a> AstLowerer<'a> {
                     _ => Err(QqlError::parse(
                         "QQL-PARSE-SHARD-KEY-CONFIG",
                         "placement entries must be non-negative integers (peer ids)",
-                        self.peek()?.span,
+                        span,
                     )),
                 })
                 .collect(),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-SHARD-KEY-CONFIG",
                 "placement must be a non-empty list of peer ids",
-                self.peek()?.span,
+                span,
             )),
         }
     }
 
     /// `initial_state` is the key's initial replica state (OpenAPI
     /// `ReplicaState`). Accepted case-insensitively, stored canonical.
-    fn shard_key_initial_state(&mut self, value: &crate::ast::Value) -> Result<String, QqlError> {
-        let span = self.peek()?.span;
+    fn shard_key_initial_state(
+        &mut self,
+        value: &crate::ast::Value,
+        span: Span,
+    ) -> Result<String, QqlError> {
         match value {
             crate::ast::Value::Str(raw) => canonical_replica_state(raw).ok_or_else(|| {
                 QqlError::parse(

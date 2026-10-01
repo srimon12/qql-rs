@@ -8,7 +8,7 @@ use gloo_net::http::Request;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
-use super::functions::qql_err_to_js;
+use super::functions::{js_err, js_exec_err, qql_err_to_js};
 
 enum EmbedMode {
     None,
@@ -194,15 +194,20 @@ impl Client {
         api_key: Option<String>,
     ) -> Result<(), JsValue> {
         if endpoint.trim().is_empty() {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpEmbedder: endpoint is required (no default URL)",
             ));
         }
         if model.trim().is_empty() {
-            return Err(JsValue::from_str("setHttpEmbedder: model is required"));
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
+                "setHttpEmbedder: model is required",
+            ));
         }
         if dimension == 0 {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpEmbedder: dimension must be positive",
             ));
         }
@@ -225,15 +230,20 @@ impl Client {
         api_key: Option<String>,
     ) -> Result<(), JsValue> {
         if endpoint.trim().is_empty() {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpMultiEmbedder: endpoint is required (no default URL)",
             ));
         }
         if model.trim().is_empty() {
-            return Err(JsValue::from_str("setHttpMultiEmbedder: model is required"));
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
+                "setHttpMultiEmbedder: model is required",
+            ));
         }
         if dimension == 0 {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpMultiEmbedder: dimension must be positive",
             ));
         }
@@ -255,15 +265,20 @@ impl Client {
         api_key: Option<String>,
     ) -> Result<(), JsValue> {
         if endpoint.trim().is_empty() {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpImageEmbedder: endpoint is required (no default URL)",
             ));
         }
         if model.trim().is_empty() {
-            return Err(JsValue::from_str("setHttpImageEmbedder: model is required"));
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
+                "setHttpImageEmbedder: model is required",
+            ));
         }
         if dimension == 0 {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpImageEmbedder: dimension must be positive",
             ));
         }
@@ -284,12 +299,16 @@ impl Client {
         api_key: Option<String>,
     ) -> Result<(), JsValue> {
         if endpoint.trim().is_empty() {
-            return Err(JsValue::from_str(
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
                 "setHttpReranker: endpoint is required (no default URL)",
             ));
         }
         if model.trim().is_empty() {
-            return Err(JsValue::from_str("setHttpReranker: model is required"));
+            return Err(js_err(
+                "QQL-VALIDATION-CONFIG",
+                "setHttpReranker: model is required",
+            ));
         }
         self.rerank_endpoint = Some(endpoint);
         self.rerank_api_key = api_key;
@@ -350,28 +369,36 @@ impl Client {
                 for t in &texts {
                     array.push(&JsValue::from_str(t));
                 }
-                let returned = fn_
-                    .call1(&JsValue::NULL, &array)
-                    .map_err(|e| JsValue::from_str(&format!("embedder call failed: {:?}", e)))?;
+                let returned = fn_.call1(&JsValue::NULL, &array).map_err(|e| {
+                    js_exec_err("QQL-EMBEDDING", format!("embedder call failed: {e:?}"))
+                })?;
 
                 let result = if returned.is_instance_of::<js_sys::Promise>() {
                     wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(returned))
                         .await
-                        .map_err(|e| JsValue::from_str(&format!("embedder rejected: {:?}", e)))?
+                        .map_err(|e| {
+                            js_exec_err("QQL-EMBEDDING", format!("embedder rejected: {e:?}"))
+                        })?
                 } else {
                     returned
                 };
 
                 let rows: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(result).map_err(|e| {
-                    JsValue::from_str(&format!("embedder returned invalid vectors: {}", e))
+                    js_exec_err(
+                        "QQL-EMBEDDING",
+                        format!("embedder returned invalid vectors: {e}"),
+                    )
                 })?;
 
                 if rows.len() != texts.len() {
-                    return Err(JsValue::from_str(&format!(
-                        "embedder returned {} vectors, expected {}",
-                        rows.len(),
-                        texts.len()
-                    )));
+                    return Err(js_exec_err(
+                        "QQL-EMBEDDING",
+                        format!(
+                            "embedder returned {} vectors, expected {}",
+                            rows.len(),
+                            texts.len()
+                        ),
+                    ));
                 }
                 Ok(rows)
             }
@@ -406,7 +433,7 @@ impl Client {
         api_key: Option<&str>,
     ) -> Result<serde_json::Value, JsValue> {
         let body_str =
-            serde_json::to_string(body).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            serde_json::to_string(body).map_err(|e| js_exec_err("QQL-EMBEDDING", e.to_string()))?;
 
         let mut rb = Request::post(url).header("Content-Type", "application/json");
         if let Some(key) = api_key.filter(|k| !k.is_empty()) {
@@ -415,25 +442,29 @@ impl Client {
 
         let resp = rb
             .body(body_str)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?
+            .map_err(|e| js_exec_err("QQL-EMBEDDING", e.to_string()))?
             .send()
             .await
-            .map_err(|e| JsValue::from_str(&format!("embedding API error: {}", e)))?;
+            .map_err(|e| js_exec_err("QQL-EMBEDDING", format!("embedding API error: {e}")))?;
 
         let status = resp.status();
         let text = resp
             .text()
             .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|e| js_exec_err("QQL-EMBEDDING", e.to_string()))?;
 
         if status >= 400 {
-            return Err(JsValue::from_str(&format!(
-                "embedding API returned {}: {}",
-                status, text
-            )));
+            return Err(js_exec_err(
+                "QQL-EMBEDDING",
+                format!("embedding API returned {status}: {text}"),
+            ));
         }
-        serde_json::from_str(&text)
-            .map_err(|e| JsValue::from_str(&format!("invalid embedding API response: {}", e)))
+        serde_json::from_str(&text).map_err(|e| {
+            js_exec_err(
+                "QQL-EMBEDDING",
+                format!("invalid embedding API response: {e}"),
+            )
+        })
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -513,7 +544,8 @@ impl Client {
             return Ok(Vec::new());
         }
         if !self.multi_enabled() {
-            return Err(JsValue::from_str(
+            return Err(js_exec_err(
+                "QQL-EMBEDDING-MULTI",
                 "multi-vector embedding is not available (no model specified). Configure setHttpMultiEmbedder, pass precomputed VECTOR [[...], ...], or use UPSERT with explicit multivector bags.",
             ));
         }
@@ -536,7 +568,8 @@ impl Client {
             return Ok(Vec::new());
         }
         if !self.image_enabled() {
-            return Err(JsValue::from_str(
+            return Err(js_exec_err(
+                "QQL-EMBEDDING-IMAGE",
                 "image embedding is not available (no model specified). Configure setHttpImageEmbedder, pass a precomputed VECTOR [...], or use UPSERT USING IMAGE ON FIELD <path_field>.",
             ));
         }
@@ -560,7 +593,8 @@ impl Client {
             return Ok(Vec::new());
         }
         let Some(endpoint) = self.rerank_endpoint.as_deref() else {
-            return Err(JsValue::from_str(
+            return Err(js_exec_err(
+                "QQL-RERANK-CROSS",
                 "cross-encoder pair scoring is not available (no model specified). Configure setHttpReranker.",
             ));
         };
@@ -579,19 +613,22 @@ impl Client {
             .get("results")
             .or_else(|| resp.get("data"))
             .and_then(|v| v.as_array())
-            .ok_or_else(|| JsValue::from_str("rerank response missing results array"))?;
+            .ok_or_else(|| {
+                js_exec_err("QQL-RERANK-CROSS", "rerank response missing results array")
+            })?;
         let mut scores = vec![0.0f32; documents.len()];
         let mut seen = vec![false; documents.len()];
         for item in results {
             let idx = item
                 .get("index")
                 .and_then(|v| v.as_u64())
-                .ok_or_else(|| JsValue::from_str("rerank result missing index"))?
+                .ok_or_else(|| js_exec_err("QQL-RERANK-CROSS", "rerank result missing index"))?
                 as usize;
             if idx >= documents.len() {
-                return Err(JsValue::from_str(&format!(
-                    "rerank result index {idx} out of range"
-                )));
+                return Err(js_exec_err(
+                    "QQL-RERANK-CROSS",
+                    format!("rerank result index {idx} out of range"),
+                ));
             }
             let score = item
                 .get("relevance_score")
@@ -602,7 +639,8 @@ impl Client {
             seen[idx] = true;
         }
         if seen.iter().any(|s| !*s) {
-            return Err(JsValue::from_str(
+            return Err(js_exec_err(
+                "QQL-RERANK-CROSS",
                 "rerank response did not cover all documents",
             ));
         }
@@ -617,21 +655,24 @@ impl Client {
         expected: usize,
         expected_dim: u32,
     ) -> Result<Vec<Vec<f32>>, JsValue> {
-        let data = resp["data"]
-            .as_array()
-            .ok_or_else(|| JsValue::from_str("embedding response missing 'data' array"))?;
+        let data = resp["data"].as_array().ok_or_else(|| {
+            js_exec_err("QQL-EMBEDDING", "embedding response missing 'data' array")
+        })?;
 
         let mut slots: Vec<Option<Vec<f32>>> = vec![None; expected];
         for (fallback_i, item) in data.iter().enumerate() {
             let emb = item["embedding"]
                 .as_array()
-                .ok_or_else(|| JsValue::from_str("item missing 'embedding' array"))?;
+                .ok_or_else(|| js_exec_err("QQL-EMBEDDING", "item missing 'embedding' array"))?;
             if expected_dim > 0 && emb.len() != expected_dim as usize {
-                return Err(JsValue::from_str(&format!(
-                    "embedding dimension mismatch: got {}, expected {}",
-                    emb.len(),
-                    expected_dim
-                )));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING",
+                    format!(
+                        "embedding dimension mismatch: got {}, expected {}",
+                        emb.len(),
+                        expected_dim
+                    ),
+                ));
             }
             let vec: Vec<f32> = emb
                 .iter()
@@ -639,14 +680,16 @@ impl Client {
                 .collect();
             let idx = item["index"].as_u64().unwrap_or(fallback_i as u64) as usize;
             if idx >= expected {
-                return Err(JsValue::from_str(&format!(
-                    "embedding index {idx} out of range (batch size {expected})"
-                )));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING",
+                    format!("embedding index {idx} out of range (batch size {expected})"),
+                ));
             }
             if slots[idx].is_some() {
-                return Err(JsValue::from_str(&format!(
-                    "duplicate embedding index {idx}"
-                )));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING",
+                    format!("duplicate embedding index {idx}"),
+                ));
             }
             slots[idx] = Some(vec);
         }
@@ -655,7 +698,9 @@ impl Client {
             .into_iter()
             .enumerate()
             .map(|(i, v)| {
-                v.ok_or_else(|| JsValue::from_str(&format!("missing embedding at index {i}")))
+                v.ok_or_else(|| {
+                    js_exec_err("QQL-EMBEDDING", format!("missing embedding at index {i}"))
+                })
             })
             .collect()
     }
@@ -668,36 +713,48 @@ impl Client {
         expected: usize,
         expected_dim: u32,
     ) -> Result<Vec<Vec<Vec<f32>>>, JsValue> {
-        let data = resp["data"]
-            .as_array()
-            .ok_or_else(|| JsValue::from_str("embedding response missing 'data' array"))?;
+        let data = resp["data"].as_array().ok_or_else(|| {
+            js_exec_err("QQL-EMBEDDING", "embedding response missing 'data' array")
+        })?;
         let mut slots: Vec<Option<Vec<Vec<f32>>>> = vec![None; expected];
         for (fallback_i, item) in data.iter().enumerate() {
             let emb = item["embedding"]
                 .as_array()
-                .ok_or_else(|| JsValue::from_str("item missing 'embedding' array"))?;
+                .ok_or_else(|| js_exec_err("QQL-EMBEDDING", "item missing 'embedding' array"))?;
             if emb.is_empty() {
-                return Err(JsValue::from_str("multi embedding returned empty bag"));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING-MULTI",
+                    "multi embedding returned empty bag",
+                ));
             }
             // Flat dense `[...f32]` rejected: first element must be an array.
             if emb.first().is_some_and(|v| !v.is_array()) {
-                return Err(JsValue::from_str(&format!(
-                    "multi embedding endpoint returned a flat dense vector (len={}) for index {}; expected nested array [[f32,…],…] (token-level multivector)",
-                    emb.len(),
-                    fallback_i
-                )));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING-MULTI",
+                    format!(
+                        "multi embedding endpoint returned a flat dense vector (len={}) for index {}; expected nested array [[f32,…],…] (token-level multivector)",
+                        emb.len(),
+                        fallback_i
+                    ),
+                ));
             }
             let mut rows = Vec::with_capacity(emb.len());
             for row in emb {
                 let arr = row.as_array().ok_or_else(|| {
-                    JsValue::from_str("multi embedding row must be an array of numbers")
+                    js_exec_err(
+                        "QQL-EMBEDDING-MULTI",
+                        "multi embedding row must be an array of numbers",
+                    )
                 })?;
                 if expected_dim > 0 && arr.len() != expected_dim as usize {
-                    return Err(JsValue::from_str(&format!(
-                        "multi embedding dimension mismatch: got {}, expected {}",
-                        arr.len(),
-                        expected_dim
-                    )));
+                    return Err(js_exec_err(
+                        "QQL-EMBEDDING-MULTI",
+                        format!(
+                            "multi embedding dimension mismatch: got {}, expected {}",
+                            arr.len(),
+                            expected_dim
+                        ),
+                    ));
                 }
                 rows.push(
                     arr.iter()
@@ -707,14 +764,16 @@ impl Client {
             }
             let idx = item["index"].as_u64().unwrap_or(fallback_i as u64) as usize;
             if idx >= expected {
-                return Err(JsValue::from_str(&format!(
-                    "embedding index {idx} out of range (batch size {expected})"
-                )));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING",
+                    format!("embedding index {idx} out of range (batch size {expected})"),
+                ));
             }
             if slots[idx].is_some() {
-                return Err(JsValue::from_str(&format!(
-                    "duplicate embedding index {idx}"
-                )));
+                return Err(js_exec_err(
+                    "QQL-EMBEDDING",
+                    format!("duplicate embedding index {idx}"),
+                ));
             }
             slots[idx] = Some(rows);
         }
@@ -722,7 +781,9 @@ impl Client {
             .into_iter()
             .enumerate()
             .map(|(i, v)| {
-                v.ok_or_else(|| JsValue::from_str(&format!("missing embedding at index {i}")))
+                v.ok_or_else(|| {
+                    js_exec_err("QQL-EMBEDDING", format!("missing embedding at index {i}"))
+                })
             })
             .collect()
     }
@@ -766,23 +827,18 @@ impl Client {
         &self,
         collection: &str,
     ) -> Result<qql_embed::TopologyNames, JsValue> {
-        use super::schema::vector_names_from_collection_result;
+        use super::topology::vector_names_from_collection_result;
         let path = format!("/collections/{collection}");
         let body = self.send_json("GET", &path, None).await?;
         let result = body
             .get("result")
             .filter(|value| value.is_object())
             .ok_or_else(|| {
-                JsValue::from_str(
-                    &serde_json::to_string(&qql_core::error::QqlError::backend(
-                        "QQL-BACKEND-ENVELOPE",
-                        "get collection response is missing a result object",
-                        None,
-                    ))
-                    .unwrap_or_else(|_| {
-                        "get collection response is missing a result object".into()
-                    }),
-                )
+                qql_err_to_js(qql_core::error::QqlError::backend(
+                    "QQL-BACKEND-ENVELOPE",
+                    "get collection response is missing a result object",
+                    None,
+                ))
             })?;
         Ok(vector_names_from_collection_result(result))
     }
@@ -845,7 +901,7 @@ impl Client {
         })?;
 
         if status >= 400 {
-            let code = classify_backend_error_code(status, &text);
+            let code = qql_core::error::BackendClass::from_http(status, &text).code();
             return Err(qql_err_to_js(
                 qql_core::error::QqlError::backend(
                     code,
@@ -863,72 +919,5 @@ impl Client {
                 None,
             ))
         })
-    }
-}
-
-fn classify_backend_error_code(status: u16, message: &str) -> &'static str {
-    let lower = message.to_ascii_lowercase();
-    if status == 401
-        || status == 403
-        || lower.contains("unauthorized")
-        || lower.contains("forbidden")
-        || lower.contains("api key")
-        || lower.contains("bearer")
-    {
-        "QQL-BACKEND-AUTH"
-    } else if status == 404 || lower.contains("not found") {
-        "QQL-BACKEND-COLLECTION-NOT-FOUND"
-    } else if (lower.contains("index")
-        && (lower.contains("not exist")
-            || lower.contains("appropriate")
-            || lower.contains("not ready")
-            || lower.contains("missing")
-            || lower.contains("indexing")
-            || lower.contains("failed")))
-        || lower.contains("no appropriate index")
-    {
-        "QQL-BACKEND-INDEX-NOT-READY"
-    } else if lower.contains("dimension")
-        || lower.contains("vector size")
-        || lower.contains("dimensions")
-    {
-        "QQL-BACKEND-DIMENSION-MISMATCH"
-    } else {
-        "QQL-BACKEND-HTTP"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_classify_backend_error_code() {
-        assert_eq!(classify_backend_error_code(401, ""), "QQL-BACKEND-AUTH");
-        assert_eq!(classify_backend_error_code(403, ""), "QQL-BACKEND-AUTH");
-        assert_eq!(
-            classify_backend_error_code(400, "invalid api key"),
-            "QQL-BACKEND-AUTH"
-        );
-        assert_eq!(
-            classify_backend_error_code(404, ""),
-            "QQL-BACKEND-COLLECTION-NOT-FOUND"
-        );
-        assert_eq!(
-            classify_backend_error_code(500, "collection 'docs' not found"),
-            "QQL-BACKEND-COLLECTION-NOT-FOUND"
-        );
-        assert_eq!(
-            classify_backend_error_code(400, "vector size mismatch: expected 128, got 256"),
-            "QQL-BACKEND-DIMENSION-MISMATCH"
-        );
-        assert_eq!(
-            classify_backend_error_code(400, "no appropriate index for field"),
-            "QQL-BACKEND-INDEX-NOT-READY"
-        );
-        assert_eq!(
-            classify_backend_error_code(500, "internal server error"),
-            "QQL-BACKEND-HTTP"
-        );
     }
 }

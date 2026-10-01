@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use qql_core::error::QqlError;
 
-use crate::sparse::{self, Bm25Params, SparseVector};
+use crate::sparse::{Bm25Params, SparseVector};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Send/Sync bound helper for `Embedder` implementations on native targets.
@@ -42,14 +42,21 @@ pub trait Embedder: EmbedderBound {
     /// matching Qdrant's `qdrant/bm25` query embedding.
     ///
     /// Default implementation uses the local pipeline from
-    /// [`Self::bm25_text_config`] when `model` is empty or `"default"`.
-    /// Non-default sparse models are rejected — override this method to
-    /// provide model-aware sparse inference.
+    /// [`Self::bm25_text_config`] when `model` is empty, `"default"`, or
+    /// `"qdrant/bm25"` (the local pipeline *is* that model — see
+    /// [`is_local_bm25_model`]). Non-default sparse models are rejected —
+    /// override this method to provide model-aware sparse inference.
     async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !is_local_bm25_model(model) {
             return Err(sparse_model_unsupported_error(model));
         }
-        self.bm25_text_config().pipeline().embed_query(text)
+        let config = self.bm25_text_config();
+        if config == crate::Bm25TextConfig::default() {
+            // Default config: reuse the process-wide pipeline instead of
+            // rebuilding the stopword set + stemmer per text.
+            return crate::bm25_text::default_pipeline().embed_query(text);
+        }
+        config.pipeline().embed_query(text)
     }
 
     /// Sparse embedding for **document** text at ingestion: BM25
@@ -57,18 +64,25 @@ pub trait Embedder: EmbedderBound {
     /// embedding.
     ///
     /// Default implementation uses the local pipeline from
-    /// [`Self::bm25_text_config`] when `model` is empty or `"default"`,
-    /// honoring its [`Bm25Params`]. Non-default sparse models are rejected —
-    /// override this method to provide model-aware sparse inference.
+    /// [`Self::bm25_text_config`] when `model` is empty, `"default"`, or
+    /// `"qdrant/bm25"` (the local pipeline *is* that model), honoring its
+    /// [`Bm25Params`]. Non-default sparse models are rejected — override this
+    /// method to provide model-aware sparse inference.
     async fn embed_sparse_document(
         &self,
         text: &str,
         model: &str,
     ) -> Result<SparseVector, QqlError> {
-        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+        if !is_local_bm25_model(model) {
             return Err(sparse_model_unsupported_error(model));
         }
-        self.bm25_text_config().pipeline().embed_document(text)
+        let config = self.bm25_text_config();
+        if config == crate::Bm25TextConfig::default() {
+            // Default config: reuse the process-wide pipeline (see the query
+            // method above).
+            return crate::bm25_text::default_pipeline().embed_document(text);
+        }
+        config.pipeline().embed_document(text)
     }
 
     /// Batch document-side sparse embedding. Default loops
@@ -96,35 +110,6 @@ pub trait Embedder: EmbedderBound {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
             results.push(self.embed_sparse_query(text, model).await?);
-        }
-        Ok(results)
-    }
-
-    /// Single-pass joint multi-modal / BGE-M3 embedding (dense + sparse + multi-vectors).
-    ///
-    /// Default implementation delegates to separate dense, sparse, and multi calls.
-    /// Override this to make a single inference pass (e.g. `Bgem3Embedding::embed`).
-    /// The default propagates the first error and does **not** suppress failures.
-    async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput, QqlError> {
-        let dense = self.embed_dense(text, model).await?;
-        let sparse = self.embed_sparse_document(text, model).await?;
-        let multi = self.embed_multi(text, model).await?;
-        Ok(JointEmbeddingOutput {
-            dense: Some(dense),
-            sparse: Some(sparse),
-            multi: Some(multi),
-        })
-    }
-
-    /// Batch joint embedding. Default loops [`Self::embed_joint`].
-    async fn embed_joint_batch(
-        &self,
-        texts: &[String],
-        model: &str,
-    ) -> Result<Vec<JointEmbeddingOutput>, QqlError> {
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            results.push(self.embed_joint(text, model).await?);
         }
         Ok(results)
     }
@@ -306,15 +291,27 @@ pub fn cross_rerank_unsupported_error(model: &str) -> QqlError {
     )
 }
 
+/// Whether `model` names the local wire-compatible BM25 pipeline: empty,
+/// `"default"`, or Qdrant's `qdrant/bm25` (ASCII case-insensitive).
+///
+/// The local pipeline is byte-compatible with that model, so hosts can accept
+/// the server-side spelling instead of rejecting the name users copy from
+/// Qdrant docs.
+pub fn is_local_bm25_model(model: &str) -> bool {
+    model.is_empty()
+        || model.eq_ignore_ascii_case("default")
+        || model.eq_ignore_ascii_case("qdrant/bm25")
+}
+
 /// Error when a sparse model is requested that this embedder cannot satisfy.
 pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
     QqlError::execution(
         "QQL-EMBEDDING-SPARSE",
         format!(
             "sparse model '{model}' is not available on this embedder. \
-             Omit the MODEL clause (or use MODEL 'default') for local \
-             wire-compatible BM25. To use model-aware sparse embedding \
-             (SPLADE / BGE-M3), configure a sparse embedding backend."
+             Omit the MODEL clause (or use MODEL 'default' / 'qdrant/bm25') \
+             for local wire-compatible BM25. To use model-aware sparse \
+             embedding (SPLADE / BGE-M3), configure a sparse embedding backend."
         ),
         None,
     )
@@ -336,38 +333,4 @@ pub fn dense_model_unsupported_error(model: &str) -> QqlError {
         ),
         None,
     )
-}
-
-/// Output container for single-pass joint multi-modal / BGE-M3 embedding.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct JointEmbeddingOutput {
-    /// Dense vector, when the model provides one.
-    pub dense: Option<Vec<f32>>,
-    /// Sparse (BM25 / SPLADE) vector, when the model provides one.
-    pub sparse: Option<SparseVector>,
-    /// Multivector token vectors (ColBERT), when the model provides them.
-    pub multi: Option<Vec<Vec<f32>>>,
-}
-
-/// Local sparse-only helper (no dense model). Default English pipeline
-/// only — hosts needing other languages use [`Bm25TextConfig`](crate::Bm25TextConfig)
-/// / [`Bm25Pipeline`](crate::Bm25Pipeline) directly.
-pub struct SparseEmbedder;
-
-impl SparseEmbedder {
-    /// Embed query text with local wire-compatible BM25 (unit term weights).
-    pub fn embed_query(text: &str) -> SparseVector {
-        sparse::embed_query(text)
-    }
-
-    /// Embed document text with local wire-compatible BM25 (tf saturation)
-    /// using Qdrant's `qdrant/bm25` defaults.
-    pub fn embed_document(text: &str) -> SparseVector {
-        sparse::embed_document(text)
-    }
-
-    /// Embed document text with explicit validated [`Bm25Params`].
-    pub fn embed_document_with(text: &str, params: &Bm25Params) -> SparseVector {
-        sparse::embed_document_with_params(text, params)
-    }
 }

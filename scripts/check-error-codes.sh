@@ -19,6 +19,7 @@ REF="$ROOT/website/src/content/docs/docs/reference/error-codes.mdoc"
 SCAN_ROOTS=(
   crates/qql-core/src
   crates/qql-plan/src
+  crates/qql-protocol/src
   crates/qql-edge/src
   crates/qql-embed/src
   crates/qql-runtime/src
@@ -40,6 +41,7 @@ ARTIFACTS=(
 # - QQL-SERIALIZE: qql-wasm response serialization.
 # - QQL-SERIALIZE-AST: nqql-common AST JSON serialization.
 # - QQL-VALIDATION-ANALYZE-BATCH: pyqql-common, nqql-common, qql-wasm analyze dispatch.
+# - QQL-VALIDATION-SHARD-UNSUPPORTED: nqql, nqql-edge shardKey setter guard.
 ALLOWLIST=(
   'QQL-BIND-ALREADY-BOUND'
   'QQL-BIND-HEADER'
@@ -48,6 +50,7 @@ ALLOWLIST=(
   'QQL-SERIALIZE'
   'QQL-SERIALIZE-AST'
   'QQL-VALIDATION-ANALYZE-BATCH'
+  'QQL-VALIDATION-SHARD-UNSUPPORTED'
 )
 
 fail=0

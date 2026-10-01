@@ -7,7 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.5.0] - 2026-10-01
+
+### ⚠️ Breaking Changes & Invariant Enforcements
+- **Per-statement batch semantics**: statements with differing `PARAMS (timeout/consistency)` or effective `WAIT` never co-group; each ambient batch executes with its own shared opts ([#191](https://github.com/srimon12/qql-rs/pull/191), [#194](https://github.com/srimon12/qql-rs/pull/194)).
+- **Match lists are sets**: `IN` / `MATCH ANY` / `MATCH EXCEPT` require homogeneous string or int64 lists; duplicates dedupe order-preservingly, while floats, bools, mixed kinds, non-finite floats, `u64` above `i64::MAX`, and out-of-range `SLICE` / `MIN SHOULD` / `RRF k` / `MMR` / `DELETE VECTOR` / `CREATE SHARD KEY` values fail closed ([#191](https://github.com/srimon12/qql-rs/pull/191), [#200](https://github.com/srimon12/qql-rs/pull/200)).
+- **Lossy projections fail closed**: `ALTER COLLECTION` shard params cannot be projected to a single route; single-route compilation of `CREATE COLLECTION` with `shard_keys` / `read_fan_out_*` emits no single route (`QQL-REST-MULTI-STEP`) ([#191](https://github.com/srimon12/qql-rs/pull/191)); `compile()` keeps `stmt_type` with no route; `SCROLL … LIMIT :n` is `QQL-PLAN-SCROLL-LIMIT` until bound; PREFETCH `SHARD`/read-opts fail closed and an outer `WHERE` composes with the source as `AND` ([#191](https://github.com/srimon12/qql-rs/pull/191)).
+- **Strict numeric and config parsing**: digit-leading integers outside `i64`/`u64` fail `QQL-PARSE-NUMBER`; wrong-typed `WITH QUANTIZATION` / `WITH SPARSE` options fail `QQL-VALIDATION-CONFIG`; `QUERY POINTS … LIMIT :n` is rejected; `CREATE SHARD KEY` counts must fit `u32` ([#190](https://github.com/srimon12/qql-rs/pull/190)).
+- **Client embedding fails closed on unrepresentable inputs**: `OPTIONS {…}` on client-embedded `TEXT`/`IMAGE` and unbound `TEXT :param` / `HYBRID TEXT :param` error `QQL-EMBEDDING`; duplicate UPSERT targets error instead of overwriting; CTE/PREFETCH nesting beyond 64 errors `QQL-VALIDATION-NESTING` ([#192](https://github.com/srimon12/qql-rs/pull/192)).
+- **Removed `qql-embed` surface**: `SparseEmbedder`, `embed_joint` / `embed_joint_batch`, `JointEmbeddingOutput`, and `sparse::{for_each_token, for_each_token_id}` — all zero-caller ([#192](https://github.com/srimon12/qql-rs/pull/192)).
+- **Node edge factories are async**: `localExecutor()` / `httpExecutor()` return `Promise<Client>`; server-only options are rejected rather than silently running locally ([#197](https://github.com/srimon12/qql-rs/pull/197)).
+- **CLI**: `qql run <file>` prints a one-line human summary by default; `--json` returns the full `ScriptResponse` ([#198](https://github.com/srimon12/qql-rs/pull/198)).
+- **WASM**: `execute(stmt, {params})` enforces `QQL-BIND-ALREADY-BOUND`; rounded integers beyond 2⁵³ are rejected with `BigInt` guidance ([#198](https://github.com/srimon12/qql-rs/pull/198)).
+
+### 🚀 Core Engine & Language
+- **CTE chains are linear**: definitions are stored once and resolved by scope, and a nested `PREFETCH (name)` resolves to the client-embedded body instead of a server-inference fallback ([#191](https://github.com/srimon12/qql-rs/pull/191)).
+- **Binding reaches every position**: `PARAMS (idf = WHERE …)`, `BATCH … PARAMS`, prepared vectors in `GROUP BY` / `BATCH` / `CROSS RERANK` / nested prefetch, and `WAL` / `STRICT_MODE` / `METADATA` / `SET QUOTA` config values ([#190](https://github.com/srimon12/qql-rs/pull/190), [#191](https://github.com/srimon12/qql-rs/pull/191)).
+- **Parser/format agreement**: text binding matches the lexer on `''''`, `""""`, `r'''…'''`; the formatter parenthesizes nested negation instead of emitting a `--` comment; glued minus parses as subtraction ([#190](https://github.com/srimon12/qql-rs/pull/190)).
+- **Embedding correctness**: the no-clause UPSERT fallback uses the same ordered text fields as `USING`/`EMBED`; `MODEL 'qdrant/bm25'` is accepted as the local pipeline alias; BM25 parity claims downgraded to "within f32 rounding" with quirks pinned ([#192](https://github.com/srimon12/qql-rs/pull/192)).
+
+### 🐛 Bug Fixes
+- **gRPC parity**: `GEO_POLYGON`, `SCROLL … ORDER BY` (incl. `START FROM`), and `COUNT … EXACT false` reach the wire; unknown directions, unrepresentable `START FROM`, and unknown recommend strategies fail closed ([#194](https://github.com/srimon12/qql-rs/pull/194)).
+- **Edge parity**: `ORDER BY … START FROM` is honored; `create_collection` rejects unsupported sharding/params at both entry points; update batches run every item and return per-item results instead of stopping at the first failure ([#199](https://github.com/srimon12/qql-rs/pull/199)).
+- **Batch result fidelity**: `/points/batch` and gRPC `UpdateBatch` items parse as `UpdateResult`; `wait_timeout` is a per-item failure and malformed items fail `QQL-BACKEND-ENVELOPE` ([#194](https://github.com/srimon12/qql-rs/pull/194)).
+- **Retries**: conditional mutations (`UPDATE FILTER`, `insert_only`/`update_only`) are not retried after a transport failure, and cardinality mismatches are never retried ([#194](https://github.com/srimon12/qql-rs/pull/194), [#200](https://github.com/srimon12/qql-rs/pull/200)).
+- **gRPC errors and lifecycle**: classified codes and `request_id` survive dispatch; `request_timeout` covers prepared/`upsert_many`; `HttpEmbedder` has client timeouts; `Executor::close` closes the backend exactly once ([#194](https://github.com/srimon12/qql-rs/pull/194)).
+- **Python**: exact `u64` parameter binding; `http_executor` forwards `bm25_stopwords_languages`; the GIL is released during model load; the shared Tokio runtime is fork-safe; `scroll_cursor(with_payload=False)` emits `WITH PAYLOAD false`; `execute_hits(stmt=)` parity; `is_valid("")` is false; 32+ positional floats bind; DB-API reads results once ([#196](https://github.com/srimon12/qql-rs/pull/196), [#200](https://github.com/srimon12/qql-rs/pull/200)).
+- **Node**: exact 64-bit JS→Rust binding; `undefined`/holes follow documented `null` semantics with coded errors; `__proto__` round-trips as own fields and `get()` reads own keys only; `Stmt.explain`, post-close behavior, and typings align across both packages; macOS Intel loads fail closed; a `tsc` gate and declaration-dedupe post-processor guard the typings ([#197](https://github.com/srimon12/qql-rs/pull/197), [#200](https://github.com/srimon12/qql-rs/pull/200)).
+- **WASM**: one structured error contract (no bare strings or raw JSON blobs); prototype-safe result objects; `analyze` no longer panics or mis-analyzes multi-statement input; answered batches are not replayed; `CREATE COLLECTION` with shard keys or read fan-out now executes the deferred multi-step sequence through browser fetch ([#198](https://github.com/srimon12/qql-rs/pull/198), [#200](https://github.com/srimon12/qql-rs/pull/200)).
+- **CLI and convert**: scripts split on the core statement table (`COUNT`, `FACET`, `CLEAR PAYLOAD`, `SET QUOTA`, `BATCH` now execute); `dump`/`migrate` fail closed on payload `id`/`vector` collisions; `ScrollPages` streams at `--batch-size 1`; comment stripping survives backticks/raw strings; REPL Ctrl-C cancels input and history persists; `qql check` validates prefetch `USING` against the sub-query's collection; `qql convert` keeps create-time `read_fan_out_*` ([#198](https://github.com/srimon12/qql-rs/pull/198)).
+- **Schema output**: `SHOW COLLECTION` converges across REST and gRPC (OpenAPI shapes, no dropped fields) ([#195](https://github.com/srimon12/qql-rs/pull/195)).
+
+### ⚡ Performance & Internal Architecture
+- **New `qql-protocol` crate**: the strict OpenAPI response parser, closed `ExecData` IR, schema reader, telemetry, and normalization moved out of `qql-plan`; `qql-runtime` re-exports keep `qql::executor::*` / `qql::backend::*` source-compatible and `qql-wasm` depends on it directly ([#195](https://github.com/srimon12/qql-rs/pull/195), [#200](https://github.com/srimon12/qql-rs/pull/200)).
+- **One implementation each**: `CompiledStatement::to_route_json` replaces three SDK builders; DX/installer copies are generated from one source with a CI check; `qql-grammar-gen check` catches orphaned `TokenKind` keywords; the no-op `std` feature is removed ([#195](https://github.com/srimon12/qql-rs/pull/195)).
+- **BM25 reuse**: default sparse embedder paths reuse the process-wide pipeline with byte-identical output ([#192](https://github.com/srimon12/qql-rs/pull/192)).
+
+### 📌 By Design (Intentional Strictness)
+- **JS integers beyond `2^53 - 1` must be `BigInt`** — a rounded `Number` is already imprecise, so QQL fails closed instead of mistargeting a point; snowflake IDs return as `BigInt`.
+- **String point IDs must be UUIDs** (`QQL-PLAN-POINT-ID`) — Qdrant routes numeric or UUID point IDs only.
+- **`OPTIONS {…}` requires server-side inference** — a client embedder cannot honor them; `OBJECT` inputs still forward options to the server.
 
 ## [0.4.2] - 2026-09-26
 

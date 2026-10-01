@@ -61,23 +61,8 @@ impl Executor {
         on_error: OnError,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         self.ensure_open()?;
-        if let Some(secs) = self.request_timeout() {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                self.execute_batch_nodes_inner(stmts, on_error),
-            )
+        self.with_timeout(self.execute_batch_nodes_inner(stmts, on_error))
             .await
-            {
-                Ok(res) => res,
-                Err(_) => Err(QqlError::transport(
-                    "QQL-TIMEOUT",
-                    format!("batch execution timed out after {secs}s"),
-                    None,
-                )),
-            }
-        } else {
-            self.execute_batch_nodes_inner(stmts, on_error).await
-        }
     }
 
     async fn execute_batch_nodes_inner(
@@ -224,40 +209,54 @@ impl Executor {
         let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
         if is_query {
             // Owned build: each `QueryRequest` moves (zero clones on the hot
-            // path). Success normalizes from the response alone; failures
-            // reconstruct per-member operations for retry (cold path only).
-            let (collection, batch) = qql_plan::into_query_batch(operations)?;
+            // path). The group's read opts are uniform by construction (they
+            // are part of the batch key) and ride the batch RPC header.
+            let (collection, opts, batch) = qql_plan::into_query_batch(operations)?;
             let expected = batch.searches.len();
-            // Ambient groups carry no header opts: per-search read opts stay
-            // on the member requests (gRPC) as before.
-            let retry = match self
+            let mut retry_error: Option<QqlError> = None;
+            match self
                 .client
-                .execute_query_batch(&collection, &batch, None, None)
+                .execute_query_batch(&collection, &batch, opts.timeout, opts.consistency)
                 .await
             {
                 Ok(responses) if responses.len() == expected => {
                     for response in responses {
                         results.push(super::normalize::normalize_query_item(response)?);
                     }
-                    false
                 }
                 Ok(responses) => {
-                    let error =
+                    // The server answered with the wrong item count: it is a
+                    // backend contract violation, not a transport failure, so
+                    // the group is never retried. Report one failure per
+                    // expected member.
+                    if let Err(error) =
                         qql_plan::verify_batch_cardinality("query", expected, responses.len())
-                            .unwrap_err();
-                    if stop_on_error {
-                        return Err(error);
+                    {
+                        if stop_on_error {
+                            return Err(error);
+                        }
+                        for _ in 0..expected {
+                            results.push(ExecResponse {
+                                ok: false,
+                                operation: "QUERY".to_string(),
+                                message: error.to_string(),
+                                data: None,
+                                telemetry: None,
+                            });
+                        }
                     }
-                    true
                 }
                 Err(error) => {
                     if stop_on_error {
                         return Err(error);
                     }
-                    true
+                    retry_error = Some(error);
                 }
-            };
-            if retry {
+            }
+            if let Some(transport_error) = retry_error {
+                // Transport failure on a read batch: the server may have run
+                // every member, so individual retries are at-least-once.
+                // Queries are side-effect free, which is what makes this safe.
                 std::hint::cold_path();
                 let operations = batch
                     .searches
@@ -267,7 +266,8 @@ impl Executor {
                         request,
                     })
                     .collect();
-                self.retry_batch_individually(operations, results).await?;
+                self.retry_batch_individually(operations, &transport_error, results)
+                    .await?;
             }
         } else {
             let mut collection: Option<String> = None;
@@ -323,14 +323,15 @@ impl Executor {
         }
 
         // Owned build: each mutation request moves (zero clones on the hot
-        // path). Success normalizes from the owned wire operations; failures
-        // move them back into planned operations for retry (cold path only).
-        let (collection, _, batch) = qql_plan::into_update_batch(operations)?;
+        // path). The group's effective `wait` is uniform by construction (it
+        // is part of the batch key) and rides the batch RPC header.
+        let (collection, _, opts, batch) = qql_plan::into_update_batch(operations)?;
         let expected = batch.operations.len();
-        // Ambient groups always wait, preserving prior behavior.
-        let retry = match self
+        let wait = opts.wait.unwrap_or(true);
+        let mut retry_error: Option<QqlError> = None;
+        match self
             .client
-            .execute_update_batch(&collection, &batch, true)
+            .execute_update_batch(&collection, &batch, wait)
             .await
         {
             Ok(responses) if responses.len() == expected => {
@@ -339,31 +340,50 @@ impl Executor {
                     // their request point count, other writes are status-only.
                     results.push(super::normalize::normalize_update_item(op, response)?);
                 }
-                false
             }
             Ok(responses) => {
-                let error = qql_plan::verify_batch_cardinality("update", expected, responses.len())
-                    .unwrap_err();
-                if stop_on_error {
-                    return Err(error);
+                // Server-answered cardinality mismatch: never retried (the
+                // server may already have applied members). One failure per
+                // expected member.
+                if let Err(error) =
+                    qql_plan::verify_batch_cardinality("update", expected, responses.len())
+                {
+                    if stop_on_error {
+                        return Err(error);
+                    }
+                    for op in &batch.operations {
+                        results.push(ExecResponse {
+                            ok: false,
+                            operation: op.operation_name().to_string(),
+                            message: error.to_string(),
+                            data: None,
+                            telemetry: None,
+                        });
+                    }
                 }
-                true
             }
             Err(error) => {
                 if stop_on_error {
                     return Err(error);
                 }
-                true
+                retry_error = Some(error);
             }
-        };
-        if retry {
+        }
+        if let Some(transport_error) = retry_error {
+            // Transport failure: the batch RPC may have applied some or all
+            // members server-side. Only set-semantics mutations are retried
+            // individually (at-least-once); conditional upserts
+            // (`update_filter` / `insert_only` / `update_only`) surface the
+            // original transport error instead — re-applying them observes
+            // different state and can change the outcome.
             std::hint::cold_path();
             let operations = batch
                 .operations
                 .into_iter()
-                .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op))
+                .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op, wait))
                 .collect();
-            self.retry_batch_individually(operations, results).await?;
+            self.retry_batch_individually(operations, &transport_error, results)
+                .await?;
         }
         Ok(())
     }
@@ -397,8 +417,8 @@ impl Executor {
             ));
         };
         match key {
-            qql_plan::BatchKey::Query(collection) => {
-                let (_, batch) = qql_plan::build_query_batch(operations)?;
+            qql_plan::BatchKey::Query { collection, .. } => {
+                let (_, _, batch) = qql_plan::build_query_batch(operations)?;
                 let expected = batch.searches.len();
                 match self
                     .client
@@ -411,26 +431,35 @@ impl Executor {
                         }
                     }
                     Ok(responses) => {
-                        let error =
+                        // Server-answered cardinality mismatch: no retry.
+                        if let Err(error) =
                             qql_plan::verify_batch_cardinality("query", expected, responses.len())
-                                .unwrap_err();
-                        if stop_on_error {
-                            return Err(error);
+                        {
+                            if stop_on_error {
+                                return Err(error);
+                            }
+                            for operation in operations {
+                                results.push(ExecResponse {
+                                    ok: false,
+                                    operation: operation.operation_label().to_string(),
+                                    message: error.to_string(),
+                                    data: None,
+                                    telemetry: None,
+                                });
+                            }
                         }
-                        self.retry_forced_members_individually(operations, results)
-                            .await?;
                     }
                     Err(error) => {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations, results)
+                        self.retry_forced_members_individually(operations, &error, results)
                             .await?;
                     }
                 }
             }
-            qql_plan::BatchKey::Mutation(collection) => {
-                let (_, _, batch) = qql_plan::build_update_batch(operations)?;
+            qql_plan::BatchKey::Mutation { collection, .. } => {
+                let (_, _, _, batch) = qql_plan::build_update_batch(operations)?;
                 let expected = batch.operations.len();
                 match self
                     .client
@@ -443,20 +472,29 @@ impl Executor {
                         }
                     }
                     Ok(responses) => {
-                        let error =
+                        // Server-answered cardinality mismatch: no retry.
+                        if let Err(error) =
                             qql_plan::verify_batch_cardinality("update", expected, responses.len())
-                                .unwrap_err();
-                        if stop_on_error {
-                            return Err(error);
+                        {
+                            if stop_on_error {
+                                return Err(error);
+                            }
+                            for operation in operations {
+                                results.push(ExecResponse {
+                                    ok: false,
+                                    operation: operation.operation_label().to_string(),
+                                    message: error.to_string(),
+                                    data: None,
+                                    telemetry: None,
+                                });
+                            }
                         }
-                        self.retry_forced_members_individually(operations, results)
-                            .await?;
                     }
                     Err(error) => {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations, results)
+                        self.retry_forced_members_individually(operations, &error, results)
                             .await?;
                     }
                 }
@@ -470,13 +508,20 @@ impl Executor {
     /// Members are never `Batch` or client-side ops (the planner rejects
     /// those), so this dispatches straight through [`Self::dispatch_raw`]
     /// instead of [`Self::dispatch_or_collect`] — keeping
-    /// [`Self::dispatch_planned`] non-recursive.
+    /// [`Self::dispatch_planned`] non-recursive. Non-idempotent members
+    /// (conditional upserts) are not re-executed; they surface the original
+    /// transport error instead.
     async fn retry_forced_members_individually(
         &self,
         operations: &[qql_plan::PlannedOperation],
+        transport_error: &QqlError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         for operation in operations {
+            if !operation.retry_is_safe() {
+                results.push(Self::transport_failure(operation, transport_error));
+                continue;
+            }
             match self.dispatch_raw(operation).await {
                 Ok(response) => results.push(Self::normalize_planned(operation, response)?),
                 Err(error) => results.push(ExecResponse {
@@ -491,14 +536,34 @@ impl Executor {
         Ok(())
     }
 
+    /// Failure response carrying the batch RPC's original transport error for
+    /// a member that must not be re-executed.
+    fn transport_failure(
+        operation: &qql_plan::PlannedOperation,
+        transport_error: &QqlError,
+    ) -> ExecResponse {
+        ExecResponse {
+            ok: false,
+            operation: operation.operation_label().to_string(),
+            message: transport_error.to_string(),
+            data: None,
+            telemetry: None,
+        }
+    }
+
     async fn retry_batch_individually(
         &self,
         operations: Vec<qql_plan::PlannedOperation>,
+        transport_error: &QqlError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         for operation in operations {
-            self.dispatch_or_collect(operation, OnError::Continue, results)
-                .await?;
+            if operation.retry_is_safe() {
+                self.dispatch_or_collect(operation, OnError::Continue, results)
+                    .await?;
+            } else {
+                results.push(Self::transport_failure(&operation, transport_error));
+            }
         }
         Ok(())
     }

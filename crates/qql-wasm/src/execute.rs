@@ -1,12 +1,11 @@
 //! Client execution: `execute`, `executeStmt`, `upsertMany`, batching.
 
 use qql_core::ast::Value;
-use qql_core::error::QqlError;
 use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 use super::client::Client;
-use super::functions::{qql_err_to_js, to_js_value};
+use super::functions::{already_bound_err, js_err, qql_err_to_js, thrown_message, to_js_value};
 use super::params::{
     WasmOnError, batch_size_from, bind_stmt_values, bind_value_params, extract_ast_stmt,
     jsvalue_to_value, maybe_bind, options_params, parse_on_error,
@@ -21,6 +20,15 @@ impl Client {
     /// Accepts a string, a Stmt, or an array of either. Always returns a stable
     /// `ExecutionReport` object:
     /// `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
+    ///
+    /// **Batch retry (at-least-once):** auto-grouped statements and explicit
+    /// `BATCH` blocks are sent as one RPC. A connection/timeout failure
+    /// re-runs the members individually, so members that already landed are
+    /// applied again — keep mutations idempotent (or use `UPDATE MODE`
+    /// deliberately). A batch the server answered with a cardinality
+    /// mismatch or an unparsable shape is never re-executed; its members
+    /// report `QQL-BACKEND-BATCH` / `QQL-BACKEND-ENVELOPE` instead. Single
+    /// statements are never retried.
     #[wasm_bindgen(unchecked_return_type = "ExecutionReport")]
     pub async fn execute(
         &self,
@@ -60,13 +68,16 @@ impl Client {
                             all_results.push(exec_response(
                                 false,
                                 "ERROR",
-                                &e.as_string().unwrap_or_default(),
+                                &thrown_message(&e),
                                 None,
                             ));
                         }
                     }
-                } else if let Some(mut stmt) = extract_ast_stmt(&item) {
+                } else if let Some((mut stmt, bound)) = extract_ast_stmt(&item) {
                     if let Some(p) = item_params {
+                        if bound {
+                            return Err(already_bound_err());
+                        }
                         bind_stmt_values(&mut stmt, p)?;
                     }
                     match self.execute_stmt_inner(&stmt).await {
@@ -80,25 +91,33 @@ impl Client {
                             all_results.push(exec_response(
                                 false,
                                 "ERROR",
-                                &e.as_string().unwrap_or_default(),
+                                &thrown_message(&e),
                                 None,
                             ));
                         }
                     }
                 } else {
-                    return Err(JsValue::from_str(&format!(
-                        "array item at index {} must be a string or Stmt, got {:?}",
-                        i,
-                        item.js_typeof()
-                    )));
+                    return Err(js_err(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        format!(
+                            "array item at index {} must be a string or Stmt, got {:?}",
+                            i,
+                            item.js_typeof()
+                        ),
+                    ));
                 }
             }
             let report = WasmReport::from_results(all_results);
             return to_js_value(&report);
         }
 
-        if let Some(mut stmt) = extract_ast_stmt(&query) {
+        if let Some((mut stmt, bound)) = extract_ast_stmt(&query) {
             if let Some(ref p) = params {
+                // Same guard as `executeStmt`: an already-bound Stmt would
+                // silently ignore the freshly supplied params.
+                if bound {
+                    return Err(already_bound_err());
+                }
                 let plan = qql_core::params_json::plan_value_params(p, 1).map_err(qql_err_to_js)?;
                 bind_stmt_values(&mut stmt, qql_core::params_json::param_value_for(&plan, 0))?;
             }
@@ -143,7 +162,7 @@ impl Client {
                                 all_results.push(exec_response(
                                     false,
                                     "ERROR",
-                                    &e.as_string().unwrap_or_default(),
+                                    &thrown_message(&e),
                                     None,
                                 ));
                             }
@@ -165,7 +184,10 @@ impl Client {
             return to_js_value(&report);
         }
 
-        Err(JsValue::from_str("query must be a string, Stmt, or array"))
+        Err(js_err(
+            "QQL-BIND-TYPE-MISMATCH",
+            "query must be a string, Stmt, or array",
+        ))
     }
 
     /// Bulk ingest: `rows` is an array of point objects
@@ -187,13 +209,9 @@ impl Client {
         let rows = match rows {
             Value::List(rows) => rows,
             _ => {
-                return Err(JsValue::from_str(
-                    &serde_json::to_string(&QqlError::validation(
-                        "QQL-BIND-TYPE-MISMATCH",
-                        "upsertMany rows must be an array of point objects ({id, vector, …payload})",
-                        None,
-                    ))
-                    .unwrap_or_else(|_| "upsertMany rows must be an array".into()),
+                return Err(js_err(
+                    "QQL-BIND-TYPE-MISMATCH",
+                    "upsertMany rows must be an array of point objects ({id, vector, …payload})",
                 ));
             }
         };
@@ -252,14 +270,7 @@ impl Client {
     ) -> Result<JsValue, JsValue> {
         let params = options_params(options.as_ref())?;
         if params.is_some() && stmt.bound {
-            return Err(JsValue::from_str(
-                &serde_json::to_string(&QqlError::validation(
-                    "QQL-BIND-ALREADY-BOUND",
-                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
-                    None,
-                ))
-                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
-            ));
+            return Err(already_bound_err());
         }
         let mut inner = stmt.inner.clone();
         if let Some(ref p) = params {

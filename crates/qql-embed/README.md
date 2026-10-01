@@ -1,7 +1,7 @@
 # qql-embed
 
 Shared embedding resolution: host-agnostic [`Embedder`] trait, local
-wire-compatible BM25 [`SparseEmbedder`], [`resolve_embeddings`], and schema
+wire-compatible BM25, [`resolve_embeddings`], and schema
 [`resolve_query_vector_kinds`].
 
 ## Proposition
@@ -12,6 +12,9 @@ Schema fills `USING` kinds **before** embed; unknown kinds fail closed
 (`QQL-VECTOR-KIND`) — never silent dense defaults for named vectors.
 
 ## Embedder trait
+
+Sketch of the surface — see docs.rs for exact signatures (`Embedder: EmbedderBound`,
+every fallible method returns `Result<_, QqlError>`).
 
 ```rust
 pub trait Embedder: Send + Sync {
@@ -49,9 +52,6 @@ pub trait Embedder: Send + Sync {
     async fn embed_image_batch(&self, sources: &[String], model: &str) -> Result<Vec<Vec<f32>>>;
     /// Cross-encoder pair scoring: (query, documents[i]) → scores. Default rejects with QQL-RERANK-CROSS.
     async fn rerank_pairs(&self, query: &str, documents: &[String], model: &str) -> Result<Vec<f32>>;
-    /// Single-pass joint embeddings (dense + sparse + multi in one pass for BGE-M3).
-    async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput>;
-    async fn embed_joint_batch(&self, texts: &[String], model: &str) -> Result<Vec<JointEmbeddingOutput>>;
 }
 ```
 
@@ -60,7 +60,7 @@ Sparse is role-split: queries embed with unit term weights
 (`embed_sparse_query`), documents with BM25 term-frequency saturation
 (`embed_sparse_document`) — both matching Qdrant's `qdrant/bm25` defaults
 (tunable via [`Embedder::bm25_params`](https://docs.rs/qql-embed), see
-[SparseEmbedder](#sparseembedder--local-wire-compatible-bm25)).
+[Local wire-compatible BM25](#local-wire-compatible-bm25)).
 Multivector defaults reject until the host opts in (`embed_multi`), as does
 image embedding (`embed_image`).
 
@@ -129,8 +129,22 @@ Resolution happens in these cases:
 | `UPSERT ... USING DENSE MODEL 'm'` | Payload text field | Dense vector per point |
 | `UPSERT ... USING HYBRID` | Payload text field | Dense + sparse vectors per point |
 | `UPSERT ... EMBED title INTO vec` | Explicit source field | Dense/sparse via `embed` directive |
-| Auto-embed (no USING) | Payload `text`/`body`/`content` | Default dense only |
+| Auto-embed (no USING) | Payload text field (same 8-field priority as the explicit specs) | Default dense only |
 | Explicit `VECTOR` / `POINT` | — | No embedding |
+
+`OPTIONS { … }` is a **server-side inference** directive. With a client-side
+embedder attached, `TEXT` / `IMAGE` inputs carrying `OPTIONS` fail closed with
+`QQL-EMBEDDING` (by design: the `Embedder` trait cannot honor server-side
+inference options, and silently dropping them would change results). `OBJECT`
+inputs still pass `OPTIONS` through to the server's inference.
+
+### Removed surface
+
+`SparseEmbedder`, `Embedder::embed_joint` / `embed_joint_batch`
+(`JointEmbeddingOutput`), and `sparse::for_each_token` / `for_each_token_id`
+were removed — they had no product callers. Use `Embedder::embed_dense` /
+`embed_sparse_query` / `embed_sparse_document` / `embed_multi` (plus their
+batch variants) instead.
 
 ### Vector roles and default names
 
@@ -143,7 +157,7 @@ behavior never depends on a target literally being named `dense` or `sparse`.
 
 These constants are used only when materializing a new default topology.
 
-## SparseEmbedder — local wire-compatible BM25
+## Local wire-compatible BM25
 
 Client-side BM25 that is **wire-compatible with Qdrant's `qdrant/bm25` model**:
 murmur3-32 token IDs (same hash the server uses), word tokenizer (split on
@@ -151,14 +165,15 @@ non-alphanumeric), Unicode lowercasing, English stopword removal, and English
 snowball stemming — the server's documented defaults. Queries embed with unit
 term weights; documents with BM25 tf saturation (k1=1.2, b=0.75, avg_len=256).
 IDF is applied server-side via the sparse vector `modifier: idf`. No network,
-no model downloads. A synchronous helper backing the default
+no model downloads. `MODEL 'qdrant/bm25'` (case-insensitive) and `MODEL
+'default'` both select this pipeline, which backs the default
 `Embedder::embed_sparse_query` / `embed_sparse_document` implementations.
 
 ```rust
-use qql_embed::SparseEmbedder;
+use qql_embed::sparse;
 
-let q = SparseEmbedder::embed_query("quantum computing");   // unit weights
-let d = SparseEmbedder::embed_document("quantum computing"); // tf saturation
+let q = sparse::embed_query("quantum computing");    // unit weights
+let d = sparse::embed_document("quantum computing"); // tf saturation
 // q/d.indices: [u32; N], q/d.values: [f32; N]
 ```
 
@@ -167,13 +182,11 @@ let d = SparseEmbedder::embed_document("quantum computing"); // tf saturation
 `qql_embed::Bm25Params` makes the BM25 hyperparameters configurable:
 
 ```rust
-use qql_embed::{Bm25Params};
+use qql_embed::Bm25Params;
 
 // Defaults: 1.2 / 0.75 / 256 (Qdrant qdrant/bm25).
 let params = Bm25Params::new(1.2, 0.75, 8.0)?;
 let d = qql_embed::sparse::embed_document_with_params("short doc", &params);
-// or, via the helper:
-let d = qql_embed::SparseEmbedder::embed_document_with("short doc", &params);
 ```
 
 This is a **client-side, write-path-only** setting:

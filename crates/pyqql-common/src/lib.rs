@@ -12,7 +12,7 @@
 //! `QQL-BIND-BATCH-LENGTH` otherwise); every other shape applies to every
 //! statement identically.
 
-use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use qql_core::ast::{self, Value};
@@ -20,9 +20,15 @@ use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
+pub mod client;
 pub mod dispatch;
+mod embedder;
 mod float_list;
 pub mod report;
+
+pub use embedder::{
+    ParsedEmbedderConfig, PyHttpEmbedder, extract_embedder_config, validate_bm25_text,
+};
 
 pub use dispatch::{
     Input, OnError, parse_on_error, prepare_input, run_analyze_async, run_analyze_input, run_async,
@@ -153,6 +159,86 @@ fn already_bound_error() -> PyErr {
     ))
 }
 
+/// A host-side render failure (JSON / pythonize) is a driver error, not a
+/// syntax error: the query already parsed. Maps to the typed
+/// `QQL-SERIALIZE` execution error so callers never "fix" their query text.
+pub(crate) fn serialize_error(error: impl std::fmt::Display) -> PyErr {
+    qql_py_error(QqlError::execution(
+        "QQL-SERIALIZE",
+        error.to_string(),
+        None,
+    ))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Shared Tokio runtime
+// ═══════════════════════════════════════════════════════════════════
+
+/// The shared runtime plus the PID that created it.
+struct SharedRuntimeCell {
+    /// `std::process::id()` captured when `runtime` was built.
+    pid: u32,
+    /// The leaked runtime. Leaked so callers can hold `&'static Runtime`
+    /// across the process lifetime and so a forked child can abandon (never
+    /// drop) the runtime it inherited.
+    runtime: &'static tokio::runtime::Runtime,
+}
+
+/// Process-wide runtime slot, replaced after `fork` (see [`shared_runtime`]).
+static SHARED_RUNTIME: std::sync::Mutex<Option<SharedRuntimeCell>> = std::sync::Mutex::new(None);
+
+/// Process-wide Tokio runtime shared by every Python client.
+///
+/// One multi-thread runtime per process (instead of one per client) keeps
+/// transports, blocking `execute`, and `execute_async` on the same runtime:
+/// a transport built with this runtime entered can never outlive it, and a
+/// future spawned here is guaranteed a live executor for the whole request.
+///
+/// # Fork safety
+///
+/// A `multiprocessing` / Gunicorn / Celery forked child inherits the runtime
+/// *struct* but none of its worker threads; tokio documents that a forked
+/// runtime must not be reused. The accessor therefore compares
+/// `std::process::id()` with the PID captured at creation and, in a forked
+/// child, builds a fresh runtime for that child. The inherited runtime is
+/// leaked rather than dropped: its worker threads do not exist in the child,
+/// so shutting it down would block or abort. Each generation's runtime lives
+/// until process exit, exactly like the original one.
+pub fn shared_runtime() -> PyResult<&'static tokio::runtime::Runtime> {
+    runtime_for_pid(
+        std::process::id(),
+        &SHARED_RUNTIME,
+        tokio::runtime::Runtime::new,
+    )
+    .map_err(|error| {
+        PyRuntimeError::new_err(format!("cannot start the QQL Tokio runtime: {error}"))
+    })
+}
+
+/// PID-aware core behind [`shared_runtime`], unit-testable without forking:
+/// reuse the stored runtime only when it was created by `pid`, otherwise
+/// build (and leak) a replacement and store it.
+fn runtime_for_pid(
+    pid: u32,
+    cell: &std::sync::Mutex<Option<SharedRuntimeCell>>,
+    create: impl FnOnce() -> std::io::Result<tokio::runtime::Runtime>,
+) -> std::io::Result<&'static tokio::runtime::Runtime> {
+    // A poisoned lock cannot leave a half-initialized cell behind (the only
+    // mutation is replacing the whole option), so recover instead of panicking
+    // during interpreter shutdown.
+    let mut guard = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = guard.as_ref()
+        && existing.pid == pid
+    {
+        return Ok(existing.runtime);
+    }
+    // New process (or first call): the stored runtime belongs to a different
+    // PID and must be abandoned, not dropped.
+    let runtime: &'static tokio::runtime::Runtime = Box::leak(Box::new(create()?));
+    *guard = Some(SharedRuntimeCell { pid, runtime });
+    Ok(runtime)
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Python value conversion — the single Py → serde_json path
 // ═══════════════════════════════════════════════════════════════════
@@ -168,8 +254,20 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(v) = value.extract::<bool>() {
         return Ok(serde_json::Value::Bool(v));
     }
-    if let Ok(v) = value.extract::<i64>() {
-        return Ok(serde_json::Value::Number(v.into()));
+    if value.is_instance_of::<PyInt>() {
+        // Python ints are unbounded: try `u64` first so point ids above
+        // `i64::MAX` keep their exact value, then `i64`. Never fall through
+        // to `f64` — that would silently change the bound type and lose
+        // precision above 2^53 (e.g. snowflake ids).
+        if let Ok(v) = value.extract::<u64>() {
+            return Ok(serde_json::Value::Number(v.into()));
+        }
+        if let Ok(v) = value.extract::<i64>() {
+            return Ok(serde_json::Value::Number(v.into()));
+        }
+        return Err(PyOverflowError::new_err(
+            "integer parameter out of range: QQL binds integers that fit in i64 or u64",
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
@@ -294,8 +392,18 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(v) = value.extract::<bool>() {
         return Ok(Value::Bool(v));
     }
-    if let Ok(v) = value.extract::<i64>() {
-        return Ok(Value::Int(v));
+    if value.is_instance_of::<PyInt>() {
+        // Mirror `py_to_json`: `u64` first (`Value::UInt`), then `i64`,
+        // never a lossy `f64` fallback.
+        if let Ok(v) = value.extract::<u64>() {
+            return Ok(Value::UInt(v));
+        }
+        if let Ok(v) = value.extract::<i64>() {
+            return Ok(Value::Int(v));
+        }
+        return Err(PyOverflowError::new_err(
+            "integer parameter out of range: QQL binds integers that fit in i64 or u64",
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
@@ -337,6 +445,26 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     Err(PyValueError::new_err(
         "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
     ))
+}
+
+/// Convert the top-level `params` argument to a typed [`Value`] container.
+///
+/// A top-level list is always the positional `?` container: it is converted
+/// element-wise so nested vectors still take [`py_to_value`]'s buffer /
+/// flat-float fast paths. The flat-float packing heuristic is deliberately
+/// *not* applied here — it is a slot-level vector optimization, and packing a
+/// 32+ element positional list into one [`Value::F32Array`] made
+/// `bind([0.5] * 32)` look like a scalar and fail with
+/// `QQL-BIND-INVALID-PARAMS`.
+pub fn py_to_value_params(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if let Ok(list) = value.cast::<PyList>() {
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_value(&item)?);
+        }
+        return Ok(Value::List(items));
+    }
+    py_to_value(value)
 }
 
 /// Pack a flat Python `float` list of at least
@@ -385,7 +513,7 @@ pub fn bind_py_stmt(stmt: &mut ast::Stmt, params: Option<&Bound<'_, PyAny>>) -> 
     if p.is_none() {
         return Ok(());
     }
-    let value_params = py_to_value(p)?;
+    let value_params = py_to_value_params(p)?;
     qql_core::params_json::bind_stmt_with_values(stmt, &value_params).map_err(qql_py_value_error)
 }
 
@@ -402,7 +530,7 @@ pub fn bind_py_params(
     if p.is_none() {
         return Ok(query.to_string());
     }
-    let value_params = py_to_value(p)?;
+    let value_params = py_to_value_params(p)?;
     let plan =
         qql_core::params_json::plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
     qql_core::params_json::bind_str_with_values(
@@ -535,16 +663,15 @@ impl PyStmt {
     }
 
     fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        serde_json::to_string(&self.inner).map_err(serialize_error)
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Must go through serde_json::Value: pythonize maps Rust tuples to
         // Python tuples, while JSON arrays become lists. AST dicts are
         // `Vec<(String, Value)>` and host tests walk those as lists.
-        let val =
-            serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        let val = serde_json::to_value(&self.inner).map_err(serialize_error)?;
+        pythonize::pythonize(py, &val).map_err(serialize_error)
     }
 
     /// Compile this Stmt directly to its transport route without re-parsing.
@@ -564,8 +691,8 @@ impl PyStmt {
         let mut stmt = self.inner.clone();
         bind_py_stmt(&mut stmt, params)?;
         let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
-        let result = compiled_route_json(&compiled);
-        pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        let result = compiled.to_route_json();
+        pythonize::pythonize(py, &result).map_err(serialize_error)
     }
 
     fn explain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -576,31 +703,6 @@ impl PyStmt {
         dict.set_item(pyo3::intern!(py, "plan"), plan)?;
         Ok(dict.into_any())
     }
-}
-
-/// Shared route JSON shape for `compile_route` / `compile`.
-pub fn compiled_route_json(compiled: &qql_plan::routing::CompiledStatement) -> serde_json::Value {
-    let (method, path, payload) = match &compiled.route {
-        Some(route) => {
-            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-            (
-                serde_json::Value::String(route.method.as_str().into()),
-                serde_json::Value::String(route.path.clone()),
-                payload,
-            )
-        }
-        None => (
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-        ),
-    };
-    serde_json::json!({
-        "stmt_type": compiled.stmt_type,
-        "method": method,
-        "path": path,
-        "payload": payload,
-    })
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -626,15 +728,19 @@ pub fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
 #[pyfunction]
 pub fn parse_json(input: &str) -> PyResult<String> {
     let statements = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
-    serde_json::to_string(&statements).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    serde_json::to_string(&statements).map_err(serialize_error)
 }
 
 /// Full frontend validity gate: parse + plan — the same contract as execution
-/// and the language conformance suite.
+/// and the language conformance suite. Empty and whitespace-only scripts are
+/// invalid: `execute` rejects them with `QQL-VALIDATION-EMPTY-SCRIPT`.
 #[pyfunction]
 pub fn is_valid(input: &str) -> bool {
-    // Full frontend gate: parse + plan — same contract as execution and the
-    // language conformance suite.
+    // Empty/whitespace scripts parse to zero statements, but execution
+    // rejects them; pre-flight checks must agree with execution.
+    if input.trim().is_empty() {
+        return false;
+    }
     qql_plan::parse_and_plan(input).is_ok()
 }
 
@@ -703,8 +809,8 @@ pub fn compile<'py>(
     let mut stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
     bind_py_stmt(&mut stmt, params)?;
     let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
-    let result = compiled_route_json(&compiled);
-    pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    let result = compiled.to_route_json();
+    pythonize::pythonize(py, &result).map_err(serialize_error)
 }
 
 /// Tree-formatted plan explanation for a query string or Stmt.
@@ -787,5 +893,43 @@ pub fn bind<'py>(
         Err(pyo3::exceptions::PyTypeError::new_err(
             "query must be a str or Stmt",
         ))
+    }
+}
+
+#[cfg(test)]
+mod shared_runtime_tests {
+    use super::runtime_for_pid;
+    use std::sync::Mutex;
+
+    /// Cheap stand-in for the multi-thread runtime: the PID logic is
+    /// runtime-agnostic and this keeps the tests fast.
+    fn build_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+        tokio::runtime::Builder::new_current_thread().build()
+    }
+
+    #[test]
+    fn same_pid_reuses_the_stored_runtime() {
+        let cell = Mutex::new(None);
+        let first = runtime_for_pid(1, &cell, build_runtime).expect("first runtime");
+        let second =
+            runtime_for_pid(1, &cell, || panic!("same PID must not rebuild")).expect("reuse");
+        assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn changed_pid_replaces_the_runtime_without_dropping_the_inherited_one() {
+        // The "child" PID is arbitrary — no fork is needed to exercise the
+        // swap. The parent runtime is abandoned (leaked), never dropped.
+        let cell = Mutex::new(None);
+        let parent = runtime_for_pid(7, &cell, build_runtime).expect("parent runtime");
+        let child = runtime_for_pid(8, &cell, build_runtime).expect("child runtime");
+        assert!(
+            !std::ptr::eq(parent, child),
+            "a different PID gets a fresh runtime"
+        );
+        let again =
+            runtime_for_pid(8, &cell, || panic!("child PID must not rebuild")).expect("reuse");
+        assert!(std::ptr::eq(child, again));
+        assert_eq!(cell.lock().unwrap().as_ref().unwrap().pid, 8);
     }
 }

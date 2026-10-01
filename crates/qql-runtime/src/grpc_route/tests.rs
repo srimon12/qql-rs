@@ -1,14 +1,16 @@
 //! gRPC converter tests (moved from `grpc_route.rs` unchanged).
 
+use std::collections::HashMap;
+
 use super::ddl::{
     hnsw_config_from_plan, quantization_config_from_plan, sparse_vectors_config_diff,
     strict_mode_config_from_plan, vector_params, vectors_config_diff, wal_config_from_plan,
 };
-use super::execute_write::to_points_update_operation;
-use super::filter::to_match;
+use super::execute_write::{to_points_update_operation, update_result_to_typed};
+use super::filter::{to_condition, to_match};
 use super::query::{
-    plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
-    to_vector_input, to_vectors,
+    plan_vector_to_proto, to_count_points, to_facet_counts, to_query_groups, to_query_points,
+    to_scroll_points, to_vector_input, to_vectors,
 };
 use super::typed::{
     collection_mutation_to_typed, facet_hit_to_typed, mutation_response_to_typed,
@@ -19,7 +21,9 @@ use crate::executor::{ExecData, ServerUsage};
 use crate::qdrant_grpc::qdrant;
 use qql_core::ast::{VectorDatatype, VectorDistance};
 use qql_core::parser::Parser;
-use qql_plan::types::{FilterExpression, MatchValue};
+use qql_plan::types::{
+    FieldCondition, FilterClause, FilterExpression, GeoLineString, GeoPoint, GeoPolygon, MatchValue,
+};
 use qql_plan::{
     DenseVectorParams, PlanFacetValue, PlanGroupId, PlanPointVectors, PlanQueryInput,
     PlanVectorStruct, PlanVectorValue,
@@ -130,7 +134,7 @@ fn grpc_update_collection_default_vector_uses_params_variant() {
 fn test_grpc_route_conversion_all_statements() {
     let statements = [
         "QUERY TEXT 'search' MODEL 'test-model' FROM docs USING dense LIMIT 10;",
-        "QUERY POINTS (1, 2, 'uuid-str') FROM docs WITH PAYLOAD INCLUDE ('title');",
+        "QUERY POINTS (1, 2, '550e8400-e29b-41d4-a716-446655440005') FROM docs WITH PAYLOAD INCLUDE ('title');",
         "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
         "UPSERT INTO docs VALUES {id: 1, text: 'hello', category: 'tech'} USING DENSE MODEL 'm';",
         "DELETE FROM docs WHERE category = 'old';",
@@ -899,44 +903,36 @@ fn grpc_exact_list_match_rejects_unrepresentable() {
     assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
     assert_eq!(err.code, "QQL-GRPC-LIST-INT");
     assert!(err.message.contains("9223372036854775808"), "{err}");
+
+    // The scalar form fails closed too (no proto `Match` field can carry it).
+    let err = to_match(&MatchValue::Value {
+        value: qql_core::ast::Value::UInt(oversized),
+    })
+    .unwrap_err();
+    assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+    assert_eq!(err.code, "QQL-GRPC-FLOAT-MATCH");
 }
 
-/// Errors from list conversion must propagate through the full filter
-/// path (`to_filter` → `to_condition` → `to_match`).
+/// Unrepresentable match lists are rejected at plan time, before any
+/// transport conversion; the transport guards below stay for hand-built plans.
 #[test]
-fn grpc_in_list_errors_propagate_through_filter() {
-    let stmt = Parser::parse(
-        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status IN ('a', 1) LIMIT 5;",
-    )
-    .unwrap();
-    let op = qql_plan::plan(&stmt).unwrap();
-    let (collection, req) = match &op {
-        qql_plan::PlannedOperation::Query {
-            collection,
-            request,
-        } => (collection, request),
-        other => panic!("expected Query, got {other:?}"),
-    };
-    let err = to_query_points(req, collection).unwrap_err();
-    assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-    assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
-
-    // Non-integral floats in IN also propagate.
-    let stmt = Parser::parse(
-        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating IN (1.5, 2.5) LIMIT 5;",
-    )
-    .unwrap();
-    let op = qql_plan::plan(&stmt).unwrap();
-    let (collection, req) = match &op {
-        qql_plan::PlannedOperation::Query {
-            collection,
-            request,
-        } => (collection, request),
-        other => panic!("expected Query, got {other:?}"),
-    };
-    let err = to_query_points(req, collection).unwrap_err();
-    assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
-    assert!(err.message.contains("1.5"), "{err}");
+fn plan_rejects_unrepresentable_match_lists_before_transport() {
+    for (source, offending) in [
+        (
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status IN ('a', 1) LIMIT 5;",
+            "mixes",
+        ),
+        (
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating IN (1.5, 2.5) LIMIT 5;",
+            "1.5",
+        ),
+    ] {
+        let stmt = Parser::parse(source).unwrap();
+        let err = qql_plan::plan(&stmt).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-MATCH-TYPE", "{source}: {err:?}");
+        assert!(err.message.contains(offending), "{source}: {err:?}");
+    }
 }
 
 /// Valid homogeneous lists survive the full parser → plan → gRPC path.
@@ -1049,6 +1045,188 @@ fn scroll_limit_overflow_is_rejected_in_grpc() {
     let err = to_scroll_points(req, collection).unwrap_err();
     assert_eq!(err.code, "QQL-GRPC-SCROLL-LIMIT");
     assert!(err.message.contains("scroll limit"));
+}
+
+/// `GEO_POLYGON` must reach the proto `FieldCondition.geo_polygon` or REST and
+/// gRPC match different rows for the same query text.
+#[test]
+fn query_points_filter_geo_polygon_maps_proto() {
+    let stmt = Parser::parse(
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE area GEO_POLYGON \
+         {exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}], \
+          interiors: [[{lat: -50.0, lon: -50.0}, {lat: 50.0, lon: -50.0}, {lat: 50.0, lon: 50.0}, {lat: -50.0, lon: 50.0}]]};",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp = to_query_points(req, collection).unwrap();
+    let condition = qp.filter.expect("filter should be set").must.swap_remove(0);
+    let Some(qdrant::condition::ConditionOneOf::Field(field)) = condition.condition_one_of else {
+        panic!("expected a field condition, got {condition:?}");
+    };
+    let polygon = field.geo_polygon.expect("geo_polygon must map to proto");
+    let exterior = polygon.exterior.expect("exterior ring must map");
+    assert_eq!(exterior.points.len(), 4);
+    assert_eq!(exterior.points[0].lat, -70.0);
+    assert_eq!(exterior.points[0].lon, -70.0);
+    assert_eq!(exterior.points[3].lon, 60.0);
+    assert_eq!(polygon.interiors.len(), 1, "interior holes must map");
+    assert_eq!(polygon.interiors[0].points.len(), 4);
+    assert_eq!(polygon.interiors[0].points[2].lat, 50.0);
+}
+
+/// A hand-built degenerate ring fails closed instead of reaching the wire as a
+/// polygon the server cannot interpret.
+#[test]
+fn geo_polygon_degenerate_ring_fails_closed() {
+    let ring = |n: usize| GeoLineString {
+        points: (0..n)
+            .map(|i| GeoPoint {
+                lat: i as f64,
+                lon: i as f64,
+            })
+            .collect(),
+    };
+    let clause = FilterClause::Field(Box::new(FieldCondition {
+        key: "area".into(),
+        geo_polygon: Some(GeoPolygon {
+            exterior: ring(2),
+            interiors: Vec::new(),
+        }),
+        ..Default::default()
+    }));
+    let err = to_condition(&clause).unwrap_err();
+    assert_eq!(err.code, "QQL-GRPC-GEO-POLYGON");
+    assert!(err.message.contains("at least 3"));
+
+    let clause = FilterClause::Field(Box::new(FieldCondition {
+        key: "area".into(),
+        geo_polygon: Some(GeoPolygon {
+            exterior: ring(3),
+            interiors: vec![ring(1)],
+        }),
+        ..Default::default()
+    }));
+    let err = to_condition(&clause).unwrap_err();
+    assert_eq!(err.code, "QQL-GRPC-GEO-POLYGON");
+    assert!(err.message.contains("interior"));
+}
+
+/// `SCROLL … ORDER BY` must reach `ScrollPoints.order_by`; dropping it makes
+/// gRPC scroll in ID order while REST scrolls in payload order.
+#[test]
+fn scroll_points_order_by_maps_proto() {
+    let stmt = Parser::parse("SCROLL FROM docs ORDER BY ts DESC START FROM 42 LIMIT 10;").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Scroll {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Scroll, got {other:?}"),
+    };
+    let sp = to_scroll_points(req, collection).unwrap();
+    let order_by = sp.order_by.expect("scroll order_by must map to proto");
+    assert_eq!(order_by.key, "ts");
+    assert_eq!(order_by.direction, Some(qdrant::Direction::Desc as i32));
+    match order_by.start_from.and_then(|sf| sf.value) {
+        Some(qdrant::start_from::Value::Integer(42)) => {}
+        other => panic!("expected integer START FROM 42, got {other:?}"),
+    }
+}
+
+/// `ORDER BY … START FROM` must reach the proto `StartFrom` oneof too (the
+/// query arm used to drop it).
+#[test]
+fn query_order_by_start_from_maps_proto() {
+    let stmt = Parser::parse(
+        "QUERY ORDER BY created_at ASC START FROM '2024-01-01T00:00:00Z' FROM docs LIMIT 10;",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp = to_query_points(req, collection).unwrap();
+    match qp.query.and_then(|q| q.variant) {
+        Some(qdrant::query::Variant::OrderBy(order_by)) => {
+            assert_eq!(order_by.key, "created_at");
+            assert_eq!(order_by.direction, Some(qdrant::Direction::Asc as i32));
+            match order_by.start_from.and_then(|sf| sf.value) {
+                Some(qdrant::start_from::Value::Datetime(text)) => {
+                    assert_eq!(text, "2024-01-01T00:00:00Z");
+                }
+                other => panic!("expected datetime START FROM, got {other:?}"),
+            }
+        }
+        other => panic!("expected OrderBy variant, got {other:?}"),
+    }
+}
+
+/// Per-item `UpdateBatch` statuses follow the same policy as REST:
+/// acknowledged/completed succeed, wait_timeout and clock-rejected are
+/// per-item failures, unknown values fail closed.
+#[test]
+fn update_batch_statuses_map_strictly() {
+    use qdrant::UpdateStatus;
+    let convert = |status: UpdateStatus| {
+        update_result_to_typed(qdrant::UpdateResult {
+            operation_id: Some(1),
+            status: status as i32,
+        })
+    };
+    assert!(convert(UpdateStatus::Acknowledged).is_ok());
+    assert!(convert(UpdateStatus::Completed).is_ok());
+
+    let err = convert(UpdateStatus::WaitTimeout).unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-BATCH");
+    assert!(err.message.contains("wait_timeout"));
+    let err = convert(UpdateStatus::ClockRejected).unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-BATCH");
+
+    let err = update_result_to_typed(qdrant::UpdateResult {
+        operation_id: None,
+        status: 99,
+    })
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+}
+
+/// `COUNT … EXACT false` must stay approximate on gRPC; it used to be forced
+/// exact.
+#[test]
+fn count_points_forwards_exact() {
+    let stmt = Parser::parse("COUNT FROM docs WITH (exact = false);").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Count {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Count, got {other:?}"),
+    };
+    assert_eq!(to_count_points(req, collection).unwrap().exact, Some(false));
+
+    let stmt = Parser::parse("COUNT FROM docs;").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Count {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Count, got {other:?}"),
+    };
+    assert_eq!(to_count_points(req, collection).unwrap().exact, Some(true));
 }
 
 #[test]
@@ -1438,7 +1616,9 @@ fn typed_retrieved_hit_maps_proto_directly() {
         qql_plan::PlanPointId::String("11111111-2222-3333-4444-555555555555".to_string())
     );
     assert_eq!(hit.score, 0.0);
-    assert_eq!(hit.payload, None);
+    // An empty proto payload map is `Some({})`, exactly like a REST
+    // `"payload": {}` record.
+    assert_eq!(hit.payload, Some(HashMap::new()));
     assert_eq!(hit.vector, None);
 }
 

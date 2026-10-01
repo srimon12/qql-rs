@@ -15,11 +15,16 @@ export class Stmt {
   toString(): string;
   /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
   toReadableString(): string;
+  /** Tree-formatted plan explanation for this statement (mirrors `nqql`). */
+  explain(): string;
+  /** Whether parameters have already been bound into this statement. */
+  readonly bound: boolean;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
-   * Reads back `string` (keyword) or `bigint` (numeric); set with
-   * `string | number | bigint | null` (numbers must be exact integers). */
-  shardKey?: string | number | bigint | null;
+   * Reads back `string` (keyword) or `bigint` (numeric numeric keys — reads
+   * never return a plain number); the setter additionally accepts a
+   * `number` that must be an exact non-negative integer. */
+  shardKey: string | bigint | null;
 }
 
 export class ScoredPoint {
@@ -361,20 +366,27 @@ export function executeHits(
  * Models download from HuggingFace on first use and cache locally.
  * No network calls for inference — embedding runs on-device via ONNX.
  *
+ * Model loading runs off the JavaScript thread; `await` the returned
+ * promise before executing statements.
+ *
+ * There is no `HttpEmbedder` class in the edge SDK: embeddings are
+ * configured at construction through this function or {@link httpExecutor}.
+ *
  * @param dataDir local data directory
  * @param options boolean is legacy `onDiskPayload`; object is preferred
  */
 export function localExecutor(
   dataDir: string,
   options?: boolean | LocalExecutorOptions,
-): Client;
+): Promise<Client>;
 
 /** List dense ONNX models available for `localExecutor({ model })`. */
 export function listEmbeddingModels(): EmbeddingModelInfo[];
 
 /**
  * Create an edge executor that calls an external OpenAI-compatible embedding
- * endpoint. Vector storage/search is still fully local.
+ * endpoint. Vector storage/search is still fully local. Store construction
+ * runs off the JavaScript thread; `await` the returned promise.
  */
 export function httpExecutor(
   dataDir: string,
@@ -409,7 +421,7 @@ export function httpExecutor(
     bm25MaxTokenLen?: number;
     bm25_max_token_len?: number;
   },
-): Client;
+): Promise<Client>;
 
 /**
  * One-shot execute with a temporary edge client.

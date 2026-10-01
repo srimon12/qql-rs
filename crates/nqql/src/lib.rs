@@ -44,8 +44,9 @@ impl Stmt {
         &mut self,
         field: String,
         op: String,
-        value: serde_json::Value,
+        value: Unknown<'_>,
     ) -> napi::Result<()> {
+        let value = common::jsparams::unknown_to_value(value).map_err(common::to_napi_err)?;
         common::stmt_inject_filter(&mut self.inner, &field, &op, value).map_err(common::to_napi_err)
     }
 
@@ -86,10 +87,14 @@ impl Stmt {
         }
     }
 
+    // The parameter list must be part of `ts_type`: napi-derive emits the
+    // string verbatim after `set shardKey` (see napi-derive-backend
+    // typegen/fn.rs), so a bare union would generate the invalid
+    // `set shardKeystring | …`.
     #[napi(
         setter,
         catch_unwind,
-        ts_type = "string | number | bigint | null | undefined"
+        ts_type = "(value: string | number | bigint | null | undefined)"
     )]
     pub fn set_shard_key(&mut self, key: Option<Unknown<'_>>) -> napi::Result<()> {
         let key = match key {
@@ -99,9 +104,11 @@ impl Stmt {
             }
         };
         if !self.inner.set_shard_key(key) {
-            return Err(napi::Error::from_reason(
+            return Err(common::to_napi_err(qql_core::error::QqlError::validation(
+                "QQL-VALIDATION-SHARD-UNSUPPORTED",
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
-            ));
+                None,
+            )));
         }
         Ok(())
     }
@@ -115,6 +122,10 @@ impl Stmt {
     /// Bind parameters into this statement and return a new bound Stmt.
     /// Vector params accept plain arrays as well as `Float32Array` /
     /// `Float64Array` (one memcpy, no per-element walk).
+    ///
+    /// `undefined`/`null` returns an unbound clone (a no-op); an *empty*
+    /// object or array is still a binding call, so the returned Stmt reports
+    /// `bound: true` and later re-binding fails with `QQL-BIND-ALREADY-BOUND`.
     #[napi(catch_unwind)]
     pub fn bind(&self, params: Unknown<'_>) -> napi::Result<Self> {
         let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
@@ -199,8 +210,9 @@ pub fn inject_filter(
     query: String,
     field: String,
     op: String,
-    value: serde_json::Value,
+    value: Unknown<'_>,
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+    let value = common::jsparams::unknown_to_value(value).map_err(common::to_napi_err)?;
     common::inject_filter(&query, &field, &op, value)
         .map(common::jsoutput::BigIntSafeJson)
         .map_err(common::to_napi_err)
@@ -494,9 +506,11 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
         }
         #[cfg(not(feature = "grpc"))]
         {
-            return Err(napi::Error::from_reason(
+            return Err(common::to_napi_err(qql_core::error::QqlError::execution(
+                "QQL-GRPC",
                 "gRPC feature not enabled in this build",
-            ));
+                None,
+            )));
         }
     } else {
         let mut rest = qql::rest::RestQdrant::new(url_str.to_string(), api_key);
@@ -563,8 +577,7 @@ pub struct JsClient {
 
 #[napi]
 impl JsClient {
-    /// Constructor required by napi-rs class registry.  Always throws —
-    /// use `new Client(options)`.
+    /// Create a client over REST (default) or gRPC (`useGrpc: true`).
     #[napi(constructor, catch_unwind)]
     pub fn new(options: Option<serde_json::Value>) -> napi::Result<Self> {
         let route_affinity = options
@@ -600,13 +613,15 @@ impl JsClient {
     )]
     pub async fn execute(
         &self,
-        query: serde_json::Value,
+        query: common::execute::ExecQueryInput,
         options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
-        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
-        let report = common::execute::execute_dispatch_typed(&self.inner, query, on_error, params)
-            .await
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref())
             .map_err(common::to_napi_err)?;
+        let report =
+            common::execute::execute_dispatch_typed(&self.inner, query.0, on_error, params)
+                .await
+                .map_err(common::to_napi_err)?;
         serde_json::to_value(&report)
             .map(common::jsoutput::BigIntSafeJson)
             .map_err(common::serde_napi_err)
@@ -627,12 +642,13 @@ impl JsClient {
     )]
     pub async fn explain_analyze(
         &self,
-        query: serde_json::Value,
+        query: common::execute::ExecQueryInput,
         options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
-        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref())
+            .map_err(common::to_napi_err)?;
         let report =
-            common::execute::explain_analyze_dispatch_typed(&self.inner, query, on_error, params)
+            common::execute::explain_analyze_dispatch_typed(&self.inner, query.0, on_error, params)
                 .await
                 .map_err(common::to_napi_err)?;
         serde_json::to_value(&report)
@@ -660,13 +676,11 @@ impl JsClient {
 
     /// Bulk ingest: `rows` is an array of point objects
     /// (`{id, vector, …payload}`) spliced through the `:rows` point-splice
-    /// path in `batchSize` chunks (default 100). Vectors accept plain arrays
-    /// and the flat `{data, dim}` multivector form. The JS wrapper normalizes
-    /// `Float32Array`/`Float64Array` and integer typed arrays to plain arrays
-    /// before this serde boundary, so direct native callers should pass plain
-    /// arrays (or bind typed arrays on the sync `Stmt.bind` surface instead,
-    /// then execute the bound statement). Returns the ExecutionReport as a
-    /// live JS object (BigInt-safe like `execute`).
+    /// path in `batchSize` chunks (default 100). Vectors accept plain arrays,
+    /// `Float32Array` / `Float64Array` (one memcpy), integer typed arrays for
+    /// sparse `indices`, and the flat `{data, dim}` multivector form; payload
+    /// integers keep their integer type exactly. Returns the ExecutionReport
+    /// as a live JS object (BigInt-safe like `execute`).
     #[napi(
         catch_unwind,
         ts_args_type = "collection: string, rows: Record<string, any>[], options?: { onError?: 'stop' | 'continue', batchSize?: number }"
@@ -674,17 +688,16 @@ impl JsClient {
     pub async fn upsert_many(
         &self,
         collection: String,
-        rows: serde_json::Value,
-        options: Option<serde_json::Value>,
+        rows: common::execute::ExecRowsInput,
+        options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
-        let rows = common::value_from_json(rows).map_err(common::to_napi_err)?;
-        let batch_size =
-            common::execute::batch_size_from(options.as_ref()).map_err(common::to_napi_err)?;
-        let on_error = common::execute::on_error_from(options.as_ref());
+        let raw = options.as_ref().map(|o| &o.raw);
+        let batch_size = common::execute::batch_size_from(raw).map_err(common::to_napi_err)?;
+        let on_error = common::execute::on_error_from(raw).map_err(common::to_napi_err)?;
         let report = common::execute::upsert_many_dispatch(
             &self.inner,
             collection,
-            rows,
+            rows.0,
             batch_size,
             on_error,
         )
@@ -735,15 +748,16 @@ pub async fn execute_stmt(
     ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
 )]
 pub async fn execute(
-    query: serde_json::Value,
+    query: common::execute::ExecQueryInput,
     options: Option<common::execute::ExecOptionsInput>,
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
     let raw = options.as_ref().map(|o| o.raw.clone());
-    let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+    let (on_error, params) =
+        common::execute::typed_dispatch_inputs(options.as_ref()).map_err(common::to_napi_err)?;
     let client = JsClient::new(raw)?;
     let report = common::execute::run_then_close(
         &client.inner,
-        common::execute::execute_dispatch_typed(&client.inner, query, on_error, params),
+        common::execute::execute_dispatch_typed(&client.inner, query.0, on_error, params),
     )
     .await
     .map_err(common::to_napi_err)?;

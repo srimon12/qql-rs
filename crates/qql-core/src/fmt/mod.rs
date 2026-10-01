@@ -179,49 +179,21 @@ fn find_comments_in_slice(slice: &str) -> Vec<&str> {
     let bytes = slice.as_bytes();
     let mut pos = 0;
     while pos < bytes.len() {
-        match bytes[pos] {
-            b'\'' | b'"' | b'`' => {
-                let quote = bytes[pos];
-                pos += 1;
-                let is_triple =
-                    pos + 1 < bytes.len() && bytes[pos] == quote && bytes[pos + 1] == quote;
-                if is_triple {
-                    pos += 2;
-                    let delim = if quote == b'\'' { "'''" } else { "\"\"\"" };
-                    if let Some(idx) = slice[pos..].find(delim) {
-                        pos += idx + 3;
-                    } else {
-                        break;
-                    }
-                } else {
-                    while pos < bytes.len() {
-                        if bytes[pos] == b'\\' {
-                            pos += 2;
-                            continue;
-                        }
-                        if bytes[pos] == quote {
-                            if quote == b'\'' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\'' {
-                                pos += 2;
-                                continue;
-                            }
-                            pos += 1;
-                            break;
-                        }
-                        pos += 1;
-                    }
-                }
-            }
-            b'-' if pos + 1 < bytes.len() && bytes[pos + 1] == b'-' => {
-                let start = pos;
-                pos += 2;
-                while pos < bytes.len() && bytes[pos] != b'\n' {
-                    pos += 1;
-                }
-                comments.push(slice[start..pos].trim_end());
-            }
-            _ => {
+        // One shared protected-span scanner for strings/raw/triple/backticks,
+        // keyed to the lexer's semantics (core-audit #6).
+        if let Some(next) = crate::params::scan::skip_literal(bytes, pos) {
+            pos = next;
+            continue;
+        }
+        if bytes[pos] == b'-' && pos + 1 < bytes.len() && bytes[pos + 1] == b'-' {
+            let start = pos;
+            pos += 2;
+            while pos < bytes.len() && bytes[pos] != b'\n' {
                 pos += 1;
             }
+            comments.push(slice[start..pos].trim_end());
+        } else {
+            pos += 1;
         }
     }
     comments

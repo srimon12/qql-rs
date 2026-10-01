@@ -17,7 +17,6 @@ categories = ["parser-implementations", "database"]
 default = []
 serde = ["dep:serde"]
 json = ["serde", "dep:serde_json"]
-std = []
 
 [dependencies]
 phf = { version = "0.14", features = ["macros"] }

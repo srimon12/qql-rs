@@ -17,8 +17,6 @@
 //! - Non-JSON bodies are forwarded but not recorded (a wrapped line must hold
 //!   JSON to stay convertible). Bodyless collection and quota routes
 //!   (`SHOW`, `DROP COLLECTION`, `DROP INDEX`) are recorded with no `body`.
-//!
-//! Requires the `record` Cargo feature (opt-in so default builds stay lean).
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

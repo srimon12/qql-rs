@@ -281,6 +281,43 @@ class TestDxImprovements(unittest.TestCase):
         with self.assertRaises(ValueError):
             sdk.parse(q)[0].bind({"v": b"\x00\x01"})
 
+    def test_u64_ids_bind_exactly(self):
+        # Python ints above i64::MAX keep their exact u64 value (`Value::UInt`):
+        # no float fallback, no precision loss.
+        stmt = sdk.parse("UPSERT INTO c VALUES {id: :id}")[0]
+        self.assertIn(
+            "18446744073709551615", str(stmt.bind({"id": 2**64 - 1}))
+        )
+        self.assertIn("9223372036854775808", str(stmt.bind({"id": 2**63})))
+
+    def test_u64_filter_and_payload_values_bind_exactly(self):
+        payload_bound = sdk.bind(
+            "UPSERT INTO c VALUES {id: 1, ts: :ts, snowflake: :sf}",
+            {"ts": 2**63, "sf": 2**64 - 1},
+        )
+        self.assertIn("9223372036854775808", payload_bound)
+        self.assertIn("18446744073709551615", payload_bound)
+        filter_bound = sdk.bind(
+            "QUERY [0.1] FROM c WHERE ts = :ts AND snowflake = :sf",
+            {"ts": 2**63, "sf": 2**64 - 1},
+        )
+        self.assertIn("9223372036854775808", filter_bound)
+        self.assertIn("18446744073709551615", filter_bound)
+
+    def test_out_of_range_integer_raises(self):
+        # Beyond u64::MAX (or below i64::MIN) fails closed instead of binding
+        # a rounded float.
+        for bad in (2**64, -(2**63) - 1):
+            with self.subTest(value=bad):
+                with self.assertRaises(OverflowError):
+                    sdk.bind("QUERY [0.1] FROM c WHERE id = :id", {"id": bad})
+
+    def test_bound_u64_round_trips_through_a_report(self):
+        rep = sdk.ExecutionReport.from_results(
+            [{"operation": "QUERY", "hits": [{"id": 2**64 - 1, "score": 1.0}]}]
+        )
+        self.assertEqual(rep.hits(0)[0].id, 2**64 - 1)
+
     def test_long_float_lists_pack_as_f32_vectors(self):
         # Flat list[float] params with >= 32 elements bind as f32 vectors
         # (same representation as numpy / array.array buffers); shorter and
@@ -329,10 +366,14 @@ class TestDxImprovements(unittest.TestCase):
 
     def test_upsert_many_surface(self):
         # Bulk ingest lives on the client next to execute — one `:rows`
-        # template prepared once, no hand-rolled batch loops. Offline:
-        # surface parity only (live chunking is covered by Rust mock
-        # tests + integration tests, no Qdrant server in CI).
-        self.assertTrue(callable(sdk.Client.upsert_many))
+        # template prepared once, no hand-rolled batch loops. Offline: pin
+        # the batch contract callers rely on (live chunking is covered by
+        # Rust mock tests + integration tests).
+        import inspect
+
+        parameters = inspect.signature(sdk.Client.upsert_many).parameters
+        self.assertEqual(parameters["batch_size"].default, 100)
+        self.assertEqual(parameters["on_error"].default, "stop")
 
 
 if __name__ == "__main__":

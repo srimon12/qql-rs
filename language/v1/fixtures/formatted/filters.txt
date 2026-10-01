@@ -55,7 +55,10 @@ LIMIT 10;
 
 -- Point ID filter
 QUERY 'test' FROM docs WHERE id = 42 LIMIT 10;
-QUERY 'test' FROM docs WHERE id = 'uuid-here' LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE id = '550e8400-e29b-41d4-a716-446655440010'
+LIMIT 10;
 QUERY 'test' FROM docs WHERE id IN (1, 2, 3) LIMIT 10;
 
 -- HAS_VECTOR

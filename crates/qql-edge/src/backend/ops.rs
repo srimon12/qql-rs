@@ -49,7 +49,11 @@ impl QdrantOps for EdgeQdrant {
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
-        Ok(self.collection_path(name).join("segments").exists())
+        // Filesystem metadata is blocking I/O; keep it off the async worker.
+        let path = self.collection_path(name);
+        tokio::task::spawn_blocking(move || path.join("segments").exists())
+            .await
+            .map_err(|e| spawn_error("collection_exists", e))
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
@@ -134,6 +138,9 @@ impl QdrantOps for EdgeQdrant {
                     }
                     .to_string()
                 }),
+                // The engine persists `on_disk` only; the plan's 1.19 `memory`
+                // tier is not recoverable from a loaded shard, so the
+                // projection reports `None`.
                 memory: None,
                 })
             })
@@ -181,6 +188,8 @@ impl QdrantOps for EdgeQdrant {
             .collect();
 
         Ok(CollectionInfo {
+            // qdrant-edge shards are always loaded and online, so the server's
+            // green health status is the only truthful projection.
             status: "green".to_string(),
             points_count: info.points_count as u64,
             indexed_vectors_count: Some(info.indexed_vectors_count as u64),
@@ -273,14 +282,20 @@ impl QdrantOps for EdgeQdrant {
         Ok(())
     }
 
+    /// Drop a collection and all of its points.
+    ///
+    /// A collection that was never created reports
+    /// `QQL-EDGE-COLLECTION-NOT-FOUND`, matching the remote backends' 404 and
+    /// the edge read paths; dropping is not silently idempotent.
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
         let path = self.collection_path(name);
         let shard = {
             let mut shards = self.shards.write().await;
             shards.remove(name)
         };
+        let had_shard = shard.is_some();
         {
-            let mut opening = self.opening.lock().await;
+            let mut opening = lock_map(&self.opening);
             opening.remove(name);
         }
         if let Some(shard) = shard {
@@ -295,7 +310,16 @@ impl QdrantOps for EdgeQdrant {
                     .with_collection(name.to_string())
                 })?;
         }
+        let collection = name.to_string();
         tokio::task::spawn_blocking(move || {
+            if !had_shard && !path.join("segments").exists() {
+                return Err(QqlError::execution(
+                    "QQL-EDGE-COLLECTION-NOT-FOUND",
+                    format!("collection '{collection}' does not exist"),
+                    None,
+                )
+                .with_collection(collection));
+            }
             if path.exists() {
                 std::fs::remove_dir_all(&path).map_err(|e| {
                     QqlError::execution(
@@ -574,59 +598,71 @@ impl QdrantOps for EdgeQdrant {
         Ok(results)
     }
 
+    /// Apply every mutation in order; qdrant-edge has no batch RPC, so the
+    /// fan-out is the batch.
+    ///
+    /// `wait` is accepted and satisfied by construction: every write is applied
+    /// before this call returns, so `true` is met exactly and `false` gets a
+    /// strictly stronger guarantee than the server's fire-and-forget
+    /// acknowledgement (there is no in-process operation id to poll). That
+    /// matters because the planner defaults embedding-less upserts to
+    /// `WAIT false`; rejecting it here would reject the standard ingest path.
+    ///
+    /// Every item runs, even after one fails, and each applied item yields one
+    /// status-only response in order. A failure makes the returned array
+    /// shorter than `batch.operations`: the executor's batch cardinality check
+    /// reports one failed member per expected operation and, because the batch
+    /// was answered, never retries the group (a retry would re-apply the items
+    /// that already landed). `BackendResponse` has no per-item error channel,
+    /// so dropping the failed item is the only encoding that reaches that path;
+    /// the first failure itself is visible when the same operation is
+    /// dispatched on its own.
     async fn execute_update_batch(
         &self,
         collection: &str,
         batch: &UpdateBatchRequest,
-        wait: bool,
+        _wait: bool,
     ) -> Result<Vec<BackendResponse>, QqlError> {
-        // In-process execution is synchronous: every op is applied before the
-        // call returns, so `wait: true` is satisfied by construction. `false`
-        // is only reachable via an explicit `WAIT false` (every producer
-        // defaults to `true`), which asks for fire-and-forget acknowledgement
-        // the engine has no path for — fail closed instead of silently
-        // over-delivering durability semantics the caller opted out of.
-        if !wait {
-            return Err(EdgeUnsupported::Wait.error());
-        }
         let mut results = Vec::with_capacity(batch.operations.len());
         for op in &batch.operations {
-            match op {
+            let outcome = match op {
                 PlanUpdateOperation::Upsert { upsert } => {
-                    self.execute_edge_upsert(collection, upsert).await?;
+                    self.execute_edge_upsert(collection, upsert).await
                 }
                 PlanUpdateOperation::Delete { delete } => {
-                    self.execute_edge_delete(collection, delete).await?;
+                    self.execute_edge_delete(collection, delete).await
                 }
                 PlanUpdateOperation::SetPayload { set_payload } => {
                     self.execute_edge_update_payload(collection, set_payload)
-                        .await?;
+                        .await
                 }
                 PlanUpdateOperation::Overwrite { overwrite_payload } => {
                     self.execute_edge_overwrite_payload(collection, overwrite_payload)
-                        .await?;
+                        .await
                 }
                 PlanUpdateOperation::ClearPayload { clear_payload } => {
                     self.execute_edge_clear_payload(collection, clear_payload)
-                        .await?;
+                        .await
                 }
                 PlanUpdateOperation::DeletePayload { delete_payload } => {
                     self.execute_edge_delete_payload(collection, delete_payload)
-                        .await?;
+                        .await
                 }
                 PlanUpdateOperation::UpdateVectors { update_vectors } => {
                     self.execute_edge_update_vectors(collection, update_vectors)
-                        .await?;
+                        .await
                 }
                 PlanUpdateOperation::DeleteVectors { delete_vectors } => {
                     self.execute_edge_delete_vectors(collection, delete_vectors)
-                        .await?;
+                        .await
                 }
+            };
+            if outcome.is_ok() {
+                results.push(BackendResponse {
+                    data: ExecData::Mutation { affected: None },
+                    telemetry: None,
+                });
             }
-            results.push(BackendResponse {
-                data: ExecData::Mutation { affected: None },
-                telemetry: None,
-            });
         }
         Ok(results)
     }

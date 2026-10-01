@@ -7,6 +7,11 @@
 //! `DEFAULTS` are deliberately converted to `serde_json::Value`: the formula
 //! API consumes JSON bindings, so JSON is the boundary domain here, not an
 //! internal IR.
+//!
+//! The edge formula domain is f32 (constants, `by_zero_default`, decay
+//! `scale`/`midpoint`), so the f64 plan values are narrowed here. This is the
+//! engine's own evaluation width; only a value exactly at an f32 rounding
+//! boundary can score differently from a wider evaluation.
 
 use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{DecayKind, GeoPoint};

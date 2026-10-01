@@ -53,11 +53,11 @@ and a `VECTOR`/`INTO` destination.
 
 {% qqlExample title="Embed multiple payload fields into named vectors" %}
 ```sql
-UPSERT INTO articles VALUES {id: 'article-1', title: 'Planning hybrid retrieval', body: 'Dense and sparse candidate generation'}
+UPSERT INTO articles VALUES {id: '0f8fad5b-d9cb-469f-a165-70867728950e', title: 'Planning hybrid retrieval', body: 'Dense and sparse candidate generation'}
 EMBED body INTO dense_body USING DENSE,
   title INTO sparse_title USING SPARSE;
 
-UPSERT INTO articles VALUES {id: 'article-2', title: 'Vector search', body: 'Semantic ranking'} USING DENSE MODEL 'all-MiniLM-L6-v2' ON FIELD body INTO dense_body, SPARSE MODEL 'qdrant/bm25' ON FIELD title INTO sparse_title;
+UPSERT INTO articles VALUES {id: '7c9e6679-7425-40de-944b-e07fc1f90ae7', title: 'Vector search', body: 'Semantic ranking'} USING DENSE MODEL 'all-MiniLM-L6-v2' ON FIELD body INTO dense_body, SPARSE MODEL 'qdrant/bm25' ON FIELD title INTO sparse_title;
 ```
 {% /qqlExample %}
 

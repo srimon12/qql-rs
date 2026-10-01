@@ -126,7 +126,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
 | `QQL-VALIDATION-ALIASES` | Collection aliases are not supported on this backend |
 | `QQL-VALIDATION-COLLECTION` | An executor helper needs a non-empty collection name |
-| `QQL-VALIDATION-CONFIG` | Invalid collection configuration block or edge executor option value |
+| `QQL-VALIDATION-CONFIG` | Invalid collection configuration block, executor/execute option value (e.g. `onError`), or edge executor option value |
 | `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
 | `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
 | `QQL-VALIDATION-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires `PREFETCH` |
@@ -139,6 +139,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-RERANK-USING` | `RERANK` requires `USING <vector>` |
 | `QQL-VALIDATION-SCORE` | A score threshold must be finite |
 | `QQL-VALIDATION-SEARCH-PARAM` | Unknown search parameter |
+| `QQL-VALIDATION-SHARD-UNSUPPORTED` | A host binding tried to set `shardKey` on a statement type that cannot carry shard routing (e.g. DDL) |
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
 | `QQL-VALIDATION-IDF` | `PARAMS (idf = …)` is not `'global'` or `WHERE <filter>` |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
@@ -152,6 +153,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-BATCH-WAIT` | `WAIT` placed on a member instead of the `BATCH` header, or on a query batch |
 | `QQL-VALIDATION-ANALYZE-BATCH` | `EXPLAIN ANALYZE` does not support `BATCH` scripts; analyze single statements individually |
 | `QQL-VALIDATION-MIN-SHOULD` | `MIN SHOULD` count must be `>= 1` |
+| `QQL-VALIDATION-NESTING` | Query `CTE` / `PREFETCH` nesting exceeds the depth the embedding and topology walks support |
 
 ## Planning
 
@@ -174,31 +176,46 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-CROSS-RERANK-MODEL` | `CROSS RERANK MODEL` must not be empty |
 | `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
+| `QQL-PLAN-DELETE-VECTOR` | `DELETE VECTOR` vector list is empty or contains duplicates (`DeleteVectors` requires minItems 1, uniqueItems) |
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
+| `QQL-PLAN-FORMULA-DECAY` | Formula references an unknown decay function; expected `EXP_DECAY`, `LIN_DECAY`, or `GAUSS_DECAY` |
 | `QQL-PLAN-GROUP` | A groups query was lowered without a `GROUP BY` (internal misuse) |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-PLAN-INDEX-OPTION` | Invalid or unsupported `CREATE INDEX` option value |
 | `QQL-PLAN-INDEX-TYPE` | Unknown payload index field type |
+| `QQL-PLAN-MATCH-TYPE` | A match value or `IN` / `MATCH ANY` / `MATCH EXCEPT` list has no wire representation (non-int64 integer, float, bool, mixed kinds). Duplicate list entries are deduped, not rejected |
+| `QQL-PLAN-MIN-SHOULD` | `MIN SHOULD` requires `min_count >= 1` (OpenAPI `MinShould` minimum) |
+| `QQL-PLAN-MMR` | `MMR DIVERSITY` outside `[0, 1]` or `CANDIDATES` outside `1..=16384` |
+| `QQL-PLAN-NON-FINITE` | A dynamic value contains NaN/infinity, which JSON cannot represent (it would silently become `null`) |
+| `QQL-PLAN-PARAMS` | A hand-built `PARAMS` combination the parser rejects (`max_selectivity` without `acorn`) |
+| `QQL-PLAN-POINT-ID` | A string point ID is not a UUID; point IDs must be unsigned integers or UUIDs |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
+| `QQL-PLAN-PREFETCH-PARAMS` | A `PREFETCH` source carries request-level `timeout` / `consistency`, which prefetch stages cannot express |
+| `QQL-PLAN-PREFETCH-SHARD` | A `PREFETCH` source carries `SHARD` routing, which prefetch stages cannot express |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-RANGE-TYPE` | A range bound resolved to a non-scalar value; expected a number, string, or datetime |
 | `QQL-PLAN-RECOMMEND-AVERAGE` | `average_vector` examples must share one vector shape |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
+| `QQL-PLAN-SCROLL-LIMIT` | `SCROLL` has no resolvable `LIMIT` (an unbound placeholder or hand-built statement) |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-SERIALIZE` | A plan IR request body failed JSON serialization (a `Serialize` regression) |
+| `QQL-PLAN-SLICE` | `SLICE` bounds violate OpenAPI `Slice` (`total` uint32, `total >= 1`, `index < total`) |
 | `QQL-PLAN-SCROLL-AFTER` | A `SCROLL ... AFTER` cursor has no next page (already the maximum point ID or UUID) |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-REST-BATCH` | `BATCH` runs through the batch RPCs, not a single REST route |
 | `QQL-REST-OVERWRITE-BATCH-ONLY` | `OVERWRITE` has no single REST route (`POST /points/payload` is merge-only); use a batch |
+| `QQL-REST-MULTI-STEP` | The statement projects to a multi-step REST sequence (e.g. `CREATE COLLECTION` with `shard_keys` / `read_fan_out_*`) and has no single route |
 | `QQL-GRPC` | Generic gRPC transport failure |
 | `QQL-GRPC-BATCH` | `BATCH` runs through the batch RPCs, not a single gRPC route |
 | `QQL-GRPC-DDL-RANGE` | A DDL value exceeds the bundled Qdrant proto `uint32` range |
+| `QQL-GRPC-DIRECTION` | An `ORDER BY` direction is neither `asc` nor `desc` on the gRPC path |
 | `QQL-GRPC-FLOAT-MATCH` | A float equality value has no `double` field in the bundled Qdrant proto `Match`; use a `RANGE` filter or an exact integer value |
 | `QQL-GRPC-FUSION` | Unsupported fusion method on the gRPC path |
+| `QQL-GRPC-GEO-POLYGON` | A `GEO_POLYGON` ring has fewer than 3 vertices and cannot be represented on the gRPC path |
 | `QQL-GRPC-LIST-INT` | An integer value is out of the gRPC `int64` range |
 | `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
 | `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
@@ -208,6 +225,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-GRPC-RRF-K` | An `rrf_k` value exceeds the bundled Qdrant proto `uint32` range |
 | `QQL-GRPC-RRF-WEIGHT` | An `rrf_weights` value is not exactly representable as gRPC `f32` |
 | `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
+| `QQL-GRPC-START-FROM` | An `ORDER BY … START FROM` value has no gRPC `StartFrom` representation; use an integer, float, or ISO-8601 datetime |
+| `QQL-GRPC-STRATEGY` | Unsupported recommend strategy on the gRPC path |
 | `QQL-BACKEND` | Generic backend or transport failure |
 | `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
 | `QQL-BACKEND-BATCH` | A batched query/update item reported an error in its status field |
@@ -272,7 +291,7 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
 | `QQL-EMBEDDING-UNAVAILABLE` | No embedder is configured or reachable for text/image embedding |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
-| `QQL-EMBEDDING` | The requested dense model is unavailable on this embedder (omit `MODEL` or use `'default'`) |
+| `QQL-EMBEDDING` | Dense embedding failed on this embedder: unavailable model, an unbound `TEXT` parameter about to be client-embedded, or `OPTIONS` that only server-side inference can honor |
 | `QQL-EMBEDDING-DIM` | `embedding_dimension` must be configured when creating collections with `USING MODEL` in local inference mode |
 | `QQL-EMBEDDING-IMAGE` | Image embedding is unavailable (no image/CLIP vision path configured) |
 | `QQL-EMBEDDING-MODEL` | The requested embedding model is not available from the configured embedder |
@@ -335,7 +354,6 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS`; qdrant-edge has no params setter |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION`; qdrant-edge has no quantization setter |
 | `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR (<name>)` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`); qdrant-edge exposes `set_vector_hnsw_config` only |
-| `QQL-EDGE-UNSUPPORTED-WAIT` | `WAIT false` on mutation batches; qdrant-edge applies every write synchronously |
 | `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE (<name>)`; qdrant-edge has no sparse vector config setter |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` (replication, fan-out, payload memory) |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys qdrant-edge excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
@@ -486,7 +504,6 @@ QQL-EDGE-UNSUPPORTED-SPARSE-DIFF
 QQL-EDGE-UNSUPPORTED-STRICT-MODE
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-UNSUPPORTED-VECTOR-DIFF
-QQL-EDGE-UNSUPPORTED-WAIT
 QQL-EDGE-UNSUPPORTED-WAL
 QQL-EDGE-UPSERT-MODE-ONLY
 QQL-EDGE-VECTOR
@@ -504,8 +521,10 @@ QQL-FMT-NON-CANONICAL
 QQL-GRPC
 QQL-GRPC-BATCH
 QQL-GRPC-DDL-RANGE
+QQL-GRPC-DIRECTION
 QQL-GRPC-FLOAT-MATCH
 QQL-GRPC-FUSION
+QQL-GRPC-GEO-POLYGON
 QQL-GRPC-LIST-INT
 QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
@@ -515,6 +534,8 @@ QQL-GRPC-RANGE-TYPE
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
 QQL-GRPC-SCROLL-LIMIT
+QQL-GRPC-START-FROM
+QQL-GRPC-STRATEGY
 QQL-IDIOM-REDUNDANT-PAYLOAD
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER
@@ -584,13 +605,23 @@ QQL-PLAN-CROSS-RERANK-CTE
 QQL-PLAN-CROSS-RERANK-MODEL
 QQL-PLAN-CROSS-RERANK-PREFETCH
 QQL-PLAN-CROSS-RERANK-QUERY
+QQL-PLAN-DELETE-VECTOR
+QQL-PLAN-FORMULA-DECAY
 QQL-PLAN-FUSION-PREFETCH
 QQL-PLAN-GROUP
 QQL-PLAN-IDF
 QQL-PLAN-INDEX-OPTION
 QQL-PLAN-INDEX-TYPE
+QQL-PLAN-MATCH-TYPE
+QQL-PLAN-MIN-SHOULD
+QQL-PLAN-MMR
+QQL-PLAN-NON-FINITE
+QQL-PLAN-PARAMS
+QQL-PLAN-POINT-ID
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
+QQL-PLAN-PREFETCH-PARAMS
+QQL-PLAN-PREFETCH-SHARD
 QQL-PLAN-QUOTA
 QQL-PLAN-RANGE-TYPE
 QQL-PLAN-RECOMMEND-AVERAGE
@@ -599,8 +630,10 @@ QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
 QQL-PLAN-SCROLL-AFTER
+QQL-PLAN-SCROLL-LIMIT
 QQL-PLAN-SERIALIZE
 QQL-PLAN-SHARD-KEY
+QQL-PLAN-SLICE
 QQL-PLAN-UNSUPPORTED-PREFETCH
 QQL-PLAN-VECTOR-DIFF
 QQL-PLAN-VECTOR-KIND
@@ -608,6 +641,7 @@ QQL-RERANK-CROSS
 QQL-RERANK-CROSS-FIELD
 QQL-REST-BATCH
 QQL-REST-CLIENT-SIDE
+QQL-REST-MULTI-STEP
 QQL-REST-OVERWRITE-BATCH-ONLY
 QQL-SERIALIZE
 QQL-SERIALIZE-AST
@@ -646,6 +680,7 @@ QQL-VALIDATION-LIMIT-OVERFLOW
 QQL-VALIDATION-MIN-SHOULD
 QQL-VALIDATION-MMR
 QQL-VALIDATION-MULTI-STMT
+QQL-VALIDATION-NESTING
 QQL-VALIDATION-POINT-ID
 QQL-VALIDATION-POINTS-CLAUSE
 QQL-VALIDATION-PREFETCH
@@ -655,6 +690,7 @@ QQL-VALIDATION-RERANK-PREFETCH
 QQL-VALIDATION-RERANK-USING
 QQL-VALIDATION-SCORE
 QQL-VALIDATION-SEARCH-PARAM
+QQL-VALIDATION-SHARD-UNSUPPORTED
 QQL-VALIDATION-SLICE
 QQL-VALIDATION-UPDATE-VECTOR
 QQL-VALIDATION-UPSERT-BATCH

@@ -141,6 +141,8 @@ fn decode_sparse_vectors(
 fn params_used(params: &qql_core::ast::CollectionParamsConfig) -> bool {
     params.replication_factor.is_some()
         || params.write_consistency_factor.is_some()
+        || params.read_fan_out_factor.is_some()
+        || params.read_fan_out_delay_ms.is_some()
         || params.on_disk_payload.is_some()
         || params.payload_memory.is_some()
         || params.shard_number.is_some()

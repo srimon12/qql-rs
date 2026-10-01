@@ -46,6 +46,9 @@ function assertFails(report, msgPart) {
   }
 }
 
+// Executor construction is asynchronous (model load runs off the JS thread),
+// so the whole suite is one async main with a single failure/handler.
+(async () => {
 // ═══════════════════════════════════════════════════════════════════
 //  1. Parser API
 // ═══════════════════════════════════════════════════════════════════
@@ -188,17 +191,23 @@ assert(bge.modelCode.includes("bge-small"));
 console.log(`  ✓ listEmbeddingModels() → ${models.length} models (BGE small = 384-d)`);
 
 // Invalid model must fail at executor construction, not later at upsert
-assert.throws(
-  () => nqql.localExecutor(tmpDir("nqql-bad-model-"), { model: "not-a-real-model-xyz" }),
-  /unknown embedding model/i,
-);
+{
+  const d = tmpDir("nqql-bad-model-");
+  await assert.rejects(
+    nqql.localExecutor(d, { model: "not-a-real-model-xyz" }),
+    /unknown embedding model/i,
+  );
+  fs.rmSync(d, { recursive: true, force: true });
+}
 console.log("  ✓ invalid model rejected at localExecutor()");
 
 // Boolean legacy second arg still works
 {
   const d = tmpDir("nqql-legacy-bool-");
-  const e = nqql.localExecutor(d, false);
+  const e = await nqql.localExecutor(d, false);
   assert(e instanceof nqql.Client);
+  await e.close();
+  fs.rmSync(d, { recursive: true, force: true });
   console.log("  ✓ localExecutor(dir, false) legacy boolean");
 }
 
@@ -207,8 +216,10 @@ console.log("  ✓ invalid model rejected at localExecutor()");
   const d = tmpDir("nqql-model-alias-");
   const opts = { onDiskPayload: false, model: "bge-small-en-v1.5" };
   if (projectCache) opts.cacheDir = projectCache;
-  const e = nqql.localExecutor(d, opts);
+  const e = await nqql.localExecutor(d, opts);
   assert(e instanceof nqql.Client);
+  await e.close();
+  fs.rmSync(d, { recursive: true, force: true });
   console.log("  ✓ localExecutor({ model: 'bge-small-en-v1.5' }) short alias");
 }
 
@@ -223,7 +234,7 @@ console.log("  dataDir:", dataDir);
 
 const execOpts = { onDiskPayload: false };
 if (projectCache) execOpts.cacheDir = projectCache;
-const exec = nqql.localExecutor(dataDir, execOpts);
+const exec = await nqql.localExecutor(dataDir, execOpts);
 assert(exec instanceof nqql.Client);
 console.log("  ✓ localExecutor() creates Client");
 
@@ -236,12 +247,11 @@ console.log("  ✓ Client.explainStmt");
 assert.strictEqual(exec.compile("QUERY 'hello' FROM docs LIMIT 10").method, "POST");
 console.log("  ✓ Client.compile");
 
-(async () => {
-  await assert.rejects(
-    exec.execute("SHOW COLLECTIONS", { onError: "typo" }),
-    /options\.onError must be 'stop' or 'continue'/,
-  );
-  console.log("  ✓ on_error validation");
+await assert.rejects(
+  exec.execute("SHOW COLLECTIONS", { onError: "typo" }),
+  /options\.onError must be 'stop' or 'continue'/,
+);
+console.log("  ✓ on_error validation");
 
   const badReport = await exec.execute("invalid syntax", { onError: "continue" });
   assert.strictEqual(badReport.ok, false);
@@ -372,7 +382,7 @@ console.log("  ✓ Client.compile");
   // 5d. Implicit embedding follows the collection's dense-only topology.
   {
     const trapDir = tmpDir("nqql-dense-trap-");
-    const trap = nqql.localExecutor(trapDir, {
+    const trap = await nqql.localExecutor(trapDir, {
       onDiskPayload: false,
       ...(projectCache ? { cacheDir: projectCache } : {}),
     });
@@ -460,7 +470,7 @@ console.log("  ✓ Client.compile");
   // 5j. CREATE COLLECTION with explicit wrong dimension vs model
   {
     const dimDir = tmpDir("nqql-dim-mismatch-");
-    const dimExec = nqql.localExecutor(dimDir, {
+    const dimExec = await nqql.localExecutor(dimDir, {
       onDiskPayload: false,
       ...(projectCache ? { cacheDir: projectCache } : {}),
     });

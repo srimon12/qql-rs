@@ -3,10 +3,8 @@ use core::fmt;
 use crate::error::Span;
 
 // ── Token kind definitions ─────────────────────────────────────
-// All variants are listed ONCE in the `token_table!`.
-// Two helper macros consume that table to produce:
-//   • as_str()     – for all variants
-//   • KEYWORDS map – for keyword-only variants
+// `gen_as_str!` lists every variant once to produce its display string;
+// the keyword lookup table lives in `keywords.generated.rs`.
 
 macro_rules! gen_as_str {
     ($($var:ident => $str:expr),* $(,)?) => {

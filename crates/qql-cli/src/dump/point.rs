@@ -9,7 +9,13 @@ use serde_json::Value;
 use super::escape::{escape_string, format_ident, is_simple_ident};
 
 /// Convert a scroll point JSON object into an UPSERT record object
-/// (`{id, vector?, …payload}`). Returns `None` only when the point has no usable `id`.
+/// (`{id, vector?, …payload}`).
+///
+/// Returns `None` when the point has no usable `id` **or** when a payload key
+/// collides with the point-object `id`/`vector` slots (case-insensitive, the
+/// same rule `qql-convert` enforces). Merging such a key would overwrite the
+/// real point id or silently drop the stored vector, so dump/migrate count the
+/// point as skipped instead of emitting a corrupted UPSERT.
 pub fn point_to_upsert_object(point: &Value) -> Option<Value> {
     let id = point.get("id")?.clone();
     let mut map = serde_json::Map::new();
@@ -17,6 +23,9 @@ pub fn point_to_upsert_object(point: &Value) -> Option<Value> {
 
     if let Some(payload) = point.get("payload").and_then(|p| p.as_object()) {
         for (k, v) in payload {
+            if k.eq_ignore_ascii_case("id") || k.eq_ignore_ascii_case("vector") {
+                return None;
+            }
             map.insert(k.clone(), v.clone());
         }
     }

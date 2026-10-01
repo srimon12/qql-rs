@@ -117,7 +117,7 @@ pub struct QueryGroupsRequest {
 }
 
 /// Wire form of OpenAPI `ReadConsistency` for REST query strings / gRPC.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadConsistencyParam {
     /// Numeric replication factor, sent as-is.
     Factor(u64),

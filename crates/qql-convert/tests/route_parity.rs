@@ -76,7 +76,7 @@ fn assert_parity(source: &str) {
 /// controls the runtime actually serializes.
 const QUERY_CORPUS: &[&str] = &[
     // 1. POINTS
-    "QUERY POINTS (1, 'pt-2') FROM docs SHARD 'acme' WITH PAYLOAD false WITH VECTOR (dense);",
+    "QUERY POINTS (1, '550e8400-e29b-41d4-a716-446655440010') FROM docs SHARD 'acme' WITH PAYLOAD false WITH VECTOR (dense);",
     // 2. NEAREST
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE k = 1 LIMIT 5 OFFSET 2;",
     "QUERY VECTOR [0.1, 0.2] FROM docs USING dense SCORE THRESHOLD 0.5 LIMIT 5;",
@@ -142,7 +142,7 @@ const QUERY_CORPUS: &[&str] = &[
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH PREFIX 'pre' LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE a IS NULL OR b IS EMPTY LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE id = 7 LIMIT 5;",
-    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE id IN (1, 2, 'pt-3') LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE id IN (1, 2, '550e8400-e29b-41d4-a716-446655440011') LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE age BETWEEN 18 AND 65 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE rating = 4.5 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE title MATCH ANY (1, 2) LIMIT 5;",
@@ -151,7 +151,7 @@ const QUERY_CORPUS: &[&str] = &[
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE code MATCH EXCEPT (1, 2) LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE MIN SHOULD 2 (a = 1, b = 2) LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE MIN SHOULD 1 (title MATCH TOKENS 'a b', tags MATCH EXCEPT (1, 2)) LIMIT 5;",
-    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE big = 18446744073709551615 LIMIT 5;",
+    "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE big = 9223372036854775807 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE n > 18446744073709551615 LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE name > 'm' LIMIT 5;",
     "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE name BETWEEN 'a' AND 'm' LIMIT 5;",
@@ -182,7 +182,6 @@ const MUTATION_CORPUS: &[&str] = &[
     "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
     "SCROLL FROM docs AFTER 7 SHARD 'acme' LIMIT 10;",
     "SCROLL FROM docs AFTER '550e8400-e29b-41d4-a716-446655440000' LIMIT 10;",
-    "SCROLL FROM docs AFTER 'not-a-uuid' LIMIT 10;",
     "SCROLL FROM docs WITH VECTOR (dense) LIMIT 5;",
     // W2: SCROLL ordering, payload selectors, and the combined shape.
     "SCROLL FROM docs ORDER BY created_at DESC LIMIT 10;",
@@ -200,11 +199,11 @@ const MUTATION_CORPUS: &[&str] = &[
     "UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2], title: 'hello'};",
     "UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1], sparse: {indices: [1], values: [0.5]}}};",
     "UPSERT INTO docs VALUES {id: 1, vector: [[0.1, 0.2], [0.3, 0.4]]};",
-    "UPSERT INTO docs VALUES {id: 'pt-1', payload: true} SHARD 'acme';",
+    "UPSERT INTO docs VALUES {id: '550e8400-e29b-41d4-a716-446655440013', payload: true} SHARD 'acme';",
     "DELETE FROM docs WHERE id = 1;",
     "DELETE FROM docs WHERE id = 1 WAIT true;",
     "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT true;",
-    "DELETE FROM docs WHERE id IN (1, 2, 'pt-3');",
+    "DELETE FROM docs WHERE id IN (1, 2, '550e8400-e29b-41d4-a716-446655440011');",
     "DELETE FROM docs WHERE category = 'archived' SHARD 101;",
     "CLEAR PAYLOAD FROM docs WHERE k = 1;",
     "CLEAR PAYLOAD FROM docs WHERE id IN (1, 2);",
@@ -309,6 +308,50 @@ fn ddl_corpus_routes_round_trip() {
     for source in DDL_CORPUS {
         assert_parity(source);
     }
+}
+
+/// A captured create body carrying `read_fan_out_*` must keep them: the
+/// emitted QQL re-emits `WITH PARAMS`, and planning that statement produces
+/// the deferred PATCH carrying both values.
+#[test]
+fn create_read_fan_out_params_round_trip() {
+    let wrapped = serde_json::json!({
+        "method": "PUT",
+        "path": "/collections/docs",
+        "body": {
+            "vectors": {"size": 8, "distance": "Cosine"},
+            "read_fan_out_factor": 2,
+            "read_fan_out_delay_ms": 500,
+        },
+    })
+    .to_string();
+    let emitted = convert(&wrapped, None).expect("convert create with fan-out");
+    assert_eq!(emitted.len(), 1);
+    assert!(
+        emitted[0].contains("read_fan_out_factor = 2"),
+        "{}",
+        emitted[0]
+    );
+    assert!(
+        emitted[0].contains("read_fan_out_delay_ms = 500"),
+        "{}",
+        emitted[0]
+    );
+
+    let stmt = Parser::parse(&format!("{};", emitted[0])).expect("reparse");
+    let op = plan(&stmt).expect("replan");
+    let qql_plan::PlannedOperation::CreateCollection {
+        collection,
+        request,
+    } = &op
+    else {
+        panic!("expected CreateCollection, got {op:?}");
+    };
+    let steps = qql_plan::ddl::create_collection_rest_steps(collection, request).expect("steps");
+    assert_eq!(steps.len(), 2, "PUT + deferred PATCH expected: {steps:?}");
+    let patch = steps[1].body.to_string();
+    assert!(patch.contains("\"read_fan_out_factor\":2"), "{patch}");
+    assert!(patch.contains("\"read_fan_out_delay_ms\":500"), "{patch}");
 }
 
 #[test]

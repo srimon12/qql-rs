@@ -15,7 +15,9 @@ Language surface tracks **Qdrant ≥ 1.19** (quotas, `memory` placement,
 npm install @veristamp/nqql
 ```
 
-Node **≥ 18**. Platforms: Linux x64/arm64 glibc, macOS x64/arm64, Windows x64.
+Node **≥ 18**. Platforms: Linux x64/arm64 glibc, macOS arm64, Windows x64.
+macOS Intel is not built and fails closed at load time (no x86_64 artifact is
+published).
 
 ## Quick start
 
@@ -49,6 +51,13 @@ await client.execute(stmt);
 
 console.log(version, isValid("SHOW COLLECTIONS"), compile("SHOW COLLECTIONS"));
 ```
+
+## Exact integers by design
+
+JS `Number` holds integers exactly up to `2^53 - 1`. Pass larger values
+(epoch-nanosecond payloads, snowflake point IDs) as `BigInt`; by design `nqql`
+fails closed instead of rounding them, and results map values above the safe
+range back to `BigInt`.
 
 ## API summary
 

@@ -4,8 +4,8 @@
 //! but ship an identical parser/parameter surface. Every piece of that logic
 //! lives here so the SDKs cannot drift: the crates keep only thin `#[napi]`
 //! wrappers plus their transport-specific client construction, and the JS
-//! wrapper keeps byte-identical copies of `dx-common.js` + `test_dx.js`
-//! enforced by a CI diff check.
+//! wrapper's `dx-common.js` + `test_dx.js` copies are generated from the
+//! nqql sources by `qql-grammar-gen` (`check` gates drift).
 //!
 //! Errors are returned as [`QqlError`] throughout; the SDK crates convert to
 //! `napi::Error` at their boundary via [`to_napi_err`] / [`serde_napi_err`],
@@ -51,47 +51,25 @@ pub fn stmt_parse(input: &str) -> Result<ast::Stmt, QqlError> {
     Parser::parse(input)
 }
 
-/// Convert a serde-boundary JSON value (async entry points) into a typed
-/// [`Value`]. Typed arrays do not survive serde — callers needing
-/// `Float32Array`/`Float64Array` must use the sync `Unknown` surface
-/// ([`jsparams::unknown_to_value`]) instead.
-pub fn value_from_json(value: serde_json::Value) -> Result<Value, QqlError> {
-    Value::from_json(value)
-}
-
 /// Inject a WHERE filter into `stmt` in place. `op` is parsed by
 /// [`qql_core::ast::ComparisonOp::parse_inject_op`] — the single source for
-/// supported operators and rejection messages.
+/// supported operators and rejection messages. `value` is already typed
+/// (from [`jsparams::unknown_to_value`]), so typed arrays and exact
+/// integers never pass through serde.
 pub fn stmt_inject_filter(
     stmt: &mut ast::Stmt,
     field: &str,
     op: &str,
-    value: serde_json::Value,
+    value: Value,
 ) -> Result<(), QqlError> {
     let cmp = qql_core::ast::ComparisonOp::parse_inject_op(op)?;
-    let val = Value::from_json(value)?;
-    ast::inject_filter(stmt, field, cmp, val)
-}
-
-/// Bind parameters into `stmt` and return the bound statement.
-pub fn stmt_bind(
-    stmt: &ast::Stmt,
-    params: Option<&serde_json::Value>,
-) -> Result<ast::Stmt, QqlError> {
-    let mut inner = stmt.clone();
-    // JS `null` means "no params" (mirrors Python `params=None`), not a
-    // failed binding — only non-null scalars fail closed downstream.
-    if let Some(p) = params.filter(|p| !p.is_null()) {
-        qql_core::params_json::bind_stmt_with_params(&mut inner, p)?;
-    }
-    Ok(inner)
+    ast::inject_filter(stmt, field, cmp, value)
 }
 
 /// Bind already-typed [`Value`] parameters into `stmt`.
 ///
-/// Same contract as [`stmt_bind`]; the `Value` tree comes from
-/// [`jsparams::unknown_to_value`], which binds typed arrays without a JSON
-/// round-trip. `None` binds nothing.
+/// The `Value` tree comes from [`jsparams::unknown_to_value`], which binds
+/// typed arrays without a JSON round-trip. `None` binds nothing.
 pub fn stmt_bind_value(stmt: &ast::Stmt, params: Option<&Value>) -> Result<ast::Stmt, QqlError> {
     let mut inner = stmt.clone();
     if let Some(p) = params {
@@ -111,50 +89,13 @@ pub fn stmt_readable(stmt: &ast::Stmt) -> String {
     qql_core::fmt::format_stmt_readable(stmt)
 }
 
-/// Compile a statement AST to its transport route, optionally binding
-/// `params` first.
-pub fn stmt_compile_route(
-    stmt: &ast::Stmt,
-    params: Option<&serde_json::Value>,
-) -> Result<serde_json::Value, QqlError> {
-    let bound = stmt_bind(stmt, params)?;
-    compile_bound_route(&bound)
-}
-
 /// Compile a statement AST with already-typed [`Value`] parameters.
-///
-/// Same contract as [`stmt_compile_route`]; see [`stmt_bind_value`].
 pub fn stmt_compile_route_value(
     stmt: &ast::Stmt,
     params: Option<&Value>,
 ) -> Result<serde_json::Value, QqlError> {
     let bound = stmt_bind_value(stmt, params)?;
-    compile_bound_route(&bound)
-}
-
-fn compile_bound_route(bound: &ast::Stmt) -> Result<serde_json::Value, QqlError> {
-    let compiled = routing::compile_statement(bound)?;
-    let (method, path, payload) = match compiled.route {
-        Some(route) => {
-            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-            (
-                serde_json::Value::String(route.method.as_str().into()),
-                serde_json::Value::String(route.path),
-                payload,
-            )
-        }
-        None => (
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-        ),
-    };
-    Ok(serde_json::json!({
-        "stmt_type": compiled.stmt_type,
-        "method": method,
-        "path": path,
-        "payload": payload,
-    }))
+    Ok(routing::compile_statement(&bound)?.to_route_json())
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -185,7 +126,7 @@ pub fn inject_filter(
     query: &str,
     field: &str,
     op: &str,
-    value: serde_json::Value,
+    value: Value,
 ) -> Result<serde_json::Value, QqlError> {
     let mut stmt = Parser::parse(query)?;
     stmt_inject_filter(&mut stmt, field, op, value)?;
@@ -220,21 +161,7 @@ pub fn tokenize(input: &str) -> Result<serde_json::Value, QqlError> {
         .map_err(|e| QqlError::execution("QQL-SERIALIZE-AST", e.to_string(), None))
 }
 
-/// Compile a QQL query to its transport route, optionally binding `params`.
-pub fn compile_query(
-    input: &str,
-    params: Option<&serde_json::Value>,
-) -> Result<serde_json::Value, QqlError> {
-    let mut stmt = Parser::parse(input)?;
-    if let Some(p) = params {
-        qql_core::params_json::bind_stmt_with_params(&mut stmt, p)?;
-    }
-    stmt_compile_route(&stmt, None)
-}
-
 /// Compile a QQL query with already-typed [`Value`] parameters.
-///
-/// Same contract as [`compile_query`]; see [`stmt_bind_value`].
 pub fn compile_query_value(
     input: &str,
     params: Option<&Value>,
@@ -243,7 +170,7 @@ pub fn compile_query_value(
     if let Some(p) = params {
         qql_core::params_json::bind_stmt_with_values(&mut stmt, p)?;
     }
-    stmt_compile_route(&stmt, None)
+    stmt_compile_route_value(&stmt, None)
 }
 
 /// Tree-formatted plan explanation for a query string.

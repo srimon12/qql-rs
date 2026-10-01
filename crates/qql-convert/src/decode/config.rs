@@ -327,8 +327,8 @@ pub(crate) fn create_params(
     Ok(CollectionParamsConfig {
         replication_factor: json::opt_u64(obj, "replication_factor", path)?,
         write_consistency_factor: json::opt_u64(obj, "write_consistency_factor", path)?,
-        read_fan_out_factor: None,
-        read_fan_out_delay_ms: None,
+        read_fan_out_factor: json::opt_u64(obj, "read_fan_out_factor", path)?,
+        read_fan_out_delay_ms: json::opt_u64(obj, "read_fan_out_delay_ms", path)?,
         on_disk_payload: json::opt_bool(obj, "on_disk_payload", path)?,
         payload_memory: payload_memory(obj, path)?,
         shard_number: json::opt_u64(obj, "shard_number", path)?,

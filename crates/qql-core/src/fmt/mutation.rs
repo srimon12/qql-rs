@@ -48,12 +48,10 @@ pub(crate) fn render_scroll(statement: &ScrollStmt) -> String {
     if let Some(selector) = &statement.with_vector {
         let _ = write!(out, " WITH VECTOR {}", render_vector_selector(selector));
     }
-    if statement.limit_param.is_some() {
-        if let Some(param) = &statement.limit_param {
-            let _ = write!(out, " LIMIT {}", render_placeholder(param));
-        }
-    } else {
-        let _ = write!(out, " LIMIT {}", statement.limit);
+    if let Some(param) = &statement.limit_param {
+        let _ = write!(out, " LIMIT {}", render_placeholder(param));
+    } else if let Some(limit) = statement.limit {
+        let _ = write!(out, " LIMIT {limit}");
     }
     out
 }

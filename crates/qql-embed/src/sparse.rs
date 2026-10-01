@@ -153,47 +153,6 @@ pub fn token_id(token: &str) -> u32 {
     (Murmur3::hash(0, token.as_bytes()) as i32).unsigned_abs()
 }
 
-/// Tokenize and iterate over processed tokens (default English pipeline: word
-/// tokenizer, lowercase, English stopwords, English stemming).
-///
-/// Compatibility shim over [`crate::bm25_text::Bm25Pipeline`]: allocates one
-/// `Vec` per call (the old stack-buffered zero-alloc form is gone — hot
-/// paths should use the pipeline directly). For other languages and options
-/// see [`crate::bm25_text::Bm25Pipeline`].
-#[inline]
-pub fn for_each_token<F>(text: &str, mut f: F)
-where
-    F: FnMut(&str),
-{
-    // The default pipeline only runs the word tokenizer: infallible.
-    if let Ok(tokens) = default_pipeline().doc_tokens(text) {
-        for token in &tokens {
-            f(token);
-        }
-    }
-}
-
-/// Tokenize and iterate directly over `u32` token IDs without intermediate allocations.
-#[inline]
-pub fn for_each_token_id<F>(text: &str, mut f: F)
-where
-    F: FnMut(u32),
-{
-    for_each_token(text, |token| {
-        f(token_id(token));
-    });
-}
-
-/// Server-default text pipeline: word tokenizer (split on non-alphanumeric),
-/// Unicode lowercase, English stopword removal, English snowball stemming.
-///
-/// Matches `WordTokenizer` + default `TokensProcessor` on the Qdrant server —
-/// the same pipeline Qdrant Edge's `EdgeBm25` runs. For other languages and
-/// options see [`crate::bm25_text::Bm25Pipeline`].
-pub fn tokenize(text: &str) -> Vec<String> {
-    default_pipeline().doc_tokens(text).unwrap_or_default()
-}
-
 /// Embed query text: unique token IDs (sorted) with unit weights — identical
 /// to Qdrant's `qdrant/bm25` query embedding.
 pub fn embed_query(text: &str) -> SparseVector {
@@ -210,9 +169,11 @@ pub fn embed_document(text: &str) -> SparseVector {
 ///
 /// Prefer this over [`embed_document_with`] on configurable paths: the
 /// parameters are validated once at construction instead of sanitized per call.
+/// Runs on the process-wide default text pipeline (default tokenizer,
+/// language, stopwords/stemmer), so no per-text pipeline build.
 pub fn embed_document_with_params(text: &str, params: &Bm25Params) -> SparseVector {
-    super::bm25_text::Bm25Pipeline::with_params(params)
-        .embed_document(text)
+    default_pipeline()
+        .embed_document_with(text, params.k1(), params.b(), params.avg_len())
         .unwrap_or_default()
 }
 

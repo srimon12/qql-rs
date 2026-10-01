@@ -253,7 +253,10 @@ fn spawn_mock_embedding_server(dim: usize, tx: mpsc::Sender<MockEmbedRequest>) -
 fn http_executor_native_symbol_constructs_client() {
     let data_dir = std::env::temp_dir().join(format!("nqql-edge-http-ctor-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&data_dir);
-    let client = http_executor(
+    // The public `http_executor` offloads construction to the async worker
+    // pool; the sync builder is what it wraps, and is what a native test can
+    // call without a JS runtime.
+    let client = build_http_executor(
         data_dir.to_string_lossy().into_owned(),
         "http://127.0.0.1:1/v1/embeddings".to_string(),
         "key".to_string(),
@@ -356,6 +359,7 @@ fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
 fn execute_stmt_rejects_embed_url_when_http_embedding_disabled() {
     let stmt = Stmt {
         inner: Parser::parse("COUNT FROM docs").expect("parse count"),
+        bound: false,
     };
     let options = serde_json::json!({
         "dataDir": std::env::temp_dir().join(format!(
@@ -367,14 +371,19 @@ fn execute_stmt_rejects_embed_url_when_http_embedding_disabled() {
         "embedModel": "mock-embed",
         "embedDim": 4,
     });
+    let options = common::execute::ExecOptionsInput {
+        raw: options,
+        params: None,
+    };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
     let err = runtime.block_on(async {
-        execute_stmt(&stmt, Some(options))
-            .await
-            .expect_err("embedUrl must be rejected without http-embedding")
+        match execute_stmt(&stmt, Some(options)).await {
+            Ok(_) => panic!("embedUrl must be rejected without http-embedding"),
+            Err(err) => err,
+        }
     });
     assert!(
         err.to_string().contains("http-embedding"),

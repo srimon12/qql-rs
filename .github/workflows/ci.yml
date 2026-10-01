@@ -87,11 +87,17 @@ jobs:
         with:
           shared-key: rust-stable
           cache-on-failure: true
+          # ort-sys (fastembed) bakes the absolute path of the ONNX Runtime it
+          # downloads into its build-script output. Caching that output without
+          # the download makes the restored fingerprint point at a missing
+          # library and `cargo test` fails to link; cache the download
+          # alongside the target dir so both always restore together.
+          cache-directories: ~/.cache/ort.pyke.io
 
       - name: Clippy (published Rust crates)
         run: >
           cargo clippy --locked --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge -p qql-cli
           -p qql-convert
           --all-targets -- -D warnings
 
@@ -104,7 +110,7 @@ jobs:
       - name: Test (published Rust crates)
         run: >
           cargo test --locked --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge -p qql-cli
           -p qql-convert
 
       # One cargo unit so feature unification (e.g. serde_json/preserve_order
@@ -202,7 +208,7 @@ jobs:
       - name: cargo check on MSRV (${{ steps.msrv.outputs.version }})
         run: >
           cargo check --locked --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge -p qql-cli
           -p qql-convert
 
   docs:
@@ -223,7 +229,7 @@ jobs:
       - name: cargo doc (libraries, deny warnings)
         run: >
           cargo doc --locked --no-deps --all-features
-          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+          -p qql-core -p qql-plan -p qql-protocol -p qql-embed -p qql -p qql-edge
           -p qql-convert
 
       - name: cargo doc (CLI, deny warnings)
@@ -262,7 +268,7 @@ jobs:
       - name: Package dependents (list + archive only)
         run: |
           set -euo pipefail
-          for crate in qql-plan qql-embed qql qql-edge qql-cli qql-convert; do
+          for crate in qql-plan qql-protocol qql-embed qql qql-edge qql-cli qql-convert; do
             cargo package --locked --no-verify --exclude-lockfile -p "$crate"
           done
 
@@ -295,6 +301,13 @@ jobs:
   pyqql-check:
     name: Python bindings
     runs-on: ubuntu-latest
+    services:
+      # Live REST round-trips (TestDbapiLive / TestClient / TestE2EPipeline /
+      # TestScriptExecute) run against this server instead of skipping.
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -314,6 +327,25 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+      - name: Type stubs parse (both SDKs)
+        run: >-
+          python -m py_compile
+          crates/pyqql/pyqql/__init__.pyi
+          crates/pyqql-edge/pyqql_edge/__init__.pyi
+      - name: Wait for Qdrant
+        run: |
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(60):
+              try:
+                  urllib.request.urlopen("http://127.0.0.1:6333/healthz", timeout=2).read()
+                  print("qdrant ready")
+                  break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise SystemExit("Qdrant did not become healthy within 120s")
+          PY
       - name: Build and test Python SDKs
         # pyqql-edge is PyO3 over qql-edge → same Rust fastembed path →
         # HF_HOME resolves as the cache ROOT (no /hub suffix) and overrides
@@ -369,24 +401,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      - name: Shared DX helper files must stay byte-identical across SDKs
-        run: |
-          set -euo pipefail
-          fail=0
-          for pair in \
-            "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
-            "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
-            "crates/pyqql/pyqql/_errors.py crates/pyqql-edge/pyqql_edge/_errors.py" \
-            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py" \
-            "scripts/install.sh website/public/install.sh" \
-            "scripts/install.ps1 website/public/install.ps1"; do
-            set -- $pair
-            if ! diff -q "$1" "$2" >/dev/null; then
-              echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"
-              fail=1
-            fi
-          done
-          exit "$fail"
+      - name: Shared DX/installer copies must match their canonical sources
+        if: matrix.package == 'nqql'
+        run: cargo run --locked -p qql-grammar-gen -- check
       - name: Install JS dependencies
         working-directory: crates/${{ matrix.package }}
         run: npm install --no-package-lock --omit=optional --no-audit --no-fund
@@ -462,6 +479,45 @@ jobs:
           assert.equal(wasm.analyzeValue, undefined);
           assert.equal(wasm.compileValue, undefined);
           assert.equal(wasm.injectShardKey, undefined);
+          NODE
+
+      - name: Prototype-safe payload round-trip in WASM output
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          // A payload key named `__proto__` (and `toString`) is data. It must
+          // arrive as an own data property without replacing the object
+          // prototype or resolving inherited members.
+          global.fetch = async () => new Response(
+            JSON.stringify({
+              result: {
+                points: [
+                  {
+                    id: 7,
+                    score: 0.5,
+                    payload: JSON.parse('{"__proto__": {"x": 1}, "toString": "p"}'),
+                  },
+                ],
+              },
+              status: 'ok',
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+          const wasm = require('/tmp/qql-wasm-pkg/qql_wasm.js');
+          (async () => {
+            const client = new wasm.Client('http://localhost:6333', null);
+            const report = await client.execute('QUERY [0.1] FROM docs LIMIT 1');
+            const payload = report.results[0].data[0].payload;
+            assert.equal(Object.prototype.hasOwnProperty.call(payload, '__proto__'), true);
+            assert.deepEqual(payload.__proto__, { x: 1 });
+            assert.equal(Object.getPrototypeOf(payload), Object.prototype);
+            assert.equal(Object.prototype.hasOwnProperty.call(payload, 'toString'), true);
+            assert.equal(payload.toString, 'p');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE
 
       - name: Verify no removed injectShardKey in WASM declarations
@@ -626,7 +682,7 @@ jobs:
             exit 0
           }
           if grep -Eq \
-            '(^website/|^language/v1/|^crates/qql-wasm/|^crates/qql-core/|^crates/qql-plan/|^crates/qql-embed/|^Cargo\.toml$|^Cargo\.lock$|^\.github/workflows/ci\.yml$)' \
+            '(^website/|^language/v1/|^crates/qql-wasm/|^crates/qql-core/|^crates/qql-plan/|^crates/qql-protocol/|^crates/qql-embed/|^Cargo\.toml$|^Cargo\.lock$|^\.github/workflows/ci\.yml$)' \
             <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else

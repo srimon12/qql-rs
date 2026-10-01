@@ -56,21 +56,18 @@ pub(crate) fn shard_key_to_plan(key: &qdrant::ShardKey) -> Result<PlanShardKey, 
     }
 }
 
-/// Payload map → typed payload: empty becomes `None`, matching the REST
-/// strict parser (absent/`null` payload reads as `None`).
+/// Payload map → typed payload: an empty map survives as `Some({})`, matching
+/// the REST strict parser, which keeps `"payload": {}` as an empty object (only
+/// an absent/null payload reads as `None`).
 fn payload_to_typed(
     payload: HashMap<String, qdrant::Value>,
 ) -> Option<HashMap<String, serde_json::Value>> {
-    if payload.is_empty() {
-        None
-    } else {
-        Some(
-            payload
-                .into_iter()
-                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-                .collect(),
-        )
-    }
+    Some(
+        payload
+            .into_iter()
+            .map(|(k, v)| (k, qdrant_value_to_json(&v)))
+            .collect(),
+    )
 }
 
 /// One proto `VectorOutput` → typed vector value. Takes ownership: dense

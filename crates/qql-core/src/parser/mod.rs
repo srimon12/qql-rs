@@ -60,6 +60,51 @@ pub fn ascii_equal(s: &str, other: &str) -> bool {
     s.eq_ignore_ascii_case(other)
 }
 
+/// Split a `-`-glued signed literal (`1-2`, `a -1`, `x-1`) into `Minus` plus
+/// an unsigned literal when the previous token can end an operand.
+///
+/// The lexer folds a leading `-` into the number token, so `a-1` produced
+/// `Identifier("a")`, `Integer("-1")` and the formula parser saw no infix
+/// operator — rejecting what `formula_sum` in `grammar.pest` accepts. A `-`
+/// preceded by whitespace (`1 - -2`) or in value position (`= -1`) keeps the
+/// signed literal unchanged.
+fn split_glued_signed_literals(tokens: Vec<Token<'_>>) -> Vec<Token<'_>> {
+    // Operand-ending kinds: only these turn a glued `-` into a binary minus.
+    fn ends_operand(kind: TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Identifier
+                | TokenKind::Integer
+                | TokenKind::Float
+                | TokenKind::String
+                | TokenKind::Rparen
+                | TokenKind::Rbracket
+        )
+    }
+
+    let mut out: Vec<Token<'_>> = Vec::with_capacity(tokens.len());
+    for tok in tokens {
+        let glued =
+            matches!(tok.kind, TokenKind::Integer | TokenKind::Float) && tok.text.starts_with('-');
+        if glued && out.last().is_some_and(|prev| ends_operand(prev.kind)) {
+            let start = tok.span.start;
+            out.push(Token::new(
+                TokenKind::Minus,
+                &tok.text[..1],
+                Span::new(start, start + 1),
+            ));
+            out.push(Token::new(
+                tok.kind,
+                &tok.text[1..],
+                Span::new(start + 1, tok.span.end),
+            ));
+        } else {
+            out.push(tok);
+        }
+    }
+    out
+}
+
 /// Returns true when a token kind can serve as a contextual field name.
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
     kind.is_keyword_or_identifier()
@@ -192,7 +237,7 @@ impl<'a> AstLowerer<'a> {
         for token_res in lexer {
             tokens.push(token_res?);
         }
-        Ok(tokens)
+        Ok(split_glued_signed_literals(tokens))
     }
 
     fn expect_end(&mut self) -> Result<(), QqlError> {
@@ -342,7 +387,22 @@ impl<'a> AstLowerer<'a> {
                     Ok(crate::ast::Value::Int(v))
                 } else if let Ok(v) = tok.text.parse::<u64>() {
                     Ok(crate::ast::Value::UInt(v))
+                } else if tok
+                    .text
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|b| b.is_ascii_digit() || *b == b'-')
+                {
+                    // Digit-leading text that fits neither `i64` nor `u64` is
+                    // out of range — fail instead of turning the numeric
+                    // comparison into a string match (core-audit #4).
+                    Err(QqlError::parse(
+                        "QQL-PARSE-NUMBER",
+                        alloc::format!("integer literal '{}' is out of range", tok.text),
+                        tok.span,
+                    ))
                 } else {
+                    // The `INTEGER` keyword spelling.
                     Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }

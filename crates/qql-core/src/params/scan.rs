@@ -76,6 +76,16 @@ fn has_closing_triple(bytes: &[u8], start: usize, triple: &[u8; 3]) -> bool {
     start + 2 < bytes.len() && &bytes[start..start + 3] == triple
 }
 
+/// Mirrors `Lexer::read_string`: a three-quote run only opens a triple-quoted
+/// string when a matching closing run exists later in the slice. Otherwise the
+/// run is ordinary quoted content (e.g. `''''` is `'` + `''` + `'`).
+#[inline]
+fn opens_triple_quoted(bytes: &[u8], i: usize, quote: u8) -> bool {
+    let triple = [quote, quote, quote];
+    has_closing_triple(bytes, i, &triple)
+        && bytes[i + 3..].windows(3).any(|window| window == triple)
+}
+
 /// Advance past a triple-quoted string (`'''...'''` or `"""..."""`).
 pub fn scan_triple_quoted(bytes: &[u8], mut i: usize, quote: u8) -> usize {
     i += 3;
@@ -116,38 +126,47 @@ pub fn scan_double_quoted(bytes: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// If `bytes[i]` begins a comment, string literal, or backtick identifier,
-/// returns `Some(next_offset)` skipping the protected region. Otherwise `None`.
-pub fn skip_protected(bytes: &[u8], i: usize) -> Option<usize> {
+/// If `bytes[i]` begins a string literal or backtick identifier, returns
+/// `Some(next_offset)` skipping the protected region. Otherwise `None`.
+///
+/// Mirrors [`crate::lexer::Lexer`] exactly: triple-quote runs require a later
+/// closing run, and raw strings (`r'…'` / `r"…"`) never fold quotes — a raw
+/// run is scanned to the first quote, so `r'''x'''` is not one raw triple
+/// string (core-audit #6).
+pub fn skip_literal(bytes: &[u8], i: usize) -> Option<usize> {
     match bytes[i] {
-        b'-' if i + 1 < bytes.len() && bytes[i + 1] == b'-' => {
-            Some(scan_line_comment(bytes, i + 2))
-        }
         b'`' => Some(scan_backtick(bytes, i)),
         b'\'' => {
-            if i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+            if opens_triple_quoted(bytes, i, b'\'') {
                 Some(scan_triple_quoted(bytes, i, b'\''))
             } else {
                 Some(scan_single_quoted(bytes, i))
             }
         }
         b'"' => {
-            if i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+            if opens_triple_quoted(bytes, i, b'"') {
                 Some(scan_triple_quoted(bytes, i, b'"'))
             } else {
                 Some(scan_double_quoted(bytes, i))
             }
         }
         b'r' if i + 1 < bytes.len() && (bytes[i + 1] == b'\'' || bytes[i + 1] == b'"') => {
-            let quote = bytes[i + 1];
-            if i + 3 < bytes.len() && bytes[i + 2] == quote && bytes[i + 3] == quote {
-                Some(scan_triple_quoted(bytes, i + 1, quote))
-            } else {
-                Some(scan_raw_string(bytes, i, quote))
-            }
+            Some(scan_raw_string(bytes, i, bytes[i + 1]))
         }
         _ => None,
     }
+}
+
+/// If `bytes[i]` begins a comment, string literal, or backtick identifier,
+/// returns `Some(next_offset)` skipping the protected region. Otherwise `None`.
+pub fn skip_protected(bytes: &[u8], i: usize) -> Option<usize> {
+    if let Some(next) = skip_literal(bytes, i) {
+        return Some(next);
+    }
+    if bytes[i] == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+        return Some(scan_line_comment(bytes, i + 2));
+    }
+    None
 }
 
 /// ASCII identifier slice at `[start, end)`. Infallible because the scanner

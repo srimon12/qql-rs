@@ -372,17 +372,19 @@ fn bare_body_detection_table() {
         convert(r#"{"query": {"nearest": [0.1]}, "limit": 5}"#),
         ["QUERY [0.1] FROM docs LIMIT 5"]
     );
-    // Order-by / fusion / sample.
-    assert_eq!(
-        convert(r#"{"order_by": "created_at", "limit": 3}"#),
-        ["QUERY ORDER BY created_at ASC FROM docs LIMIT 3"]
-    );
+    // Fusion / sample.
     assert_eq!(
         convert(
             r#"{"fusion": "rrf", "prefetch": [{"query": {"nearest": [0.1]}, "limit": 10}], "limit": 3}"#
         ),
         ["QUERY FUSION RRF FROM docs PREFETCH (QUERY [0.1] LIMIT 10) LIMIT 3"]
     );
+    // A bare top-level order_by is ambiguous (SCROLL vs query ORDER BY)
+    // without the method/path envelope, so it fails closed.
+    assert!(matches!(
+        convert_err(r#"{"order_by": "created_at", "limit": 3}"#),
+        ConvertError::UndecodableBody { .. }
+    ));
     // DDL detections.
     assert_eq!(convert(r#"{"vectors": {}}"#), ["CREATE COLLECTION docs"]);
     assert_eq!(
@@ -414,6 +416,7 @@ fn bare_ambiguities_fail_closed() {
         r#"{"points": []}"#,
         r#"{"shard_key": "acme"}"#,
         r#"{"limit": 5}"#,
+        r#"{"order_by": "created_at", "limit": 3}"#,
     ] {
         assert!(
             matches!(
@@ -423,6 +426,25 @@ fn bare_ambiguities_fail_closed() {
             "{input}"
         );
     }
+}
+
+#[test]
+fn quoted_collection_names_with_spaces_are_accepted() {
+    let wrapped = serde_json::json!({
+        "method": "POST",
+        "path": "/collections/my coll/points/query",
+        "body": {"query": {"nearest": [0.1]}, "limit": 1},
+    })
+    .to_string();
+    let stmts = convert_json(&wrapped, None).expect("quoted collection with spaces");
+    assert_eq!(stmts, ["QUERY [0.1] FROM 'my coll' LIMIT 1"]);
+}
+
+#[test]
+fn legacy_match_integer_accepts_negative_values() {
+    let stmts =
+        convert(r#"{"filter": {"must": [{"key": "code", "match": {"integer": -5}}]}, "limit": 1}"#);
+    assert!(stmts[0].contains("code = -5"), "{}", stmts[0]);
 }
 
 #[test]

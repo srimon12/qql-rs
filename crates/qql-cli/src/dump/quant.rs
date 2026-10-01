@@ -83,9 +83,9 @@ fn push_memory(opts: &mut Vec<String>, memory: Option<qql_plan::types::MemoryPla
 fn normalize_binary_encoding_str(raw: &str) -> Option<String> {
     Some(
         match raw.to_ascii_lowercase().as_str() {
-            "one_bit" | "onebit" | "1" => "one_bit",
-            "two_bits" | "twobits" | "2" => "two_bits",
-            "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits",
+            "one_bit" => "one_bit",
+            "two_bits" => "two_bits",
+            "one_and_half_bits" => "one_and_half_bits",
             _ => return None,
         }
         .to_string(),
@@ -96,10 +96,10 @@ fn normalize_binary_encoding_str(raw: &str) -> Option<String> {
 fn normalize_turbo_bits_str(raw: &str) -> Option<String> {
     Some(
         match raw.to_ascii_lowercase().as_str() {
-            "bits1" | "1" => "1",
-            "bits1_5" | "bits1.5" | "1.5" => "1.5",
-            "bits2" | "2" => "2",
-            "bits4" | "4" => "4",
+            "bits1" => "1",
+            "bits1_5" => "1.5",
+            "bits2" => "2",
+            "bits4" => "4",
             _ => return None,
         }
         .to_string(),
@@ -162,62 +162,12 @@ pub fn format_quantization_opts(kind: &str, inner: &serde_json::Map<String, Valu
     opts.join(", ")
 }
 
+/// Map the OpenAPI binary `encoding` string to a QQL encoding.
 pub fn normalize_binary_encoding(v: &Value) -> Option<String> {
-    let raw = match v {
-        Value::String(s) => s.to_ascii_lowercase(),
-        Value::Number(n) => {
-            let f = n.as_f64()?;
-            if (f - 1.5).abs() < f64::EPSILON {
-                "1.5".into()
-            } else if (f - 2.0).abs() < f64::EPSILON {
-                "2".into()
-            } else if (f - 1.0).abs() < f64::EPSILON {
-                "1".into()
-            } else {
-                return None;
-            }
-        }
-        _ => return None,
-    };
-    Some(
-        match raw.as_str() {
-            "one_bit" | "onebit" | "1" => "one_bit",
-            "two_bits" | "twobits" | "2" => "two_bits",
-            "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits",
-            _ => return None,
-        }
-        .into(),
-    )
+    normalize_binary_encoding_str(v.as_str()?)
 }
 
-/// Map REST/gRPC turbo bit representations to QQL numeric `bits`.
+/// Map the OpenAPI turbo `bits` string to QQL's numeric `bits`.
 pub fn normalize_turbo_bits(v: &Value) -> Option<String> {
-    match v {
-        Value::Number(n) => {
-            let f = n.as_f64()?;
-            // Only the four legal turbo bit widths.
-            if (f - 1.0).abs() < f64::EPSILON
-                || (f - 1.5).abs() < f64::EPSILON
-                || (f - 2.0).abs() < f64::EPSILON
-                || (f - 4.0).abs() < f64::EPSILON
-            {
-                // Prefer compact integer rendering when whole.
-                if f.fract() == 0.0 {
-                    Some(format!("{}", f as i64))
-                } else {
-                    Some(format!("{}", f))
-                }
-            } else {
-                None
-            }
-        }
-        Value::String(s) => match s.to_ascii_lowercase().as_str() {
-            "bits1" | "1" => Some("1".into()),
-            "bits1_5" | "bits1.5" | "1.5" => Some("1.5".into()),
-            "bits2" | "2" => Some("2".into()),
-            "bits4" | "4" => Some("4".into()),
-            _ => None,
-        },
-        _ => None,
-    }
+    normalize_turbo_bits_str(v.as_str()?)
 }

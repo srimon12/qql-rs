@@ -8,17 +8,16 @@ use crate::executor::response::{BackendResponse, ExecData, score_f64};
 use crate::executor::{ExecResponse, Executor, OnError, SearchHit};
 
 impl Executor {
-    /// Execute one parsed statement under the configured timeout, returning a
-    /// single response.
-    pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
-        self.ensure_open()?;
+    /// Run `future` under the configured [`request_timeout`](Executor::request_timeout).
+    ///
+    /// Every execution entry point funnels through this so the timeout cannot
+    /// be bypassed by one path (e.g. prepared statements or `upsert_many`).
+    pub(crate) async fn with_timeout<T>(
+        &self,
+        future: impl std::future::Future<Output = Result<T, QqlError>>,
+    ) -> Result<T, QqlError> {
         if let Some(secs) = self.request_timeout() {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                self.execute_node_inner(stmt),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_secs(secs), future).await {
                 Ok(res) => res,
                 Err(_) => Err(QqlError::transport(
                     "QQL-TIMEOUT",
@@ -27,8 +26,15 @@ impl Executor {
                 )),
             }
         } else {
-            self.execute_node_inner(stmt).await
+            future.await
         }
+    }
+
+    /// Execute one parsed statement under the configured timeout, returning a
+    /// single response.
+    pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        self.ensure_open()?;
+        self.with_timeout(self.execute_node_inner(stmt)).await
     }
 
     async fn execute_node_inner(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {

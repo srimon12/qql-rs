@@ -292,6 +292,30 @@ const REPLICA_STATES: &[&str] = &[
     "ManualRecovery",
 ];
 
+/// Validate `CREATE SHARD KEY` counts against the OpenAPI `CreateShardingKey`
+/// schema: `uint32`, minimum 1. A hand-built or bound statement can carry any
+/// `u64`; failing here keeps the wire valid on every transport.
+pub(crate) fn validate_shard_key_counts(
+    shards_number: Option<u64>,
+    replication_factor: Option<u64>,
+) -> Result<(), QqlError> {
+    for (name, value) in [
+        ("shards_number", shards_number),
+        ("replication_factor", replication_factor),
+    ] {
+        if let Some(value) = value
+            && (value == 0 || value > u32::MAX as u64)
+        {
+            return Err(QqlError::validation(
+                "QQL-PLAN-SHARD-KEY",
+                format!("{name} must be within 1..={}", u32::MAX),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Validate (and canonicalize the casing of) a shard-key `initial_state`.
 /// The parser stores the canonical form; a hand-built AST is normalized here
 /// and fails closed on unknown states.

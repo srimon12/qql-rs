@@ -19,8 +19,9 @@ grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/r
 rest = ["dep:reqwest", "tokio/rt", "tokio/fs", "tokio/io-util"]
 
 [dependencies]
-qql-core = { workspace = true, features = ["serde", "std", "json"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
 qql-plan = { workspace = true }
+qql-protocol = { workspace = true }
 qql-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -45,7 +46,7 @@ tonic-prost-build = "0.14"
 protoc-bin-vendored = "3"
 
 [dev-dependencies]
-jsonschema = "0.56"
+jsonschema = "0.57"
 
 [lints]
 workspace = true

@@ -3,7 +3,7 @@ use qql::executor::{Executor, OnError};
 use qql_core::parser::Parser;
 use qql_plan::{
     PlanFacetValue, PlanGroupId, PlanPointId, PlanVectorStruct, PlanVectorValue, PlannedOperation,
-    plan,
+    PointsRequest, plan,
 };
 use serde_json::json;
 
@@ -229,11 +229,14 @@ fn typed_update_batch_returns_mutations() {
         }
 
         let mutations = vec![
-            plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}}"),
+            // `WAIT true` keeps the members' effective wait uniform: the batch
+            // builder rejects mixed-wait batches (embedding-less upserts
+            // default to `WAIT false`).
+            plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}} WAIT true"),
             plan_one("UPDATE docs SET PAYLOAD = {city: 'NYC'} WHERE id = 2"),
             plan_one("DELETE FROM docs WHERE id = 2"),
         ];
-        let (collection, _labels, batch) =
+        let (collection, _labels, _opts, batch) =
             qql_plan::build_update_batch(&mutations).expect("update batch");
         assert_eq!(collection, "docs");
 
@@ -248,6 +251,283 @@ fn typed_update_batch_returns_mutations() {
             // The executor owns upsert counts; the backend never reports one.
             assert!(response.data.count().is_none());
         }
+
+        backend.close().await.expect("close edge backend");
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// A direct `QdrantOps::create_collection` call must reject the create-time
+/// options qdrant-edge cannot persist, exactly like the `CREATE COLLECTION`
+/// statement path: success with the options silently dropped would leave a
+/// single-shard, single-replica collection.
+#[test]
+fn trait_create_collection_rejects_sharding_and_params() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let dir = temp_dir("trait-create-rejects");
+        let _ = std::fs::remove_dir_all(&dir);
+        let backend = EdgeQdrant::new(&dir, false);
+        let collection = "docs";
+
+        let PlannedOperation::CreateCollection { request, .. } =
+            plan_one("CREATE COLLECTION docs (dense VECTOR(3, COSINE))")
+        else {
+            panic!("expected a create-collection plan");
+        };
+
+        let mut sharded = request.clone();
+        sharded.shard_number = Some(3);
+        let error = backend
+            .create_collection(collection, &sharded)
+            .await
+            .expect_err("shard_number must fail closed on the trait path");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-SHARD");
+        assert!(
+            !backend.collection_exists(collection).await.unwrap(),
+            "a rejected create must not materialise the collection"
+        );
+
+        let mut keyed = request.clone();
+        keyed.shard_keys = Some(vec![qql_plan::semantic::PlanShardKey::Keyword(
+            "acme".to_string(),
+        )]);
+        let error = backend
+            .create_collection(collection, &keyed)
+            .await
+            .expect_err("shard_keys must fail closed on the trait path");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-SHARD");
+
+        let mut replicated = request.clone();
+        replicated.params = Some(qql_plan::CollectionParams {
+            replication_factor: Some(3),
+            ..Default::default()
+        });
+        let error = backend
+            .create_collection(collection, &replicated)
+            .await
+            .expect_err("replication params must fail closed on the trait path");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS");
+
+        backend
+            .create_collection(collection, &request)
+            .await
+            .expect("edge-representable create still succeeds");
+        assert!(backend.collection_exists(collection).await.unwrap());
+
+        // The same call on the now-open collection must still reject the
+        // unrepresentable options instead of returning the cached shard.
+        let error = backend
+            .create_collection(collection, &sharded)
+            .await
+            .expect_err("cached create must not bypass the option rejection");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-SHARD");
+
+        backend.close().await.expect("close edge backend");
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// The update-batch fan-out mirrors the server: every item runs even when an
+/// earlier one fails, each applied item gets one response in order, and the
+/// short result array is the documented failure signal (the caller's
+/// cardinality check reports the failed member without re-applying the batch).
+#[test]
+fn update_batch_runs_every_item_after_a_failure() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let dir = temp_dir("update-batch-partial");
+        let _ = std::fs::remove_dir_all(&dir);
+        let backend = EdgeQdrant::new(&dir, false);
+        backend
+            .execute_planned(&plan_one(
+                "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
+            ))
+            .await
+            .expect("create collection");
+        backend
+            .execute_planned(&plan_one(
+                "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}} WAIT true",
+            ))
+            .await
+            .expect("seed point");
+
+        let mutations = vec![
+            plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}} WAIT true"),
+            // Wrong dimension: fails, but must not stop the delete below.
+            plan_one("UPSERT INTO docs VALUES {id: 3, vector: {dense: [0.0, 1.0]}} WAIT true"),
+            plan_one("DELETE FROM docs WHERE id = 1 WAIT true"),
+        ];
+        let (collection, _labels, _opts, batch) =
+            qql_plan::build_update_batch(&mutations).expect("update batch");
+        let responses = backend
+            .execute_update_batch(&collection, &batch, true)
+            .await
+            .expect("the batch answers with the applied items");
+        assert_eq!(
+            responses.len(),
+            2,
+            "the failed item is dropped, so the batch is short of the operation count"
+        );
+        for response in &responses {
+            assert_eq!(response.data, ExecData::Mutation { affected: None });
+            assert!(response.telemetry.is_none());
+        }
+
+        // The dropped item reports its real failure when dispatched alone.
+        let error = backend
+            .execute_planned(&mutations[1])
+            .await
+            .expect_err("wrong vector dimension must fail");
+        assert_eq!(error.code, "QQL-EDGE-DIMENSION");
+
+        // Final state: the first upsert landed, the delete ran, the bad one did not.
+        let response = backend
+            .execute_planned(&plan_one("QUERY POINTS (1, 2, 3) FROM docs"))
+            .await
+            .expect("read back");
+        let ExecData::Hits(hits) = &response.data else {
+            panic!("expected typed hits, got {:?}", response.data);
+        };
+        let ids: Vec<_> = hits.iter().map(|hit| hit.id.clone()).collect();
+        assert_eq!(ids, vec![PlanPointId::Number(2)]);
+
+        backend.close().await.expect("close edge backend");
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// Edge accepts `WAIT false` everywhere and satisfies it by construction:
+/// embedding-less upserts plan with `WAIT false` by default, so failing closed
+/// would reject the standard ingest path. Every write is applied before the
+/// call returns, which also makes a `WAIT false` batch valid.
+#[test]
+fn wait_false_is_satisfied_synchronously() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let dir = temp_dir("wait-false");
+        let _ = std::fs::remove_dir_all(&dir);
+        let backend = EdgeQdrant::new(&dir, false);
+        backend
+            .execute_planned(&plan_one(
+                "CREATE COLLECTION docs (dense VECTOR(3, COSINE))",
+            ))
+            .await
+            .expect("create collection");
+
+        // No explicit WAIT: the planner defaults embedding-less upserts to false.
+        backend
+            .execute_planned(&plan_one(
+                "UPSERT INTO docs VALUES {id: 1, vector: {dense: [1.0, 0.0, 0.0]}}",
+            ))
+            .await
+            .expect("default-wait upsert");
+        let response = backend
+            .execute_planned(&plan_one("COUNT FROM docs"))
+            .await
+            .expect("count");
+        assert_eq!(
+            response.data,
+            ExecData::Count(1),
+            "the write is visible immediately"
+        );
+
+        backend
+            .execute_planned(&plan_one("DELETE FROM docs WHERE id = 1 WAIT false"))
+            .await
+            .expect("explicit WAIT false delete");
+        let response = backend
+            .execute_planned(&plan_one("COUNT FROM docs"))
+            .await
+            .expect("count");
+        assert_eq!(response.data, ExecData::Count(0));
+
+        // The batch path accepts the same flag (all members share it).
+        let mutations = vec![
+            plan_one("UPSERT INTO docs VALUES {id: 2, vector: {dense: [0.0, 1.0, 0.0]}}"),
+            plan_one("UPSERT INTO docs VALUES {id: 3, vector: {dense: [0.0, 0.0, 1.0]}}"),
+        ];
+        let (collection, _labels, _opts, batch) =
+            qql_plan::build_update_batch(&mutations).expect("update batch");
+        let responses = backend
+            .execute_update_batch(&collection, &batch, false)
+            .await
+            .expect("WAIT false batch is synchronous, not rejected");
+        assert_eq!(responses.len(), 2);
+
+        backend.close().await.expect("close edge backend");
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// Every failed open path must clean up its per-key entry in `opening`; a
+/// retry loop against missing collections would otherwise leak one entry per
+/// attempted name.
+#[test]
+fn failed_opens_do_not_leak_opening_entries() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let dir = temp_dir("opening-leak");
+        let _ = std::fs::remove_dir_all(&dir);
+        let backend = EdgeQdrant::new(&dir, false);
+
+        for name in ["missing_a", "missing_b"] {
+            let error = backend
+                .execute_planned(&plan_one(&format!("COUNT FROM {name}")))
+                .await
+                .expect_err("missing collection must fail");
+            assert_eq!(error.code, "QQL-EDGE-COLLECTION-NOT-FOUND");
+        }
+
+        let create = plan_one("CREATE COLLECTION docs (dense VECTOR(3, COSINE))");
+        backend.execute_planned(&create).await.expect("create");
+        let error = backend
+            .execute_planned(&create)
+            .await
+            .expect_err("duplicate create must fail");
+        assert_eq!(error.code, "QQL-EDGE-COLLECTION-EXISTS");
+
+        assert!(
+            backend.opening.lock().unwrap().is_empty(),
+            "failed opens must remove their per-key open mutex"
+        );
+
+        backend.close().await.expect("close edge backend");
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
+/// Dropping a collection that was never created reports the same not-found
+/// code the read paths use, matching the remote backends' 404 instead of
+/// silently succeeding.
+#[test]
+fn drop_missing_collection_fails_closed() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let dir = temp_dir("drop-missing");
+        let _ = std::fs::remove_dir_all(&dir);
+        let backend = EdgeQdrant::new(&dir, false);
+
+        let error = backend
+            .execute_planned(&plan_one("DROP COLLECTION ghost"))
+            .await
+            .expect_err("dropping a missing collection must fail");
+        assert_eq!(error.code, "QQL-EDGE-COLLECTION-NOT-FOUND");
 
         backend.close().await.expect("close edge backend");
         let _ = std::fs::remove_dir_all(dir);
@@ -666,6 +946,9 @@ fn engine_dimension_mismatch_reports_dimension_code() {
 
 /// Non-UUID string point IDs are rejected before the engine call, with the
 /// dedicated id-conversion code.
+///
+/// The planner rejects these earlier with `QQL-PLAN-POINT-ID`, so this builds
+/// the plan directly to pin the edge-side refusal as a last line of defense.
 #[test]
 fn invalid_string_point_id_reports_code() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -683,8 +966,17 @@ fn invalid_string_point_id_reports_code() {
             .await
             .expect("create collection");
 
+        let unvalidated = PlannedOperation::GetPoints {
+            collection: "docs".into(),
+            request: PointsRequest {
+                ids: vec![PlanPointId::String("doc-1".into())],
+                with_payload: None,
+                with_vector: None,
+                shard_key: None,
+            },
+        };
         let error = backend
-            .execute_planned(&plan_one("QUERY POINTS ('doc-1') FROM docs"))
+            .execute_planned(&unvalidated)
             .await
             .expect_err("non-UUID string id must fail");
         assert_eq!(error.code, "QQL-EDGE-INVALID-POINT-ID");

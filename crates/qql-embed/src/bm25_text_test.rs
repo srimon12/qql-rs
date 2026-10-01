@@ -468,6 +468,83 @@ fn tf_formula_matches_qdrant_reference() {
 }
 
 #[test]
+fn prefix_min_token_len_zero_emits_the_phantom_empty_token() {
+    // Shared quirk with Qdrant's `PrefixTokenizer`: `min_token_len = 0`
+    // starts the n-gram loop at 0, whose `nth(0)` slice is the empty string.
+    // Pinned (not fixed) so the deliberate parity behavior stays visible.
+    let config = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        None,
+        Some("prefix"),
+        None,
+        None,
+        None,
+        Some("none"),
+        Some(0),
+        None,
+        None,
+    )
+    .expect("valid");
+    let pipe = config.pipeline();
+    assert_eq!(
+        pipe.doc_tokens("hi").unwrap(),
+        vec!["", "h", "hi"],
+        "n = 0 emits the empty prefix token"
+    );
+    let vector = pipe.embed_document("hi").unwrap();
+    assert!(
+        vector.indices.contains(&sparse::token_id("")),
+        "the empty token contributes its token id to the document vector"
+    );
+}
+
+#[test]
+fn ascii_folding_does_not_fold_stopword_entries() {
+    // Behavior pin (see the module docs): stopword entries are lowercased but
+    // never ASCII-folded at build time, while tokens are folded *then*
+    // lowercased. French "à" is an entry, so without folding it filters; with
+    // folding the token becomes "a" (not an entry) and survives. Qdrant
+    // parity for this corner is unverified; the test keeps the behavior
+    // deliberate instead of accidental.
+    let folded = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        Some("french"),
+        None,
+        None,
+        Some(true),
+        None,
+        Some("none"),
+        None,
+        None,
+        None,
+    )
+    .expect("valid")
+    .pipeline();
+    assert_eq!(folded.doc_tokens("à").unwrap(), vec!["a"]);
+    let unfolded = Bm25TextConfig::resolve(
+        None,
+        None,
+        None,
+        Some("french"),
+        None,
+        None,
+        None,
+        None,
+        Some("none"),
+        None,
+        None,
+        None,
+    )
+    .expect("valid")
+    .pipeline();
+    assert!(unfolded.doc_tokens("à").unwrap().is_empty());
+}
+
+#[test]
 fn estimator_measures_post_pipeline_lengths() {
     let pipe = plain("english");
     // "the" is filtered: (2 + 1) / 2 = 1.5.

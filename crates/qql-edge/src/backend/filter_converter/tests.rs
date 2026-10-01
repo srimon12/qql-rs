@@ -356,7 +356,7 @@ fn bare_nested_filter_is_wrapped_in_must() {
 /// with its own conditions (no `should`-moving: the threshold carries
 /// its candidate list).
 #[test]
-fn legacy_min_should_moves_should_conditions() {
+fn object_min_should_passes_through() {
     let expression = PlanExpression::Compound(PlanCompound {
         must: vec![],
         must_not: vec![],
@@ -409,6 +409,66 @@ fn mixed_any_values_fail_closed() {
         "{}",
         error.message
     );
+}
+
+/// Integral floats in `IN` / `MATCH ANY` are integer matches on the gRPC path
+/// (Qdrant compares payload numbers numerically); the edge lowering accepts and
+/// rejects exactly the same lists.
+#[test]
+fn integral_float_lists_follow_the_grpc_rule() {
+    use qdrant_edge::{AnyVariants, Match, MatchValue, ValueVariants};
+
+    let integral = PlanExpression::Single(Box::new(match_field(
+        "price",
+        PlanMatch::Any {
+            any: vec![
+                qql_core::ast::Value::Int(2),
+                qql_core::ast::Value::Float(3.0),
+                qql_core::ast::Value::UInt(4),
+            ],
+        },
+    )));
+    let lowered = convert_edge_filter(Some(&integral)).unwrap().unwrap();
+    let must = lowered.must.expect("single clause wrapped in must");
+    let Condition::Field(field) = &must[0] else {
+        panic!("expected a field condition");
+    };
+    let Some(Match::Any(any)) = &field.r#match else {
+        panic!("expected a match-any condition");
+    };
+    let AnyVariants::Integers(integers) = &any.any else {
+        panic!("expected an integer list, got {:?}", any.any);
+    };
+    assert_eq!(integers.iter().copied().collect::<Vec<_>>(), vec![2, 3, 4]);
+
+    let non_integral = PlanExpression::Single(Box::new(match_field(
+        "price",
+        PlanMatch::Any {
+            any: vec![
+                qql_core::ast::Value::Int(2),
+                qql_core::ast::Value::Float(3.5),
+            ],
+        },
+    )));
+    let error = convert_edge_filter(Some(&non_integral)).unwrap_err();
+    assert_eq!(error.code, "QQL-EDGE-FILTER-CONVERT");
+
+    // Single-value floats follow the same rule.
+    let single = PlanExpression::Single(Box::new(match_field(
+        "price",
+        PlanMatch::Value {
+            value: qql_core::ast::Value::Float(2.0),
+        },
+    )));
+    let lowered = convert_edge_filter(Some(&single)).unwrap().unwrap();
+    let must = lowered.must.expect("single clause wrapped in must");
+    let Condition::Field(field) = &must[0] else {
+        panic!("expected a field condition");
+    };
+    let Some(Match::Value(MatchValue { value })) = &field.r#match else {
+        panic!("expected a match-value condition");
+    };
+    assert_eq!(value, &ValueVariants::Integer(2));
 }
 
 #[test]

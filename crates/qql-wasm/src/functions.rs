@@ -29,6 +29,74 @@ pub(crate) fn qql_err_to_js(err: qql_core::error::QqlError) -> JsValue {
     JsValue::from_str(&serde_json::to_string(&err).unwrap_or_else(|_| err.to_string()))
 }
 
+/// Structured validation error for a host-side misuse (`QQL-VALIDATION-*`,
+/// `QQL-BIND-*`): the single constructor for every throw that is not already
+/// a `QqlError`.
+pub(crate) fn js_err(code: &'static str, message: impl Into<String>) -> JsValue {
+    qql_err_to_js(qql_core::error::QqlError::validation(
+        code,
+        message.into(),
+        None,
+    ))
+}
+
+/// Structured execution error twin of [`js_err`] for runtime failures
+/// (embedding endpoints, response parsing).
+pub(crate) fn js_exec_err(code: &'static str, message: impl Into<String>) -> JsValue {
+    qql_err_to_js(qql_core::error::QqlError::execution(
+        code,
+        message.into(),
+        None,
+    ))
+}
+
+/// The shared already-bound guard error (`QQL-BIND-ALREADY-BOUND`).
+pub(crate) fn already_bound_err() -> JsValue {
+    js_err(
+        "QQL-BIND-ALREADY-BOUND",
+        "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+    )
+}
+
+/// Human-readable message for an `onError: "continue"` ERROR result: parse
+/// the structured `QqlError` JSON back and render `Display`-style text
+/// (`[CODE] message`); non-JSON throw values pass through unchanged. One
+/// formatter for every error result.
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+pub(crate) fn thrown_message(value: &JsValue) -> String {
+    let Some(text) = value.as_string() else {
+        return "unknown error".to_string();
+    };
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text)
+        && let (Some(code), Some(message)) = (
+            parsed.get("code").and_then(|v| v.as_str()),
+            parsed.get("message").and_then(|v| v.as_str()),
+        )
+    {
+        return format!("[{code}] {message}");
+    }
+    text
+}
+
+/// Whether a thrown error is a transport failure (connection refused, DNS,
+/// timeout) — the only class a per-member batch retry can help with.
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+pub(crate) fn is_transport_error(value: &JsValue) -> bool {
+    let Some(text) = value.as_string() else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .get("kind")
+                .and_then(|k| k.as_str())
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("Transport")
+}
+
 #[wasm_bindgen(unchecked_return_type = "unknown[]")]
 pub fn parse(input: &str) -> Result<JsValue, JsValue> {
     // Always parse as a script — returns a list even for single statements.
@@ -41,7 +109,7 @@ pub fn parse(input: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = parseJson, unchecked_return_type = "string")]
 pub fn parse_json(input: &str) -> Result<String, JsValue> {
     let stmts = Parser::parse_all(input).map_err(qql_err_to_js)?;
-    serde_json::to_string(&stmts).map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_json::to_string(&stmts).map_err(|error| js_exec_err("QQL-SERIALIZE", error.to_string()))
 }
 
 #[wasm_bindgen(js_name = isValid)]
@@ -82,36 +150,33 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
     for token_result in lexer {
         let token = token_result.map_err(qql_err_to_js)?;
         let obj = js_sys::Object::new();
-        js_sys::Reflect::set(
+        // Infallible on a fresh object with string keys; a host trap here is
+        // unrecoverable, so the results are deliberately discarded.
+        let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("kind"),
             &JsValue::from_str(token.kind.as_str()),
-        )
-        .unwrap();
-        js_sys::Reflect::set(
+        );
+        let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("text"),
             &JsValue::from_str(token.text),
-        )
-        .unwrap();
-        js_sys::Reflect::set(
+        );
+        let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("pos"),
             &JsValue::from_f64(token.span.start as f64),
-        )
-        .unwrap();
-        js_sys::Reflect::set(
+        );
+        let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("end"),
             &JsValue::from_f64(token.span.end as f64),
-        )
-        .unwrap();
-        js_sys::Reflect::set(
+        );
+        let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("len"),
             &JsValue::from_f64(token.span.end.saturating_sub(token.span.start) as f64),
-        )
-        .unwrap();
+        );
         tokens.push(JsValue::from(obj));
     }
     Ok(tokens)
@@ -160,7 +225,7 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
     let mut routes_val = Vec::new();
     for stmt in &stmts {
         match routing::compile_statement(stmt) {
-            Ok(compiled) => routes_val.push(compiled_route_json(&compiled)),
+            Ok(compiled) => routes_val.push(compiled.to_route_json()),
             Err(err) => errors.push(err_json(&err)),
         }
     }
@@ -260,11 +325,30 @@ pub(crate) fn json_value_to_js(value: &serde_json::Value) -> JsValue {
         }
         serde_json::Value::Object(fields) => {
             let object = js_sys::Object::new();
+            // Own data properties via `defineProperty`: a payload key named
+            // `__proto__` must round-trip as an own field, not trip the
+            // inherited `Object.prototype.__proto__` setter (`Reflect::set`)
+            // and silently replace the prototype.
+            let descriptor = js_sys::Object::new();
+            let _ =
+                js_sys::Reflect::set(&descriptor, &JsValue::from_str("writable"), &JsValue::TRUE);
+            let _ = js_sys::Reflect::set(
+                &descriptor,
+                &JsValue::from_str("enumerable"),
+                &JsValue::TRUE,
+            );
+            let _ = js_sys::Reflect::set(
+                &descriptor,
+                &JsValue::from_str("configurable"),
+                &JsValue::TRUE,
+            );
             for (key, item) in fields {
+                let value = json_value_to_js(item);
+                let _ = js_sys::Reflect::set(&descriptor, &JsValue::from_str("value"), &value);
                 // Infallible on a fresh object with string keys; a host trap
                 // here is unrecoverable, so there is no `QqlError` to carry.
                 let _ =
-                    js_sys::Reflect::set(&object, &JsValue::from_str(key), &json_value_to_js(item));
+                    js_sys::Reflect::define_property(&object, &JsValue::from_str(key), &descriptor);
             }
             object.into()
         }
@@ -288,23 +372,6 @@ pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
 
 // ── Core: compile & explain ───────────────────────────────────────
 
-pub(crate) fn compiled_route_json(compiled: &qql_plan::CompiledStatement) -> serde_json::Value {
-    match &compiled.route {
-        Some(route) => serde_json::json!({
-            "stmt_type": compiled.stmt_type,
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-        }),
-        None => serde_json::json!({
-            "stmt_type": compiled.stmt_type,
-            "method": serde_json::Value::Null,
-            "path": serde_json::Value::Null,
-            "payload": serde_json::Value::Null,
-        }),
-    }
-}
-
 fn build_compile_output(
     query: &str,
     params: Option<JsValue>,
@@ -318,7 +385,7 @@ fn build_compile_output(
     };
     let stmt = Parser::parse(&bound).map_err(qql_err_to_js)?;
     let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
-    Ok(compiled_route_json(&compiled))
+    Ok(compiled.to_route_json())
 }
 
 /// Compile one QQL statement into a JavaScript route object. Optional
@@ -339,7 +406,8 @@ pub fn compile_bytes(query: &str, params: Option<JsValue>) -> Result<js_sys::Uin
     SCRATCH_BUF.with(|cell| {
         let mut buf = cell.borrow_mut();
         buf.clear();
-        serde_json::to_writer(&mut *buf, &output).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::to_writer(&mut *buf, &output)
+            .map_err(|error| js_exec_err("QQL-SERIALIZE", error.to_string()))?;
         Ok(safe_owned_uint8_array(&buf))
     })
 }

@@ -41,8 +41,8 @@ pub use bm25_text::{
     AvgLenEstimate, Bm25Pipeline, Bm25TextConfig, Stemmer, Stopwords, Tokenizer, estimate_avg_len,
 };
 pub use embedder::{
-    Embedder, EmbedderBound, JointEmbeddingOutput, SparseEmbedder, cross_rerank_unsupported_error,
-    dense_model_unsupported_error, image_unsupported_error, multi_unsupported_error,
+    Embedder, EmbedderBound, cross_rerank_unsupported_error, dense_model_unsupported_error,
+    image_unsupported_error, is_local_bm25_model, multi_unsupported_error,
     sparse_model_unsupported_error,
 };
 pub use resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, resolve_embeddings};

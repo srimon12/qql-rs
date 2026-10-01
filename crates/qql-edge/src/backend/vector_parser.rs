@@ -66,6 +66,10 @@ fn plan_vector_to_edge(
     name: Option<String>,
 ) -> Result<VectorStructInternal, QqlError> {
     match &v {
+        // An unnamed multivector maps to the struct-level `MultiDense` (the
+        // engine's unnamed-multi point shape); unnamed dense/sparse map to the
+        // `{"": …}` named form, which qdrant-edge treats as the unnamed vector.
+        // The asymmetry mirrors the engine's persisted point representations.
         PlanVectorValue::MultiDense(rows) => {
             let vec = qdrant_edge::Vector::new_multi(rows.clone())
                 .map_err(|e| err(format!("invalid multivector: {e}")))?;

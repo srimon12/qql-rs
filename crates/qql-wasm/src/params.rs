@@ -21,6 +21,8 @@ pub(crate) enum WasmOnError {
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 pub(crate) fn parse_on_error(options: Option<&JsValue>) -> Result<WasmOnError, JsValue> {
+    use super::functions::{js_err, thrown_message};
+
     let Some(options) = options else {
         return Ok(WasmOnError::Stop);
     };
@@ -28,16 +30,18 @@ pub(crate) fn parse_on_error(options: Option<&JsValue>) -> Result<WasmOnError, J
         return Ok(WasmOnError::Stop);
     }
     if !options.is_object() {
-        return Err(JsValue::from_str("options must be an object"));
+        return Err(js_err("QQL-VALIDATION-CONFIG", "options must be an object"));
     }
-    let value = js_sys::Reflect::get(options, &JsValue::from_str("onError"))?;
+    let value = js_sys::Reflect::get(options, &JsValue::from_str("onError"))
+        .map_err(|e| js_err("QQL-VALIDATION-CONFIG", thrown_message(&e)))?;
     if value.is_undefined() {
         return Ok(WasmOnError::Stop);
     }
     match value.as_string().as_deref() {
         Some("stop") => Ok(WasmOnError::Stop),
         Some("continue") => Ok(WasmOnError::Continue),
-        _ => Err(JsValue::from_str(
+        _ => Err(js_err(
+            "QQL-VALIDATION-CONFIG",
             "options.onError must be 'stop' or 'continue'",
         )),
     }
@@ -59,15 +63,27 @@ pub(crate) fn options_params(options: Option<&JsValue>) -> Result<Option<Value>,
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-pub(crate) fn extract_ast_stmt(val: &JsValue) -> Option<ast::Stmt> {
+/// Extract the AST statement behind a `Stmt` instance (via `toObject`) or a
+/// plain AST-shaped object, plus the instance's `bound` flag when present.
+///
+/// The flag drives the `QQL-BIND-ALREADY-BOUND` guard on `execute` /
+/// `executeStmt`: `extract_ast_stmt` used to drop it, so re-binding through
+/// `execute(stmt, {params})` silently ignored the new params.
+pub(crate) fn extract_ast_stmt(val: &JsValue) -> Option<(ast::Stmt, bool)> {
+    let bound = js_sys::Reflect::get(val, &JsValue::from_str("bound"))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if let Ok(to_obj_val) = js_sys::Reflect::get(val, &JsValue::from_str("toObject"))
         && let Ok(to_obj_fn) = to_obj_val.dyn_into::<js_sys::Function>()
         && let Ok(obj) = to_obj_fn.call0(val)
         && let Ok(s) = serde_wasm_bindgen::from_value::<ast::Stmt>(obj)
     {
-        return Some(s);
+        return Some((s, bound));
     }
-    serde_wasm_bindgen::from_value::<ast::Stmt>(val.clone()).ok()
+    serde_wasm_bindgen::from_value::<ast::Stmt>(val.clone())
+        .ok()
+        .map(|s| (s, bound))
 }
 
 /// Map a params binding to a query string via the shared typed contract.
@@ -95,6 +111,28 @@ pub(crate) fn maybe_bind(query: &str, params: Option<&Value>) -> Result<String, 
 
 fn invalid_params(message: impl Into<String>) -> QqlError {
     QqlError::validation("QQL-BIND-INVALID-PARAMS", message.into(), None)
+}
+
+/// Largest magnitude a JS `Number` holds exactly.
+const MAX_SAFE_INTEGER: f64 = 9007199254740991.0;
+
+/// Classify an integral JS `Number`:
+///
+/// - `Ok(Some(int))` — exactly representable, binds as an integer;
+/// - `Err(..)` — within `i64` but past 2^53, where JS has already rounded:
+///   bind a `BigInt` instead;
+/// - `Ok(None)` — outside `i64` entirely, so JS could never have held it as
+///   an exact integer; stays a float (matching the pre-existing behavior).
+fn exact_integer(n: f64) -> Result<Option<i64>, QqlError> {
+    if !(i64::MIN as f64..=i64::MAX as f64).contains(&n) {
+        return Ok(None);
+    }
+    if n.abs() > MAX_SAFE_INTEGER {
+        return Err(invalid_params(
+            "parameter number exceeds the exact-integer range; pass a BigInt instead",
+        ));
+    }
+    Ok(Some(n as i64))
 }
 
 /// Convert any JS value to a typed shard routing key (`None` clears).
@@ -132,7 +170,7 @@ pub(crate) fn jsvalue_to_shard_key(v: &JsValue) -> Result<Option<ast::ShardKey>,
                 "shardKey number must be a non-negative integer",
             ));
         }
-        if n > 9007199254740991.0 {
+        if n > MAX_SAFE_INTEGER {
             return Err(invalid_params(
                 "shardKey number exceeds the exact-integer range; pass a BigInt instead",
             ));
@@ -168,8 +206,10 @@ pub(crate) fn jsvalue_to_value(v: &JsValue) -> Result<Value, QqlError> {
         if !n.is_finite() {
             return Err(invalid_params("cannot bind non-finite float value"));
         }
-        if n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
-            return Ok(Value::Int(n as i64));
+        if n.fract() == 0.0
+            && let Some(int) = exact_integer(n)?
+        {
+            return Ok(Value::Int(int));
         }
         return Ok(Value::Float(n));
     }
@@ -298,5 +338,37 @@ pub(crate) fn batch_size_from(options: Option<&JsValue>) -> Result<usize, QqlErr
             "upsertMany batchSize must be >= 1",
             None,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exact_integer;
+
+    #[test]
+    fn exact_integer_binds_small_values_and_rejects_rounded_large_ones() {
+        assert_eq!(exact_integer(0.0).expect("zero"), Some(0));
+        assert_eq!(exact_integer(-42.0).expect("small negative"), Some(-42));
+        assert_eq!(
+            exact_integer(9007199254740991.0).expect("2^53 - 1"),
+            Some(9007199254740991)
+        );
+        assert_eq!(
+            exact_integer(-9007199254740991.0).expect("-(2^53 - 1)"),
+            Some(-9007199254740991)
+        );
+
+        // Already-rounded JS numbers fail closed instead of mistargeting IDs.
+        for rounded in [9007199254740992.0, -9007199254740992.0, 1.5e16] {
+            let err = exact_integer(rounded).expect_err("must fail closed");
+            assert_eq!(err.code, "QQL-BIND-INVALID-PARAMS");
+            assert!(err.message.contains("BigInt"), "{}", err.message);
+        }
+
+        // Outside i64: a JS Number cannot hold these as exact integers, so
+        // they stay floats (pre-existing behavior).
+        assert_eq!(exact_integer(1e30).expect("1e30"), None);
+        assert_eq!(exact_integer(-1e30).expect("-1e30"), None);
+        assert!(exact_integer(2f64.powi(63)).is_err());
     }
 }
