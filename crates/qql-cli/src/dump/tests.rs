@@ -562,12 +562,12 @@ fn create_vector_with_turbo_quantization() {
 
 #[test]
 fn format_quantization_turbo_flat_and_nested() {
-    let nested = json!({"turbo": {"bits": 2, "always_ram": false}});
+    let nested = json!({"turbo": {"bits": "bits2", "always_ram": false}});
     let s = format_quantization_spec(&nested).unwrap();
     assert!(s.contains("type = 'turbo'"));
     assert!(s.contains("bits = 2"));
 
-    let flat = json!({"type": "turbo", "turbo_bits": 4.0, "always_ram": true});
+    let flat = json!({"type": "turbo", "turbo_bits": "bits4", "always_ram": true});
     let s = format_quantization_spec(&flat).unwrap();
     assert!(s.contains("type = 'turbo'"));
     assert!(s.contains("bits = 4"));
@@ -586,10 +586,11 @@ fn format_quantization_product_and_binary() {
     assert!(s.contains("type = 'binary'"));
     assert!(s.contains("encoding = 'two_bits'"));
 
-    // Protobuf-style enum names from gRPC adapters must normalize.
-    let binary_proto = json!({"binary": {"encoding": "TwoBits"}});
-    let s = format_quantization_spec(&binary_proto).unwrap();
-    assert!(s.contains("encoding = 'two_bits'"));
+    // Only the OpenAPI enum spellings are accepted now that every transport
+    // emits them; legacy protobuf/numeric spellings are not re-interpreted.
+    let legacy = json!({"binary": {"encoding": "TwoBits"}});
+    let s = format_quantization_spec(&legacy).unwrap();
+    assert!(!s.contains("encoding"));
 }
 
 /// Typed collection configs keep the previous JSON-map key order, including

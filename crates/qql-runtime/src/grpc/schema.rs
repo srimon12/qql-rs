@@ -230,10 +230,7 @@ fn f32_to_f64(value: f32) -> f64 {
     value.to_string().parse().unwrap_or(f64::from(value))
 }
 
-/// Proto `HnswConfigDiff` → typed plan HNSW config.
-///
-/// `inline_storage` is left unset to preserve the existing gRPC projection
-/// output; the REST/edge producers report it when the backend does.
+/// Proto `HnswConfigDiff` → typed plan HNSW config (all proto fields).
 fn hnsw_diff_to_spec(diff: &qdrant::HnswConfigDiff) -> HnswConfig {
     HnswConfig {
         m: diff.m,
@@ -242,7 +239,7 @@ fn hnsw_diff_to_spec(diff: &qdrant::HnswConfigDiff) -> HnswConfig {
         max_indexing_threads: diff.max_indexing_threads,
         on_disk: diff.on_disk,
         payload_m: diff.payload_m,
-        inline_storage: None,
+        inline_storage: diff.inline_storage,
         memory: diff
             .memory
             .and_then(memory_to_str)
@@ -250,18 +247,14 @@ fn hnsw_diff_to_spec(diff: &qdrant::HnswConfigDiff) -> HnswConfig {
     }
 }
 
-/// Proto `OptimizersConfigDiff` → typed plan optimizer config.
-///
-/// `memmap_threshold` / `prevent_unoptimized` are left unset to preserve the
-/// existing gRPC projection output (the proto carries them, the dump shape so
-/// far did not).
+/// Proto `OptimizersConfigDiff` → typed plan optimizer config (all proto fields).
 fn optimizer_config_diff_to_spec(diff: &qdrant::OptimizersConfigDiff) -> OptimizersConfig {
     OptimizersConfig {
         deleted_threshold: diff.deleted_threshold,
         vacuum_min_vector_number: diff.vacuum_min_vector_number,
         default_segment_number: diff.default_segment_number,
         max_segment_size: diff.max_segment_size,
-        memmap_threshold: None,
+        memmap_threshold: diff.memmap_threshold,
         indexing_threshold: diff.indexing_threshold,
         flush_interval_sec: diff.flush_interval_sec,
         max_optimization_threads: diff.max_optimization_threads.as_ref().and_then(|mot| {
@@ -274,24 +267,24 @@ fn optimizer_config_diff_to_spec(diff: &qdrant::OptimizersConfigDiff) -> Optimiz
                 }
             })
         }),
-        prevent_unoptimized: None,
+        prevent_unoptimized: diff.prevent_unoptimized,
     }
 }
 
 /// Proto quantization config → typed plan config.
 ///
-/// Scalar's OpenAPI `type` is always `int8`; the proto `memory` placement was
-/// not part of the previous JSON projection and stays unset to keep SHOW
-/// output unchanged for gRPC-backed collections.
+/// Scalar's OpenAPI `type` is always `int8`; every family maps `memory` like
+/// the REST/edge producers do.
 fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<QuantizationConfig> {
     use qdrant::quantization_config::Quantization;
+    let memory = |m: Option<i32>| m.and_then(memory_to_str).and_then(MemoryPlacement::parse);
     match &q.quantization {
         Some(Quantization::Scalar(sq)) => Some(QuantizationConfig::Scalar {
             scalar: ScalarQuantization {
                 qtype: "int8".into(),
                 quantile: sq.quantile.map(f32_to_f64),
                 always_ram: sq.always_ram,
-                memory: None,
+                memory: memory(sq.memory),
             },
         }),
         Some(Quantization::Product(pq)) => {
@@ -303,7 +296,7 @@ fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<Quantiz
                 product: ProductQuantization {
                     compression,
                     always_ram: pq.always_ram,
-                    memory: None,
+                    memory: memory(pq.memory),
                 },
             })
         }
@@ -346,7 +339,7 @@ fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<Quantiz
                     always_ram: bq.always_ram,
                     encoding,
                     query_encoding,
-                    memory: None,
+                    memory: memory(bq.memory),
                 },
             })
         }
@@ -367,7 +360,7 @@ fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<Quantiz
                 turbo: TurboQuantization {
                     bits,
                     always_ram: tq.always_ram,
-                    memory: None,
+                    memory: memory(tq.memory),
                 },
             })
         }
@@ -403,14 +396,18 @@ fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, se
     if let Some(v) = diff.payload_m {
         map.insert("payload_m".into(), serde_json::Value::from(v));
     }
+    if let Some(v) = diff.inline_storage {
+        map.insert("inline_storage".into(), serde_json::Value::Bool(v));
+    }
     if let Some(name) = diff.memory.and_then(memory_to_str) {
         map.insert("memory".into(), serde_json::Value::String(name.into()));
     }
     map
 }
 
-/// Convert protobuf quantization into the nested REST-shaped JSON that dump
-/// understands (`{ "scalar": {...} }`, `{ "turbo": {...} }`, …).
+/// Convert protobuf quantization into the OpenAPI REST fragment
+/// (`{ "scalar": { "type": "int8", … } }`, `{ "turbo": { "bits": "bits1_5", … } }`, …)
+/// so gRPC, REST, and edge share one dump shape.
 ///
 /// Sanctioned JSON exception (not response-IR): [`VectorSpec::quantization`]
 /// is deliberately `serde_json::Value` (see `crate::backend` "Deliberate
@@ -419,21 +416,28 @@ fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, se
 /// metadata, never a query/response envelope.
 fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_json::Value> {
     use qdrant::quantization_config::Quantization;
+
+    let memory = |map: &mut serde_json::Map<String, serde_json::Value>, value: Option<i32>| {
+        if let Some(name) = value.and_then(memory_to_str) {
+            map.insert("memory".into(), serde_json::Value::String(name.into()));
+        }
+    };
     match &q.quantization {
         Some(Quantization::Scalar(sq)) => {
             let mut map = serde_json::Map::new();
-            map.insert("type".into(), serde_json::json!("scalar"));
+            // OpenAPI `ScalarQuantizationConfig` requires `type`, always `int8`.
+            map.insert("type".into(), serde_json::json!("int8"));
             if let Some(v) = sq.quantile {
                 map.insert("quantile".into(), serde_json::json!(v));
             }
             if let Some(v) = sq.always_ram {
                 map.insert("always_ram".into(), serde_json::Value::Bool(v));
             }
+            memory(&mut map, sq.memory);
             Some(serde_json::json!({ "scalar": map }))
         }
         Some(Quantization::Product(pq)) => {
             let mut map = serde_json::Map::new();
-            map.insert("type".into(), serde_json::json!("product"));
             if let Ok(c) = qdrant::CompressionRatio::try_from(pq.compression) {
                 map.insert(
                     "compression".into(),
@@ -443,18 +447,17 @@ fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_j
             if let Some(v) = pq.always_ram {
                 map.insert("always_ram".into(), serde_json::Value::Bool(v));
             }
+            memory(&mut map, pq.memory);
             Some(serde_json::json!({ "product": map }))
         }
         Some(Quantization::Binary(bq)) => {
             let mut map = serde_json::Map::new();
-            map.insert("type".into(), serde_json::json!("binary"));
             if let Some(v) = bq.always_ram {
                 map.insert("always_ram".into(), serde_json::Value::Bool(v));
             }
             if let Some(enc) = bq.encoding
                 && let Ok(e) = qdrant::BinaryQuantizationEncoding::try_from(enc)
             {
-                // QQL CREATE accepts snake_case aliases, not protobuf enum names.
                 let qql_enc = match e {
                     qdrant::BinaryQuantizationEncoding::OneBit => "one_bit",
                     qdrant::BinaryQuantizationEncoding::TwoBits => "two_bits",
@@ -483,26 +486,27 @@ fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_j
                     serde_json::Value::String(name.into()),
                 );
             }
+            memory(&mut map, bq.memory);
             Some(serde_json::json!({ "binary": map }))
         }
         Some(Quantization::Turboquant(tq)) => {
             let mut map = serde_json::Map::new();
-            map.insert("type".into(), serde_json::json!("turbo"));
             if let Some(v) = tq.always_ram {
                 map.insert("always_ram".into(), serde_json::Value::Bool(v));
             }
             if let Some(bits) = tq.bits
                 && let Ok(b) = qdrant::TurboQuantBitSize::try_from(bits)
             {
-                // Numeric form matches QQL CREATE: bits = 1 | 1.5 | 2 | 4
-                let n = match b {
-                    qdrant::TurboQuantBitSize::Bits1 => 1.0,
-                    qdrant::TurboQuantBitSize::Bits15 => 1.5,
-                    qdrant::TurboQuantBitSize::Bits2 => 2.0,
-                    qdrant::TurboQuantBitSize::Bits4 => 4.0,
+                // OpenAPI `TurboQuantBitSize` is the string enum, not a number.
+                let label = match b {
+                    qdrant::TurboQuantBitSize::Bits1 => "bits1",
+                    qdrant::TurboQuantBitSize::Bits15 => "bits1_5",
+                    qdrant::TurboQuantBitSize::Bits2 => "bits2",
+                    qdrant::TurboQuantBitSize::Bits4 => "bits4",
                 };
-                map.insert("bits".into(), serde_json::json!(n));
+                map.insert("bits".into(), serde_json::Value::String(label.into()));
             }
+            memory(&mut map, tq.memory);
             Some(serde_json::json!({ "turbo": map }))
         }
         None => None,
@@ -528,6 +532,11 @@ fn payload_index_params_from_proto(
             if p.prefix.is_some() {
                 map.insert("prefix".into(), serde_json::Value::Bool(true));
             }
+            // REST carries `is_tenant` inside an index's params too; keep both
+            // readers byte-identical.
+            if let Some(v) = p.is_tenant {
+                map.insert("is_tenant".into(), serde_json::Value::Bool(v));
+            }
             if let Some(v) = p.memory.and_then(memory_to_str) {
                 map.insert("memory".into(), serde_json::Value::String(v.into()));
             }
@@ -536,6 +545,9 @@ fn payload_index_params_from_proto(
             is_tenant = p.is_tenant;
             if let Some(v) = p.on_disk {
                 map.insert("on_disk".into(), serde_json::Value::Bool(v));
+            }
+            if let Some(v) = p.is_tenant {
+                map.insert("is_tenant".into(), serde_json::Value::Bool(v));
             }
         }
         Some(IndexParams::TextIndexParams(p)) => {
@@ -679,5 +691,175 @@ mod tests {
             }
             other => panic!("expected turbo quantization, got {other:?}"),
         }
+    }
+
+    /// Cross-transport lockstep (REST ↔ gRPC), in the spirit of the
+    /// runtime↔wasm schema fixture: one collection described as OpenAPI JSON
+    /// and as proto `CollectionInfo` must lower to byte-identical
+    /// `CollectionSchema` JSON, including the fields gRPC used to drop
+    /// (`inline_storage`, `memmap_threshold`, `prevent_unoptimized`,
+    /// quantization `memory`) and the OpenAPI turbo bits / inner `type` tags.
+    #[test]
+    fn grpc_schema_matches_rest_schema_fixture() {
+        use std::collections::HashMap;
+
+        let rest = serde_json::json!({
+            "config": {
+                "params": {
+                    "vectors": {
+                        "body": {
+                            "size": 8,
+                            "distance": "Cosine",
+                            "on_disk": true,
+                            "datatype": "float32",
+                            "memory": "cold",
+                            "hnsw_config": {"m": 16, "inline_storage": true, "memory": "pinned"},
+                            "quantization_config": {
+                                "turbo": {"bits": "bits1_5", "always_ram": true, "memory": "cached"}
+                            },
+                            "multivector_config": {"comparator": "max_sim"},
+                        },
+                    },
+                    "sparse_vectors": {"text": {"modifier": "idf", "index": {"on_disk": true}}},
+                    "shard_number": 3,
+                    "sharding_method": "custom",
+                    "on_disk_payload": true,
+                    "replication_factor": 2,
+                    "payload": {"memory": "cold"},
+                },
+                "hnsw_config": {"m": 16, "inline_storage": true, "memory": "pinned"},
+                "optimizer_config": {
+                    "memmap_threshold": 100000,
+                    "prevent_unoptimized": true,
+                    "max_optimization_threads": "auto",
+                },
+                "quantization_config": {
+                    "turbo": {"bits": "bits1_5", "always_ram": true, "memory": "cached"}
+                },
+            },
+            "payload_schema": {
+                "tenant_id": {"data_type": "keyword", "params": {"is_tenant": true}},
+            },
+        });
+
+        let quantization = qdrant::QuantizationConfig {
+            quantization: Some(qdrant::quantization_config::Quantization::Turboquant(
+                qdrant::TurboQuantization {
+                    always_ram: Some(true),
+                    bits: Some(qdrant::TurboQuantBitSize::Bits15 as i32),
+                    memory: Some(qdrant::Memory::Cached as i32),
+                },
+            )),
+        };
+        let vector_hnsw = qdrant::HnswConfigDiff {
+            m: Some(16),
+            inline_storage: Some(true),
+            memory: Some(qdrant::Memory::Pinned as i32),
+            ..Default::default()
+        };
+        let proto = qdrant::CollectionInfo {
+            config: Some(qdrant::CollectionConfig {
+                params: Some(qdrant::CollectionParams {
+                    vectors_config: Some(qdrant::VectorsConfig {
+                        config: Some(qdrant::vectors_config::Config::ParamsMap(
+                            qdrant::VectorParamsMap {
+                                map: HashMap::from([(
+                                    "body".to_string(),
+                                    qdrant::VectorParams {
+                                        size: 8,
+                                        distance: qdrant::Distance::Cosine as i32,
+                                        hnsw_config: Some(vector_hnsw),
+                                        quantization_config: Some(quantization),
+                                        on_disk: Some(true),
+                                        datatype: Some(qdrant::Datatype::Float32 as i32),
+                                        memory: Some(qdrant::Memory::Cold as i32),
+                                        multivector_config: Some(qdrant::MultiVectorConfig {
+                                            comparator: qdrant::MultiVectorComparator::MaxSim
+                                                as i32,
+                                        }),
+                                    },
+                                )]),
+                            },
+                        )),
+                    }),
+                    sparse_vectors_config: Some(qdrant::SparseVectorConfig {
+                        map: HashMap::from([(
+                            "text".to_string(),
+                            qdrant::SparseVectorParams {
+                                modifier: Some(qdrant::Modifier::Idf as i32),
+                                index: Some(qdrant::SparseIndexConfig {
+                                    on_disk: Some(true),
+                                    ..Default::default()
+                                }),
+                            },
+                        )]),
+                    }),
+                    shard_number: 3,
+                    on_disk_payload: true,
+                    replication_factor: Some(2),
+                    sharding_method: Some(qdrant::ShardingMethod::Custom as i32),
+                    payload: Some(qdrant::PayloadStorageParams {
+                        memory: Some(qdrant::Memory::Cold as i32),
+                    }),
+                    ..Default::default()
+                }),
+                hnsw_config: Some(qdrant::HnswConfigDiff {
+                    m: Some(16),
+                    inline_storage: Some(true),
+                    memory: Some(qdrant::Memory::Pinned as i32),
+                    ..Default::default()
+                }),
+                optimizer_config: Some(qdrant::OptimizersConfigDiff {
+                    memmap_threshold: Some(100000),
+                    prevent_unoptimized: Some(true),
+                    max_optimization_threads: Some(qdrant::MaxOptimizationThreads {
+                        variant: Some(qdrant::max_optimization_threads::Variant::Setting(0)),
+                    }),
+                    ..Default::default()
+                }),
+                quantization_config: Some(quantization),
+                ..Default::default()
+            }),
+            payload_schema: HashMap::from([(
+                "tenant_id".to_string(),
+                qdrant::PayloadSchemaInfo {
+                    data_type: qdrant::PayloadSchemaType::Keyword as i32,
+                    params: Some(qdrant::PayloadIndexParams {
+                        index_params: Some(
+                            qdrant::payload_index_params::IndexParams::KeywordIndexParams(
+                                qdrant::KeywordIndexParams {
+                                    is_tenant: Some(true),
+                                    ..Default::default()
+                                },
+                            ),
+                        ),
+                    }),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let from_rest = serde_json::to_value(crate::backend::schema_from_rest_result(&rest))
+            .expect("REST schema serializes");
+        let from_grpc = serde_json::to_value(schema_from_grpc_collection(&proto))
+            .expect("gRPC schema serializes");
+        assert_eq!(
+            from_grpc, from_rest,
+            "gRPC and REST must report one SHOW COLLECTION shape"
+        );
+
+        // Spot-check the converged fields the gRPC reader used to drop or
+        // reshape: string turbo bits, no non-OpenAPI inner `type` tags, and
+        // the metadata keys.
+        assert_eq!(from_rest["quantization"]["turbo"]["bits"], "bits1_5");
+        assert_eq!(
+            from_rest["vectors"][0]["quantization"]["turbo"]["bits"],
+            "bits1_5"
+        );
+        assert_eq!(from_rest["hnsw"]["inline_storage"], true);
+        assert_eq!(from_rest["optimizers"]["memmap_threshold"], 100000);
+        assert_eq!(from_rest["optimizers"]["prevent_unoptimized"], true);
+        assert_eq!(from_rest["quantization"]["turbo"]["memory"], "cached",);
     }
 }
