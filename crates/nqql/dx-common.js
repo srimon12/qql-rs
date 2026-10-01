@@ -5,9 +5,10 @@
  * error mapping, the typed ExecutionReport / ScoredPoint classes, and the
  * Stmt-aware module bind.
  *
- * BYTE-IDENTICAL in crates/nqql and crates/nqql-edge — a CI check diffs the
- * two copies, so edit both or neither. They must stay in lockstep with the
- * Python `pyqql/pyqql/_dx_report.py` classes (same report contract).
+ * The nqql and nqql-edge copies are byte-identical; the edge copy is
+ * generated from this file by `qql-grammar-gen` (`check` gates drift), so
+ * edit only this canonical source. Keep it in lockstep with the Python
+ * `pyqql/pyqql/_dx_report.py` classes (same report contract).
  */
 
 /**
@@ -95,6 +96,45 @@ function callNative(call) {
   }
 }
 
+/**
+ * Await a native promise, mapping rejections through buildError. Used by
+ * entry points whose construction is offloaded off the JS thread (the edge
+ * executor factories), where the synchronous `callNative` cannot apply.
+ */
+async function callNativeAsync(call) {
+  try {
+    return await call();
+  } catch (error) {
+    throw buildError(error);
+  }
+}
+
+/**
+ * Copy every own enumerable property of `data` onto `target` with
+ * define-data-property semantics.
+ *
+ * `Object.assign`/plain assignment use `[[Set]]`, so an own `"__proto__"`
+ * key (valid JSON payload data) would invoke the inherited
+ * `Object.prototype.__proto__` setter — replacing the instance prototype —
+ * instead of creating an own field. Defining the property keeps the
+ * prototype intact and the key addressable.
+ */
+function defineOwnProperties(target, data) {
+  // Mirrors `Object.assign(target, undefined | null)` being a no-op.
+  if (data === null || data === undefined) {
+    return target;
+  }
+  for (const key of Object.keys(data)) {
+    Object.defineProperty(target, key, {
+      value: data[key],
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return target;
+}
+
 /** Normalize a query argument (Stmt → AST object; arrays mapped) for native. */
 function normalizeQuery(Stmt, query) {
   if (query instanceof Stmt) {
@@ -127,8 +167,9 @@ class ScoredPoint {
     if (!data || typeof data !== 'object') {
       throw new TypeError('ScoredPoint requires a hit object');
     }
-    // Field defaults mirror pyqql's ScoredPoint dataclass; Object.assign
-    // below overlays the hit's own values.
+    // Field defaults mirror pyqql's ScoredPoint dataclass; the define-copy
+    // below overlays the hit's own values without `[[Set]]` semantics (an
+    // own `__proto__` payload field must not mutate the prototype).
     this.id = data.id;
     this.score = data.score ?? 0;
     this.payload = data.payload ?? null;
@@ -138,7 +179,7 @@ class ScoredPoint {
     this.collection = data.collection ?? null;
     this.vector = data.vector ?? null;
     this.shard_key = data.shard_key ?? null;
-    Object.assign(this, data);
+    defineOwnProperties(this, data);
   }
 
   get(key, defaultValue = null) {
@@ -158,7 +199,13 @@ class ScoredPoint {
       const value = this[key];
       return value === null || value === undefined ? defaultValue : value;
     }
-    if (this.payload && typeof this.payload === 'object' && key in this.payload) {
+    // Own-property lookup only: `in` would resolve inherited names like
+    // `"toString"` from `Object.prototype` and return them as payload data.
+    if (
+      this.payload &&
+      typeof this.payload === 'object' &&
+      Object.prototype.hasOwnProperty.call(this.payload, key)
+    ) {
       return this.payload[key];
     }
     return defaultValue;
@@ -182,7 +229,7 @@ class ExecutionReport {
     this.results = [];
     this.succeeded = 0;
     this.failed = 0;
-    Object.assign(this, data);
+    defineOwnProperties(this, data);
   }
 
   #resultAt(stmt) {
@@ -479,72 +526,11 @@ function scrollStream(client, collection, options) {
   });
 }
 
-/**
- * Normalize `upsertMany` rows so typed arrays behave the same on every SDK.
- * `Float32Array` / `Float64Array` become plain arrays (one copy, same vector
- * semantics as the packed `F32Array` bind path); `Int32Array` / `Uint32Array`
- * become integer lists for sparse `indices`. Raw binary (`Buffer`,
- * `ArrayBuffer`, `DataView`) fails closed with wrap-first guidance, matching
- * the `bind` surface. Plain values pass through untouched. Non-array top-level
- * input passes through so the native layer fails with
- * `QQL-BIND-TYPE-MISMATCH`.
- */
-function normalizeUpsertValue(value) {
-  if (typeof Float32Array !== 'undefined' && value instanceof Float32Array) {
-    return Array.from(value);
-  }
-  if (typeof Float64Array !== 'undefined' && value instanceof Float64Array) {
-    return Array.from(value);
-  }
-  if (typeof Int32Array !== 'undefined' && value instanceof Int32Array) {
-    return Array.from(value);
-  }
-  if (typeof Uint32Array !== 'undefined' && value instanceof Uint32Array) {
-    return Array.from(value);
-  }
-  if (
-    typeof Buffer !== 'undefined' &&
-    typeof Buffer.isBuffer === 'function' &&
-    Buffer.isBuffer(value)
-  ) {
-    throw new TypeError(
-      'binary Buffer must be wrapped in a Float32Array or Float64Array view first (e.g. new Float64Array(buf.buffer, buf.byteOffset, buf.length / 8))',
-    );
-  }
-  if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
-    throw new TypeError(
-      'binary ArrayBuffer must be wrapped in a Float32Array or Float64Array view first',
-    );
-  }
-  if (typeof DataView !== 'undefined' && value instanceof DataView) {
-    throw new TypeError(
-      'binary ArrayBuffer must be wrapped in a Float32Array or Float64Array view first',
-    );
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeUpsertValue);
-  }
-  if (value && typeof value === 'object') {
-    const out = {};
-    for (const key of Object.keys(value)) {
-      out[key] = normalizeUpsertValue(value[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
-function normalizeUpsertRows(rows) {
-  if (!Array.isArray(rows)) {
-    return rows;
-  }
-  return rows.map(normalizeUpsertValue);
-}
-
 module.exports = {
   installStmtToJSON,
   buildError,
   callNative,
+  callNativeAsync,
   normalizeQuery,
   validateOptions,
   ScoredPoint,
@@ -554,6 +540,4 @@ module.exports = {
   buildScrollStatement,
   scrollCursor,
   scrollStream,
-  normalizeUpsertValue,
-  normalizeUpsertRows,
 };

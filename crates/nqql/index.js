@@ -16,8 +16,13 @@ function nativeTarget() {
     }
     return arch === 'arm64' ? 'linux-arm64-gnu' : 'linux-x64-gnu';
   }
-  if (platform === 'darwin' && (arch === 'x64' || arch === 'arm64')) {
-    return `darwin-${arch}`;
+  if (platform === 'darwin' && arch === 'arm64') {
+    return 'darwin-arm64';
+  }
+  if (platform === 'darwin' && arch === 'x64') {
+    throw new Error(
+      `nqql ${pkg.version} does not provide a macOS Intel binary (no x86_64-apple-darwin artifact is published)`,
+    );
   }
   if (platform === 'win32' && arch === 'x64') {
     return 'win32-x64-msvc';
@@ -203,7 +208,7 @@ function parseJson(query) {
 }
 
 function isValid(query) {
-  return nativeBinding.isValid(query);
+  return callNative(() => nativeBinding.isValid(query));
 }
 
 function injectFilter(query, field, op, value) {
@@ -303,16 +308,12 @@ class Client {
    */
   async upsertMany(collection, rows, options) {
     try {
-      if (
-        options?.batchSize !== undefined &&
-        (!Number.isInteger(options.batchSize) || options.batchSize < 1)
-      ) {
-        throw new TypeError("options.batchSize must be an integer >= 1");
-      }
-      const normalized = dx.normalizeUpsertRows(rows);
+      // No JS-side batchSize check: the native layer owns that validation
+      // (`QQL-VALIDATION-UPSERT-BATCH`), so both the Client method and a
+      // direct native call fail identically.
       const raw = await this._inner.upsertMany(
         collection,
-        normalized,
+        rows,
         validateOptions(options) || undefined,
       );
       return new ExecutionReport(raw);
@@ -359,8 +360,10 @@ class Client {
   }
 
   async close() {
-    if (typeof this._inner.close === "function") {
-      await this._inner.close();
+    try {
+      return await this._inner.close();
+    } catch (error) {
+      throw buildError(error);
     }
   }
 }
