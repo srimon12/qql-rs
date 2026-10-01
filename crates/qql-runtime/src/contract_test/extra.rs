@@ -105,45 +105,43 @@ fn facet_contract_matches_openapi_and_grpc() {
 }
 
 #[test]
-fn test_batch_item_error_shape() {
-    use qql_plan::batch_item_error;
+fn batch_item_fixtures_match_openapi_and_parser_policy() {
     use serde_json::json;
 
-    // 1. Root error property with status "error"
-    let err_item = json!({
-        "status": "error",
-        "error": "point 42 not found"
-    });
-    assert_eq!(
-        batch_item_error(&err_item),
-        Some("point 42 not found".to_string())
-    );
+    let Some(openapi) = openapi_or_skip() else {
+        return;
+    };
 
-    // 2. Fallback when error field is missing but status is "error"
-    let fallback_err = json!({
-        "status": "error"
-    });
-    assert_eq!(
-        batch_item_error(&fallback_err),
-        Some("batch item failed".to_string())
-    );
+    // Every `UpdateResult` status the parser accepts must validate against the
+    // OpenAPI schema (the old `{"status":"error"}` heuristic matched none).
+    for item in [
+        json!({"status": "acknowledged", "operation_id": 1}),
+        json!({"status": "completed"}),
+        json!({"status": "wait_timeout"}),
+    ] {
+        validate_ref(&openapi, "UpdateResult", &item);
+    }
 
-    // 3. Successful or completed items return None
-    let completed = json!({
-        "status": "completed",
-        "result": { "operation_id": 1 }
-    });
-    assert_eq!(batch_item_error(&completed), None);
+    let parsed = crate::rest_response::parse_update_batch(json!([
+        {"status": "acknowledged", "operation_id": 1},
+        {"status": "completed"},
+    ]))
+    .expect("acknowledged/completed items parse");
+    assert_eq!(parsed.len(), 2);
 
-    let acknowledged = json!({
-        "status": "acknowledged",
-        "operation_id": 10
-    });
-    assert_eq!(batch_item_error(&acknowledged), None);
+    let err = crate::rest_response::parse_update_batch(json!([{"status": "wait_timeout"}]))
+        .expect_err("wait_timeout is a per-item failure");
+    assert_eq!(err.code, "QQL-BACKEND-BATCH");
 
-    let normal_hit = json!({
-        "id": 1,
-        "score": 0.95
-    });
-    assert_eq!(batch_item_error(&normal_hit), None);
+    let err = crate::rest_response::parse_update_batch(json!([{"status": "error", "error": "x"}]))
+        .expect_err("schema-orphaned error items fail closed");
+    assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
+
+    // Query batch items validate against `QueryResponse`; `points` is required.
+    for item in [
+        json!({"points": []}),
+        json!({"points": [{"id": 1, "score": 0.5, "version": 3}]}),
+    ] {
+        validate_ref(&openapi, "QueryResponse", &item);
+    }
 }

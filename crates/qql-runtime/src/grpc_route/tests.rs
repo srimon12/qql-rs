@@ -4,7 +4,7 @@ use super::ddl::{
     hnsw_config_from_plan, quantization_config_from_plan, sparse_vectors_config_diff,
     strict_mode_config_from_plan, vector_params, vectors_config_diff, wal_config_from_plan,
 };
-use super::execute_write::to_points_update_operation;
+use super::execute_write::{to_points_update_operation, update_result_to_typed};
 use super::filter::{to_condition, to_match};
 use super::query::{
     plan_vector_to_proto, to_count_points, to_facet_counts, to_query_groups, to_query_points,
@@ -1165,6 +1165,35 @@ fn query_order_by_start_from_maps_proto() {
         }
         other => panic!("expected OrderBy variant, got {other:?}"),
     }
+}
+
+/// Per-item `UpdateBatch` statuses follow the same policy as REST:
+/// acknowledged/completed succeed, wait_timeout and clock-rejected are
+/// per-item failures, unknown values fail closed.
+#[test]
+fn update_batch_statuses_map_strictly() {
+    use qdrant::UpdateStatus;
+    let convert = |status: UpdateStatus| {
+        update_result_to_typed(qdrant::UpdateResult {
+            operation_id: Some(1),
+            status: status as i32,
+        })
+    };
+    assert!(convert(UpdateStatus::Acknowledged).is_ok());
+    assert!(convert(UpdateStatus::Completed).is_ok());
+
+    let err = convert(UpdateStatus::WaitTimeout).unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-BATCH");
+    assert!(err.message.contains("wait_timeout"));
+    let err = convert(UpdateStatus::ClockRejected).unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-BATCH");
+
+    let err = update_result_to_typed(qdrant::UpdateResult {
+        operation_id: None,
+        status: 99,
+    })
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-BACKEND-ENVELOPE");
 }
 
 /// `COUNT … EXACT false` must stay approximate on gRPC; it used to be forced
