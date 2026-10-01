@@ -64,6 +64,19 @@ fn run() -> Result<(), Box<dyn Error>> {
         eprintln!("qql-grammar-gen: warning: {message}");
     }
 
+    let token_source = fs::read_to_string(root.join("crates/qql-core/src/token.rs"))?;
+    let unlexable = unlexable_keywords(&literals, &token_source);
+    if !unlexable.is_empty() {
+        let message = format!(
+            "TokenKind keyword variants absent from grammar.pest (never reachable via `lookup_keyword`): {}",
+            unlexable.join(", ")
+        );
+        if command == "check" {
+            return Err(message.into());
+        }
+        eprintln!("qql-grammar-gen: warning: {message}");
+    }
+
     match command.as_str() {
         "generate" => artifacts
             .iter()
@@ -329,6 +342,105 @@ fn dead_rules(source: &str) -> Vec<String> {
     dead
 }
 
+/// Parse the `gen_as_str! { Variant => "TEXT", … }` display table from
+/// `qql-core/src/token.rs`.
+fn gen_as_str_entries(source: &str) -> Vec<(String, String)> {
+    let Some(start) = source.find("gen_as_str!") else {
+        return Vec::new();
+    };
+    let Some(open) = source[start..].find('{') else {
+        return Vec::new();
+    };
+    let body_start = start + open + 1;
+    let rest = &source[body_start..];
+    let mut close = rest.len();
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim() == "}" {
+            close = offset;
+            break;
+        }
+        offset += line.len();
+    }
+    let mut entries = Vec::new();
+    for line in rest[..close].lines() {
+        let line = line.trim().trim_end_matches(',');
+        let Some((variant, text)) = line.split_once("=>") else {
+            continue;
+        };
+        let variant = variant.trim();
+        let text = text.trim().trim_matches('"');
+        if !variant.is_empty() && !text.is_empty() {
+            entries.push((variant.to_string(), text.to_string()));
+        }
+    }
+    entries
+}
+
+/// Token kinds whose display string is a word but which are not keywords:
+/// the exclusions of `TokenKind::is_keyword_or_identifier` plus `Identifier`
+/// and `Eof`, which the lexer produces without a keyword lookup.
+fn structural_word_kinds(source: &str) -> Vec<String> {
+    let mut kinds = vec!["Identifier".to_string(), "Eof".to_string()];
+    let Some(start) = source.find("pub fn is_keyword_or_identifier") else {
+        return kinds;
+    };
+    let Some(match_start) = source[start..].find("matches!(") else {
+        return kinds;
+    };
+    let body_start = start + match_start + "matches!(".len();
+    let bytes = source.as_bytes();
+    let mut depth = 1usize;
+    let mut end = body_start;
+    while end < bytes.len() && depth > 0 {
+        match bytes[end] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {}
+        }
+        end += 1;
+    }
+    for part in source[body_start..end].split("Self::").skip(1) {
+        let name: String = part
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        if !name.is_empty() {
+            kinds.push(name);
+        }
+    }
+    kinds.sort();
+    kinds.dedup();
+    kinds
+}
+
+/// `gen_as_str!` entries that look like keywords (word display, length > 1)
+/// but are absent from the grammar-derived keyword set, so `lookup_keyword`
+/// can never produce them. This is the reverse of the compile-time
+/// grammar-literal → `TokenKind` check.
+fn unlexable_keywords(grammar: &[String], token_source: &str) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let structural: HashSet<String> = structural_word_kinds(token_source).into_iter().collect();
+    let known: HashSet<&str> = grammar.iter().map(String::as_str).collect();
+    let mut missing = Vec::new();
+    for (variant, display) in gen_as_str_entries(token_source) {
+        if structural.contains(&variant) {
+            continue;
+        }
+        let is_word = display.len() > 1
+            && display
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            && display.bytes().any(|b| b.is_ascii_alphabetic());
+        if is_word && !known.contains(display.to_ascii_uppercase().as_str()) {
+            missing.push(format!("{variant} => \"{display}\""));
+        }
+    }
+    missing.sort();
+    missing
+}
+
 fn render_typescript(literals: &[String]) -> String {
     let constants = literals
         .iter()
@@ -571,6 +683,44 @@ rule = { ^"REAL" ~ "//not a comment" ~ ^"ALSO_REAL" }
         // Unicode operators present, `<>` absent.
         assert!(grammar.contains("!=|>=|<=|≠|≥|≤|=|>|<"));
         assert!(!grammar.contains("<>"));
+    }
+
+    #[test]
+    fn flags_keyword_variants_missing_from_the_grammar() {
+        let grammar = grammar_literals(r#"query = { ^"QUERY" }"#);
+        let token_source = r#"
+            gen_as_str! {
+                Query => "QUERY",
+                Fresh => "FRESH",
+                Identifier => "IDENTIFIER",
+            }
+        "#;
+        assert_eq!(
+            unlexable_keywords(&grammar, token_source),
+            [r#"Fresh => "FRESH""#]
+        );
+    }
+
+    #[test]
+    fn structural_kinds_parse_from_the_classifier() {
+        let source =
+            fs::read_to_string(workspace_root().join("crates/qql-core/src/token.rs")).unwrap();
+        let kinds = structural_word_kinds(&source);
+        assert!(kinds.contains(&"Minus".to_string()));
+        assert!(kinds.contains(&"NotEquals".to_string()));
+        assert!(kinds.contains(&"Identifier".to_string()));
+        assert!(!kinds.contains(&"Query".to_string()));
+    }
+
+    #[test]
+    fn real_token_table_has_no_unlexable_keywords() {
+        let root = workspace_root();
+        let grammar_source = fs::read_to_string(root.join("language/v1/grammar.pest")).unwrap();
+        let token_source = fs::read_to_string(root.join("crates/qql-core/src/token.rs")).unwrap();
+        assert!(
+            unlexable_keywords(&grammar_literals(&grammar_source), &token_source).is_empty(),
+            "every keyword `gen_as_str!` entry must appear in grammar.pest"
+        );
     }
 
     #[test]
