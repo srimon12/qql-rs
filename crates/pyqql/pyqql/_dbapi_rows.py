@@ -47,10 +47,15 @@ def _point_mapped(hits: List[Dict[str, Any]]) -> Tuple[List[Tuple], List[Tuple]]
     return [_point_row(h, with_vector) for h in hits], cols
 
 
-def map_result(report: Any, idx: int) -> Tuple[List[Tuple], Optional[List[Tuple]]]:
-    """Map statement ``idx`` to ``(rows, description)`` (``None`` = no result set)."""
-    results = report.results
-    res = results[idx] if 0 <= idx < len(results) else {}
+def map_result(
+    res: Dict[str, Any], report: Any, idx: int
+) -> Tuple[List[Tuple], Optional[List[Tuple]]]:
+    """Map an already-pythonized statement result to ``(rows, description)``.
+
+    ``res`` is ``report.results[idx]`` as read once by the caller; this
+    function never re-serializes the report. ``report`` is used only for the
+    typed ``count(idx)`` / ``groups(idx)`` accessors (``None`` = no result set).
+    """
     op = res.get("operation", "")
     data = res.get("data", None)
     if op in POINT_OPS and isinstance(data, list):

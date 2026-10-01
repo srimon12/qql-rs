@@ -54,17 +54,17 @@ except ImportError:  # pragma: no cover - feature-disabled builds
     http_executor = None
 
 
-def execute_hits(*args: Any, **kwargs: Any) -> List[ScoredPoint]:
+def execute_hits(*args: Any, stmt: int = 0, **kwargs: Any) -> List[ScoredPoint]:
     if execute is None:
         raise NotImplementedError("execute is not available in this build")
-    return execute(*args, **kwargs).hits(0)
+    return execute(*args, **kwargs).hits(stmt)
 
 
-async def execute_async_hits(*args: Any, **kwargs: Any) -> List[ScoredPoint]:
+async def execute_async_hits(*args: Any, stmt: int = 0, **kwargs: Any) -> List[ScoredPoint]:
     if execute_async is None:
         raise NotImplementedError("execute_async is not available in this build")
     rep = await execute_async(*args, **kwargs)
-    return rep.hits(0)
+    return rep.hits(stmt)
 
 
 def _format_collection(name: str) -> str:
@@ -118,6 +118,7 @@ def _build_scroll_statement(
     where: str,
     cursor: Any,
     base_params: Optional[Dict[str, Any]],
+    with_payload: bool,
     with_vector: bool,
     shard_key: Optional[Union[str, int]],
 ) -> tuple[str, Optional[Dict[str, Any]]]:
@@ -136,6 +137,11 @@ def _build_scroll_statement(
             sql += " SHARD " + str(shard_key)
         else:
             sql += " SHARD '" + str(shard_key).replace("'", "''") + "'"
+    # Strip payloads server-side (the documented minimal-bandwidth idiom);
+    # `_strip_payload` stays as a defensive second layer for backends that
+    # ignore the clause.
+    if not with_payload:
+        sql += " WITH PAYLOAD false"
     if with_vector:
         sql += " WITH VECTOR"
     sql += " LIMIT " + str(batch_size)
@@ -166,7 +172,7 @@ def _scroll_cursor_impl(
     first = True
     while True:
         (sql, page_params) = _build_scroll_statement(
-            _coll, _batch, _where, None if first else cursor, _params, _with_vector, _shard
+            _coll, _batch, _where, None if first else cursor, _params, _with_payload, _with_vector, _shard
         )
         report = client.execute(sql, params=page_params) if page_params is not None else client.execute(sql)
         hits = report.hits()
@@ -201,7 +207,7 @@ async def _scroll_cursor_async_impl(
     first = True
     while True:
         (sql, page_params) = _build_scroll_statement(
-            _coll, _batch, _where, None if first else cursor, _params, _with_vector, _shard
+            _coll, _batch, _where, None if first else cursor, _params, _with_payload, _with_vector, _shard
         )
         if page_params is not None:
             report = await client.execute_async(sql, params=page_params)
