@@ -138,6 +138,9 @@ impl QdrantOps for EdgeQdrant {
                     }
                     .to_string()
                 }),
+                // The engine persists `on_disk` only; the plan's 1.19 `memory`
+                // tier is not recoverable from a loaded shard, so the
+                // projection reports `None`.
                 memory: None,
                 })
             })
@@ -185,6 +188,8 @@ impl QdrantOps for EdgeQdrant {
             .collect();
 
         Ok(CollectionInfo {
+            // qdrant-edge shards are always loaded and online, so the server's
+            // green health status is the only truthful projection.
             status: "green".to_string(),
             points_count: info.points_count as u64,
             indexed_vectors_count: Some(info.indexed_vectors_count as u64),

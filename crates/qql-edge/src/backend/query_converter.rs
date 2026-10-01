@@ -77,6 +77,9 @@ fn convert_shared_query(fields: SharedQueryFields<'_>) -> Result<QueryRequest, Q
             .collect::<Result<_, _>>()?,
         query: Some(convert_query(fields.query, fields.using)?),
         filter: super::convert_edge_filter(fields.filter)?,
+        // qdrant-edge stores the threshold as f32: an f64 plan value is
+        // narrowed here, so a hit exactly at an f32 rounding boundary can be
+        // included/excluded differently than on a backend that compares f64.
         score_threshold: fields.score_threshold.map(|score| score as f32),
         limit: usize::try_from(fields.limit).map_err(limit_error)?,
         offset: usize::try_from(fields.offset).map_err(limit_error)?,
@@ -215,6 +218,8 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
                 Ok(ScoringQuery::Mmr(Mmr {
                     vector,
                     using: using.unwrap_or("").into(),
+                    // The engine's MMR lambda is f32; narrowing follows the
+                    // request-wide f64→f32 rule documented on `score_threshold`.
                     lambda: OrderedFloat(mmr.diversity as f32),
                     candidates_limit: usize::try_from(mmr.candidates_limit).map_err(limit_error)?,
                 }))
