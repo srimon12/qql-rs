@@ -192,10 +192,13 @@ pub(crate) fn parse(method: &str, path: &str) -> Result<EndpointMatch, ConvertEr
 /// would produce QQL that cannot re-parse, so reject them here — one check for
 /// the wrapped, snippet, and curl paths alike (bare `--collection` values go
 /// through [`crate::convert`] which calls this too).
+///
+/// Whitespace is allowed: quoted collection names with spaces are legal QQL
+/// and `format_ident` quotes them on emit.
 pub(crate) fn reject_template_collection(name: &str) -> Result<(), ConvertError> {
     if name
         .chars()
-        .any(|c| matches!(c, '<' | '>' | '{' | '}' | '$') || c.is_whitespace())
+        .any(|c| matches!(c, '<' | '>' | '{' | '}' | '$'))
     {
         return Err(ConvertError::InvalidField {
             path: "collection".to_string(),

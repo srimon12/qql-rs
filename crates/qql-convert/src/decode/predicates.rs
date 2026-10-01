@@ -105,11 +105,15 @@ pub(crate) fn decode_match(
                 field: field.to_string(),
                 op: ComparisonOp::Eq,
                 value: {
-                    let n = json::required(obj, "integer", path)
-                        .and_then(|v| json::u64_at(v, &child(path, "integer")))?;
-                    i64::try_from(n)
-                        .map(AstValue::Int)
-                        .unwrap_or(AstValue::UInt(n))
+                    let raw = json::required(obj, "integer", path)?;
+                    let value_path = child(path, "integer");
+                    // Negative values are legal MatchInteger values; large
+                    // positives keep full u64 precision.
+                    if let Some(n) = raw.as_i64() {
+                        AstValue::Int(n)
+                    } else {
+                        AstValue::UInt(json::u64_at(raw, &value_path)?)
+                    }
                 },
             },
             "boolean" => FilterExpr::Compare {
