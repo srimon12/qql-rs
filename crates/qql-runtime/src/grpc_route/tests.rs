@@ -1,5 +1,7 @@
 //! gRPC converter tests (moved from `grpc_route.rs` unchanged).
 
+use std::collections::HashMap;
+
 use super::ddl::{
     hnsw_config_from_plan, quantization_config_from_plan, sparse_vectors_config_diff,
     strict_mode_config_from_plan, vector_params, vectors_config_diff, wal_config_from_plan,
@@ -1610,7 +1612,9 @@ fn typed_retrieved_hit_maps_proto_directly() {
         qql_plan::PlanPointId::String("11111111-2222-3333-4444-555555555555".to_string())
     );
     assert_eq!(hit.score, 0.0);
-    assert_eq!(hit.payload, None);
+    // An empty proto payload map is `Some({})`, exactly like a REST
+    // `"payload": {}` record.
+    assert_eq!(hit.payload, Some(HashMap::new()));
     assert_eq!(hit.vector, None);
 }
 

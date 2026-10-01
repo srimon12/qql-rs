@@ -120,6 +120,35 @@ fn rest_grpc_query_parity_timeout_consistency_shard_multi() {
 }
 
 #[test]
+fn rest_grpc_empty_payload_parity() {
+    use std::collections::HashMap;
+
+    // REST `"payload": {}` survives as `Some({})`; the gRPC empty proto map
+    // must read the same, not `None`.
+    let stmt = Parser::parse("SCROLL FROM docs LIMIT 1;").unwrap();
+    let op = plan(&stmt).unwrap();
+    let rest = crate::rest_response::parse_planned(
+        &op,
+        serde_json::json!({"result": {"points": [{"id": 1, "payload": {}}]}, "status": "ok"}),
+    )
+    .expect("REST empty payload parses");
+    let rest_hit = &rest.data.hits().expect("hits")[0];
+    assert_eq!(rest_hit.payload, Some(HashMap::new()));
+
+    let grpc_hit = test_api::retrieved_point_to_hit(qdrant::RetrievedPoint {
+        id: Some(qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(1)),
+        }),
+        payload: Default::default(),
+        vectors: None,
+        shard_key: None,
+        order_value: None,
+    })
+    .expect("gRPC empty payload converts");
+    assert_eq!(grpc_hit.payload, rest_hit.payload);
+}
+
+#[test]
 fn rest_grpc_geo_polygon_parity() {
     // The same polygon must be present in the REST body and the proto field
     // condition — a missing proto conversion silently matches different rows.

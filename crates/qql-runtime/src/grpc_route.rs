@@ -43,7 +43,7 @@ pub(crate) mod test_api {
     pub(crate) use super::query::{
         to_count_points, to_facet_counts, to_query_points, to_scroll_points, to_vector_input,
     };
-    pub(crate) use super::typed::{facet_hit_to_typed, usage_to_json};
+    pub(crate) use super::typed::{facet_hit_to_typed, retrieved_point_to_hit, usage_to_json};
 }
 
 #[cfg(test)]
