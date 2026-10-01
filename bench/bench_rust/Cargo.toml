@@ -14,3 +14,14 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 tempfile = "3"
+
+# Keep debug builds small: no DWARF for deps, line tables for local code.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+debug = false
+strip = "debuginfo"

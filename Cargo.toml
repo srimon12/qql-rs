@@ -53,7 +53,17 @@ async-trait = "0.1"
 phf = { version = "0.14", features = ["macros"] }
 uuid = { version = "1.13", features = ["serde"] }
 
+[profile.dev]
+# Full DWARF is what makes dependency rlibs (qdrant-edge et al.) GB-sized; line
+# tables keep backtraces useful at a fraction of the disk cost.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Third-party deps don't need debug info — the single biggest target/ size cut.
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
+debug = false
 strip = true
