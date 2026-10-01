@@ -147,14 +147,20 @@ impl Executor {
         self.client.as_ref()
     }
 
-    /// Close the executor, aborting in-flight work and preventing future executions.
+    /// Close the executor: prevents new executions, clears the schema cache,
+    /// and closes the backend (flushing/releasing resources; embedded
+    /// backends override [`QdrantOps::close`](crate::client::QdrantOps::close)
+    /// to release their store). In-flight statements that already passed
+    /// `ensure_open` run to completion.
+    ///
+    /// Idempotent: a second call is a no-op and the backend is closed once.
     pub async fn close(&self) -> Result<(), QqlError> {
         let _guard = self.close_lock.lock().await;
         if self.closed.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
         self.schema_cache.write().await.clear();
-        Ok(())
+        self.client.close().await
     }
 
     /// Check whether this executor has been closed.
