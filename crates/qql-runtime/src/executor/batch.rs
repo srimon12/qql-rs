@@ -213,7 +213,8 @@ impl Executor {
             // are part of the batch key) and ride the batch RPC header.
             let (collection, opts, batch) = qql_plan::into_query_batch(operations)?;
             let expected = batch.searches.len();
-            let retry = match self
+            let mut retry_error: Option<QqlError> = None;
+            match self
                 .client
                 .execute_query_batch(&collection, &batch, opts.timeout, opts.consistency)
                 .await
@@ -222,7 +223,6 @@ impl Executor {
                     for response in responses {
                         results.push(super::normalize::normalize_query_item(response)?);
                     }
-                    false
                 }
                 Ok(responses) => {
                     // The server answered with the wrong item count: it is a
@@ -245,21 +245,18 @@ impl Executor {
                             });
                         }
                     }
-                    false
                 }
                 Err(error) => {
                     if stop_on_error {
                         return Err(error);
                     }
-                    true
+                    retry_error = Some(error);
                 }
-            };
-            if retry {
-                // Transport failure: the batch RPC may have applied some or
-                // all members server-side, so individual retries are
-                // at-least-once. Every QQL mutation is idempotent in effect
-                // (upsert/delete/set/overwrite/clear/delete payload/vectors),
-                // which is what makes this safe today.
+            }
+            if let Some(transport_error) = retry_error {
+                // Transport failure on a read batch: the server may have run
+                // every member, so individual retries are at-least-once.
+                // Queries are side-effect free, which is what makes this safe.
                 std::hint::cold_path();
                 let operations = batch
                     .searches
@@ -269,7 +266,8 @@ impl Executor {
                         request,
                     })
                     .collect();
-                self.retry_batch_individually(operations, results).await?;
+                self.retry_batch_individually(operations, &transport_error, results)
+                    .await?;
             }
         } else {
             let mut collection: Option<String> = None;
@@ -330,7 +328,8 @@ impl Executor {
         let (collection, _, opts, batch) = qql_plan::into_update_batch(operations)?;
         let expected = batch.operations.len();
         let wait = opts.wait.unwrap_or(true);
-        let retry = match self
+        let mut retry_error: Option<QqlError> = None;
+        match self
             .client
             .execute_update_batch(&collection, &batch, wait)
             .await
@@ -341,7 +340,6 @@ impl Executor {
                     // their request point count, other writes are status-only.
                     results.push(super::normalize::normalize_update_item(op, response)?);
                 }
-                false
             }
             Ok(responses) => {
                 // Server-answered cardinality mismatch: never retried (the
@@ -363,25 +361,29 @@ impl Executor {
                         });
                     }
                 }
-                false
             }
             Err(error) => {
                 if stop_on_error {
                     return Err(error);
                 }
-                true
+                retry_error = Some(error);
             }
-        };
-        if retry {
-            // Transport failure: see the query arm for the at-least-once
-            // rationale.
+        }
+        if let Some(transport_error) = retry_error {
+            // Transport failure: the batch RPC may have applied some or all
+            // members server-side. Only set-semantics mutations are retried
+            // individually (at-least-once); conditional upserts
+            // (`update_filter` / `insert_only` / `update_only`) surface the
+            // original transport error instead — re-applying them observes
+            // different state and can change the outcome.
             std::hint::cold_path();
             let operations = batch
                 .operations
                 .into_iter()
                 .map(|op| qql_plan::mutation::update_operation_into_planned(&collection, op, wait))
                 .collect();
-            self.retry_batch_individually(operations, results).await?;
+            self.retry_batch_individually(operations, &transport_error, results)
+                .await?;
         }
         Ok(())
     }
@@ -451,7 +453,7 @@ impl Executor {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations, results)
+                        self.retry_forced_members_individually(operations, &error, results)
                             .await?;
                     }
                 }
@@ -492,7 +494,7 @@ impl Executor {
                         if stop_on_error {
                             return Err(error);
                         }
-                        self.retry_forced_members_individually(operations, results)
+                        self.retry_forced_members_individually(operations, &error, results)
                             .await?;
                     }
                 }
@@ -506,13 +508,20 @@ impl Executor {
     /// Members are never `Batch` or client-side ops (the planner rejects
     /// those), so this dispatches straight through [`Self::dispatch_raw`]
     /// instead of [`Self::dispatch_or_collect`] — keeping
-    /// [`Self::dispatch_planned`] non-recursive.
+    /// [`Self::dispatch_planned`] non-recursive. Non-idempotent members
+    /// (conditional upserts) are not re-executed; they surface the original
+    /// transport error instead.
     async fn retry_forced_members_individually(
         &self,
         operations: &[qql_plan::PlannedOperation],
+        transport_error: &QqlError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         for operation in operations {
+            if !operation.retry_is_safe() {
+                results.push(Self::transport_failure(operation, transport_error));
+                continue;
+            }
             match self.dispatch_raw(operation).await {
                 Ok(response) => results.push(Self::normalize_planned(operation, response)?),
                 Err(error) => results.push(ExecResponse {
@@ -527,14 +536,34 @@ impl Executor {
         Ok(())
     }
 
+    /// Failure response carrying the batch RPC's original transport error for
+    /// a member that must not be re-executed.
+    fn transport_failure(
+        operation: &qql_plan::PlannedOperation,
+        transport_error: &QqlError,
+    ) -> ExecResponse {
+        ExecResponse {
+            ok: false,
+            operation: operation.operation_label().to_string(),
+            message: transport_error.to_string(),
+            data: None,
+            telemetry: None,
+        }
+    }
+
     async fn retry_batch_individually(
         &self,
         operations: Vec<qql_plan::PlannedOperation>,
+        transport_error: &QqlError,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         for operation in operations {
-            self.dispatch_or_collect(operation, OnError::Continue, results)
-                .await?;
+            if operation.retry_is_safe() {
+                self.dispatch_or_collect(operation, OnError::Continue, results)
+                    .await?;
+            } else {
+                results.push(Self::transport_failure(&operation, transport_error));
+            }
         }
         Ok(())
     }

@@ -386,6 +386,27 @@ impl PlannedOperation {
         }
     }
 
+    /// Whether re-executing this operation after an ambiguous transport
+    /// failure is safe because the operation has set (idempotent) semantics.
+    ///
+    /// Reads and whole-value writes are safe to apply twice. The exception is
+    /// [`PlannedOperation::Upsert`] with a conditional guard: `update_filter`
+    /// and `update_mode: insert_only | update_only` make a second application
+    /// observe different state, so a retry can change the outcome of a first
+    /// application that already landed.
+    pub fn retry_is_safe(&self) -> bool {
+        match self {
+            PlannedOperation::Upsert { request, .. } => {
+                request.update_filter.is_none()
+                    && !matches!(
+                        request.update_mode,
+                        Some(UpdateMode::InsertOnly | UpdateMode::UpdateOnly)
+                    )
+            }
+            _ => true,
+        }
+    }
+
     /// Batch grouping key (collection + family + per-statement execution
     /// opts) for executor dispatch.
     ///
@@ -1624,5 +1645,29 @@ mod batch_tests {
                 .iter()
                 .any(|(k, v)| k == "consistency" && v == "majority")
         );
+    }
+
+    #[test]
+    fn conditional_upserts_are_not_retry_safe() {
+        // Batch retries are at-least-once: only set-semantics operations may
+        // run again after an ambiguous transport failure.
+        for source in [
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1]};",
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE upsert;",
+            "DELETE FROM docs WHERE id = 1;",
+            "DELETE PAYLOAD draft FROM docs WHERE id = 1;",
+        ] {
+            let op = plan_source(source).unwrap_or_else(|e| panic!("{source}: {e:?}"));
+            assert!(op.retry_is_safe(), "{source} must stay retry-safe");
+        }
+
+        for source in [
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE insert_only;",
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1]} UPDATE MODE update_only;",
+            "UPSERT INTO docs VALUES {id: 1, vector: [0.1], status: 'a'} UPDATE FILTER status = 'a';",
+        ] {
+            let op = plan_source(source).unwrap_or_else(|e| panic!("{source}: {e:?}"));
+            assert!(!op.retry_is_safe(), "{source} must not be retried");
+        }
     }
 }

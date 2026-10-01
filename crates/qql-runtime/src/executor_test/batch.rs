@@ -585,6 +585,56 @@ async fn query_batch_failure_with_continue_retries_individually() {
 }
 
 #[tokio::test]
+async fn conditional_upserts_are_not_retried_after_batch_transport_failure() {
+    // A transport failure on a mutation batch re-runs only set-semantics
+    // members one-by-one. Conditional upserts (`update_filter` /
+    // `update_mode`) must surface the original batch error instead of
+    // executing again against different state.
+    let client = MockQdrantClient::default();
+    *client.fail_update_batch.lock().unwrap() = true;
+    let update_calls = client.update_batch_call_count.clone();
+    let individual_calls = client.execute_planned_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, vector: [0.1], status: 'active'} \
+             UPDATE FILTER status = 'active' WAIT true;\
+         UPSERT INTO docs VALUES {id: 2, vector: [0.2]} UPDATE MODE insert_only WAIT true;\
+         UPSERT INTO docs VALUES {id: 3, vector: [0.3]} WAIT true;",
+    )
+    .unwrap();
+    let results = executor
+        .execute_batch_nodes(stmts, OnError::Continue)
+        .await
+        .expect("continue mode must return a report");
+
+    assert_eq!(results.len(), 3, "one response per statement: {results:?}");
+    assert!(
+        !results[0].ok,
+        "an update_filter upsert must not be retried: {results:?}"
+    );
+    assert!(
+        !results[1].ok,
+        "an insert_only upsert must not be retried: {results:?}"
+    );
+    assert!(
+        results[1].message.contains("batch rejected"),
+        "the original transport error is surfaced: {:?}",
+        results[1]
+    );
+    assert!(
+        results[2].ok,
+        "the set-semantics upsert is retried individually: {results:?}"
+    );
+    assert_eq!(*update_calls.lock().unwrap(), 1, "exactly one batch RPC");
+    assert_eq!(
+        *individual_calls.lock().unwrap(),
+        1,
+        "only the retry-safe member re-runs"
+    );
+}
+
+#[tokio::test]
 async fn same_collection_query_batch_yields_per_statement_hits() {
     // N1: two same-collection QUERY statements batch into ONE
     // /points/query/batch RPC. The upstream per-item shape (OpenAPI
