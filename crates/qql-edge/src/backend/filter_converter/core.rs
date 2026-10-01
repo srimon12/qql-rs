@@ -118,21 +118,6 @@ fn lower_clause(clause: &PlanFilterClause) -> Result<Condition, QqlError> {
         PlanFilterClause::HasVector(condition) => Condition::HasVector(HasVectorCondition {
             has_vector: condition.has_vector.clone(),
         }),
-        PlanFilterClause::MinShould(condition) => {
-            let conditions = condition
-                .min_should
-                .conditions
-                .iter()
-                .map(lower_clause)
-                .collect::<Result<Vec<_>, _>>()?;
-            Condition::Filter(Filter {
-                min_should: Some(MinShould {
-                    conditions,
-                    min_count: condition.min_should.min_count as usize,
-                }),
-                ..Filter::default()
-            })
-        }
         PlanFilterClause::Nested(condition) => Condition::Nested(lower_nested(condition)?),
         PlanFilterClause::Filter(compound) => Condition::Filter(lower_compound(compound)?),
         PlanFilterClause::Slice(condition) => Condition::Slice(lower_slice(condition)?),

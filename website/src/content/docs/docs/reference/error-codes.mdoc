@@ -354,7 +354,6 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-ALTER-PARAMS` | `ALTER COLLECTION … WITH PARAMS`; qdrant-edge has no params setter |
 | `QQL-EDGE-UNSUPPORTED-ALTER-QUANTIZATION` | `ALTER COLLECTION … QUANTIZATION`; qdrant-edge has no quantization setter |
 | `QQL-EDGE-UNSUPPORTED-VECTOR-DIFF` | Per-vector `ALTER COLLECTION … WITH VECTOR (<name>)` fields other than `hnsw_config` (`quantization_config` / `on_disk` / `memory`); qdrant-edge exposes `set_vector_hnsw_config` only |
-| `QQL-EDGE-UNSUPPORTED-WAIT` | `WAIT false` on mutation batches; qdrant-edge applies every write synchronously |
 | `QQL-EDGE-UNSUPPORTED-SPARSE-DIFF` | Per-sparse-vector `ALTER COLLECTION … WITH SPARSE (<name>)`; qdrant-edge has no sparse vector config setter |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Create-time `WITH PARAMS` keys other than `on_disk_payload` (replication, fan-out, payload memory) |
 | `QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY` | `OPTIMIZERS` keys qdrant-edge excludes (`memmap_threshold`, `flush_interval_sec`, `max_optimization_threads`) |
@@ -505,7 +504,6 @@ QQL-EDGE-UNSUPPORTED-SPARSE-DIFF
 QQL-EDGE-UNSUPPORTED-STRICT-MODE
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-UNSUPPORTED-VECTOR-DIFF
-QQL-EDGE-UNSUPPORTED-WAIT
 QQL-EDGE-UNSUPPORTED-WAL
 QQL-EDGE-UPSERT-MODE-ONLY
 QQL-EDGE-VECTOR

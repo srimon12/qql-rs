@@ -37,8 +37,6 @@ pub enum EdgeUnsupported {
     Timeout,
     /// `PARAMS (consistency = …)`.
     Consistency,
-    /// `WAIT false` on mutation batches (no async acknowledgement path).
-    Wait,
     /// `QUERY CROSS RERANK` via direct backend execution.
     CrossRerank,
     /// `SHOW QUOTAS` / `SET QUOTA`.
@@ -73,7 +71,6 @@ impl EdgeUnsupported {
             Self::OptimizerKey => "QQL-EDGE-UNSUPPORTED-OPTIMIZER-KEY",
             Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
             Self::Consistency => "QQL-EDGE-UNSUPPORTED-CONSISTENCY",
-            Self::Wait => "QQL-EDGE-UNSUPPORTED-WAIT",
             Self::CrossRerank => "QQL-EDGE-UNSUPPORTED-CROSS-RERANK",
             Self::Quota => "QQL-EDGE-UNSUPPORTED-QUOTA",
             Self::RecommendAverageVector => "QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY",
@@ -106,7 +103,6 @@ impl EdgeUnsupported {
             }
             Self::Timeout => "PARAMS (timeout = …)",
             Self::Consistency => "PARAMS (consistency = …)",
-            Self::Wait => "WAIT false on mutation batches",
             Self::CrossRerank => "QUERY CROSS RERANK",
             Self::Quota => "SHOW QUOTAS / SET QUOTA",
             Self::RecommendAverageVector => {
@@ -158,9 +154,6 @@ impl EdgeUnsupported {
             }
             Self::Consistency => {
                 "qdrant-edge is a single-node engine with no replica consistency levels"
-            }
-            Self::Wait => {
-                "qql-edge applies every write synchronously before returning; it has no async acknowledgement path to return before apply"
             }
             Self::CrossRerank => {
                 "reranking runs client-side in the executor over scored pairs; direct backend execution has no cross-encoder path"
@@ -336,7 +329,6 @@ mod tests {
             EdgeUnsupported::OptimizerKey,
             EdgeUnsupported::Timeout,
             EdgeUnsupported::Consistency,
-            EdgeUnsupported::Wait,
             EdgeUnsupported::CrossRerank,
             EdgeUnsupported::Quota,
             EdgeUnsupported::RecommendAverageVector,

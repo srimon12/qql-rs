@@ -8,9 +8,9 @@ use std::collections::HashMap;
 
 use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{
-    ContextPair as EdgeContextPair, ContextQuery, Direction, DiscoverQuery, Fusion, JsonPath, Mmr,
-    NamedQuery, OrderBy, Prefetch, QueryEnum, QueryRequest, RecommendQuery, Sample, ScoringQuery,
-    VectorInternal, WithPayloadInterface, WithVector,
+    ContextPair as EdgeContextPair, ContextQuery, DiscoverQuery, Fusion, Mmr, NamedQuery, Prefetch,
+    QueryEnum, QueryRequest, RecommendQuery, Sample, ScoringQuery, VectorInternal,
+    WithPayloadInterface, WithVector,
 };
 
 use qql_core::error::QqlError;
@@ -27,8 +27,8 @@ mod selectors;
 
 use formula::{formula_default_to_json, plan_formula_to_edge};
 pub(crate) use selectors::{
-    convert_order_by_interface, convert_search_params, convert_with_payload, convert_with_vector,
-    parse_json_path,
+    convert_order_by, convert_order_by_interface, convert_search_params, convert_with_payload,
+    convert_with_vector, parse_json_path,
 };
 
 /// Fields shared by the single-query and grouped-query request bodies, so the
@@ -77,6 +77,9 @@ fn convert_shared_query(fields: SharedQueryFields<'_>) -> Result<QueryRequest, Q
             .collect::<Result<_, _>>()?,
         query: Some(convert_query(fields.query, fields.using)?),
         filter: super::convert_edge_filter(fields.filter)?,
+        // qdrant-edge stores the threshold as f32: an f64 plan value is
+        // narrowed here, so a hit exactly at an f32 rounding boundary can be
+        // included/excluded differently than on a backend that compares f64.
         score_threshold: fields.score_threshold.map(|score| score as f32),
         limit: usize::try_from(fields.limit).map_err(limit_error)?,
         offset: usize::try_from(fields.offset).map_err(limit_error)?,
@@ -131,7 +134,10 @@ pub(crate) fn convert_query_groups_request(
         request.shard_key.as_ref(),
         request.timeout,
         request.consistency.as_ref(),
-        request.lookup_from.as_ref(),
+        // `lookup_from` is the same group-hydration feature as `with_lookup`
+        // and is rejected above with its dedicated code; do not re-check it
+        // here as a generic point reference.
+        None,
     )?;
     let query = convert_shared_query(SharedQueryFields {
         query: &request.query,
@@ -212,6 +218,8 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
                 Ok(ScoringQuery::Mmr(Mmr {
                     vector,
                     using: using.unwrap_or("").into(),
+                    // The engine's MMR lambda is f32; narrowing follows the
+                    // request-wide f64→f32 rule documented on `score_threshold`.
                     lambda: OrderedFloat(mmr.diversity as f32),
                     candidates_limit: usize::try_from(mmr.candidates_limit).map_err(limit_error)?,
                 }))
@@ -288,23 +296,7 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
             })))
         }
         QueryVariant::OrderBy { order_by } => {
-            let direction = match order_by.direction.as_deref() {
-                None | Some("asc") => Direction::Asc,
-                Some("desc") => Direction::Desc,
-                Some(other) => {
-                    return Err(edge_error(format!(
-                        "unsupported order_by direction '{other}'"
-                    )));
-                }
-            };
-            let key: JsonPath =
-                serde_json::from_value(serde_json::Value::String(order_by.key.clone()))
-                    .map_err(|e| edge_error(format!("invalid order_by key: {e}")))?;
-            Ok(ScoringQuery::OrderBy(OrderBy {
-                key,
-                direction: Some(direction),
-                start_from: None,
-            }))
+            Ok(ScoringQuery::OrderBy(convert_order_by(order_by)?))
         }
         QueryVariant::Sample { sample } => match sample.as_str() {
             "random" => Ok(ScoringQuery::Sample(Sample::Random)),

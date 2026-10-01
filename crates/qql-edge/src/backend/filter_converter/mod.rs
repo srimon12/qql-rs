@@ -11,7 +11,7 @@
 //! |---|---|
 //! | `FilterExpression::Single` | `Filter { must: [condition] }` |
 //! | `FilterExpression::Compound` | `Filter { must, must_not, should, min_should }` |
-//! | `MatchValue::{Value,Text,Any,Except,Phrase,Prefix}` | `Match::{Value,Text,Any,Except,Phrase,Prefix}` |
+//! | `MatchValue::{Value,Text,TextAny,Any,Except,Phrase,Prefix}` | `Match::{Value,Text,TextAny,Any,Except,Phrase,Prefix}` |
 //! | `RangeParams` numeric / RFC 3339 bounds | `RangeInterface::{Float,DateTime}` |
 //! | `FieldCondition` geo / `values_count` / `is_empty` / `is_null` | same-named edge types |
 //! | `IsNull`/`IsEmpty`/`HasId`/`HasVector`/`Nested`/`Filter`/`Slice` | same-named edge conditions |

@@ -1,5 +1,5 @@
 use super::*;
-use qdrant_edge::OrderByInterface;
+use qdrant_edge::{Direction, OrderByInterface};
 use qql_plan::types::{
     DiscoverQuery as PlanDiscover, FormulaDefault, FormulaQuery, NearestQuery, OrderByQuery,
     PlanFormula, RecommendQuery, RelevanceFeedbackInput,
@@ -227,7 +227,7 @@ fn test_order_by_conversion() {
         order_by: OrderByQuery {
             key: "created_at".to_string(),
             direction: Some("desc".to_string()),
-            start_from: None,
+            start_from: Some(qql_core::ast::Value::Int(10)),
         },
     };
     let result = convert_query(&query, None);
@@ -236,9 +236,31 @@ fn test_order_by_conversion() {
         ScoringQuery::OrderBy(order_by) => {
             assert_eq!(order_by.key.to_string(), "created_at");
             assert_eq!(order_by.direction, Some(Direction::Desc));
+            assert_eq!(
+                order_by.start_from,
+                Some(qdrant_edge::StartFrom::Integer(10)),
+                "the query path must carry START FROM into the engine request"
+            );
         }
         other => panic!("expected OrderBy, got {other:?}"),
     }
+}
+
+/// `START FROM` values the engine cannot represent fail closed on the query
+/// path instead of lowering to `None` (which would silently restart at the
+/// beginning of the ordered range).
+#[test]
+fn test_order_by_start_from_rejects_unrepresentable_values() {
+    let query = QueryVariant::OrderBy {
+        order_by: OrderByQuery {
+            key: "created_at".to_string(),
+            direction: None,
+            start_from: Some(qql_core::ast::Value::Bool(true)),
+        },
+    };
+    let error = convert_query(&query, None).expect_err("bool START FROM must fail closed");
+    assert_eq!(error.code, "QQL-EDGE-QUERY");
+    assert!(error.message.contains("start_from"), "{error}");
 }
 
 /// ACORN params are a first-class `SearchParams` field on qdrant-edge
@@ -525,13 +547,14 @@ fn test_convert_order_by_interface() {
     let ob = OrderByQuery {
         key: "price".to_string(),
         direction: Some("asc".to_string()),
-        start_from: None,
+        start_from: Some(qql_core::ast::Value::Float(2.5)),
     };
     let result = convert_order_by_interface(&ob).unwrap();
     match result {
         OrderByInterface::Struct(s) => {
             assert_eq!(s.key.to_string(), "price");
             assert_eq!(s.direction, Some(Direction::Asc));
+            assert_eq!(s.start_from, Some(qdrant_edge::StartFrom::Float(2.5)));
         }
         _ => panic!("expected Struct variant"),
     }

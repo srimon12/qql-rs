@@ -9,6 +9,7 @@
 
 mod accessors;
 mod bm25;
+mod cache;
 mod catalog;
 mod construct;
 mod inference;
@@ -20,9 +21,11 @@ pub use catalog::{
     list_embedding_models, resolve_embedding_model, resolve_image_model, resolve_multi_model,
 };
 
-use std::collections::HashMap;
+pub(crate) use cache::{
+    cache_dir_key, dense_cache, image_cache, load_cached, multi_cache, rerank_cache, sparse_cache,
+};
+
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 use fastembed::{Bgem3Embedding, ImageEmbedding, SparseTextEmbedding, TextEmbedding, TextRerank};
@@ -63,7 +66,8 @@ pub struct FastEmbedderOptions {
     /// Accepts `splade`, `SPLADEPPV1`, `Qdrant/Splade_PP_en_v1`, `bge-m3`,
     /// `BGEM3`, `BAAI/bge-m3`. When set, sparse embedding uses real ONNX
     /// inference. `None` → local wire-compatible BM25 (Qdrant
-    /// `qdrant/bm25`-identical token IDs) for sparse requests.
+    /// `qdrant/bm25`-identical token IDs) for sparse requests. `"bm25"` is
+    /// not an alias for the local encoder — omit this option for that.
     pub sparse_model: Option<String>,
     /// Offline multivector model. Accepts `bge-m3`, `BGEM3Q`,
     /// `gpahal/bge-m3-onnx-int8`. When set, `embed_multi` runs via BGE-M3 ColBERT.
@@ -171,38 +175,4 @@ pub struct FastEmbedder {
     /// via [`qql_embed::Embedder::bm25_text_config`], so estimators measure with the
     /// same language/tokenizer the engine embeds with).
     bm25_text: Bm25TextConfig,
-}
-
-pub(crate) type CacheKey = (String, String);
-pub(crate) type CachedModel<T> = Arc<Mutex<T>>;
-pub(crate) type ModelCache<T> = Mutex<HashMap<CacheKey, CachedModel<T>>>;
-
-static DENSE_CACHE: OnceLock<ModelCache<TextEmbedding>> = OnceLock::new();
-static SPARSE_CACHE: OnceLock<ModelCache<SparseTextEmbedding>> = OnceLock::new();
-static MULTI_CACHE: OnceLock<ModelCache<Bgem3Embedding>> = OnceLock::new();
-static IMAGE_CACHE: OnceLock<ModelCache<ImageEmbedding>> = OnceLock::new();
-static RERANK_CACHE: OnceLock<ModelCache<TextRerank>> = OnceLock::new();
-
-pub(crate) fn cache_dir_key(dir: Option<&PathBuf>) -> String {
-    dir.map(|p| p.display().to_string()).unwrap_or_default()
-}
-
-pub(crate) fn dense_cache() -> &'static ModelCache<TextEmbedding> {
-    DENSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn sparse_cache() -> &'static ModelCache<SparseTextEmbedding> {
-    SPARSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn multi_cache() -> &'static ModelCache<Bgem3Embedding> {
-    MULTI_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn image_cache() -> &'static ModelCache<ImageEmbedding> {
-    IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn rerank_cache() -> &'static ModelCache<TextRerank> {
-    RERANK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }

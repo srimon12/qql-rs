@@ -34,6 +34,10 @@ pub struct FilterCompound {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
     /// At-least-N `should` threshold as a wire object (`{"conditions", "min_count"}`).
+    ///
+    /// Always carried here: a top-level `MIN SHOULD` lowers to a compound with
+    /// only this field, and a nested occurrence rides [`FilterClause::Filter`],
+    /// so there is no standalone `min_should` clause variant to keep in sync.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_should: Option<MinShould>,
 }
@@ -45,14 +49,6 @@ pub struct MinShould {
     pub conditions: Vec<FilterClause>,
     /// Minimum number of clauses required to match.
     pub min_count: u64,
-}
-
-/// `{ "min_should": { "conditions": […], "min_count": n } }` — at least `n`
-/// of the conditions must match (OpenAPI `Filter.min_should`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MinShouldCondition {
-    /// At-least-N condition set.
-    pub min_should: MinShould,
 }
 
 /// One filter condition — any OpenAPI `Condition` variant.
@@ -69,8 +65,6 @@ pub enum FilterClause {
     HasId(HasIdCondition),
     /// `{ "has_vector": "name" }` — named-vector presence.
     HasVector(HasVectorCondition),
-    /// `{ "min_should": { "conditions": […], "min_count": n } }` — at-least-N match.
-    MinShould(MinShouldCondition),
     /// `{ "nested": … }` — filter over an array of objects.
     Nested(NestedCondition),
     /// Recursive sub-filter.

@@ -36,7 +36,8 @@ use qdrant_edge::{
     VectorStructPersisted, WalOptions, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::RwLock;
 
 use config_builder::{build_edge_config, edge_hnsw_config_over, overlay_optimizers};
 use conversions::{
@@ -78,7 +79,46 @@ pub struct EdgeQdrant {
     /// value (32 MiB for new shards).
     wal_segment_capacity: Option<usize>,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
-    opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Per-collection open mutexes, keyed by collection name.
+    ///
+    /// A plain `std::sync::Mutex` (never held across an `.await`): the entry is
+    /// inserted, then the per-key [`TokioMutex`] is awaited. [`OpeningGuard`]
+    /// removes the entry on every exit path.
+    opening: std::sync::Mutex<HashMap<String, Arc<TokioMutex<()>>>>,
+}
+
+/// Removes an `opening` entry when its attempt finishes.
+///
+/// The entry is only removed once no other opener is queued behind the same
+/// lock and the map still points at this lock: a waiting opener keeps its
+/// serialization, and a concurrent `delete_collection` re-inserting a fresh
+/// lock is not disturbed.
+struct OpeningGuard<'a> {
+    map: &'a std::sync::Mutex<HashMap<String, Arc<TokioMutex<()>>>>,
+    name: String,
+    lock: Arc<TokioMutex<()>>,
+}
+
+impl Drop for OpeningGuard<'_> {
+    fn drop(&mut self) {
+        let mut map = lock_map(self.map);
+        let same_lock = map
+            .get(&self.name)
+            .is_some_and(|entry| Arc::ptr_eq(entry, &self.lock));
+        // `self.lock` + the map's entry = 2; a waiting opener adds one.
+        if same_lock && Arc::strong_count(&self.lock) <= 2 {
+            map.remove(&self.name);
+        }
+    }
+}
+
+/// Lock a poisoning-tolerant `std::sync::Mutex`.
+///
+/// The maps behind it hold only keys/locks, so a panic cannot leave them
+/// logically inconsistent; recovering the guard is preferable to panicking in
+/// `Drop`.
+fn lock_map<T>(map: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    map.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// How `open_shard_inner` treats a missing vs existing collection directory.
@@ -94,6 +134,16 @@ enum OpenMode {
 fn spawn_error(operation: &str, error: impl std::fmt::Display) -> QqlError {
     QqlError::execution("QQL-EDGE-SPAWN", format!("{operation}: {error}"), None)
         .with_field("operation", operation.to_string())
+}
+
+/// `CREATE COLLECTION` against a collection that already exists.
+fn collection_exists_error(name: &str) -> QqlError {
+    QqlError::execution(
+        "QQL-EDGE-COLLECTION-EXISTS",
+        format!("collection '{name}' already exists"),
+        None,
+    )
+    .with_collection(name.to_string())
 }
 
 /// Persisted WAL segment capacity (bytes) from the shard's `edge_config.json`.
@@ -128,7 +178,7 @@ impl EdgeQdrant {
             on_disk_payload,
             wal_segment_capacity: None,
             shards: RwLock::new(HashMap::new()),
-            opening: Mutex::new(HashMap::new()),
+            opening: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -184,25 +234,48 @@ impl EdgeQdrant {
         req: Option<&CreateCollectionRequest>,
         mode: OpenMode,
     ) -> Result<Arc<EdgeShard>, QqlError> {
+        // Validate create-time options before any cache or existence shortcut:
+        // a direct `QdrantOps::create_collection` call must reject
+        // unrepresentable sharding/params even when the collection is already
+        // open (where the path below would otherwise return the cached shard
+        // or report only "already exists").
+        let config = match req {
+            Some(req) => Some(build_edge_config(req, self.on_disk_payload)?),
+            None => None,
+        };
         {
             let shards = self.shards.read().await;
             if let Some(shard) = shards.get(name) {
+                if matches!(mode, OpenMode::CreateExclusive) {
+                    return Err(collection_exists_error(name));
+                }
                 return Ok(Arc::clone(shard));
             }
         }
 
-        let opening = {
-            let mut opening = self.opening.lock().await;
-            Arc::clone(
+        // Serialize construction of this collection behind a per-key mutex; the
+        // guard removes the map entry on every exit path (success, engine
+        // error, missing collection, panicked spawn) so retries do not leak.
+        let opening_guard = {
+            let mut opening = lock_map(&self.opening);
+            let lock = Arc::clone(
                 opening
                     .entry(name.to_string())
-                    .or_insert_with(|| Arc::new(Mutex::new(()))),
-            )
+                    .or_insert_with(|| Arc::new(TokioMutex::new(()))),
+            );
+            OpeningGuard {
+                map: &self.opening,
+                name: name.to_string(),
+                lock,
+            }
         };
-        let _opening_guard = opening.lock().await;
+        let _opening_lock = opening_guard.lock.lock().await;
         {
             let shards = self.shards.read().await;
             if let Some(shard) = shards.get(name) {
+                if matches!(mode, OpenMode::CreateExclusive) {
+                    return Err(collection_exists_error(name));
+                }
                 return Ok(Arc::clone(shard));
             }
         }
@@ -211,16 +284,10 @@ impl EdgeQdrant {
         let on_disk = self.on_disk_payload;
         let wal_segment_capacity = self.wal_segment_capacity;
         let collection = name.to_string();
-        let config_res = req.map(|r| build_edge_config(r, on_disk));
         let shard = tokio::task::spawn_blocking(move || -> Result<EdgeShard, QqlError> {
             if path.join("segments").exists() {
                 if matches!(mode, OpenMode::CreateExclusive) {
-                    return Err(QqlError::execution(
-                        "QQL-EDGE-COLLECTION-EXISTS",
-                        format!("collection '{collection}' already exists"),
-                        None,
-                    )
-                    .with_collection(collection));
+                    return Err(collection_exists_error(&collection));
                 }
                 // Persisted value wins: the env/CLI capacity only seeds a
                 // shard that never recorded one. Passing an override equal to
@@ -247,8 +314,8 @@ impl EdgeQdrant {
                     )
                 })?;
 
-                let mut config = match config_res {
-                    Some(c) => c?,
+                let mut config = match config {
+                    Some(c) => c,
                     None => EdgeConfigBuilder::new().on_disk_payload(on_disk).build(),
                 };
                 if let Some(capacity) = wal_segment_capacity {
@@ -279,10 +346,6 @@ impl EdgeQdrant {
             .write()
             .await
             .insert(name.to_string(), Arc::clone(&shard));
-        {
-            let mut opening = self.opening.lock().await;
-            opening.remove(name);
-        }
         Ok(shard)
     }
 

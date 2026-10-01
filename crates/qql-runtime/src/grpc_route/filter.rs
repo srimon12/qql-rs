@@ -131,21 +131,6 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
         FilterClause::HasId(h) => ConditionOneOf::HasId(qdrant::HasIdCondition {
             has_id: h.has_id.iter().map(to_point_id).collect(),
         }),
-        FilterClause::MinShould(m) => {
-            let conditions = m
-                .min_should
-                .conditions
-                .iter()
-                .map(to_condition)
-                .collect::<Result<Vec<_>, _>>()?;
-            ConditionOneOf::Filter(qdrant::Filter {
-                min_should: Some(qdrant::MinShould {
-                    conditions,
-                    min_count: m.min_should.min_count,
-                }),
-                ..Default::default()
-            })
-        }
         FilterClause::HasVector(v) => ConditionOneOf::HasVector(qdrant::HasVectorCondition {
             has_vector: v.has_vector.clone(),
         }),
