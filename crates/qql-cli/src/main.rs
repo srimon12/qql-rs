@@ -59,11 +59,8 @@ enum Command {
         /// Path to .qql file, directory, or inline statement (working tree when
         /// interactive with no target, stdin when piped)
         file: Option<String>,
-        /// Check-only mode (the default): report issues without writing; exit non-zero if found
-        #[arg(long, conflicts_with = "fix")]
-        check: bool,
         /// Automatically apply safe fixes (duplicate clauses, redundant payload, canonical formatting)
-        #[arg(long, aliases = ["write", "fix"])]
+        #[arg(long, aliases = ["write"])]
         fix: bool,
         /// Parameter in key=value format (can be specified multiple times)
         #[arg(long = "param", short = 'p')]
@@ -265,8 +262,8 @@ struct MigrateArgs {
     #[arg(long)]
     shard_key_field: Option<String>,
     /// Missing `--shard-key-field` policy: error, skip, or `default=<key>`
-    #[arg(long, default_value = "error")]
-    on_missing_shard_key: String,
+    #[arg(long, default_value = "error", value_parser = parse_on_missing_shard_key)]
+    on_missing_shard_key: migrate::MissingShardKey,
     /// Optimizer indexing_threshold (KB) during bulk load
     #[arg(long, default_value_t = migrate::DEFAULT_BULK_INDEXING_THRESHOLD)]
     bulk_threshold_kb: u64,
@@ -519,6 +516,14 @@ enum EdgeCommand {
     },
 }
 
+/// Parse `--on-missing-shard-key`: `error`, `skip`, or `default=<key>`.
+///
+/// Clap validates at parse time (with completion-friendly flag errors) instead
+/// of failing mid-migration.
+fn parse_on_missing_shard_key(raw: &str) -> Result<migrate::MissingShardKey, String> {
+    migrate::MissingShardKey::parse(raw)
+}
+
 /// Named/positional params for `qql run`. Bound on the AST (not string-spliced)
 /// so `UPSERT … VALUES :rows` can take a JSON array of point objects.
 fn collect_exec_params(
@@ -682,7 +687,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Lint {
             file,
-            check,
             fix,
             params,
             params_file,
@@ -690,14 +694,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             quiet,
         } => {
             let lint_params = collect_exec_params(&params, params_file.as_ref())?;
-            commands::handle_lint(
-                file.as_deref(),
-                check,
-                fix,
-                lint_params.as_ref(),
-                json,
-                quiet,
-            )
+            commands::handle_lint(file.as_deref(), fix, lint_params.as_ref(), json, quiet)
         }
         Command::Run {
             query,
@@ -827,8 +824,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 quantize,
                 shard_key: args.shard_key,
                 shard_key_field: args.shard_key_field,
-                missing_shard_key: migrate::MissingShardKey::parse(&args.on_missing_shard_key)
-                    .map_err(|e| format!("--on-missing-shard-key: {e}"))?,
+                missing_shard_key: args.on_missing_shard_key,
                 bulk_indexing_threshold: args.bulk_threshold_kb,
                 cutover_alias: args.cutover,
                 drop_source_after_cutover: args.drop_source_after_cutover,
