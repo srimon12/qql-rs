@@ -57,6 +57,9 @@ let route = to_rest_route(&op)?;   // fallible REST projection
 `PlanPointId`, `PlanVectorValue` (Dense / Sparse / MultiDense), `PlanQueryInput`,
 typed formula trees — stay typed until a transport boundary.
 `MemoryPlacement` / `VectorDatatype` re-exported from `qql-core`.
+String point IDs are validated as UUIDs at plan time (`QQL-PLAN-POINT-ID`):
+that is Qdrant's wire requirement (numeric or UUID point IDs), not a QQL
+restriction.
 
 ### Typed formula (`PlanFormula` → proto / edge)
 

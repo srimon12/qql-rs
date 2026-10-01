@@ -57,7 +57,7 @@ Binary: `target/release/qql` (or `~/.cargo/bin/qql` for installs).
 |---------|------|
 | `qql lint [path]` | Offline syntax + plan check, `--fix` autofix, `--json` for CI |
 | `qql run "…"` | One statement (`--json`, `--quiet`, `--param`, `--params-file`) |
-| `qql run file.qql` | Script (`--stop-on-error`) |
+| `qql run file.qql` | Script: one-line human summary by default, full `ScriptResponse` JSON with `--json` (`--stop-on-error`) |
 | `qql explain "…"` | Plan without Qdrant |
 | `qql repl` | REPL (alias: `connect`) |
 | `qql doctor ["…"]` | Health + embed host snapshot, or 5-stage query triage (alias: `check`) |
@@ -77,6 +77,8 @@ qql run "SHOW COLLECTIONS"
 qql run --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
 qql run "QUERY TEXT :q FROM docs LIMIT :lim" -p q=ml -p lim=5
 qql run "UPSERT INTO docs VALUES :rows WAIT true" --params-file rows.json
+qql run script.qql          # prints "Ran script script.qql (N succeeded, M failed)"
+qql run --json script.qql   # machine-readable ScriptResponse for CI
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
 

@@ -132,6 +132,20 @@ Resolution happens in these cases:
 | Auto-embed (no USING) | Payload text field (same 8-field priority as the explicit specs) | Default dense only |
 | Explicit `VECTOR` / `POINT` | — | No embedding |
 
+`OPTIONS { … }` is a **server-side inference** directive. With a client-side
+embedder attached, `TEXT` / `IMAGE` inputs carrying `OPTIONS` fail closed with
+`QQL-EMBEDDING` (by design: the `Embedder` trait cannot honor server-side
+inference options, and silently dropping them would change results). `OBJECT`
+inputs still pass `OPTIONS` through to the server's inference.
+
+### Removed surface
+
+`SparseEmbedder`, `Embedder::embed_joint` / `embed_joint_batch`
+(`JointEmbeddingOutput`), and `sparse::for_each_token` / `for_each_token_id`
+were removed — they had no product callers. Use `Embedder::embed_dense` /
+`embed_sparse_query` / `embed_sparse_document` / `embed_multi` (plus their
+batch variants) instead.
+
 ### Vector roles and default names
 
 Query targets carry an optional role (`DENSE` or `SPARSE`) plus a `multi` flag.
