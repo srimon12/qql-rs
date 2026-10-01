@@ -766,7 +766,7 @@ impl Client {
         &self,
         collection: &str,
     ) -> Result<qql_embed::TopologyNames, JsValue> {
-        use super::schema::vector_names_from_collection_result;
+        use super::topology::vector_names_from_collection_result;
         let path = format!("/collections/{collection}");
         let body = self.send_json("GET", &path, None).await?;
         let result = body

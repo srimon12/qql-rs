@@ -7,8 +7,10 @@ use wasm_bindgen::prelude::*;
 use super::client::Client;
 use super::functions::qql_err_to_js;
 use super::params::WasmOnError;
-use super::report::{WasmReport, exec_response, exec_response_with_telemetry};
-use super::response::{parse_query_batch, parse_update_batch, wasm_success_response};
+use super::report::{
+    WasmReport, exec_response, parsed_update_batch, shaped_query_batch, shaped_success_response,
+    shaped_update_batch, shaped_update_response,
+};
 
 #[wasm_bindgen]
 impl Client {
@@ -125,7 +127,7 @@ impl Client {
         let result = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;
-        wasm_success_response(operation, &result).map_err(|error| {
+        shaped_success_response(operation, &result).map_err(|error| {
             JsValue::from_str(&serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
         })
     }
@@ -210,7 +212,7 @@ impl Client {
         };
         match key {
             qql_plan::BatchKey::Query { .. } => {
-                let retry = match parse_query_batch(&response) {
+                let retry = match shaped_query_batch(&response) {
                     Ok(items) => {
                         if let Err(err) =
                             verify_batch_cardinality("query", operations.len(), items.len())
@@ -220,16 +222,7 @@ impl Client {
                             }
                             true
                         } else {
-                            for (hits, telemetry) in items {
-                                let count = hits.as_array().map_or(0, Vec::len);
-                                results.push(exec_response_with_telemetry(
-                                    true,
-                                    "QUERY",
-                                    &format!("Found {count} hits"),
-                                    Some(hits),
-                                    telemetry,
-                                ));
-                            }
+                            results.extend(items);
                             false
                         }
                     }
@@ -245,37 +238,17 @@ impl Client {
                 }
             }
             qql_plan::BatchKey::Mutation { .. } => {
-                // Labels only: derive without cloning requests (the route
-                // body above already carries the wire batch built by
-                // `to_rest_route`, which borrows `operations`).
-                let labels: Vec<&'static str> = operations
-                    .iter()
-                    .map(|operation| operation.operation_label())
-                    .collect();
-                let retry = match parse_update_batch(&response) {
-                    Ok(received) => {
-                        if let Err(err) = verify_batch_cardinality("update", labels.len(), received)
+                let retry = match shaped_update_batch(&response, &operations) {
+                    Ok(items) => {
+                        if let Err(err) =
+                            verify_batch_cardinality("update", operations.len(), items.len())
                         {
                             if on_error == WasmOnError::Stop {
                                 return Err(qql_err_to_js(err));
                             }
                             true
                         } else {
-                            for (label, operation) in labels.iter().zip(operations.iter()) {
-                                let data = match operation {
-                                    PlannedOperation::Upsert { request, .. } => {
-                                        Some(serde_json::json!({"count": request.points.len()}))
-                                    }
-                                    _ => None,
-                                };
-                                let message = match operation {
-                                    PlannedOperation::Upsert { request, .. } => {
-                                        format!("Upserted {} point(s)", request.points.len())
-                                    }
-                                    _ => format!("{label} ok"),
-                                };
-                                results.push(exec_response(true, label, &message, data));
-                            }
+                            results.extend(items);
                             false
                         }
                     }
@@ -339,7 +312,7 @@ impl Client {
                     qql_err_to_js(QqlError::execution("QQL-JSON", error.to_string(), None))
                 })?;
                 let retry = match self.send_json("POST", &path, Some(body)).await {
-                    Ok(response) => match parse_query_batch(&response) {
+                    Ok(response) => match shaped_query_batch(&response) {
                         Ok(items) => {
                             if let Err(err) =
                                 verify_batch_cardinality("query", expected, items.len())
@@ -349,16 +322,7 @@ impl Client {
                                 }
                                 true
                             } else {
-                                for (hits, telemetry) in items {
-                                    let count = hits.as_array().map_or(0, Vec::len);
-                                    results.push(exec_response_with_telemetry(
-                                        true,
-                                        "QUERY",
-                                        &format!("Found {count} hits"),
-                                        Some(hits),
-                                        telemetry,
-                                    ));
-                                }
+                                results.extend(items);
                                 false
                             }
                         }
@@ -394,7 +358,7 @@ impl Client {
                 // Owned build: each mutation request moves (zero clones on the
                 // hot path). The group's effective `wait` is uniform by
                 // construction (it is part of the batch key).
-                let (collection, labels, opts, batch) =
+                let (collection, _labels, opts, batch) =
                     into_update_batch(operations).map_err(qql_err_to_js)?;
                 let expected = batch.operations.len();
                 let wait = opts.wait.unwrap_or(true);
@@ -403,33 +367,21 @@ impl Client {
                     qql_err_to_js(QqlError::execution("QQL-JSON", error.to_string(), None))
                 })?;
                 let retry = match self.send_json("POST", &path, Some(body)).await {
-                    Ok(response) => match parse_update_batch(&response) {
-                        Ok(received) => {
-                            if let Err(err) = verify_batch_cardinality("update", expected, received)
+                    Ok(response) => match parsed_update_batch(&response) {
+                        Ok(items) => {
+                            if let Err(err) =
+                                verify_batch_cardinality("update", expected, items.len())
                             {
                                 if on_error == WasmOnError::Stop {
                                     return Err(qql_err_to_js(err));
                                 }
                                 true
                             } else {
-                                for (label, operation) in labels.iter().zip(batch.operations.iter())
-                                {
-                                    // Same normalization as single dispatch:
-                                    // upserts report their request point count,
-                                    // other writes are status-only (`null`).
-                                    let data = match operation {
-                                        qql_plan::UpdateOperation::Upsert { upsert } => {
-                                            Some(serde_json::json!({"count": upsert.points.len()}))
-                                        }
-                                        _ => None,
-                                    };
-                                    let message = match operation {
-                                        qql_plan::UpdateOperation::Upsert { upsert } => {
-                                            format!("Upserted {} point(s)", upsert.points.len())
-                                        }
-                                        _ => format!("{label} ok"),
-                                    };
-                                    results.push(exec_response(true, label, &message, data));
+                                for (update, item) in batch.operations.iter().zip(items) {
+                                    results.push(
+                                        shaped_update_response(update, item)
+                                            .map_err(qql_err_to_js)?,
+                                    );
                                 }
                                 false
                             }
