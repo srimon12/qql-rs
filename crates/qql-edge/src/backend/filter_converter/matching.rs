@@ -42,9 +42,9 @@ pub(crate) fn lower_match(value: &PlanMatchValue) -> Result<Match, QqlError> {
 
 /// `MatchValue::value` only exists for strings, integers, and bools on the
 /// Qdrant wire (`ValueVariants`); floats are lowered to a `range` by the
-/// planner before reaching this point. Mirrors the old `serde_json::Number`
-/// rule exactly: plain integers and `u64` values that fit `i64` pass, floats
-/// (even integral ones) fail.
+/// planner before reaching this point. This arm is defensive: a hand-built
+/// plan carrying a float equality value follows the gRPC rule — an integral
+/// float within `i64` range is an integer match, anything else fails closed.
 fn lower_match_value(value: &PlanValue) -> Result<ValueVariants, QqlError> {
     match value {
         PlanValue::Str(string) => Ok(ValueVariants::String(string.clone())),
@@ -55,6 +55,11 @@ fn lower_match_value(value: &PlanValue) -> Result<ValueVariants, QqlError> {
             ))
         }),
         PlanValue::Bool(flag) => Ok(ValueVariants::Bool(*flag)),
+        PlanValue::Float(f) => integral_integer(*f).map(ValueVariants::Integer).ok_or_else(|| {
+            filter_error(format!(
+                "float match value {f} has no exact integer representation; use an exact integer value or a RANGE filter"
+            ))
+        }),
         PlanValue::Param(name, _) => {
             panic!("invariant violation: unbound parameter :{name} reached edge match lowering");
         }
@@ -70,9 +75,12 @@ fn lower_match_value(value: &PlanValue) -> Result<ValueVariants, QqlError> {
     }
 }
 
-/// `any`/`except` accept homogeneous string or integer sets. A mixed list is
-/// rejected, matching the `AnyVariants` wire type. Mirrors `is_i64`
-/// semantics: integers and fitting `u64`s count, integral floats do not.
+/// `any`/`except` accept a homogeneous string or integer set, matching the
+/// `AnyVariants` wire type. Integer entries follow the gRPC `IN`/`NOT IN`
+/// rule: plain integers, `u64`s that fit `i64`, and integral floats within
+/// `i64` range; mixed lists, non-integral floats, and overflowing `u64`s fail
+/// closed. Parser-produced plans reject float lists at plan time, so the float
+/// arm only serves hand-built plans.
 fn lower_any_variants(values: &[PlanValue]) -> Result<AnyVariants, QqlError> {
     if values.iter().all(|v| matches!(v, PlanValue::Str(_))) {
         Ok(AnyVariants::Strings(
@@ -84,30 +92,42 @@ fn lower_any_variants(values: &[PlanValue]) -> Result<AnyVariants, QqlError> {
                 })
                 .collect(),
         ))
-    } else if values.iter().all(|v| match v {
-        PlanValue::Int(_) => true,
-        PlanValue::UInt(n) => i64::try_from(*n).is_ok(),
-        _ => false,
-    }) {
+    } else if values.iter().all(|v| integer_entry(v).is_some()) {
         Ok(AnyVariants::Integers(
-            values
-                .iter()
-                .filter_map(|v| match v {
-                    PlanValue::Int(n) => Some(*n),
-                    PlanValue::UInt(n) => i64::try_from(*n).ok(),
-                    _ => None,
-                })
-                .collect(),
+            values.iter().filter_map(integer_entry).collect(),
         ))
     } else {
         Err(filter_error(format!(
-            "match any/except values must be all strings or all integers, got {:?}",
+            "match any/except values must be all strings or all integers (integral floats included), got {:?}",
             values
                 .iter()
                 .map(qql_plan::value_error_text)
                 .collect::<Vec<_>>()
         )))
     }
+}
+
+/// Integer-like match entry, mirroring the gRPC `list_integer` rule so a list
+/// accepted on one transport is accepted on the other.
+fn integer_entry(value: &PlanValue) -> Option<i64> {
+    match value {
+        PlanValue::Int(n) => Some(*n),
+        PlanValue::UInt(n) => i64::try_from(*n).ok(),
+        PlanValue::Float(f) => integral_integer(*f),
+        _ => None,
+    }
+}
+
+/// `Some(f as i64)` when `f` is finite, integral, and inside `i64` range.
+fn integral_integer(f: f64) -> Option<i64> {
+    // `f as i64` saturates, so the round-trip check alone would admit 2^63
+    // (it re-rounds to 2^63); the range guard keeps the cast exact.
+    let integral = f.is_finite()
+        && f.fract() == 0.0
+        && f >= i64::MIN as f64
+        && f < 9_223_372_036_854_775_808.0
+        && (f as i64) as f64 == f;
+    integral.then_some(f as i64)
 }
 
 pub(crate) fn lower_range(range: &PlanRangeParams) -> Result<RangeInterface, QqlError> {
