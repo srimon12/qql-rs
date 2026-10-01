@@ -1,6 +1,6 @@
 // @ts-check
 
-import { readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import markdoc from "@astrojs/markdoc";
 import sitemap from "@astrojs/sitemap";
@@ -103,6 +103,21 @@ const qqlGrammar = {
 	name: "qql",
 };
 
+// @astrojs/sitemap always emits `sitemap-index.xml` + numbered shards, never
+// `/sitemap.xml`. GSC, Bing and crawlers probe the conventional path, so mirror
+// the index to `/sitemap.xml`. Runs after `sitemap()` (hooks run in integration
+// order); robots.txt advertises the alias.
+/** @returns {import("astro").AstroIntegration} */
+const sitemapAlias = () => ({
+	name: "sitemap-alias",
+	hooks: {
+		"astro:build:done": ({ dir }) => {
+			const index = new URL("sitemap-index.xml", dir);
+			if (existsSync(index)) copyFileSync(index, new URL("sitemap.xml", dir));
+		},
+	},
+});
+
 export default defineConfig(
 	/** @type {import("astro").AstroUserConfig} */ ({
 		site: SITE_URL,
@@ -116,6 +131,7 @@ export default defineConfig(
 
 		integrations: [
 			sitemap(),
+			sitemapAlias(),
 			starlight({
 				expressiveCode: {
 					themes: [
