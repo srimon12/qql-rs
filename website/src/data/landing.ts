@@ -116,7 +116,22 @@ export const faq = {
 		{
 			question: "What is QQL?",
 			answer:
-				"A typed query language for Qdrant. One surface for retrieval, filtering, mutations, schema, and policy-safe AST rewriting.",
+				"QQL stands for Qdrant Query Language: a typed, declarative language for Qdrant. It gives you one surface for retrieval, filtering, point mutations, schema, and policy-safe AST rewriting.",
+		},
+		{
+			question: "Is QQL a SQL dialect?",
+			answer:
+				"No. QQL borrows SQL's readable shape (QUERY ... FROM ... WHERE ... LIMIT), but each statement plans to Qdrant operations — vector retrieval, filtering, mutations, and collection management — rather than a relational engine.",
+		},
+		{
+			question: "Does QQL replace Qdrant, or does it only work with Qdrant?",
+			answer:
+				"It only works with Qdrant, and it does not replace it: Qdrant is the execution target. Statements lower to Qdrant REST or gRPC routes, or run against the in-process edge backend.",
+		},
+		{
+			question: "How is QQL different from Qdrant's REST API or client SDKs?",
+			answer:
+				"The SDKs expose typed request builders per language; QQL is one reviewable statement that runs unchanged from Rust, Python, Node.js, WebAssembly, or the CLI, with trusted filters injectable into the AST before planning.",
 		},
 		{
 			question: "Which runtimes ship today?",
@@ -129,11 +144,6 @@ export const faq = {
 			question: "How does multitenancy work?",
 			answer:
 				"Parse untrusted QQL, then inject a trusted tenant filter into the AST before planning. SHARD routing is a separate locality concern and can run alongside the filter.",
-		},
-		{
-			question: "Does QQL replace Qdrant?",
-			answer:
-				"No. QQL plans operations for Qdrant and dispatches them over REST or gRPC, or evaluates the supported subset through the in-process edge backend.",
 		},
 		{
 			question: "Is it production-ready?",

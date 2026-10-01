@@ -1,13 +1,14 @@
 ---
 title: "What is QQL?"
-description: "Use one readable query language for Qdrant retrieval, data operations, schema work, and policy-safe execution."
+description: "QQL (Qdrant Query Language) explained: one typed surface for Qdrant retrieval, data operations, schema work, and policy-safe execution."
 sidebar:
   order: 1
 ---
 
-QQL gives a product team one query surface for search, retrieval pipelines,
-point mutations, and collection management. The same source works in a Rust
-service, Python worker, Node.js API, browser tool, or the `qql` CLI.
+QQL (Qdrant Query Language) is a typed, declarative language for Qdrant. It
+gives a product team one query surface for search, retrieval pipelines, point
+mutations, and collection management — the same source works in a Rust service,
+Python worker, Node.js API, browser tool, or the `qql` CLI.
 
 {% grid style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%,18rem), 1fr)); gap:1rem;" %}
 
@@ -61,6 +62,9 @@ Production multi-tenant systems commonly use both.
 Parsing proves complete QQL syntax. Planning can still require collection
 topology, and execution can still require an embedder or a live Qdrant backend.
 {% /aside %}
+
+New to the acronym? The [FAQ](/docs/faq/) answers what QQL stands for, how it
+differs from SQL and the Qdrant SDKs, and when to reach for it.
 
 Continue with [installation](/docs/getting-started/installation/) or run the
 [quickstart](/docs/getting-started/quickstart/).
