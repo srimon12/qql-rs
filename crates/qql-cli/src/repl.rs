@@ -19,6 +19,14 @@ pub async fn run_repl(
     );
 
     let mut rl = rustyline::DefaultEditor::new()?;
+    // Persist history next to the config file (`~/.qql/repl_history`) so
+    // sessions survive; a missing/unwritable home is non-fatal.
+    let history_path = qql::config::QqlConfig::config_dir()
+        .ok()
+        .map(|dir| dir.join("repl_history"));
+    if let Some(path) = history_path.as_ref() {
+        let _ = rl.load_history(path);
+    }
     let mut buffer = String::new();
     let mut session_params = match initial_params {
         Some(serde_json::Value::Object(map)) => map.clone(),
@@ -44,8 +52,24 @@ pub async fn run_repl(
 
         let line = match rl.readline(prompt) {
             Ok(l) => l,
-            Err(_) => {
+            // Ctrl-C cancels the current input / aborts the multiline buffer
+            // and keeps the session (and its connection + params) alive.
+            Err(rustyline::error::ReadlineError::Interrupted) => {
+                if buffer.is_empty() {
+                    println!("\x1b[2m(Ctrl-C: type exit or press Ctrl-D to quit)\x1b[0m");
+                } else {
+                    buffer.clear();
+                    println!("\x1b[2m(statement aborted)\x1b[0m");
+                }
+                continue;
+            }
+            // Ctrl-D exits.
+            Err(rustyline::error::ReadlineError::Eof) => {
                 println!("\nBye.");
+                break;
+            }
+            Err(error) => {
+                crate::output::print_error(&format!("input error: {error}"));
                 break;
             }
         };
@@ -310,6 +334,9 @@ pub async fn run_repl(
         }
     }
 
+    if let Some(path) = history_path.as_ref() {
+        let _ = rl.save_history(path);
+    }
     executor.close().await?;
     Ok(())
 }
