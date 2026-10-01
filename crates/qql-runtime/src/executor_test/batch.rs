@@ -501,7 +501,10 @@ async fn close_reaches_backend_close_once() {
     let mock = MockQdrantClient::default();
     let close_calls = Arc::clone(&mock.close_call_count);
     let executor = Executor::new(Box::new(mock), Some(test_config()));
-    executor.close().await.expect("close forwards to the backend");
+    executor
+        .close()
+        .await
+        .expect("close forwards to the backend");
     assert_eq!(*close_calls.lock().unwrap(), 1);
     executor.close().await.expect("close twice is fine");
     assert_eq!(

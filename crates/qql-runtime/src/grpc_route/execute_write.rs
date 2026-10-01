@@ -59,9 +59,7 @@ pub(crate) async fn execute_upsert(
         update_mode: request.update_mode.map(to_update_mode),
         ..Default::default()
     };
-    let resp = client
-        .upsert_points(grpc_req)
-        .await?;
+    let resp = client.upsert_points(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -80,9 +78,7 @@ pub(crate) async fn execute_delete(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .delete_points(grpc_req)
-        .await?;
+    let resp = client.delete_points(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -101,9 +97,7 @@ pub(crate) async fn execute_clear_payload(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .clear_payload(grpc_req)
-        .await?;
+    let resp = client.clear_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -123,9 +117,7 @@ pub(crate) async fn execute_delete_payload(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .delete_payload(grpc_req)
-        .await?;
+    let resp = client.delete_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -147,9 +139,7 @@ pub(crate) async fn execute_delete_vectors(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .delete_vectors(grpc_req)
-        .await?;
+    let resp = client.delete_vectors(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -177,9 +167,7 @@ pub(crate) async fn execute_update_vectors(
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
-    let resp = client
-        .update_vectors(grpc_req)
-        .await?;
+    let resp = client.update_vectors(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -205,9 +193,7 @@ pub(crate) async fn execute_update_payload(
         key: request.key.clone(),
         ..Default::default()
     };
-    let resp = client
-        .set_payload(grpc_req)
-        .await?;
+    let resp = client.set_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -233,9 +219,7 @@ pub(crate) async fn execute_overwrite_payload(
         key: request.key.clone(),
         ..Default::default()
     };
-    let resp = client
-        .overwrite_payload(grpc_req)
-        .await?;
+    let resp = client.overwrite_payload(grpc_req).await?;
     Ok(mutation_response_to_typed(resp))
 }
 
@@ -285,10 +269,7 @@ pub(crate) fn update_result_to_typed(
     let status = UpdateStatus::try_from(result.status).map_err(|_| {
         QqlError::backend(
             "QQL-BACKEND-ENVELOPE",
-            format!(
-                "update batch item carries unknown status {}",
-                result.status
-            ),
+            format!("update batch item carries unknown status {}", result.status),
             None,
         )
     })?;

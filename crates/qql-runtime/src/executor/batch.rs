@@ -430,11 +430,9 @@ impl Executor {
                     }
                     Ok(responses) => {
                         // Server-answered cardinality mismatch: no retry.
-                        if let Err(error) = qql_plan::verify_batch_cardinality(
-                            "query",
-                            expected,
-                            responses.len(),
-                        ) {
+                        if let Err(error) =
+                            qql_plan::verify_batch_cardinality("query", expected, responses.len())
+                        {
                             if stop_on_error {
                                 return Err(error);
                             }
@@ -473,11 +471,9 @@ impl Executor {
                     }
                     Ok(responses) => {
                         // Server-answered cardinality mismatch: no retry.
-                        if let Err(error) = qql_plan::verify_batch_cardinality(
-                            "update",
-                            expected,
-                            responses.len(),
-                        ) {
+                        if let Err(error) =
+                            qql_plan::verify_batch_cardinality("update", expected, responses.len())
+                        {
                             if stop_on_error {
                                 return Err(error);
                             }

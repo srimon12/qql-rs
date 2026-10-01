@@ -106,7 +106,11 @@ pub(crate) fn to_order_by(order_by: &OrderByQuery) -> Result<qdrant::OrderBy, Qq
     Ok(qdrant::OrderBy {
         key: order_by.key.clone(),
         direction,
-        start_from: order_by.start_from.as_ref().map(to_start_from).transpose()?,
+        start_from: order_by
+            .start_from
+            .as_ref()
+            .map(to_start_from)
+            .transpose()?,
     })
 }
 
@@ -144,9 +148,7 @@ fn to_start_from(value: &qql_core::ast::Value) -> Result<qdrant::StartFrom, QqlE
             ));
         }
     };
-    Ok(qdrant::StartFrom {
-        value: Some(start),
-    })
+    Ok(qdrant::StartFrom { value: Some(start) })
 }
 
 pub(crate) fn to_read_consistency(
@@ -746,11 +748,7 @@ pub(crate) fn to_scroll_points(
         with_payload: request.with_payload.as_ref().map(to_payload_selector),
         with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
         shard_key_selector: shard_key_selector(&request.shard_key),
-        order_by: request
-            .order_by
-            .as_ref()
-            .map(to_order_by)
-            .transpose()?,
+        order_by: request.order_by.as_ref().map(to_order_by).transpose()?,
         ..Default::default()
     })
 }

@@ -233,7 +233,9 @@ fn rest_grpc_count_exact_parity() {
     let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
     assert_eq!(body["exact"], false);
     assert_eq!(
-        test_api::to_count_points(request, collection).unwrap().exact,
+        test_api::to_count_points(request, collection)
+            .unwrap()
+            .exact,
         Some(false)
     );
 }

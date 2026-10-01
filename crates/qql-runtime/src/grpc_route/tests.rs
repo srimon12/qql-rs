@@ -1058,11 +1058,7 @@ fn query_points_filter_geo_polygon_maps_proto() {
         other => panic!("expected Query, got {other:?}"),
     };
     let qp = to_query_points(req, collection).unwrap();
-    let condition = qp
-        .filter
-        .expect("filter should be set")
-        .must
-        .swap_remove(0);
+    let condition = qp.filter.expect("filter should be set").must.swap_remove(0);
     let Some(qdrant::condition::ConditionOneOf::Field(field)) = condition.condition_one_of else {
         panic!("expected a field condition, got {condition:?}");
     };

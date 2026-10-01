@@ -169,7 +169,10 @@ pub(crate) fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, Q
 /// A ring with fewer than three vertices cannot bound a surface: sending it
 /// would either error server-side or silently match nothing, so it fails
 /// closed instead of reaching the wire.
-fn to_geo_line_string(ring: &GeoLineString, which: &str) -> Result<qdrant::GeoLineString, QqlError> {
+fn to_geo_line_string(
+    ring: &GeoLineString,
+    which: &str,
+) -> Result<qdrant::GeoLineString, QqlError> {
     if ring.points.len() < 3 {
         return Err(QqlError::validation(
             "QQL-GRPC-GEO-POLYGON",
