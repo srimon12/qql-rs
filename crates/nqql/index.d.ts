@@ -14,15 +14,19 @@ export class Stmt {
   /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
   toReadableString(): string;
   /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt.
-   * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
+   * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy).
+   * `undefined`/`null` is a no-op; an empty object/array still marks the clone as bound. */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** Tree-formatted plan explanation for this statement (mirrors free `explainStmt`). */
   explain(): string;
+  /** Whether parameters have already been bound into this statement. */
+  readonly bound: boolean;
   /** QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
-   * Reads back `string` (keyword) or `bigint` (numeric); set with
-   * `string | number | bigint | null` (numbers must be exact integers). */
-  shardKey?: string | number | bigint | null;
+   * Reads back `string` (keyword) or `bigint` (numeric numeric keys — reads
+   * never return a plain number); the setter additionally accepts a
+   * `number` that must be an exact non-negative integer. */
+  shardKey: string | bigint | null;
 }
 
 export class ScoredPoint {
@@ -100,6 +104,7 @@ export class ExecutionReport {
   failed: number;
   /** Aggregated server telemetry when the backend reported it; absent otherwise. */
   telemetry?: ServerTelemetry | null;
+  [key: string]: unknown;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
   ids(stmt?: number): Array<string | number | bigint>;
@@ -211,6 +216,39 @@ export interface HttpEmbedderOptions {
 
 export class HttpEmbedder {
   constructor(options: HttpEmbedderOptions);
+  /** Dense endpoint/model passed to the constructor. */
+  endpoint: string;
+  model: string;
+  /** Bearer token (empty string when unset). */
+  apiKey: string;
+  dimension: number;
+  /** Multi/ColBERT endpoint/model (empty strings when unset). */
+  multiEndpoint: string;
+  multiApiKey: string;
+  multiModel: string;
+  multiDimension: number | null;
+  /** Image/CLIP endpoint/model (empty strings when unset). */
+  imageEndpoint: string;
+  imageApiKey: string;
+  imageModel: string;
+  imageDimension: number | null;
+  /** Cross-encoder rerank endpoint/model (empty strings when unset). */
+  rerankEndpoint: string;
+  rerankApiKey: string;
+  rerankModel: string;
+  /** Client-side BM25 document encoder knobs (undefined = engine default). */
+  bm25K1?: number;
+  bm25B?: number;
+  bm25AvgLen?: number;
+  bm25Language?: string;
+  bm25Tokenizer?: string;
+  bm25Lowercase?: boolean;
+  bm25AsciiFolding?: boolean;
+  bm25Stopwords?: string[];
+  bm25StopwordsLanguages?: string[];
+  bm25Stemmer?: string;
+  bm25MinTokenLen?: number;
+  bm25MaxTokenLen?: number;
 }
 
 export class Client {

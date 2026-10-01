@@ -40,6 +40,7 @@ ARTIFACTS=(
 # - QQL-SERIALIZE: qql-wasm response serialization.
 # - QQL-SERIALIZE-AST: nqql-common AST JSON serialization.
 # - QQL-VALIDATION-ANALYZE-BATCH: pyqql-common, nqql-common, qql-wasm analyze dispatch.
+# - QQL-VALIDATION-SHARD-UNSUPPORTED: nqql, nqql-edge shardKey setter guard.
 ALLOWLIST=(
   'QQL-BIND-ALREADY-BOUND'
   'QQL-BIND-HEADER'
@@ -48,6 +49,7 @@ ALLOWLIST=(
   'QQL-SERIALIZE'
   'QQL-SERIALIZE-AST'
   'QQL-VALIDATION-ANALYZE-BATCH'
+  'QQL-VALIDATION-SHARD-UNSUPPORTED'
 )
 
 fail=0

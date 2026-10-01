@@ -126,7 +126,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
 | `QQL-VALIDATION-ALIASES` | Collection aliases are not supported on this backend |
 | `QQL-VALIDATION-COLLECTION` | An executor helper needs a non-empty collection name |
-| `QQL-VALIDATION-CONFIG` | Invalid collection configuration block or edge executor option value |
+| `QQL-VALIDATION-CONFIG` | Invalid collection configuration block, executor/execute option value (e.g. `onError`), or edge executor option value |
 | `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
 | `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
 | `QQL-VALIDATION-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires `PREFETCH` |
@@ -139,6 +139,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-RERANK-USING` | `RERANK` requires `USING <vector>` |
 | `QQL-VALIDATION-SCORE` | A score threshold must be finite |
 | `QQL-VALIDATION-SEARCH-PARAM` | Unknown search parameter |
+| `QQL-VALIDATION-SHARD-UNSUPPORTED` | A host binding tried to set `shardKey` on a statement type that cannot carry shard routing (e.g. DDL) |
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
 | `QQL-VALIDATION-IDF` | `PARAMS (idf = …)` is not `'global'` or `WHERE <filter>` |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
@@ -691,6 +692,7 @@ QQL-VALIDATION-RERANK-PREFETCH
 QQL-VALIDATION-RERANK-USING
 QQL-VALIDATION-SCORE
 QQL-VALIDATION-SEARCH-PARAM
+QQL-VALIDATION-SHARD-UNSUPPORTED
 QQL-VALIDATION-SLICE
 QQL-VALIDATION-UPDATE-VECTOR
 QQL-VALIDATION-UPSERT-BATCH
