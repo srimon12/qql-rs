@@ -62,8 +62,9 @@ impl Stmt {
         &mut self,
         field: String,
         op: String,
-        value: serde_json::Value,
+        value: Unknown<'_>,
     ) -> napi::Result<()> {
+        let value = common::jsparams::unknown_to_value(value).map_err(common::to_napi_err)?;
         common::stmt_inject_filter(&mut self.inner, &field, &op, value).map_err(common::to_napi_err)
     }
 
@@ -104,10 +105,14 @@ impl Stmt {
         }
     }
 
+    // The parameter list must be part of `ts_type`: napi-derive emits the
+    // string verbatim after `set shardKey` (see napi-derive-backend
+    // typegen/fn.rs), so a bare union would generate the invalid
+    // `set shardKeystring | …`.
     #[napi(
         setter,
         catch_unwind,
-        ts_type = "string | number | bigint | null | undefined"
+        ts_type = "(value: string | number | bigint | null | undefined)"
     )]
     pub fn set_shard_key(&mut self, key: Option<Unknown<'_>>) -> napi::Result<()> {
         let key = match key {
@@ -117,9 +122,11 @@ impl Stmt {
             }
         };
         if !self.inner.set_shard_key(key) {
-            return Err(napi::Error::from_reason(
+            return Err(common::to_napi_err(qql_core::error::QqlError::validation(
+                "QQL-VALIDATION-SHARD-UNSUPPORTED",
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
-            ));
+                None,
+            )));
         }
         Ok(())
     }
@@ -133,6 +140,10 @@ impl Stmt {
     /// Bind parameters into this statement and return a new bound Stmt.
     /// Vector params accept plain arrays as well as `Float32Array` /
     /// `Float64Array` (one memcpy, no per-element walk).
+    ///
+    /// `undefined`/`null` returns an unbound clone (a no-op); an *empty*
+    /// object or array is still a binding call, so the returned Stmt reports
+    /// `bound: true` and later re-binding fails with `QQL-BIND-ALREADY-BOUND`.
     #[napi(catch_unwind)]
     pub fn bind(&self, params: Unknown<'_>) -> napi::Result<Self> {
         let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
@@ -160,6 +171,13 @@ impl Stmt {
     #[napi(catch_unwind, js_name = "toReadableString")]
     pub fn to_readable_string(&self) -> String {
         common::stmt_readable(&self.inner)
+    }
+
+    /// Tree-formatted plan explanation for this statement (mirrors the free
+    /// `explainStmt` and `nqql`'s `Stmt.explain`).
+    #[napi(catch_unwind)]
+    pub fn explain(&self) -> String {
+        common::explain_stmt(&self.inner)
     }
 
     /// Compile this Stmt AST directly into its transport route without re-parsing.
@@ -214,8 +232,9 @@ pub fn inject_filter(
     query: String,
     field: String,
     op: String,
-    value: serde_json::Value,
+    value: Unknown<'_>,
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
+    let value = common::jsparams::unknown_to_value(value).map_err(common::to_napi_err)?;
     common::inject_filter(&query, &field, &op, value)
         .map(common::jsoutput::BigIntSafeJson)
         .map_err(common::to_napi_err)
@@ -262,7 +281,6 @@ pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
 #[napi(js_name = "Client")]
 pub struct JsClient {
     inner: qql::executor::Executor,
-    closed: std::sync::atomic::AtomicBool,
 }
 
 #[napi]
@@ -271,9 +289,11 @@ impl JsClient {
     /// use `localExecutor()` or `httpExecutor()` to obtain a Client.
     #[napi(constructor, catch_unwind)]
     pub fn new() -> napi::Result<Self> {
-        Err(napi::Error::from_reason(
+        Err(common::to_napi_err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
             "Client must be created via localExecutor() or httpExecutor()",
-        ))
+            None,
+        )))
     }
 
     /// Execute a QQL query string, a Stmt, or an array of either.
@@ -287,16 +307,15 @@ impl JsClient {
     )]
     pub async fn execute(
         &self,
-        query: serde_json::Value,
+        query: common::execute::ExecQueryInput,
         options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
-        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(napi::Error::from_reason("client is closed"));
-        }
-        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
-        let report = common::execute::execute_dispatch_typed(&self.inner, query, on_error, params)
-            .await
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref())
             .map_err(common::to_napi_err)?;
+        let report =
+            common::execute::execute_dispatch_typed(&self.inner, query.0, on_error, params)
+                .await
+                .map_err(common::to_napi_err)?;
         serde_json::to_value(&report)
             .map(common::jsoutput::BigIntSafeJson)
             .map_err(common::serde_napi_err)
@@ -318,15 +337,13 @@ impl JsClient {
     )]
     pub async fn explain_analyze(
         &self,
-        query: serde_json::Value,
+        query: common::execute::ExecQueryInput,
         options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
-        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(napi::Error::from_reason("client is closed"));
-        }
-        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
+        let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref())
+            .map_err(common::to_napi_err)?;
         let report =
-            common::execute::explain_analyze_dispatch_typed(&self.inner, query, on_error, params)
+            common::execute::explain_analyze_dispatch_typed(&self.inner, query.0, on_error, params)
                 .await
                 .map_err(common::to_napi_err)?;
         serde_json::to_value(&report)
@@ -354,13 +371,11 @@ impl JsClient {
 
     /// Bulk ingest: `rows` is an array of point objects
     /// (`{id, vector, …payload}`) spliced through the `:rows` point-splice
-    /// path in `batchSize` chunks (default 100). Vectors accept plain arrays
-    /// and the flat `{data, dim}` multivector form. The JS wrapper normalizes
-    /// `Float32Array`/`Float64Array` and integer typed arrays to plain arrays
-    /// before this serde boundary, so direct native callers should pass plain
-    /// arrays (or bind typed arrays on the sync `Stmt.bind` surface instead,
-    /// then execute the bound statement). Returns the ExecutionReport as a
-    /// live JS object (BigInt-safe like `execute`).
+    /// path in `batchSize` chunks (default 100). Vectors accept plain arrays,
+    /// `Float32Array` / `Float64Array` (one memcpy), integer typed arrays for
+    /// sparse `indices`, and the flat `{data, dim}` multivector form; payload
+    /// integers keep their integer type exactly. Returns the ExecutionReport
+    /// as a live JS object (BigInt-safe like `execute`).
     #[napi(
         catch_unwind,
         ts_args_type = "collection: string, rows: Record<string, any>[], options?: { onError?: 'stop' | 'continue', batchSize?: number }"
@@ -368,20 +383,16 @@ impl JsClient {
     pub async fn upsert_many(
         &self,
         collection: String,
-        rows: serde_json::Value,
-        options: Option<serde_json::Value>,
+        rows: common::execute::ExecRowsInput,
+        options: Option<common::execute::ExecOptionsInput>,
     ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
-        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(napi::Error::from_reason("client is closed"));
-        }
-        let rows = common::value_from_json(rows).map_err(common::to_napi_err)?;
-        let batch_size =
-            common::execute::batch_size_from(options.as_ref()).map_err(common::to_napi_err)?;
-        let on_error = common::execute::on_error_from(options.as_ref());
+        let raw = options.as_ref().map(|o| &o.raw);
+        let batch_size = common::execute::batch_size_from(raw).map_err(common::to_napi_err)?;
+        let on_error = common::execute::on_error_from(raw).map_err(common::to_napi_err)?;
         let report = common::execute::upsert_many_dispatch(
             &self.inner,
             collection,
-            rows,
+            rows.0,
             batch_size,
             on_error,
         )
@@ -393,12 +404,10 @@ impl JsClient {
     }
 
     /// Flush and release edge storage. Idempotent; execution after close is
-    /// rejected instead of silently reopening shards.
+    /// rejected with `QQL-CLIENT-CLOSED` instead of silently reopening
+    /// shards (the runtime executor owns the closed flag for both SDKs).
     #[napi(catch_unwind)]
     pub async fn close(&self) -> napi::Result<()> {
-        if self.closed.swap(true, std::sync::atomic::Ordering::AcqRel) {
-            return Ok(());
-        }
         self.inner.close().await.map_err(common::to_napi_err)
     }
 }
@@ -406,10 +415,7 @@ impl JsClient {
 #[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
 impl JsClient {
     fn from_executor(exec: qql::executor::Executor) -> Self {
-        Self {
-            inner: exec,
-            closed: std::sync::atomic::AtomicBool::new(false),
-        }
+        Self { inner: exec }
     }
 }
 
@@ -536,11 +542,15 @@ fn whole_usize(value: Option<f64>, name: &str) -> Result<Option<usize>, qql_core
 /// Models are downloaded from HuggingFace on first use and cached locally.
 /// The npm package ships NO model files.
 ///
+/// The model load (and first-use download) runs on the Node async worker
+/// pool: the returned promise resolves once the executor is ready, so the
+/// JavaScript event loop is never blocked.
+///
 /// ```js
 /// // defaults
-/// const exec = localExecutor("./data");
+/// const exec = await localExecutor("./data");
 /// // pick model + cache
-/// const exec = localExecutor("./data", {
+/// const exec = await localExecutor("./data", {
 ///   onDiskPayload: false,
 ///   model: "AllMiniLML6V2",
 ///   cacheDir: "/var/cache/fastembed",
@@ -548,7 +558,18 @@ fn whole_usize(value: Option<f64>, name: &str) -> Result<Option<usize>, qql_core
 /// ```
 #[cfg(feature = "fastembed-local")]
 #[napi(js_name = localExecutor, catch_unwind)]
-pub fn local_executor(
+pub async fn local_executor(
+    data_dir: String,
+    options: Option<LocalExecutorOptions>,
+) -> napi::Result<JsClient> {
+    build_local_executor(data_dir, options)
+}
+
+/// Synchronous construction shared by the public async `localExecutor` and
+/// the one-shot `execute`/`executeStmt` paths. Runs on the JS thread only
+/// inside an already-offloaded async body (or napi's worker), never directly.
+#[cfg(feature = "fastembed-local")]
+fn build_local_executor(
     data_dir: String,
     options: Option<LocalExecutorOptions>,
 ) -> napi::Result<JsClient> {
@@ -589,13 +610,13 @@ pub fn local_executor(
 
 /// List dense text embedding models available for `localExecutor({ model })`.
 ///
-/// Returns `[{ name, modelCode, dim, description }, ...]`.
+/// Returns `[{ name, modelCode, dim, description, multi, image }, ...]`.
 #[cfg(feature = "fastembed-local")]
 #[napi(js_name = listEmbeddingModels, catch_unwind)]
-pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
+pub fn list_embedding_models() -> Vec<EmbeddingModelInfo> {
     qql_edge::list_embedding_models()
         .into_iter()
-        .map(|m| EmbeddingModelInfoJs {
+        .map(|m| EmbeddingModelInfo {
             name: m.name,
             model_code: m.model_code,
             dim: m.dim as u32,
@@ -608,7 +629,7 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
 
 #[cfg(feature = "fastembed-local")]
 #[napi(object)]
-pub struct EmbeddingModelInfoJs {
+pub struct EmbeddingModelInfo {
     pub name: String,
     pub model_code: String,
     pub dim: u32,
@@ -631,9 +652,36 @@ pub struct EmbeddingModelInfoJs {
 /// `onDiskPayload` defaults to `true`. `bm25_options` carries the **local**
 /// BM25 document encoder knobs used for sparse vectors (write-path only;
 /// defaults 1.2 / 0.75 / 256, English, word tokenizer).
+///
+/// The store construction runs on the Node async worker pool; the returned
+/// promise resolves once the executor is ready.
 #[cfg(feature = "http-embedding")]
 #[napi(js_name = httpExecutor, catch_unwind)]
-pub fn http_executor(
+pub async fn http_executor(
+    data_dir: String,
+    url: String,
+    embed_key: String,
+    embed_model: String,
+    embed_dim: u32,
+    on_disk_payload: Option<bool>,
+    bm25_options: Option<serde_json::Value>,
+) -> napi::Result<JsClient> {
+    build_http_executor(
+        data_dir,
+        url,
+        embed_key,
+        embed_model,
+        embed_dim,
+        on_disk_payload,
+        bm25_options,
+    )
+}
+
+/// Synchronous construction shared by the public async `httpExecutor` and
+/// the one-shot `execute`/`executeStmt` paths. Runs on the JS thread only
+/// inside an already-offloaded async body.
+#[cfg(feature = "http-embedding")]
+fn build_http_executor(
     data_dir: String,
     url: String,
     embed_key: String,
@@ -674,6 +722,7 @@ pub fn http_executor(
 
 /// Parsed BM25 knobs for the HTTP edge path. Numerics stay raw `f64` so the
 /// shared `HttpEmbedderOptions` validator fails closed on them.
+#[cfg(feature = "http-embedding")]
 struct HttpBm25Opts {
     k1: Option<f64>,
     b: Option<f64>,
@@ -898,7 +947,7 @@ fn option_f64(options: Option<&serde_json::Value>, camel: &str, snake: &str) -> 
 /// compiled in, a supplied `embedUrl` returns an explicit error instead of being
 /// silently ignored (falling back to the local ONNX model).
 #[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
-fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClient> {
+async fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClient> {
     let data_dir = options
         .and_then(|o| o.get("dataDir"))
         .and_then(|v| v.as_str())
@@ -930,7 +979,7 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
                 .unwrap_or(0) as u32;
             // Forward the whole options object: parse_http_bm25_opts reads
             // only the bm25* keys (both cases), so text knobs ride along.
-            return http_executor(
+            return build_http_executor(
                 data_dir.to_string(),
                 embed_url.to_string(),
                 embed_key.to_string(),
@@ -950,20 +999,24 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
         .and_then(|v| v.as_str())
         .is_some_and(|s| !s.is_empty())
     {
-        return Err(napi::Error::from_reason(
+        return Err(common::to_napi_err(qql_core::error::QqlError::validation(
+            "QQL-VALIDATION-CONFIG",
             "embedUrl requires the http-embedding feature (httpExecutor), which is not enabled in this build",
-        ));
+            None,
+        )));
     }
 
     #[cfg(feature = "fastembed-local")]
     {
-        local_executor(data_dir.to_string(), Some(standalone_local_opts(options)?))
+        build_local_executor(data_dir.to_string(), Some(standalone_local_opts(options)?))
     }
 
     #[cfg(not(feature = "fastembed-local"))]
-    Err(napi::Error::from_reason(
+    Err(common::to_napi_err(qql_core::error::QqlError::validation(
+        "QQL-VALIDATION-CONFIG",
         "no embedding backend is enabled: build nqql-edge with fastembed-local and/or http-embedding",
-    ))
+        None,
+    )))
 }
 
 /// Execute a pre-parsed Stmt directly via a new temporary edge client.
@@ -972,8 +1025,9 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
 /// standalone `execute` API; otherwise a local fastembed executor is used.
 ///
 /// **Warning:** each call initialises the embedding backend (ONNX model load for
-/// the local path, HTTP client for the `embedUrl` path). Prefer a long-lived
-/// `localExecutor()` / `httpExecutor()` Client for anything beyond one-shots.
+/// the local path, HTTP client for the `embedUrl` path), off the JavaScript
+/// thread. Prefer a long-lived `localExecutor()` / `httpExecutor()` Client for
+/// anything beyond one-shots.
 #[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
 #[napi(
     catch_unwind,
@@ -985,7 +1039,7 @@ pub async fn execute_stmt(
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
     let raw = options.as_ref().map(|o| o.raw.clone());
     let params = options.as_ref().and_then(|o| o.params.as_ref());
-    let client = standalone_client(raw.as_ref())?;
+    let client = standalone_client(raw.as_ref()).await?;
     let resp = common::execute::run_then_close(&client.inner, async {
         let mut inner = stmt.inner.clone();
         if let Some(p) = params {
@@ -1015,8 +1069,9 @@ pub async fn execute(
     options: Option<common::execute::ExecOptionsInput>,
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
     let raw = options.as_ref().map(|o| o.raw.clone());
-    let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
-    let client = standalone_client(raw.as_ref())?;
+    let (on_error, params) =
+        common::execute::typed_dispatch_inputs(options.as_ref()).map_err(common::to_napi_err)?;
+    let client = standalone_client(raw.as_ref()).await?;
     let report = common::execute::run_then_close(
         &client.inner,
         common::execute::execute_dispatch_typed(&client.inner, query, on_error, params),
@@ -1038,8 +1093,9 @@ pub async fn execute(
     options: Option<common::execute::ExecOptionsInput>,
 ) -> napi::Result<common::jsoutput::BigIntSafeJson> {
     let raw = options.as_ref().map(|o| o.raw.clone());
-    let (on_error, params) = common::execute::typed_dispatch_inputs(options.as_ref());
-    let client = standalone_client(raw.as_ref())?;
+    let (on_error, params) =
+        common::execute::typed_dispatch_inputs(options.as_ref()).map_err(common::to_napi_err)?;
+    let client = standalone_client(raw.as_ref()).await?;
     let report = common::execute::run_then_close(
         &client.inner,
         common::execute::execute_dispatch_typed(&client.inner, query, on_error, params),

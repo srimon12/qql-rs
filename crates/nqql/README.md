@@ -15,7 +15,9 @@ Language surface tracks **Qdrant ≥ 1.19** (quotas, `memory` placement,
 npm install @veristamp/nqql
 ```
 
-Node **≥ 18**. Platforms: Linux x64/arm64 glibc, macOS x64/arm64, Windows x64.
+Node **≥ 18**. Platforms: Linux x64/arm64 glibc, macOS arm64, Windows x64.
+macOS Intel is not built and fails closed at load time (no x86_64 artifact is
+published).
 
 ## Quick start
 

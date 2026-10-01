@@ -8,6 +8,34 @@
  */
 
 /**
+ * Server-connection options that only exist in `@veristamp/nqql`. Silently
+ * ignoring them here would run the statement against a local empty store
+ * while the caller believes it talks to a Qdrant server.
+ */
+const SERVER_ONLY_OPTIONS = [
+  "url",
+  "apiKey",
+  "api_key",
+  "useGrpc",
+  "use_grpc",
+  "routeAffinity",
+  "route_affinity",
+  "embedder",
+];
+
+function rejectServerOnlyOptions(options, where) {
+  for (const key of SERVER_ONLY_OPTIONS) {
+    if (options[key] !== undefined) {
+      throw new TypeError(
+        `${where} option "${key}" is only supported by the server SDK (@veristamp/nqql); ` +
+          "nqql-edge runs locally — use localExecutor() / httpExecutor() for embeddings, " +
+          "and execute against a server with @veristamp/nqql",
+      );
+    }
+  }
+}
+
+/**
  * Normalize the second arg of localExecutor:
  *   localExecutor(dir)                          → {}
  *   localExecutor(dir, false)                   → { onDiskPayload: false }  (legacy)
@@ -25,6 +53,7 @@ function normalizeLocalOptions(options) {
       "localExecutor options must be a boolean (legacy onDiskPayload) or an object",
     );
   }
+  rejectServerOnlyOptions(options, "localExecutor");
   return {
     onDiskPayload: options.onDiskPayload,
     model: typeof options.model === "string" ? options.model : undefined,
@@ -66,6 +95,7 @@ function normalizeStandaloneOptions(options) {
   if (typeof options !== "object" || Array.isArray(options)) {
     throw new TypeError("options must be an object");
   }
+  rejectServerOnlyOptions(options, "execute");
   if (
     options.onError !== undefined &&
     options.onError !== "stop" &&
@@ -124,4 +154,8 @@ function normalizeStandaloneOptions(options) {
   };
 }
 
-module.exports = { normalizeLocalOptions, normalizeStandaloneOptions };
+module.exports = {
+  normalizeLocalOptions,
+  normalizeStandaloneOptions,
+  rejectServerOnlyOptions,
+};

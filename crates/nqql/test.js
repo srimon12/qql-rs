@@ -292,7 +292,64 @@ async function testAsyncErrors() {
   await client.close();
 }
 
+// Exact 64-bit conversion and coded `undefined`/hole failures at the JS→Rust
+// boundary. Offline: the dead port proves conversion/planning ran before any
+// transport attempt (a corrupted value fails earlier with another error).
+async function testBoundaryExactness() {
+  const probing = new nqql.Client({ url: "http://127.0.0.1:9" });
+  try {
+    // A >2^32 point ID in a Stmt stays an integer through
+    // toObject() → execute; a float would fail deserialization first.
+    const [bigStmt] = nqql.parse("QUERY POINTS (5000000000) FROM docs");
+    const bigErr = await probing.execute(bigStmt).then(
+      () => null,
+      (e) => e,
+    );
+    assert.ok(bigErr, "dead port must reject");
+    assert.ok(
+      bigErr.code && bigErr.code.startsWith("QQL-TRANSPORT"),
+      `expected QQL-TRANSPORT-*, got ${bigErr.code}: ${bigErr.message}`,
+    );
+
+    // Array holes/undefined follow the documented JSON semantics and fail
+    // with a QQL code instead of a raw napi error.
+    const holeErr = await probing.execute([bigStmt, undefined]).then(
+      () => null,
+      (e) => e,
+    );
+    assert.ok(holeErr, "batch with an undefined entry must reject");
+    assert.strictEqual(holeErr.code, "QQL-BATCH-INVARIANT", holeErr.message);
+
+    // `options.params` holes are converted, then rejected by the binding
+    // contract (never by napi's serde layer with a code-less error).
+    const paramsErr = await probing
+      .execute("QUERY :v FROM docs USING dense LIMIT 1", { params: [1, , 3] })
+      .then(
+        () => null,
+        (e) => e,
+      );
+    assert.ok(paramsErr, "a hole in params must reject");
+    assert.ok(
+      paramsErr.code && paramsErr.code.startsWith("QQL-"),
+      `expected a QQL error code, got ${paramsErr.code}: ${paramsErr.message}`,
+    );
+
+    // close() is idempotent and post-close execution carries the shared code.
+    await probing.close();
+    const closedErr = await probing.execute("SHOW COLLECTIONS").then(
+      () => null,
+      (e) => e,
+    );
+    assert.ok(closedErr, "execution after close must reject");
+    assert.strictEqual(closedErr.code, "QQL-CLIENT-CLOSED", closedErr.message);
+    await probing.close();
+  } finally {
+    await probing.close();
+  }
+}
+
 testAsyncErrors()
+  .then(testBoundaryExactness)
   .then(() => console.log("All NAPI tests passed!"))
   .catch((error) => {
     console.error(error);

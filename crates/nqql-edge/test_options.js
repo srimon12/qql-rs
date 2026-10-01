@@ -105,6 +105,32 @@ test("localExecutor rejects non-object, non-boolean options", () => {
   assert.throws(() => normalizeLocalOptions([]), TypeError);
 });
 
+test("server-only options are rejected instead of silently ignored", () => {
+  for (const key of [
+    "url",
+    "apiKey",
+    "api_key",
+    "useGrpc",
+    "use_grpc",
+    "routeAffinity",
+    "route_affinity",
+    "embedder",
+  ]) {
+    assert.throws(
+      () => normalizeLocalOptions({ [key]: "x" }),
+      /only supported by the server SDK/,
+      `localExecutor must reject ${key}`,
+    );
+    assert.throws(
+      () => normalizeStandaloneOptions({ [key]: "x" }),
+      /only supported by the server SDK/,
+      `execute must reject ${key}`,
+    );
+  }
+  // Explicit `undefined` is treated as absent, like every other option.
+  assert.strictEqual(normalizeLocalOptions({ url: undefined }).url, undefined);
+});
+
 test("standalone options forward edge model slots and embed fields", () => {
   const opts = normalizeStandaloneOptions({
     dataDir: "/data",

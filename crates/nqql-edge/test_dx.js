@@ -391,6 +391,16 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
     () => sdk.parse(q)[0].bind({ v: Buffer.from([1, 2, 3, 4]) }),
     /Float32Array or Float64Array/
   );
+
+  // injectFilter values take the same typed path: a Float32Array predicate
+  // stays a numeric list instead of the serde layer's index-keyed object.
+  const [typedInject] = sdk.parse("UPSERT INTO docs VALUES {id: 1, text: 'x'}");
+  typedInject.injectFilter('vec', '=', new Float32Array([0.1, 0.2]));
+  const injected = typedInject
+    .toObject()
+    .Upsert.points[0].payload.find((entry) => entry[0] === 'vec')[1].F32Array;
+  assert.ok(Array.isArray(injected), 'typed-array injectFilter value must stay a list');
+  assert.ok(Math.abs(injected[0] - 0.1) < 1e-6);
 }
 
 
@@ -400,28 +410,60 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(typeof sdk.Client.prototype.upsertMany, 'function');
 }
 
-// normalizeUpsertRows (offline): typed arrays convert like Python and WASM,
-// raw binary fails closed with wrap-first guidance.
+// Prototype safety (offline): `__proto__` is payload data, not a prototype
+// setter — report classes, payload reads, and native object output all use
+// own-property semantics.
 {
-  const dx = require('./dx-common.js');
-  assert.strictEqual(typeof dx.normalizeUpsertRows, 'function');
-  const converted = dx.normalizeUpsertRows([
-    { id: 1, vector: { dense: new Float32Array([0.1, 0.2]) } },
-    { id: 2, vector: { sparse: { indices: new Uint32Array([1, 5]), values: new Float64Array([0.5, 0.8]) } } },
-  ]);
-  assert.ok(Array.isArray(converted[0].vector.dense));
-  assert.deepStrictEqual(converted[1].vector.sparse.indices, [1, 5]);
-  assert.strictEqual(converted[1].vector.sparse.values.length, 2);
-  assert.throws(
-    () => dx.normalizeUpsertRows([{ id: 1, vector: Buffer.from([1, 2, 3]) }]),
-    /Float32Array or Float64Array/,
+  // ScoredPoint/ExecutionReport copy own fields with define semantics, so an
+  // own `__proto__` field cannot replace the instance prototype.
+  const hit = new sdk.ScoredPoint(
+    JSON.parse('{"id": 1, "score": 0.5, "__proto__": {"x": 1}}'),
   );
-  assert.throws(
-    () => dx.normalizeUpsertRows([{ id: 1, vector: new ArrayBuffer(8) }]),
-    /Float32Array or Float64Array/,
+  assert.ok(hit instanceof sdk.ScoredPoint);
+  assert.strictEqual(Object.getPrototypeOf(hit), sdk.ScoredPoint.prototype);
+  assert.ok(Object.prototype.hasOwnProperty.call(hit, '__proto__'));
+  assert.deepStrictEqual(hit.__proto__, { x: 1 });
+
+  const report = new sdk.ExecutionReport(
+    JSON.parse('{"ok": true, "succeeded": 1, "__proto__": {"y": 2}}'),
   );
-  // Non-array top level passes through for the native QQL-BIND-TYPE-MISMATCH.
-  assert.strictEqual(dx.normalizeUpsertRows('nope'), 'nope');
+  assert.ok(report instanceof sdk.ExecutionReport);
+  assert.strictEqual(Object.getPrototypeOf(report), sdk.ExecutionReport.prototype);
+  assert.ok(Object.prototype.hasOwnProperty.call(report, '__proto__'));
+  assert.strictEqual(report.ok, true);
+
+  // get() reads own payload keys only: inherited Object.prototype names are
+  // not payload data.
+  const inherited = new sdk.ScoredPoint({ id: 2, payload: {} });
+  assert.strictEqual(inherited.get('toString', 'default'), 'default');
+  assert.strictEqual(inherited.get('hasOwnProperty', 'default'), 'default');
+  assert.strictEqual(inherited.get('name', 'default'), 'default');
+
+  // Native JSON output uses define semantics too: a dict bound as a
+  // parameter and projected into a route keeps `__proto__` as an own key
+  // and leaves the object's prototype alone.
+  const route = sdk.compile('UPSERT INTO docs VALUES {id: 1, meta: :m}', {
+    m: JSON.parse('{"__proto__": {"x": 1}}'),
+  });
+  const meta = route.payload.points[0].payload.meta;
+  assert.strictEqual(Object.getPrototypeOf(meta), Object.prototype);
+  assert.ok(Object.prototype.hasOwnProperty.call(meta, '__proto__'));
+  assert.deepStrictEqual(meta.__proto__, { x: 1 });
+  assert.ok(JSON.stringify(meta).includes('__proto__'));
+
+  // As a payload field injected on the UPSERT path, the same value survives
+  // native conversion (AST dicts serialize as `[key, value]` pairs, so the
+  // assertion is on the pair list).
+  const [upsert] = sdk.parse("UPSERT INTO docs VALUES {id: 1, text: 'x'}");
+  upsert.injectFilter('meta', '=', JSON.parse('{"__proto__": {"x": 1}}'));
+  const upsertObject = upsert.toObject();
+  const metaEntry = upsertObject.Upsert.points[0].payload.find(
+    (entry) => entry[0] === 'meta',
+  );
+  assert.ok(metaEntry, 'injected meta payload must be present');
+  const protoEntry = metaEntry[1].Dict.find((entry) => entry[0] === '__proto__');
+  assert.ok(protoEntry, 'own __proto__ key must survive conversion + output');
+  assert.strictEqual(protoEntry[1].Dict[0][0], 'x');
 }
 
 // 12. u64 exactness at the JS boundary (WASM parity: safe ints stay

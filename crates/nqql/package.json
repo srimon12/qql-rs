@@ -13,9 +13,10 @@
     "README.md"
   ],
   "scripts": {
-    "build": "napi build --platform --no-js --release --dts native.d.ts",
-    "build:debug": "napi build --platform --no-js --dts native.d.ts",
-    "test": "node --test test_options.js && npm run build:debug && node test_dx.js nqql && node --test test_scroll.js && node test.js && node test_comprehensive.js",
+    "build": "napi build --platform --no-js --release --dts native.d.ts --pipe \"node ../../scripts/fix-native-dts.mjs\"",
+    "build:debug": "napi build --platform --no-js --dts native.d.ts --pipe \"node ../../scripts/fix-native-dts.mjs\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test_options.js && npm run build:debug && npm run typecheck && node test_dx.js nqql && node --test test_scroll.js && node test.js && node test_comprehensive.js",
     "test:options": "node --test test_options.js",
     "prepublishOnly": "napi prepublish -t npm"
   },
@@ -63,6 +64,7 @@
     "@veristamp/nqql-win32-x64-msvc": "0.4.2"
   },
   "devDependencies": {
-    "@napi-rs/cli": "3.7.4"
+    "@napi-rs/cli": "3.7.4",
+    "typescript": "^5.9.3"
   }
 }
