@@ -160,7 +160,7 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
     let mut routes_val = Vec::new();
     for stmt in &stmts {
         match routing::compile_statement(stmt) {
-            Ok(compiled) => routes_val.push(compiled_route_json(&compiled)),
+            Ok(compiled) => routes_val.push(compiled.to_route_json()),
             Err(err) => errors.push(err_json(&err)),
         }
     }
@@ -288,23 +288,6 @@ pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
 
 // ── Core: compile & explain ───────────────────────────────────────
 
-pub(crate) fn compiled_route_json(compiled: &qql_plan::CompiledStatement) -> serde_json::Value {
-    match &compiled.route {
-        Some(route) => serde_json::json!({
-            "stmt_type": compiled.stmt_type,
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-        }),
-        None => serde_json::json!({
-            "stmt_type": compiled.stmt_type,
-            "method": serde_json::Value::Null,
-            "path": serde_json::Value::Null,
-            "payload": serde_json::Value::Null,
-        }),
-    }
-}
-
 fn build_compile_output(
     query: &str,
     params: Option<JsValue>,
@@ -318,7 +301,7 @@ fn build_compile_output(
     };
     let stmt = Parser::parse(&bound).map_err(qql_err_to_js)?;
     let compiled = routing::compile_statement(&stmt).map_err(qql_err_to_js)?;
-    Ok(compiled_route_json(&compiled))
+    Ok(compiled.to_route_json())
 }
 
 /// Compile one QQL statement into a JavaScript route object. Optional

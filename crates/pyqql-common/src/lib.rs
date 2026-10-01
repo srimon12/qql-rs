@@ -564,7 +564,7 @@ impl PyStmt {
         let mut stmt = self.inner.clone();
         bind_py_stmt(&mut stmt, params)?;
         let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
-        let result = compiled_route_json(&compiled);
+        let result = compiled.to_route_json();
         pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 
@@ -576,31 +576,6 @@ impl PyStmt {
         dict.set_item(pyo3::intern!(py, "plan"), plan)?;
         Ok(dict.into_any())
     }
-}
-
-/// Shared route JSON shape for `compile_route` / `compile`.
-pub fn compiled_route_json(compiled: &qql_plan::routing::CompiledStatement) -> serde_json::Value {
-    let (method, path, payload) = match &compiled.route {
-        Some(route) => {
-            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-            (
-                serde_json::Value::String(route.method.as_str().into()),
-                serde_json::Value::String(route.path.clone()),
-                payload,
-            )
-        }
-        None => (
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-        ),
-    };
-    serde_json::json!({
-        "stmt_type": compiled.stmt_type,
-        "method": method,
-        "path": path,
-        "payload": payload,
-    })
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -703,7 +678,7 @@ pub fn compile<'py>(
     let mut stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
     bind_py_stmt(&mut stmt, params)?;
     let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
-    let result = compiled_route_json(&compiled);
+    let result = compiled.to_route_json();
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 

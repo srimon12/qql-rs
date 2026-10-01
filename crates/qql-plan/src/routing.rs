@@ -523,6 +523,29 @@ pub struct CompiledStatement {
     pub route: Option<Route>,
 }
 
+impl CompiledStatement {
+    /// Host-facing route object for the SDK `compile` entry points.
+    ///
+    /// Always carries `stmt_type`; `method`/`path`/`payload` are `null` when
+    /// no single REST route exists (client-side, batch-only, multi-step).
+    pub fn to_route_json(&self) -> serde_json::Value {
+        match &self.route {
+            Some(route) => serde_json::json!({
+                "stmt_type": self.stmt_type,
+                "method": route.method.as_str(),
+                "path": route.path,
+                "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+            }),
+            None => serde_json::json!({
+                "stmt_type": self.stmt_type,
+                "method": serde_json::Value::Null,
+                "path": serde_json::Value::Null,
+                "payload": serde_json::Value::Null,
+            }),
+        }
+    }
+}
+
 /// Compile a statement from the planner IR.
 ///
 /// Always sets `stmt_type` from [`crate::plan::PlannedOperation::compile_stmt_type`].
@@ -562,6 +585,34 @@ mod tests {
         let compiled = compile_statement(&s).unwrap();
         assert_eq!(compiled.stmt_type, "cross_rerank");
         assert!(compiled.route.is_none());
+    }
+
+    #[test]
+    fn to_route_json_pins_sdk_compile_shape() {
+        // The host SDKs return this object verbatim from `compile`; the key set
+        // and null-route shape are a documented contract, so pin both here once.
+        let s = Parser::parse("QUERY POINTS (1, 2) FROM docs;").unwrap();
+        let compiled = compile_statement(&s).unwrap();
+        let json = compiled.to_route_json();
+        assert_eq!(json["stmt_type"], "query_points");
+        assert_eq!(json["method"], "POST");
+        assert_eq!(json["path"], "/collections/docs/points");
+        assert_eq!(json["payload"]["ids"], serde_json::json!([1, 2]));
+
+        let s = Parser::parse(
+            "QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD body FROM docs PREFETCH (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) LIMIT 10;",
+        )
+        .unwrap();
+        let json = compile_statement(&s).unwrap().to_route_json();
+        assert_eq!(json["stmt_type"], "cross_rerank");
+        assert!(json["method"].is_null());
+        assert!(json["path"].is_null());
+        assert!(json["payload"].is_null());
+        assert_eq!(
+            json.as_object().unwrap().len(),
+            4,
+            "route JSON key set is part of the SDK contract"
+        );
     }
 
     #[test]
