@@ -4295,7 +4295,6 @@ name = "pyqql"
 version = "0.4.2"
 dependencies = [
  "pyo3",
- "pyo3-async-runtimes",
  "pyqql-common",
  "pythonize",
  "qql",
@@ -4303,7 +4302,6 @@ dependencies = [
  "qql-plan",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -4311,6 +4309,7 @@ name = "pyqql-common"
 version = "0.4.2"
 dependencies = [
  "pyo3",
+ "pyo3-async-runtimes",
  "pythonize",
  "qql",
  "qql-core",
@@ -4333,7 +4332,6 @@ dependencies = [
  "qql-edge",
  "qql-plan",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

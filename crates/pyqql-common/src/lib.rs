@@ -20,9 +20,15 @@ use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
+pub mod client;
 pub mod dispatch;
+mod embedder;
 mod float_list;
 pub mod report;
+
+pub use embedder::{
+    ParsedEmbedderConfig, PyHttpEmbedder, extract_embedder_config, validate_bm25_text,
+};
 
 pub use dispatch::{
     Input, OnError, parse_on_error, prepare_input, run_analyze_async, run_analyze_input, run_async,

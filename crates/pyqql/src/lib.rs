@@ -2,10 +2,9 @@
 //!
 //! The parser/parameter surface (Stmt, parse/tokenize/bind/explain/compile)
 //! lives in `pyqql-common`, shared with `pyqql-edge` so the two SDKs cannot
-//! drift; this crate keeps the REST/gRPC client, the HTTP embedder, and the
-//! module-level one-shot helpers.
+//! drift; this crate keeps the REST/gRPC client and the module-level one-shot
+//! helpers.
 
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
@@ -17,7 +16,6 @@ pub use embedder::*;
 #[pyclass(name = "Client", subclass)]
 struct PyClient {
     inner: std::sync::Arc<qql::executor::Executor>,
-    runtime: tokio::runtime::Runtime,
     /// Normalized `X-Qdrant-Route-Affinity` / gRPC metadata value; `None` = unset.
     route_affinity: Option<String>,
 }
@@ -34,10 +32,9 @@ impl PyClient {
         route_affinity: Option<String>,
     ) -> PyResult<Self> {
         let route_affinity = route_affinity.filter(|s| !s.is_empty());
-        let (exec, rt) = create_executor(url, api_key, use_grpc, embedder, route_affinity.clone())?;
+        let exec = create_executor(url, api_key, use_grpc, embedder, route_affinity.clone())?;
         Ok(PyClient {
             inner: std::sync::Arc::new(exec),
-            runtime: rt,
             route_affinity,
         })
     }
@@ -52,7 +49,8 @@ impl PyClient {
 
     /// Close the client and release underlying connections.
     fn close(&self) -> PyResult<()> {
-        Python::attach(|py| py.detach(|| self.runtime.block_on(self.inner.close())))
+        let runtime = common::shared_runtime()?;
+        Python::attach(|py| py.detach(|| runtime.block_on(self.inner.close())))
             .map_err(common::qql_py_error)
     }
 
@@ -94,40 +92,28 @@ impl PyClient {
     fn execute<'py>(
         &self,
         py: Python<'py>,
-        query: &Bound<'_, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        query: &Bound<'py, PyAny>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(query, params)?;
-        let report = py.detach(|| common::run_input(&self.inner, &self.runtime, input, oe))?;
-        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
+        common::client::run_execute(py, &self.inner, query, params, on_error)
     }
 
     /// Async variant — accepts the same input types as `execute`.
     ///
-    /// Executes the QQL pipeline asynchronously on the Tokio background runtime.
+    /// The request runs on the process-wide Tokio runtime shared with the
+    /// transport, so it cannot be killed by collecting the client. Cancelling
+    /// the returned awaitable detaches the request instead of aborting it: it
+    /// runs to completion.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute_async<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let inner = self.inner.clone();
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(&query, params)?;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let report = common::run_async(&inner, input, oe)
-                .await
-                .map_err(common::qql_py_error)?;
-            Python::attach(|py| {
-                Ok(common::PyExecutionReport::wrap(py, report)?
-                    .into_any()
-                    .unbind())
-            })
-        })
+        common::client::run_execute_async(py, &self.inner, query, params, on_error)
     }
 
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
@@ -143,14 +129,11 @@ impl PyClient {
     fn explain_analyze<'py>(
         &self,
         py: Python<'py>,
-        query: &Bound<'_, PyAny>,
-        params: Option<&Bound<'_, PyAny>>,
+        query: &Bound<'py, PyAny>,
+        params: Option<&Bound<'py, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let oe = common::parse_on_error(on_error)?;
-        let input = common::prepare_input(query, params)?;
-        let out = py.detach(|| common::run_analyze_input(&self.inner, &self.runtime, input, oe))?;
-        pythonize::pythonize(py, &out).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        common::client::run_explain_analyze(py, &self.inner, query, params, on_error)
     }
 
     /// Compile a QQL query to its transport route without executing (parity with nqql).
@@ -175,29 +158,11 @@ impl PyClient {
         &self,
         py: Python<'py>,
         collection: &str,
-        rows: &Bound<'_, PyAny>,
+        rows: &Bound<'py, PyAny>,
         batch_size: usize,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let oe = common::parse_on_error(on_error)?;
-        let items: Vec<Bound<'_, PyAny>> = rows.extract().map_err(|_| {
-            common::qql_py_value_error(qql_core::error::QqlError::validation(
-                "QQL-BIND-TYPE-MISMATCH",
-                "upsert_many rows must be a list of point objects ({id, vector, …payload})",
-                None,
-            ))
-        })?;
-        let values: Vec<qql_core::ast::Value> = items
-            .iter()
-            .map(common::py_to_value)
-            .collect::<PyResult<_>>()?;
-        let report = py
-            .detach(|| {
-                self.runtime
-                    .block_on(self.inner.upsert_many(collection, values, batch_size, oe))
-            })
-            .map_err(common::qql_py_error)?;
-        Ok(common::PyExecutionReport::wrap(py, report)?.into_any())
+        common::client::run_upsert_many(py, &self.inner, collection, rows, batch_size, on_error)
     }
 }
 
@@ -206,7 +171,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     common::register_error_module("pyqql");
     common::register_report_classes(m)?;
     m.add_class::<common::PyStmt>()?;
-    m.add_class::<PyHttpEmbedder>()?;
+    m.add_class::<common::PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;
     m.add_function(wrap_pyfunction!(common::bind, m)?)?;
     m.add_function(wrap_pyfunction!(common::explain, m)?)?;
