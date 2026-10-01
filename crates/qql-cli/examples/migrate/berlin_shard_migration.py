@@ -258,7 +258,7 @@ def dry_run(qql: Qql) -> None:
 def migrate(qql: Qql, batch: int, workers: int) -> None:
     say(f"5/7 MIGRATE {SRC} -> {DST} with --shard-key-field {SHARD_FIELD}")
     t0 = time.perf_counter()
-    qql.run_sql(
+    qql.run(
         "migrate", SRC, "--to", DST, "--shard-key-field", SHARD_FIELD,
         "--recreate", "--restart", "--workers", str(workers), "--batch-size", str(batch),
         live=True,
@@ -329,7 +329,7 @@ def dump_round_trip(qql: Qql, batch: int, tmp: Path) -> None:
     replay_file.write_text(script.replace(DST, RST))
     qql.run("run", f"DROP COLLECTION {RST};", check=False)
     print("  replaying dump script (~30s, output parsed at the end)…", flush=True)
-    proc = qql.run("run", "--stop-on-error", str(replay_file))
+    proc = qql.run("run", "--stop-on-error", "--json", str(replay_file))
     summary = json.loads(proc.stdout)
     if summary.get("failed"):
         raise Fail(f"replay failed: {proc.stdout}")
