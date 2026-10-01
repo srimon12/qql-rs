@@ -199,7 +199,7 @@ class Cursor:
                     except (TypeError, ValueError):
                         pass
                     continue
-                part_rows, part_desc = map_result(raw, idx)
+                part_rows, part_desc = map_result(res, raw, idx)
                 rows.extend(part_rows)
                 if description is None and part_desc is not None:
                     description = part_desc
@@ -228,7 +228,7 @@ class Cursor:
                     pass
                 self._result_sets.append(([], None, count))
                 continue
-            part_rows, part_desc = map_result(raw, idx)
+            part_rows, part_desc = map_result(res, raw, idx)
             rc = len(part_rows) if part_desc is not None else -1
             self._result_sets.append((part_rows, part_desc, rc))
 

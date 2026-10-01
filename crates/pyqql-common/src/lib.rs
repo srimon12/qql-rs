@@ -12,7 +12,7 @@
 //! `QQL-BIND-BATCH-LENGTH` otherwise); every other shape applies to every
 //! statement identically.
 
-use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use qql_core::ast::{self, Value};
@@ -20,9 +20,15 @@ use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
+pub mod client;
 pub mod dispatch;
+mod embedder;
 mod float_list;
 pub mod report;
+
+pub use embedder::{
+    ParsedEmbedderConfig, PyHttpEmbedder, extract_embedder_config, validate_bm25_text,
+};
 
 pub use dispatch::{
     Input, OnError, parse_on_error, prepare_input, run_analyze_async, run_analyze_input, run_async,
@@ -153,6 +159,45 @@ fn already_bound_error() -> PyErr {
     ))
 }
 
+/// A host-side render failure (JSON / pythonize) is a driver error, not a
+/// syntax error: the query already parsed. Maps to the typed
+/// `QQL-SERIALIZE` execution error so callers never "fix" their query text.
+pub(crate) fn serialize_error(error: impl std::fmt::Display) -> PyErr {
+    qql_py_error(QqlError::execution(
+        "QQL-SERIALIZE",
+        error.to_string(),
+        None,
+    ))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Shared Tokio runtime
+// ═══════════════════════════════════════════════════════════════════
+
+static SHARED_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+
+/// Process-wide Tokio runtime shared by every Python client.
+///
+/// One multi-thread runtime per process (instead of one per client) keeps
+/// transports, blocking `execute`, and `execute_async` on the same runtime:
+/// a transport built with this runtime entered can never outlive it, and a
+/// future spawned here is guaranteed a live executor for the whole request.
+/// The runtime lives until process exit.
+pub fn shared_runtime() -> PyResult<&'static tokio::runtime::Runtime> {
+    if let Some(runtime) = SHARED_RUNTIME.get() {
+        return Ok(runtime);
+    }
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| {
+        PyRuntimeError::new_err(format!("cannot start the QQL Tokio runtime: {error}"))
+    })?;
+    // A concurrent caller may win the race; the loser drops its runtime and
+    // uses the winner (both are equivalent).
+    let _ = SHARED_RUNTIME.set(runtime);
+    SHARED_RUNTIME
+        .get()
+        .ok_or_else(|| PyRuntimeError::new_err("cannot start the QQL Tokio runtime"))
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Python value conversion — the single Py → serde_json path
 // ═══════════════════════════════════════════════════════════════════
@@ -168,8 +213,20 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(v) = value.extract::<bool>() {
         return Ok(serde_json::Value::Bool(v));
     }
-    if let Ok(v) = value.extract::<i64>() {
-        return Ok(serde_json::Value::Number(v.into()));
+    if value.is_instance_of::<PyInt>() {
+        // Python ints are unbounded: try `u64` first so point ids above
+        // `i64::MAX` keep their exact value, then `i64`. Never fall through
+        // to `f64` — that would silently change the bound type and lose
+        // precision above 2^53 (e.g. snowflake ids).
+        if let Ok(v) = value.extract::<u64>() {
+            return Ok(serde_json::Value::Number(v.into()));
+        }
+        if let Ok(v) = value.extract::<i64>() {
+            return Ok(serde_json::Value::Number(v.into()));
+        }
+        return Err(PyOverflowError::new_err(
+            "integer parameter out of range: QQL binds integers that fit in i64 or u64",
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
@@ -294,8 +351,18 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(v) = value.extract::<bool>() {
         return Ok(Value::Bool(v));
     }
-    if let Ok(v) = value.extract::<i64>() {
-        return Ok(Value::Int(v));
+    if value.is_instance_of::<PyInt>() {
+        // Mirror `py_to_json`: `u64` first (`Value::UInt`), then `i64`,
+        // never a lossy `f64` fallback.
+        if let Ok(v) = value.extract::<u64>() {
+            return Ok(Value::UInt(v));
+        }
+        if let Ok(v) = value.extract::<i64>() {
+            return Ok(Value::Int(v));
+        }
+        return Err(PyOverflowError::new_err(
+            "integer parameter out of range: QQL binds integers that fit in i64 or u64",
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
@@ -337,6 +404,26 @@ pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     Err(PyValueError::new_err(
         "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
     ))
+}
+
+/// Convert the top-level `params` argument to a typed [`Value`] container.
+///
+/// A top-level list is always the positional `?` container: it is converted
+/// element-wise so nested vectors still take [`py_to_value`]'s buffer /
+/// flat-float fast paths. The flat-float packing heuristic is deliberately
+/// *not* applied here — it is a slot-level vector optimization, and packing a
+/// 32+ element positional list into one [`Value::F32Array`] made
+/// `bind([0.5] * 32)` look like a scalar and fail with
+/// `QQL-BIND-INVALID-PARAMS`.
+pub fn py_to_value_params(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if let Ok(list) = value.cast::<PyList>() {
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_value(&item)?);
+        }
+        return Ok(Value::List(items));
+    }
+    py_to_value(value)
 }
 
 /// Pack a flat Python `float` list of at least
@@ -385,7 +472,7 @@ pub fn bind_py_stmt(stmt: &mut ast::Stmt, params: Option<&Bound<'_, PyAny>>) -> 
     if p.is_none() {
         return Ok(());
     }
-    let value_params = py_to_value(p)?;
+    let value_params = py_to_value_params(p)?;
     qql_core::params_json::bind_stmt_with_values(stmt, &value_params).map_err(qql_py_value_error)
 }
 
@@ -402,7 +489,7 @@ pub fn bind_py_params(
     if p.is_none() {
         return Ok(query.to_string());
     }
-    let value_params = py_to_value(p)?;
+    let value_params = py_to_value_params(p)?;
     let plan =
         qql_core::params_json::plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
     qql_core::params_json::bind_str_with_values(
@@ -535,16 +622,15 @@ impl PyStmt {
     }
 
     fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        serde_json::to_string(&self.inner).map_err(serialize_error)
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Must go through serde_json::Value: pythonize maps Rust tuples to
         // Python tuples, while JSON arrays become lists. AST dicts are
         // `Vec<(String, Value)>` and host tests walk those as lists.
-        let val =
-            serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        let val = serde_json::to_value(&self.inner).map_err(serialize_error)?;
+        pythonize::pythonize(py, &val).map_err(serialize_error)
     }
 
     /// Compile this Stmt directly to its transport route without re-parsing.
@@ -565,7 +651,7 @@ impl PyStmt {
         bind_py_stmt(&mut stmt, params)?;
         let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
         let result = compiled.to_route_json();
-        pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        pythonize::pythonize(py, &result).map_err(serialize_error)
     }
 
     fn explain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -601,15 +687,19 @@ pub fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
 #[pyfunction]
 pub fn parse_json(input: &str) -> PyResult<String> {
     let statements = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
-    serde_json::to_string(&statements).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    serde_json::to_string(&statements).map_err(serialize_error)
 }
 
 /// Full frontend validity gate: parse + plan — the same contract as execution
-/// and the language conformance suite.
+/// and the language conformance suite. Empty and whitespace-only scripts are
+/// invalid: `execute` rejects them with `QQL-VALIDATION-EMPTY-SCRIPT`.
 #[pyfunction]
 pub fn is_valid(input: &str) -> bool {
-    // Full frontend gate: parse + plan — same contract as execution and the
-    // language conformance suite.
+    // Empty/whitespace scripts parse to zero statements, but execution
+    // rejects them; pre-flight checks must agree with execution.
+    if input.trim().is_empty() {
+        return false;
+    }
     qql_plan::parse_and_plan(input).is_ok()
 }
 
@@ -679,7 +769,7 @@ pub fn compile<'py>(
     bind_py_stmt(&mut stmt, params)?;
     let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
     let result = compiled.to_route_json();
-    pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    pythonize::pythonize(py, &result).map_err(serialize_error)
 }
 
 /// Tree-formatted plan explanation for a query string or Stmt.

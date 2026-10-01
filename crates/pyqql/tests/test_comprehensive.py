@@ -637,7 +637,7 @@ class TestE2EPipeline(unittest.TestCase):
     def test_g6_upsert_compiles_correct_route(self):
         """UPSERT compile produces correct Qdrant route structure."""
         cq = pyqql.compile(
-            'UPSERT INTO test VALUES {"id":"x","vector":[1.0,2.0],"key":"val"}'
+            'UPSERT INTO test VALUES {"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","vector":[1.0,2.0],"key":"val"}'
         )
         self.assertEqual(cq["method"], "PUT")
         self.assertIn("/collections/test/points", cq["path"])
@@ -647,7 +647,7 @@ class TestE2EPipeline(unittest.TestCase):
 
     def test_g7_delete_compiles_correct_route(self):
         """DELETE compile produces correct Qdrant route structure."""
-        cq = pyqql.compile('DELETE FROM test WHERE id = "doc-1"')
+        cq = pyqql.compile('DELETE FROM test WHERE id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"')
         self.assertIn("method", cq)
         self.assertIn("path", cq)
 
@@ -748,13 +748,13 @@ class TestCompileQueryRoute(unittest.TestCase):
 
     def test_i6_upsert_compiles_with_correct_method(self):
         cq = pyqql.compile(
-            'UPSERT INTO test VALUES {"id":"x","vector":[1.0,2.0],"k":"v"}'
+            'UPSERT INTO test VALUES {"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","vector":[1.0,2.0],"k":"v"}'
         )
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "PUT")
 
     def test_i7_delete_compiles_with_correct_method(self):
-        cq = pyqql.compile('DELETE FROM test WHERE id = "doc-1"')
+        cq = pyqql.compile('DELETE FROM test WHERE id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"')
         self.assertIsInstance(cq, dict)
         self.assertIn("method", cq)
 
@@ -794,13 +794,13 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIsInstance(stmts, list)
         self.assertEqual(len(stmts), 0)
 
-    def test_j3_is_valid_empty_is_true(self):
-        """PAPERCUT: is_valid on empty string returns True."""
-        self.assertTrue(pyqql.is_valid(""))
+    def test_j3_is_valid_empty_is_false(self):
+        # Execution rejects empty scripts (QQL-VALIDATION-EMPTY-SCRIPT), so
+        # the pre-flight predicate must reject them too.
+        self.assertFalse(pyqql.is_valid(""))
 
-    def test_j4_is_valid_whitespace_is_true(self):
-        """PAPERCUT: is_valid on whitespace returns True."""
-        self.assertTrue(pyqql.is_valid("   "))
+    def test_j4_is_valid_whitespace_is_false(self):
+        self.assertFalse(pyqql.is_valid("   "))
 
     def test_j5_is_valid_sql_is_false(self):
         self.assertFalse(pyqql.is_valid("SELECT * FROM docs"))
@@ -847,13 +847,13 @@ class TestEdgeCases(unittest.TestCase):
     def test_j11_stmt_shard_key_property(self):
         """SHARD in QQL + Stmt.shard_key property (no inject_shard_key)."""
         stmts = pyqql.parse("QUERY TEXT 'x' FROM docs SHARD 'honeywell' LIMIT 5")
-        assert stmts[0].shard_key == "honeywell"
+        self.assertEqual(stmts[0].shard_key, "honeywell")
         stmts2 = pyqql.parse("QUERY TEXT 'x' FROM docs LIMIT 5")
         stmts2[0].shard_key = "acme"
-        assert stmts2[0].shard_key == "acme"
+        self.assertEqual(stmts2[0].shard_key, "acme")
         # empty clears
         stmts2[0].shard_key = ""
-        assert stmts2[0].shard_key is None
+        self.assertIsNone(stmts2[0].shard_key)
 
 
     def test_j12_show_collections_to_json(self):
@@ -891,27 +891,27 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(len(tokens), 0)
 
     def test_j17_delete_to_dict(self):
-        stmts = pyqql.parse('DELETE FROM test WHERE id = "doc-1"')
+        stmts = pyqql.parse('DELETE FROM test WHERE id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"')
         d = stmts[0].to_dict()
         self.assertIn("Delete", d)
         self.assertEqual(d["Delete"]["collection"], "test")
-        self.assertEqual(d["Delete"]["selector"]["Id"]["String"], "doc-1")
+        self.assertEqual(d["Delete"]["selector"]["Id"]["String"], "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
 
     def test_j18_upsert_to_dict(self):
         stmts = pyqql.parse(
-            'UPSERT INTO test VALUES {"id":"x","vector":[1.0,2.0],"k":"v"}'
+            'UPSERT INTO test VALUES {"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","vector":[1.0,2.0],"k":"v"}'
         )
         d = stmts[0].to_dict()
         self.assertIn("Upsert", d)
         self.assertEqual(d["Upsert"]["collection"], "test")
         points = d["Upsert"]["points"]
         self.assertEqual(len(points), 1)
-        self.assertEqual(points[0]["id"]["String"], "x")
+        self.assertEqual(points[0]["id"]["String"], "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
 
     def test_j19_upsert_payload_fields_are_top_level(self):
         """Payload fields in UPSERT JSON go directly under point payload."""
         cq = pyqql.compile(
-            'UPSERT INTO test VALUES {"id":"x","vector":[1.0],"myfield":"myval","count":42}'
+            'UPSERT INTO test VALUES {"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","vector":[1.0],"myfield":"myval","count":42}'
         )
         pt = cq["payload"]["points"][0]
         self.assertEqual(pt["payload"]["myfield"], "myval")
@@ -920,7 +920,7 @@ class TestEdgeCases(unittest.TestCase):
     def test_j20_upsert_payload_key_is_nested(self):
         """A key literally named 'payload' in VALUES becomes nested."""
         cq = pyqql.compile(
-            'UPSERT INTO test VALUES {"id":"x","vector":[1.0],"payload":{"nested":"yes"}}'
+            'UPSERT INTO test VALUES {"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","vector":[1.0],"payload":{"nested":"yes"}}'
         )
         pt = cq["payload"]["points"][0]
         self.assertIn("payload", pt["payload"])
@@ -929,7 +929,7 @@ class TestEdgeCases(unittest.TestCase):
     def test_j21_upsert_no_vector_compiles(self):
         """UPSERT without vector field still compiles."""
         cq = pyqql.compile(
-            'UPSERT INTO test VALUES {"id":"x","text":"just metadata"}'
+            'UPSERT INTO test VALUES {"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","text":"just metadata"}'
         )
         self.assertIn("points", cq["payload"])
         self.assertNotIn("vector", cq["payload"]["points"][0])

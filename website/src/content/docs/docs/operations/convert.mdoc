@@ -94,8 +94,8 @@ A bare body has no path to derive the collection from. Pass it explicitly
 with `--collection`:
 
 {% terminal title="Bare body with an explicit collection" %}
-echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
-# QUERY POINTS (1, 'point-2') FROM docs;
+echo '{"ids": [1, "7c9e6679-7425-40de-944b-e07fc1f90ae7"]}' | qql convert --collection docs
+# QUERY POINTS (1, '7c9e6679-7425-40de-944b-e07fc1f90ae7') FROM docs;
 {% /terminal %}
 
 Without `--collection`, a bare body fails with `MissingCollection` rather

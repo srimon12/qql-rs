@@ -114,6 +114,14 @@ class TestEmptyScriptParity(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.execute([])
 
+    def test_is_valid_rejects_empty_and_whitespace(self):
+        # `is_valid` promises the same contract as execution, which rejects
+        # empty/whitespace scripts with QQL-VALIDATION-EMPTY-SCRIPT.
+        self.assertFalse(pyqql.is_valid(""))
+        self.assertFalse(pyqql.is_valid("   \t\n"))
+        self.assertFalse(pyqql.is_valid(";;"))
+        self.assertTrue(pyqql.is_valid("COUNT FROM docs"))
+
 
 class TestLimitZero(unittest.TestCase):
     def test_limit_zero_rejected_at_parse_time(self):
@@ -140,8 +148,62 @@ class TestClosedClient(unittest.TestCase):
         client.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestAsyncRuntimeLifetime(unittest.TestCase):
+    def test_async_future_survives_client_collection(self):
+        # The request is spawned on the process-wide runtime, so collecting
+        # the client cannot cancel it: the await still settles with the
+        # transport verdict instead of hanging.
+        import asyncio
+
+        async def run():
+            client = pyqql.Client("http://localhost:1")
+            task = asyncio.create_task(
+                client.execute_async("QUERY 'x' FROM docs LIMIT 1")
+            )
+            del client
+            with self.assertRaises(pyqql.QqlTransportError):
+                await task
+
+        asyncio.run(run())
+
+
+class TestPositionalParamsShape(unittest.TestCase):
+    """A top-level params list is always the positional container.
+
+    The flat-float vector heuristic must not run on the container itself:
+    `[0.5] * 32` used to pack into one `F32Array` and fail as an "invalid
+    params shape" — a length cliff with a misleading error.
+    """
+
+    def test_positional_float_params_bind_at_31_32_33(self):
+        # The container is element-wise: every float is one positional value,
+        # no matter how many (the old heuristic packed 32+ into one vector and
+        # rejected the container as an invalid params shape).
+        for length in (31, 32, 33):
+            with self.subTest(length=length):
+                where = " AND ".join(f"f{i} = ?" for i in range(length))
+                bound = pyqql.bind(
+                    f"QUERY [0.1] FROM docs WHERE {where}", [0.5] * length
+                )
+                self.assertEqual(bound.count("0.5"), length)
+
+    def test_long_positional_list_reports_the_real_arity_error(self):
+        for length in (31, 32, 33):
+            with self.subTest(length=length):
+                with self.assertRaises(ValueError) as ctx:
+                    pyqql.bind(
+                        "QUERY [0.1] FROM docs WHERE a = ?", [0.5] * length
+                    )
+                message = str(ctx.exception)
+                self.assertIn("QQL-BIND-UNUSED-PARAMS", message)
+                self.assertNotIn("QQL-BIND-INVALID-PARAMS", message)
+
+    def test_nested_positional_vector_values_still_pack(self):
+        # Element-wise conversion keeps the per-slot vector fast path.
+        bound = pyqql.bind(
+            "QUERY ? FROM docs USING dense LIMIT 1", [[0.5] * 32]
+        )
+        self.assertIn("0.5", bound)
 
 
 class TestVerdictRoundTwo(unittest.TestCase):
@@ -288,3 +350,7 @@ class TestBm25EmbedderParams(unittest.TestCase):
             }
         )
         client.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

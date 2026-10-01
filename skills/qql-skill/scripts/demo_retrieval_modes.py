@@ -311,7 +311,7 @@ EXAMPLES = [
     {
         "mode": "select-by-id",
         "when": "Use when you already know the exact point ID and want the stored payload.",
-        "query": "QUERY POINTS ('pt-42') FROM articles",
+        "query": "QUERY POINTS ('7c9e6679-7425-40de-944b-e07fc1f90ae7') FROM articles",
         "setup": [],
         "requires_index": [],
     },
@@ -319,7 +319,7 @@ EXAMPLES = [
         "mode": "scroll",
         "when": "Use when you need to page through a collection or walk filtered points.",
         "query": (
-            "SCROLL FROM articles WHERE category = 'ml' AFTER 'pt-42' LIMIT 25"
+            "SCROLL FROM articles WHERE category = 'ml' AFTER '7c9e6679-7425-40de-944b-e07fc1f90ae7' LIMIT 25"
         ),
         "setup": [
             "CREATE INDEX ON COLLECTION articles FOR category TYPE keyword",
