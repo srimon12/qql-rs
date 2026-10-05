@@ -396,9 +396,9 @@
     "publish": "npx @vscode/vsce publish"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@types/node": "^26.6.1",
-    "@types/vscode": "^1.138.0",
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^26.6.4",
+    "@types/vscode": "^1.140.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^7.0.2"
   },
