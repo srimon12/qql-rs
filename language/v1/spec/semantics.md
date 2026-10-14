@@ -33,6 +33,11 @@ Spans in reference errors are zero-based UTF-8 byte ranges `[start, end)`.
 QQL values are `string`, signed `integer`, `float`, `boolean`, `null`, ordered
 object entries, and ordered lists. Point IDs are either unsigned integers or
 strings. Each UPSERT point must contain exactly one case-insensitive `id` key.
+A point literal may end with `WITH PAYLOAD { … }` (QQL 1.8). Keys inside that
+object are payload, including `id` and `vector`, which would otherwise collide
+with the envelope slots. Flat keys and suffix keys may not duplicate each
+other case-insensitively (`QQL-PARSE-DUPLICATE-KEY`). The canonical form emits
+the suffix only when the payload contains an envelope key.
 
 Vector values have three structural kinds:
 

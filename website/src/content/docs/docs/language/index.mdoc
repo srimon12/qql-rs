@@ -51,6 +51,10 @@ binding (`bind`, statement-scoped batch parameters, nested parameter
 expansion). Bindings substitute values before planning — see [Parameter
 binding](/docs/language/queries/#parameter-binding--prepared-queries).
 
+Notable QQL 1.8 additions: a point-level `WITH PAYLOAD { … }` suffix on
+`UPSERT … VALUES`, so a payload field named `id` or `vector` is stored as
+payload instead of colliding with the point envelope.
+
 ## Lexical rules
 
 The script surface is strict: one statement per semicolon-separated element, at

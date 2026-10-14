@@ -4,7 +4,7 @@ Packaged guidance for coding agents that author QQL and call SDKs.
 
 ## Proposition
 
-- Language: one SQL-like grammar for Qdrant retrieval, hybrid, multivector, mutations, DDL. Qdrant 1.19 and QQL 1.7 surface with placeholders, `WAIT`, typed shard keys, quotas, memory and `turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = ...)`.
+- Language: one SQL-like grammar for Qdrant retrieval, hybrid, multivector, mutations, DDL. Qdrant 1.19 and QQL 1.8 surface with placeholders, `WAIT`, typed shard keys, quotas, memory and `turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = ...)`, and point-level `WITH PAYLOAD { … }` on upsert.
 - Plan IR: transport-neutral `PlannedOperation`. gRPC and REST are first-class projections. Quotas are REST-only.
 - Isolation: `inject_filter` on the AST, fail-closed.
 - Routing: `SHARD '...'` in QQL or `stmt.shard_key`. Never inside `Filter`. No `inject_shard_key`.

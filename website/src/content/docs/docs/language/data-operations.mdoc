@@ -28,7 +28,19 @@ one unnamed vector or as an object of arbitrary named vectors.
 
 A `vector` dict with a string `text`/`image` key or an `object` key is
 server-side inference input, not a named vector. Only `model` and `options`
-may accompany it. A dict with a numeric `text` value stays a named vector.
+may accompany it.
+
+Payload keys named `id` or `vector` collide with those envelope slots. Put
+them in a point-level `WITH PAYLOAD { … }` suffix (QQL 1.8). Flat keys and
+suffix keys cannot duplicate each other (`QQL-PARSE-DUPLICATE-KEY`). The same
+split is how `qql dump` writes those points, and how `UPSERT … VALUES :rows`
+binds them: the exact-case object `$payload` holds the colliding fields.
+
+{% qqlExample title="Payload keys named id or vector" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]} WITH PAYLOAD {id: 'legacy-1', vector: 'sparse_v1', category: 'tech'};
+```
+{% /qqlExample %} A dict with a numeric `text` value stays a named vector.
 
 {% qqlExample title="Per-point inference vectors" %}
 ```sql

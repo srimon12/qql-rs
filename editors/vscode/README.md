@@ -14,9 +14,9 @@
 
 ## Features
 
-### Language support (QQL 1.7 / Qdrant 1.19)
+### Language support (QQL 1.8 / Qdrant 1.19)
 
-Highlights and completions cover the full QQL 1.7 surface, including:
+Highlights and completions cover the full QQL 1.8 surface, including:
 
 | Feature | Example |
 |---------|---------|
@@ -34,6 +34,7 @@ Highlights and completions cover the full QQL 1.7 surface, including:
 | Per-query IDF | `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')` |
 | TurboQuant datatype | `datatype = 'turbo4'` (aliases `t4`, `f32`, `f16`, `u8`) |
 | Keyword prefix index | `CREATE INDEX … TYPE keyword WITH (prefix = true)` |
+| Payload envelope suffix | `UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WITH PAYLOAD {id: 'legacy', vector: 'v1'}` |
 
 ### Syntax Highlighting
 
@@ -102,7 +103,7 @@ Also available from the editor title bar and right-click **QQL** submenu.
 
 ### Status Bar
 
-Shows `✓ QQL 1.7 · N` when valid, or `✗ QQL 1.7` with the error code on failure. The active params profile is appended (`· acme`) when one is selected. Click to re-analyze (or pick a profile when `qql.paramProfiles` is configured).
+Shows `✓ QQL 1.8 · N` when valid, or `✗ QQL 1.8` with the error code on failure. The active params profile is appended (`· acme`) when one is selected. Click to re-analyze (or pick a profile when `qql.paramProfiles` is configured).
 
 ### Quick Fixes & error links
 

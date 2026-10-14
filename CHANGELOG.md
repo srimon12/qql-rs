@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### 🚀 Core Engine & Language
-- **UPSERT payload-collision safety**: point literals accept a `WITH PAYLOAD { … }` suffix so payload fields named `id` or `vector` no longer collide with the point envelope; the formatter emits it only when needed and flat point sugar keeps its meaning ([#202](https://github.com/srimon12/qql-rs/pull/202)).
+- **Language 1.8 — UPSERT payload-collision safety**: point literals accept a `WITH PAYLOAD { … }` suffix so payload fields named `id` or `vector` no longer collide with the point envelope; the formatter emits it only when needed and flat point sugar keeps its meaning ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 - **`$payload` batch binding**: whole-point params (`UPSERT INTO c VALUES :rows`) reserve the exact-case `$payload` dictionary to bind colliding payload entries; a literal `$payload` payload key is stored by nesting it inside `$payload` ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ### 🐛 Bug Fixes

@@ -74,10 +74,10 @@ cargo run -p qql-grammar-gen -- check
 cargo run -p qql-conformance -- check language/v1
 ```
 
-Expected result (language 1.7):
+Expected result (language 1.8):
 
 ```text
-conformant: 40 valid files (298 statements), 73 invalid cases, 40 AST snapshots, 40 canonical formats
+conformant: 41 valid files (301 statements), 73 invalid cases, 41 AST snapshots, 41 canonical formats
 ```
 
 (Counts track the fixture corpus and change as fixtures are added; the live

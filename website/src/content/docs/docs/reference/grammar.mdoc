@@ -95,7 +95,7 @@ cargo run -p qql-grammar-gen -- check
 
 ## Versioning contract
 
-QQL follows `MAJOR.MINOR`; the current language version is `1.7` while the
+QQL follows `MAJOR.MINOR`; the current language version is `1.8` while the
 canonical AST schema is independently fixed as `qql.ast/v1`.
 
 QQL 1.7 adds parameter placeholder productions (`param = ":" identifier | "?"`)
@@ -105,6 +105,8 @@ SDK binders before planning — see [Parameter
 binding](/docs/language/queries/#parameter-binding--prepared-queries).
 
 QQL 1.7 also adds trailing `WAIT true | false` on UPSERT, DELETE, CLEAR/DELETE PAYLOAD, DELETE VECTOR, UPDATE VECTOR/PAYLOAD and CREATE INDEX (after `SHARD`), typed shard keys end-to-end (`SHARD 101`, numeric `CREATE`/`DROP SHARD KEY`), and `ALTER COLLECTION` per-vector diffs (`WITH VECTOR [name] (...)`, `WITH SPARSE name (...)`) — see [Collections & indexes](/docs/language/collections-indexes/).
+
+QQL 1.8 adds a point-level `WITH PAYLOAD { … }` suffix on `UPSERT … VALUES` so payload keys named `id` or `vector` no longer collide with the point envelope. Flat point sugar is unchanged. See [Data operations](/docs/language/data-operations/).
 
 - Within one major version, every program valid in an earlier minor release
   must stay valid with the same meaning and canonical AST. A minor release may

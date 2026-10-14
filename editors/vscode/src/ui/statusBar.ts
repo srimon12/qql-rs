@@ -11,7 +11,7 @@ import { getActiveProfileName, getParamProfiles } from "../core/params";
  */
 
 /** QQL language version this extension targets — bump with the grammar. */
-const QQL_VERSION = "1.7";
+const QQL_VERSION = "1.8";
 export class QqlStatusBar implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
