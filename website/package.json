@@ -22,7 +22,7 @@
 		"typecheck": "astro check"
 	},
 	"dependencies": {
-		"@astrojs/markdoc": "^2.0.11",
+		"@astrojs/markdoc": "^2.1.0",
 		"@astrojs/sitemap": "^3.7.4",
 		"@astrojs/starlight": "^0.42.6",
 		"@astrojs/starlight-markdoc": "^0.7.0",
@@ -39,7 +39,7 @@
 		"@huggingface/transformers": "4.2.0",
 		"@lezer/highlight": "^1.2.5",
 		"@qql/ui": "workspace:*",
-		"astro": "^7.3.8",
+		"astro": "^7.4.0",
 		"codemirror": "^6.0.2",
 		"sharp": "0.35.5",
 		"starlight-llms-txt": "^0.12.0"
