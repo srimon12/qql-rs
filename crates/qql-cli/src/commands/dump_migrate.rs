@@ -10,10 +10,19 @@ pub async fn handle_dump(
     collection: &str,
     output: &str,
     batch_size: u32,
+    bulk_threshold_kb: u64,
     progress: Option<&(dyn Fn(dump::DumpProgress) + Sync)>,
 ) -> Result<dump::DumpStats, Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
-    let result = dump::dump_collection(&executor, collection, output, batch_size, progress).await;
+    let result = dump::dump_collection(
+        &executor,
+        collection,
+        output,
+        batch_size,
+        bulk_threshold_kb,
+        progress,
+    )
+    .await;
     executor.close().await?;
     result
 }

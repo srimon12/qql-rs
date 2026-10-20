@@ -7,6 +7,7 @@ use std::path::PathBuf;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod bulk;
 mod commands;
 mod config;
 mod dump;
@@ -147,6 +148,9 @@ enum Command {
         output: String,
         #[arg(long, default_value = "100")]
         batch_size: u32,
+        /// Optimizer indexing_threshold (KB) during dump replay (default 2000000)
+        #[arg(long, default_value_t = bulk::DEFAULT_BULK_INDEXING_THRESHOLD)]
+        bulk_threshold_kb: u64,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -741,6 +745,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             collection,
             output,
             batch_size,
+            bulk_threshold_kb,
             json,
             quiet,
         } => {
@@ -760,6 +765,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &collection,
                 &output,
                 batch_size,
+                bulk_threshold_kb,
                 progress_cb,
             )
             .await?;

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI and convert**: `qql dump`, `qql migrate`, and `qql convert` no longer skip or reject points whose payload contains `id`/`vector` keys — dumped text emits `WITH PAYLOAD`, migrated rows bind through `$payload`, and `--shard-key-field` resolves shard keys from the packed payload ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ### ⚡ Performance & Internal Architecture
+- **Fast-bulk `qql dump`**: dumped scripts raise the target optimizer `indexing_threshold` after the schema DDL (`--bulk-threshold-kb`, default `2000000`), replay the `UPSERT` batches with HNSW suppressed, then restore the source threshold as an explicit trailing `ALTER COLLECTION` — so replay indexes once instead of per segment, and an interrupted replay can be recovered with one line ([#217](https://github.com/srimon12/qql-rs/pull/217)).
 - **Smaller debug targets**: `[profile.dev] debug = "line-tables-only"` plus `debug = false` for dependencies shrinks debug artifacts and speeds local linking in the workspace and benchmark crate ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ## [0.5.0] - 2026-10-01

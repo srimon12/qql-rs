@@ -1,18 +1,11 @@
 //! Migration options, quantization overrides, and progress/stats types.
 
+pub use crate::bulk::DEFAULT_BULK_INDEXING_THRESHOLD;
+
 /// Default upsert batch size (Qdrant bulk-upload guidance: 64–256).
 pub const DEFAULT_BATCH_SIZE: u32 = 128;
 /// Default concurrent upsert window. Official guidance is 2–4 upload streams.
 pub const DEFAULT_WORKERS: usize = 2;
-/// Default optimizer `indexing_threshold` (KB) during bulk load (~2 GB).
-///
-/// Official guidance is "very high" so HNSW is not built concurrently with
-/// ingest. 10 GB OOMs small nodes; 2 GB is high enough to suppress indexing
-/// on typical migrations without pinning unbounded RAM. Override with
-/// `--bulk-threshold-kb`.
-pub const DEFAULT_BULK_INDEXING_THRESHOLD: u64 = 2_000_000;
-/// Qdrant default `indexing_threshold` (20 MB) restored after bulk load.
-pub const DEFAULT_INDEXING_THRESHOLD: u64 = 20_000;
 /// Default pause between ingest windows (ms). Zero means no throttle.
 pub const DEFAULT_BATCH_DELAY_MS: u64 = 0;
 
