@@ -269,6 +269,7 @@ pub async fn run_repl(
                     dump_parts[0],
                     dump_parts[1],
                     50,
+                    crate::bulk::DEFAULT_BULK_INDEXING_THRESHOLD,
                     None,
                 )
                 .await

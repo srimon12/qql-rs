@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚡ Performance & Internal Architecture
 - **Paced migration dispatch**: `qql migrate --max-rps N` caps upsert batch requests per second across all workers, closing the intra-window burst that `--workers` and `--batch-delay-ms` leave open; retries consume tokens and `0` disables the cap ([#216](https://github.com/srimon12/qql-rs/pull/216)).
+- **Fast-bulk `qql dump`**: dumped scripts raise the target optimizer `indexing_threshold` after the schema DDL (`--bulk-threshold-kb`, default `2000000`), replay the `UPSERT` batches with HNSW suppressed, then restore the source threshold (or Qdrant 1.19's 10,000 KB default when the source reports none) as an explicit trailing `ALTER COLLECTION` — so replay indexes once instead of per segment, and an interrupted replay can be recovered with one line. Dumps made before this change replay unchanged ([#217](https://github.com/srimon12/qql-rs/pull/217)).
 - **Smaller debug targets**: `[profile.dev] debug = "line-tables-only"` plus `debug = false` for dependencies shrinks debug artifacts and speeds local linking in the workspace and benchmark crate ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ## [0.5.0] - 2026-10-01
