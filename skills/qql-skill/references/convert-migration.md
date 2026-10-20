@@ -204,9 +204,25 @@ Key decisions:
 
 ```bash
 qql dump my_collection output.qql
+qql dump my_collection output.qql --batch-size 256 --bulk-threshold-kb 2000000
 qql run output.qql --stop-on-error
 ```
 
 `dump` writes a collection to a QQL script for backup, inspection, and restore. Replay with `qql run`. For cluster moves with reshard or requantize, prefer `migrate`. For traffic capture, prefer `record` plus `convert`.
+
+The script replays fast-bulk by default, in the same order `migrate` uses: `CREATE COLLECTION`, `CREATE INDEX`, `CREATE SHARD KEY`, then an `ALTER COLLECTION … WITH OPTIMIZERS (indexing_threshold = 2000000)` before the `UPSERT` batches. With HNSW suppressed, replay does not build an index per segment; the target builds it once after ingest. `--bulk-threshold-kb` overrides the replay threshold.
+
+The last executable line restores the source setting:
+
+```sql
+ALTER COLLECTION my_collection WITH OPTIMIZERS (indexing_threshold = 12345);
+```
+
+The restore copies the source `indexing_threshold`. When the source reports none, dump writes Qdrant's default of `20000` KB. Dump has no checkpoint, so if the replay stops early the bulk `ALTER` is still active on the target. Read the source value with `SHOW COLLECTION`, then restore it by hand:
+
+```bash
+qql --url http://target:6333 run "SHOW COLLECTION my_collection"
+qql --url http://target:6333 run "ALTER COLLECTION my_collection WITH OPTIMIZERS (indexing_threshold = 20000)"
+```
 
 Full product docs live at `website/src/content/docs/docs/operations/convert.mdoc` and `cluster-migration.mdoc`.
