@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`$payload` batch binding**: whole-point params (`UPSERT INTO c VALUES :rows`) reserve the exact-case `$payload` dictionary to bind colliding payload entries; a literal `$payload` payload key is stored by nesting it inside `$payload` ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ### 🐛 Bug Fixes
+- **TTY-gated CLI progress**: `qql run` reports statement and operation progress, and `qql run` / `qql dump` / `qql migrate` only rewrite the progress line when stderr is a terminal — piped output and CI logs stay free of stray `\r`, and `--quiet` / `--json` remain silent ([#218](https://github.com/srimon12/qql-rs/pull/218)).
 - **CLI and convert**: `qql dump`, `qql migrate`, and `qql convert` no longer skip or reject points whose payload contains `id`/`vector` keys — dumped text emits `WITH PAYLOAD`, migrated rows bind through `$payload`, and `--shard-key-field` resolves shard keys from the packed payload ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ### ⚡ Performance & Internal Architecture
