@@ -303,6 +303,9 @@ struct MigrateArgs {
     /// Pause between ingest windows in milliseconds (throttles a loaded cluster)
     #[arg(long, default_value_t = migrate::DEFAULT_BATCH_DELAY_MS)]
     batch_delay_ms: u64,
+    /// Maximum upsert batch requests per second across all workers (0 = unlimited)
+    #[arg(long, default_value_t = 0)]
+    max_rps: u64,
     /// Output as JSON
     #[arg(long)]
     json: bool,
@@ -838,6 +841,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 wait: !args.no_wait,
                 recreate: args.recreate,
                 batch_delay_ms: args.batch_delay_ms,
+                max_rps: args.max_rps,
             };
             let progress_fn = |p: migrate::MigrateProgress| {
                 eprint!(

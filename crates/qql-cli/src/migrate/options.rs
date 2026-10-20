@@ -170,14 +170,16 @@ pub struct MigrateOptions {
     pub recreate: bool,
     /// Pause between ingest windows (ms) to spare a loaded cluster.
     pub batch_delay_ms: u64,
+    /// Maximum upsert batch requests per second across all workers (0 = unlimited).
+    pub max_rps: u64,
 }
 
 impl MigrateOptions {
     /// Identity of schema-affecting options. Resume refuses a mismatched checkpoint.
     ///
     /// Tuning flags (`batch_size`, `workers`, `wait`, `recreate`, `verify`,
-    /// `checkpoint_path`, `batch_delay_ms`) are intentionally excluded: they change speed or
-    /// durability, not what the target must contain. `cutover_alias` is also
+    /// `checkpoint_path`, `batch_delay_ms`, `max_rps`) are intentionally excluded: they change
+    /// speed or durability, not what the target must contain. `cutover_alias` is also
     /// excluded: the alias swap reads the current flags when the Cutover
     /// phase runs, so adding or dropping `--cutover` across a resume is safe.
     pub fn fingerprint(&self) -> String {

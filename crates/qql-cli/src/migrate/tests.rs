@@ -85,6 +85,7 @@ fn base_opts() -> MigrateOptions {
         wait: true,
         recreate: false,
         batch_delay_ms: 0,
+        max_rps: 0,
     }
 }
 
@@ -568,6 +569,15 @@ fn batch_delay_is_tuning_not_identity() {
     b.batch_delay_ms = 250;
     assert_eq!(a.fingerprint(), b.fingerprint());
     assert_eq!(base_opts().batch_delay_ms, 0);
+}
+
+#[test]
+fn max_rps_is_tuning_not_identity() {
+    let a = base_opts();
+    let mut b = base_opts();
+    b.max_rps = 500;
+    assert_eq!(a.fingerprint(), b.fingerprint());
+    assert_eq!(base_opts().max_rps, 0);
 }
 
 #[test]
