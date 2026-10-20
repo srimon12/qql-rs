@@ -131,6 +131,13 @@ enum Command {
         /// Collection name for bare bodies (required when the JSON has no path)
         #[arg(long)]
         collection: Option<String>,
+        /// Substitute variable placeholders before parsing (repeatable)
+        #[arg(
+            long = "var",
+            value_name = "KEY=VALUE",
+            help = "Substitute $VAR, ${VAR}, and <VAR> before parsing (repeatable)"
+        )]
+        var: Vec<String>,
     },
     /// Format QQL source into canonical form (offline)
     Fmt {
@@ -742,8 +749,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let repl_params = collect_exec_params(&params, params_file.as_ref())?;
             commands::handle_connect(&url, use_edge, repl_params.as_ref()).await
         }
-        Command::Convert { file, collection } => {
-            commands::handle_convert(file.as_deref(), collection.as_deref())
+        Command::Convert {
+            file,
+            collection,
+            var,
+        } => {
+            let vars = commands::parse_convert_vars(&var)?;
+            commands::handle_convert(file.as_deref(), collection.as_deref(), &vars)
         }
         Command::Fmt { file, check, write } => commands::handle_fmt(file.as_deref(), check, write),
         Command::Dump {

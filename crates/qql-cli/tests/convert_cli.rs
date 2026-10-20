@@ -7,16 +7,27 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn temp_jsonl(tag: &str, contents: &str) -> PathBuf {
+fn temp_dir(tag: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("qql-convert-it-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "qql-convert-it-{tag}-{}-{nanos}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
-    let path = dir.join(format!("{tag}.jsonl"));
+    dir
+}
+
+fn temp_file(tag: &str, name: &str, contents: &str) -> PathBuf {
+    let path = temp_dir(tag).join(name);
     std::fs::write(&path, contents).expect("write fixture");
     path
+}
+
+fn temp_jsonl(tag: &str, contents: &str) -> PathBuf {
+    temp_file(tag, &format!("{tag}.jsonl"), contents)
 }
 
 fn qql(args: &[&str]) -> std::process::Output {
@@ -79,4 +90,78 @@ fn bare_body_without_collection_fails() {
     assert!(!out.status.success(), "expected non-zero exit");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("requires a collection"), "stderr: {stderr}");
+}
+
+#[test]
+fn curl_vars_substitute_end_to_end() {
+    let path = temp_file(
+        "vars",
+        "request.curl",
+        "curl -X POST http://localhost:6333/collections/$TENANT/points/count -d '{\"exact\": true}'",
+    );
+    let out = qql(&[
+        "convert",
+        "--var",
+        "TENANT=first",
+        "--var",
+        "TENANT=acme",
+        path.to_str().expect("utf8 path"),
+    ]);
+
+    assert!(
+        out.status.success(),
+        "convert failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("COUNT FROM acme WITH (exact = true);"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn curl_at_file_body_resolves_end_to_end() {
+    let dir = temp_dir("at-file");
+    let body = dir.join("body.json");
+    std::fs::write(&body, r#"{"exact": true}"#).expect("write body");
+    let request = dir.join("request.curl");
+    std::fs::write(
+        &request,
+        format!(
+            "curl -X POST http://localhost:6333/collections/docs/points/count -d @{}",
+            body.display()
+        ),
+    )
+    .expect("write curl");
+
+    let out = qql(&["convert", request.to_str().expect("utf8 path")]);
+
+    assert!(
+        out.status.success(),
+        "convert failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("COUNT FROM docs WITH (exact = true);"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn var_without_equals_is_rejected() {
+    let path = temp_jsonl("var-bad", "{\"ids\": [1]}\n");
+    let out = qql(&[
+        "convert",
+        "--collection",
+        "docs",
+        "--var",
+        "TENANT",
+        path.to_str().expect("utf8 path"),
+    ]);
+
+    assert!(!out.status.success(), "expected non-zero exit");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("KEY=VALUE"), "stderr: {stderr}");
 }

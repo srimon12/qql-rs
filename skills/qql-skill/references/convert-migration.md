@@ -84,7 +84,33 @@ curl -X POST http://localhost:6333/collections/docs/points/count \
   -d '{"exact": true}' | qql convert
 ```
 
-Fail-closed paste rules: `$VAR` / `$(…)` / backticks, `--data @file`, pipes, `--data-urlencode` / `--config` / `-T`, and placeholder collections (`<your-collection>`, `{collection_name}`) all error with a typed `ConvertError` instead of emitting QQL that cannot re-parse. Replace placeholders and variables with literal values before converting.
+### Variables: `--var NAME=value`
+
+Pass `--var` once per placeholder. It is repeatable, and a duplicate key keeps the last value. Substitution is textual and runs before the input is parsed, so `$VAR` works inside double-quoted curl arguments too:
+
+```bash
+qql convert curl.txt --var TENANT=acme --var COLLECTION=docs
+```
+
+All three forms expand: `$NAME`, `${NAME}`, and `<NAME>`. Names match `[A-Za-z_][A-Za-z0-9_]*` in every form; angle text that is not an identifier (for example `<your-collection>`) is left to the existing placeholder checks.
+
+Every `$NAME`, `${NAME}`, or `<NAME>` without a value fails closed with `UnresolvedVariables`, and the message lists all missing names. A typo never reaches the parser and never emits half-substituted QQL.
+
+Values are inserted raw, so keep them context-safe. A quote or backslash inside a JSON string can break the body and surfaces as `InvalidJson`. `--var` is not an escaping mechanism.
+
+### File bodies: `@file`
+
+`-d`, `--data`, `--data-ascii`, `--data-binary`, and `--json` read the body from a file when the value starts with `@`. The CLI reads the file from its own working directory and inlines the contents before conversion. `-d@body.json` and quoted paths with spaces both work.
+
+```bash
+qql convert <<'EOF'
+curl -X POST http://localhost:6333/collections/docs/points/count -d @body.json
+EOF
+```
+
+`--data-raw @literal` keeps the `@` as a literal byte, as curl does. `--data @-` is rejected because stdin cannot be resolved here. The `qql-convert` library itself does no I/O; the CLI injects the reader.
+
+Fail-closed paste rules: unresolved `$VAR`, `$(…)` and backticks, `--data @-`, pipes, `--data-urlencode` / `--config` / `-T`, and placeholder collections (`<your-collection>`, `{collection_name}`) all error with a typed `ConvertError` instead of emitting QQL that cannot re-parse.
 
 ## Coverage and contract facts
 

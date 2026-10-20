@@ -7,18 +7,19 @@
 //! [`crate::convert::convert_method_path_body`] lowering, so envelope,
 //! snippet, and curl inputs cannot drift.
 //!
-//! Fail-closed rules: `$VAR`/`${VAR}`/`$(…)`/backticks cannot resolve offline,
-//! `--data @file` points at bytes the pure [`crate::convert`] function cannot
-//! read, and multiple `--data` flags join with `&` in curl (never valid JSON).
-//! Full `curl` flag coverage is intentionally bounded — unknown boolean flags
-//! are skipped, but anything that carries a value the parse cannot see fails
-//! rather than silently misreading the URL or body.
+//! Fail-closed rules: `$VAR`/`${VAR}`/`$(…)`/backticks cannot resolve unless
+//! the caller supplies [`crate::ConvertOptions::vars`] (which expands before
+//! tokenizing), `--data @file` needs [`crate::ConvertOptions::read_file`] or
+//! it fails closed, and multiple `--data` flags join with `&` in curl (never
+//! valid JSON). Full `curl` flag coverage is intentionally bounded — unknown
+//! boolean flags are skipped, but anything that carries a value the parse
+//! cannot see fails rather than silently misreading the URL or body.
 
 use qql_core::ast::Stmt;
 use serde_json::Value;
 
-use crate::ConvertError;
 use crate::shell::{self, Item, Word};
+use crate::{ConvertError, ReadFile};
 
 pub(crate) struct PastedRequest {
     pub method: String,
@@ -40,8 +41,9 @@ fn is_method(token: &str) -> bool {
 pub(crate) fn convert_pasted(
     input: &str,
     collection: Option<&str>,
+    read_file: ReadFile<'_>,
 ) -> Option<Result<Vec<Stmt>, ConvertError>> {
-    let docs = match parse_pasted(input)? {
+    let docs = match parse_pasted(input, read_file)? {
         Ok(docs) => docs,
         Err(e) => return Some(Err(e)),
     };
@@ -71,11 +73,14 @@ pub(crate) fn convert_pasted(
     Some(Ok(out))
 }
 
-fn parse_pasted(input: &str) -> Option<Result<Vec<PastedRequest>, ConvertError>> {
+fn parse_pasted(
+    input: &str,
+    read_file: ReadFile<'_>,
+) -> Option<Result<Vec<PastedRequest>, ConvertError>> {
     let input = strip_prompt(input);
     let first = input.split_whitespace().next()?;
     if first == "curl" || first == "curl.exe" {
-        return Some(parse_curl_docs(input));
+        return Some(parse_curl_docs(input, read_file));
     }
     if is_method(first) && header_shape(input.lines().next().unwrap_or("")) {
         return Some(parse_snippet_docs(input));
@@ -248,7 +253,10 @@ fn split_first_line(s: &str) -> (&str, &str) {
 
 // ── curl ─────────────────────────────────────────────────────────────────────
 
-fn parse_curl_docs(input: &str) -> Result<Vec<PastedRequest>, ConvertError> {
+fn parse_curl_docs(
+    input: &str,
+    read_file: ReadFile<'_>,
+) -> Result<Vec<PastedRequest>, ConvertError> {
     let mut commands: Vec<Vec<Word>> = Vec::new();
     let mut cur: Vec<Word> = Vec::new();
     for item in shell::tokenize(input)? {
@@ -272,15 +280,42 @@ fn parse_curl_docs(input: &str) -> Result<Vec<PastedRequest>, ConvertError> {
     if commands.is_empty() {
         return Err(ConvertError::undecodable("curl: no command found"));
     }
-    commands.iter().map(|cmd| parse_curl_command(cmd)).collect()
+    commands
+        .iter()
+        .map(|cmd| parse_curl_command(cmd, read_file))
+        .collect()
+}
+
+/// How a curl data flag treats `@`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DataFlag {
+    /// Reads `@file` bodies: `-d`, `--data`, `--data-ascii`,
+    /// `--data-binary`, `--json`.
+    File,
+    /// `--data-raw`: a leading `@` is a literal byte.
+    Raw,
+    /// `--data-urlencode`: no QQL mapping.
+    UrlEncode,
+}
+
+/// The one table of curl long data flags, keyed by name without leading
+/// dashes. `-d` is the short spelling of `--data`.
+fn data_flag(name: &str) -> Option<DataFlag> {
+    match name {
+        "data" | "data-ascii" | "data-binary" | "json" => Some(DataFlag::File),
+        "data-raw" => Some(DataFlag::Raw),
+        "data-urlencode" => Some(DataFlag::UrlEncode),
+        _ => None,
+    }
 }
 
 /// Short flags that consume the next token (or an attached value).
 const SHORT_VALUE_FLAGS: &str = "XduHAemow";
 /// Short boolean flags (also valid combined, e.g. `-sSf`).
 const SHORT_BOOL_FLAGS: &str = "sSfkvqNLlipO#012346gG";
-/// Long flags that consume the next token (or `=value`).
-const LONG_VALUE_FLAGS: [&str; 22] = [
+/// Long flags that consume the next token (or `=value`). Data flags consume
+/// theirs through [`data_flag`] and are deliberately not listed here.
+const LONG_VALUE_FLAGS: [&str; 17] = [
     "request",
     "url",
     "header",
@@ -298,14 +333,12 @@ const LONG_VALUE_FLAGS: [&str; 22] = [
     "cacert",
     "cert",
     "key",
-    "data",
-    "data-raw",
-    "data-ascii",
-    "data-binary",
-    "json",
 ];
 
-fn parse_curl_command(words: &[Word]) -> Result<PastedRequest, ConvertError> {
+fn parse_curl_command(
+    words: &[Word],
+    read_file: ReadFile<'_>,
+) -> Result<PastedRequest, ConvertError> {
     let line = words[0].line;
     if words[0].text != "curl" && words[0].text != "curl.exe" {
         return Err(ConvertError::undecodable(format!(
@@ -327,19 +360,10 @@ fn parse_curl_command(words: &[Word]) -> Result<PastedRequest, ConvertError> {
             method = Some(next_value(words, i, w)?.to_string());
         } else if w.starts_with("-X") && w.len() > 2 {
             method = Some(w[2..].to_string());
-        } else if is_data_flag(w) {
-            i += 1;
-            datas.push(check_data_value(next_value(words, i, w)?)?);
-        } else if w.starts_with("-d") && w.len() > 2 {
-            datas.push(check_data_value(&w[2..])?);
         } else if w == "-T" || w == "--upload-file" || w == "-K" || w == "--config" {
             return Err(ConvertError::undecodable(format!(
                 "curl: `{w}` reads a file — paste literal values instead"
             )));
-        } else if w == "--data-urlencode" {
-            return Err(ConvertError::undecodable(
-                "curl: `--data-urlencode` has no QQL mapping — pass a JSON body with `-d`",
-            ));
         } else if w.starts_with("--") {
             i = parse_long_flag(
                 words,
@@ -349,6 +373,7 @@ fn parse_curl_command(words: &[Word]) -> Result<PastedRequest, ConvertError> {
                 &mut datas,
                 &mut get_flag,
                 &mut head_flag,
+                read_file,
             )?;
         } else if w.starts_with('-') && w.len() > 1 {
             i = parse_shorts(
@@ -358,6 +383,7 @@ fn parse_curl_command(words: &[Word]) -> Result<PastedRequest, ConvertError> {
                 &mut datas,
                 &mut get_flag,
                 &mut head_flag,
+                read_file,
             )?;
         } else if url.is_none() {
             url = Some(w.clone());
@@ -408,13 +434,6 @@ fn parse_curl_command(words: &[Word]) -> Result<PastedRequest, ConvertError> {
     })
 }
 
-fn is_data_flag(w: &str) -> bool {
-    matches!(
-        w,
-        "-d" | "--data" | "--data-raw" | "--data-ascii" | "--data-binary" | "--json"
-    )
-}
-
 fn next_value<'a>(words: &'a [Word], i: usize, flag: &str) -> Result<&'a str, ConvertError> {
     words
         .get(i)
@@ -422,17 +441,39 @@ fn next_value<'a>(words: &'a [Word], i: usize, flag: &str) -> Result<&'a str, Co
         .ok_or_else(|| ConvertError::undecodable(format!("curl: `{flag}` needs a value")))
 }
 
-/// `--data @file` (and `@-` stdin) point at bytes an offline converter cannot
-/// read. Shell process substitution (`<(…)`) is not a file either.
-fn check_data_value(value: &str) -> Result<String, ConvertError> {
-    if value.starts_with('@') {
-        return Err(ConvertError::undecodable(
-            "curl: `--data @file` reads a file — paste the JSON body inline instead",
-        ));
+/// Resolve one data value according to its flag. `@file` reads through the
+/// injected resolver; without one it stays fail-closed.
+fn data_value(
+    flag: DataFlag,
+    value: &str,
+    read_file: ReadFile<'_>,
+) -> Result<String, ConvertError> {
+    match flag {
+        DataFlag::Raw => Ok(value.to_string()),
+        DataFlag::UrlEncode => Err(ConvertError::undecodable(
+            "curl: `--data-urlencode` has no QQL mapping — pass a JSON body with `-d`",
+        )),
+        DataFlag::File => {
+            let Some(path) = value.strip_prefix('@') else {
+                return Ok(value.to_string());
+            };
+            if path == "-" {
+                return Err(ConvertError::undecodable(
+                    "curl: `@-` reads stdin — stdin is not supported, paste the JSON body inline",
+                ));
+            }
+            let Some(read) = read_file else {
+                return Err(ConvertError::undecodable(
+                    "curl: `--data @file` reads a file — paste the JSON body inline instead",
+                ));
+            };
+            read(path)
+                .map_err(|e| ConvertError::undecodable(format!("curl: cannot read `@{path}`: {e}")))
+        }
     }
-    Ok(value.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_long_flag(
     words: &[Word],
     i: usize,
@@ -441,6 +482,7 @@ fn parse_long_flag(
     datas: &mut Vec<String>,
     get_flag: &mut bool,
     head_flag: &mut bool,
+    read_file: ReadFile<'_>,
 ) -> Result<usize, ConvertError> {
     let w = &words[i].text;
     let (name, attached) = match w[2..].split_once('=') {
@@ -448,6 +490,17 @@ fn parse_long_flag(
         None => (w[2..].as_ref(), None),
     };
     let mut i = i;
+    if let Some(flag) = data_flag(name) {
+        let value = match attached {
+            Some(v) => v.to_string(),
+            None => {
+                i += 1;
+                next_value(words, i, w)?.to_string()
+            }
+        };
+        datas.push(data_value(flag, &value, read_file)?);
+        return Ok(i);
+    }
     let value = match attached {
         Some(v) => v.to_string(),
         None if LONG_VALUE_FLAGS.contains(&name) => {
@@ -458,13 +511,10 @@ fn parse_long_flag(
     };
     match name {
         "request" => *method = Some(value),
-        "data" | "data-raw" | "data-ascii" | "data-binary" | "json" => {
-            datas.push(check_data_value(&value)?);
-        }
         "url" => *url = Some(value),
         "get" => *get_flag = true,
         "head" => *head_flag = true,
-        "data-urlencode" | "config" | "upload-file" => {
+        "config" | "upload-file" => {
             return Err(ConvertError::undecodable(format!(
                 "curl: `--{name}` has no QQL mapping — paste literal values instead"
             )));
@@ -481,6 +531,7 @@ fn parse_shorts(
     datas: &mut Vec<String>,
     get_flag: &mut bool,
     head_flag: &mut bool,
+    read_file: ReadFile<'_>,
 ) -> Result<usize, ConvertError> {
     let w = &words[i].text;
     let mut i = i;
@@ -496,7 +547,7 @@ fn parse_shorts(
             };
             match c {
                 'X' => *method = Some(value),
-                'd' => datas.push(check_data_value(&value)?),
+                'd' => datas.push(data_value(DataFlag::File, &value, read_file)?),
                 'u' | 'H' | 'A' | 'e' | 'm' | 'o' | 'w' => {} // credentials / tuning: inert
                 // Drift guard: `SHORT_VALUE_FLAGS` membership was checked
                 // above, so every table member is covered. Fail closed (never

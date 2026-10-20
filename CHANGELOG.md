@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 🧰 CLI
 - **`qql run` progress**: script execution reports a single rewritten stderr line with statement and operation counts, including `BATCH` members; `--quiet` and `--json` keep it silent ([#218](https://github.com/srimon12/qql-rs/pull/218)).
 
+### 🛠️ Workspace, Tooling & Verification
+- **`qql convert` variables and curl file bodies**: `--var NAME=value` expands `$NAME`, `${NAME}`, and `<NAME>` before parsing (missing names fail closed), and `-d` / `--data` / `--data-ascii` / `--data-binary` / `--json` resolve `@file` bodies from the CLI side while `--data-raw` stays literal and `@-` is rejected ([#219](https://github.com/srimon12/qql-rs/pull/219)).
+
 ### 🐛 Bug Fixes
 - **TTY-gated CLI progress**: `qql run`, `qql dump`, and `qql migrate` only rewrite the progress line when stderr is a terminal — piped output and CI logs stay free of stray `\r`, and `--quiet` / `--json` remain silent ([#218](https://github.com/srimon12/qql-rs/pull/218)).
 - **CLI and convert**: `qql dump`, `qql migrate`, and `qql convert` no longer skip or reject points whose payload contains `id`/`vector` keys — dumped text emits `WITH PAYLOAD`, migrated rows bind through `$payload`, and `--shard-key-field` resolves shard keys from the packed payload ([#202](https://github.com/srimon12/qql-rs/pull/202)).
