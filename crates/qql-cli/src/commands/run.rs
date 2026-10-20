@@ -2,6 +2,7 @@
 
 use super::runtime::{executor, explain_query_bound, statements_need_embeddings};
 use crate::output;
+use crate::progress;
 use crate::script;
 
 pub async fn handle_run_smart(
@@ -156,6 +157,18 @@ pub async fn handle_run_file(
     }
     let mut ok_count = 0;
     let mut fail_count = 0;
+    let operation_counts: Vec<usize> = statements
+        .iter()
+        .map(|statement| script::statement_operation_count(statement))
+        .collect();
+    let operation_total: usize = operation_counts.iter().sum();
+    let mut statements_done = 0;
+    let mut operations_done = 0;
+    let mut progress = progress::Progress::new(
+        !quiet && !json && progress::stderr_is_tty(),
+        std::io::stderr(),
+    );
+    progress.set_totals(statements.len(), operation_total);
 
     for (index, statement) in statements.iter().enumerate() {
         let on_err = if stop_on_error {
@@ -184,6 +197,7 @@ pub async fn handle_run_file(
                         .await
                 }
                 _ => {
+                    progress.finish();
                     return Err("--params-file must contain a JSON object or array".into());
                 }
             },
@@ -193,24 +207,41 @@ pub async fn handle_run_file(
                 ok_count += report.succeeded;
                 fail_count += report.failed;
                 for result in report.results.iter().filter(|result| !result.ok) {
+                    progress.suspend();
                     output::print_error(&format!(
                         "statement {} ({}): {}",
                         index + 1,
                         result.operation,
                         result.message
                     ));
+                    progress.resume();
                 }
+                statements_done += 1;
+                // A failed statement may not have run every planned operation:
+                // count only what actually ran so the total is never overstated.
+                operations_done += if report.failed == 0 {
+                    operation_counts[index]
+                } else {
+                    report.succeeded + report.failed
+                };
+                progress.update(statements_done, operations_done, ok_count, fail_count);
             }
             Err(error) => {
                 fail_count += 1;
+                statements_done += 1;
+                progress.suspend();
                 output::print_error(&format!("statement {}: {}", index + 1, error));
+                progress.resume();
+                progress.update(statements_done, operations_done, ok_count, fail_count);
                 if stop_on_error {
                     break;
                 }
             }
         }
     }
-    executor.close().await?;
+    let closed = executor.close().await;
+    progress.finish();
+    closed?;
     finish_script(path, ok_count, fail_count, json, quiet)
 }
 

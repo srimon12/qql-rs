@@ -131,6 +131,16 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
     Ok(statements)
 }
 
+/// How many backend operations a statement plans to run. A `BATCH` statement
+/// is one statement but one operation per member; anything unparsable or
+/// non-batch counts as one, which is what progress totals assume.
+pub fn statement_operation_count(statement: &str) -> usize {
+    match Parser::parse(statement) {
+        Ok(qql_core::ast::Stmt::Batch(batch)) => batch.statements.len(),
+        _ => 1,
+    }
+}
+
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     let data = std::fs::read_to_string(path)
         .map_err(|e| QqlError::execution("QQL-CLI-IO", format!("cannot read file: {e}"), None))?;
@@ -139,7 +149,23 @@ pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
 
 #[cfg(test)]
 mod tests {
-    use super::split_statements;
+    use super::{split_statements, statement_operation_count};
+
+    #[test]
+    fn batch_statements_count_their_members() {
+        let batch = "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }";
+        assert_eq!(statement_operation_count(batch), 2);
+        assert_eq!(
+            statement_operation_count("QUERY [0.1] FROM docs LIMIT 1"),
+            1,
+            "a plain statement is one operation"
+        );
+        assert_eq!(
+            statement_operation_count("not qql"),
+            1,
+            "an unparsable statement still counts as one"
+        );
+    }
 
     #[test]
     fn splits_top_level_semicolons_without_breaking_ctes() {

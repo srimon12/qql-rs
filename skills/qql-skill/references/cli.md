@@ -43,7 +43,7 @@ qql doctor "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
 qql check "QUERY 'hello' FROM docs USING dense LIMIT 5"
 ```
 
-- `run`: Smart runner. Automatically detects whether the argument is an inline query string or a `.qql` script file. `-p`/`--params-file` bind inline-query placeholders only (rejected with script files).
+- `run`: Smart runner. Automatically detects whether the argument is an inline query string or a `.qql` script file. `-p`/`--params-file` bind inline-query placeholders only (rejected with script files). Script progress is printed to stderr only when it is a terminal, and is disabled by `--quiet` and `--json`.
 - `run` is the only execution spelling: inline string or `.qql` file, auto-detected.
 - `doctor "<query>"` (alias `check`): 5-stage live triage loop (format, offline plan, embedder probe, vector topology, backend health). Exits non-zero on first failure. Note: requires live backend reachability.
 

@@ -14,6 +14,7 @@ mod dump;
 mod fmt_tests;
 mod migrate;
 mod output;
+mod progress;
 mod record;
 #[cfg(test)]
 mod record_tests;
@@ -749,11 +750,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 eprint!("\rDumped {} points ({} batches)...", p.written, p.batches);
                 let _ = std::io::stderr().flush();
             };
-            let progress_cb: Option<&(dyn Fn(dump::DumpProgress) + Sync)> = if !json && !quiet {
-                Some(&progress_fn)
-            } else {
-                None
-            };
+            let progress_cb: Option<&(dyn Fn(dump::DumpProgress) + Sync)> =
+                if !json && !quiet && progress::stderr_is_tty() {
+                    Some(&progress_fn)
+                } else {
+                    None
+                };
             let stats = commands::handle_dump(
                 &url,
                 use_edge,
@@ -763,7 +765,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 progress_cb,
             )
             .await?;
-            if !json && !quiet && stats.batches > 0 {
+            if !json && !quiet && progress::stderr_is_tty() && stats.batches > 0 {
                 eprintln!();
             }
             let msg = format!(
@@ -847,7 +849,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = std::io::stderr().flush();
             };
             let progress_cb: Option<&(dyn Fn(migrate::MigrateProgress) + Sync)> =
-                if !args.json && !args.quiet && !args.dry_run {
+                if !args.json && !args.quiet && !args.dry_run && progress::stderr_is_tty() {
                     Some(&progress_fn)
                 } else {
                     None
@@ -862,7 +864,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 progress_cb,
             )
             .await?;
-            if !args.json && !args.quiet && stats.batches > 0 {
+            if !args.json && !args.quiet && progress::stderr_is_tty() && stats.batches > 0 {
                 eprintln!();
             }
             print_migrate_result(&args.collection, &target_collection, &stats, args.json)?;
