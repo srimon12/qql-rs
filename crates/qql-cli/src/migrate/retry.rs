@@ -13,6 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use qql_core::error::{QqlError, is_retryable, is_retryable_message};
 
+use super::pacer::Pacer;
+
 /// Attempts per call (first try + retries).
 pub(crate) const MAX_ATTEMPTS: u32 = 6;
 /// Exhausted retry sequences before the ingest circuit opens.
@@ -80,7 +82,14 @@ fn jitter(cap: u64) -> u64 {
 
 /// Retry `op` on transient errors. Non-retryable failures propagate
 /// immediately. An open circuit fails fast without calling `op`.
-pub(crate) async fn retry<T, F, Fut>(circuit: &Circuit, mut op: F) -> Result<T, Box<dyn Error>>
+///
+/// `pacer` covers retry attempts only: the caller already acquired a token for
+/// the first attempt.
+pub(crate) async fn retry<T, F, Fut>(
+    circuit: &Circuit,
+    pacer: Option<&Pacer>,
+    mut op: F,
+) -> Result<T, Box<dyn Error>>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, Box<dyn Error>>>,
@@ -93,6 +102,11 @@ where
     }
     let mut last: Option<Box<dyn Error>> = None;
     for attempt in 0..MAX_ATTEMPTS {
+        if attempt > 0
+            && let Some(pacer) = pacer
+        {
+            pacer.acquire().await;
+        }
         match op().await {
             Ok(value) => {
                 circuit.on_success();
@@ -162,5 +176,32 @@ mod tests {
                 "attempt {attempt} exceeds the 10s cap"
             );
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_consumes_a_pacer_token_per_attempt() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let pacer = super::Pacer::new(1).expect("1 rps pacing");
+        // `upsert_one` already took the first-attempt token; retry paces retries.
+        pacer.acquire().await;
+        let circuit = Circuit::default();
+        let attempts = AtomicU32::new(0);
+        let start = tokio::time::Instant::now();
+        super::retry(&circuit, Some(pacer.as_ref()), || async {
+            if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(QqlError::transport("QQL-TRANSPORT", "connection reset", None).into())
+            } else {
+                Ok(())
+            }
+        })
+        .await
+        .expect("second attempt succeeds");
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert!(
+            start.elapsed() >= std::time::Duration::from_secs(1),
+            "one retry at 1 rps must wait a full slot: {:?}",
+            start.elapsed()
+        );
     }
 }

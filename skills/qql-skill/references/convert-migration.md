@@ -143,6 +143,7 @@ Key decisions:
 - `--quantize scalar|binary|product|turbo` rewrites vector spec on create. Scalar defaults to `always_ram = true`, `quantile = 0.99`. Binary defaults to `always_ram = true`, `encoding = one_bit`. Product defaults to `always_ram = true`, `compression = x16`. Turbo defaults to `always_ram = true`, `bits = 2`. `--no-always-ram` stores quantized vectors on disk. Without `--quantize`, source quantization copies unchanged.
 - Fast-bulk is on by default. It raises `indexing_threshold` to `--bulk-threshold-kb` (default `2000000`) during ingest, then restores with `ALTER COLLECTION`. Lower the threshold on small nodes. `--no-fast-bulk` keeps indexing active for small collections.
 - Batch sizing follows bulk-upload guidance. Batches of 64 to 256 points with 2 to 4 streams. Defaults are `--batch-size 128`, `--workers 2`. Multivector collections use `--batch-size 64 --workers 2`. Scroll pages accept up to 64 MiB.
+- `--max-rps N` caps upsert batch requests per second across all workers, smoothing dispatch inside an ingest window. Retries consume tokens too, `0` disables the cap, and it combines with `--batch-delay-ms`, which serializes windows.
 - Verify compares filtered source count against unfiltered target count. A filtered copy verifies against the filtered count. With durable `WAIT true`, one exact read per side suffices. With `--no-wait`, verify polls up to 40 times at 50 ms. `--no-verify` skips comparison. Keep verification on for cutovers.
 - `--cutover <alias>` points the alias at the target in one `change_aliases` batch after verification, falling back to create when missing. `--drop-source-after-cutover` drops the source and is rejected without `--cutover`. `--json` reports `written`, `source_count`, `target_count`, `verified`, `resumed`, `cutover_alias`, `source_dropped`, and plan blocks.
 
@@ -157,6 +158,8 @@ Full flag table:
 | `--target-api-key <key>` | Target cluster key |
 | `--batch-size N` | Scroll and upsert batch size, default `128` |
 | `--workers N` | Concurrent upsert streams, default `2` |
+| `--max-rps N` | Cap upsert batch requests per second across all workers, default `0` (unlimited) |
+| `--batch-delay-ms N` | Pause between ingest windows, default `0` |
 | `--shard-number N` | Override target `shard_number` |
 | `--replication-factor N` | Override target `replication_factor` |
 | `--sharding-method auto\|custom` | Override sharding method |
