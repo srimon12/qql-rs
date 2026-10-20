@@ -2,12 +2,13 @@
 
 use serde_json::Value;
 
-use crate::ConvertError;
 use crate::decode::{self, DecodeCtx};
 use crate::endpoint;
 use crate::request::RequestOpts;
+use crate::{ConvertError, ConvertOptions, ReadFile};
 use qql_core::ast::Stmt;
 use qql_core::fmt::format_stmt;
+use std::borrow::Cow;
 
 /// Convert a Qdrant REST JSON payload (one object or a JSONL capture) into
 /// typed QQL statements.
@@ -17,6 +18,15 @@ use qql_core::fmt::format_stmt;
 /// the buffer is not a single JSON value and has two or more non-empty lines
 /// — the shape `qql record --out` writes.
 pub fn convert_stmts(input: &str, collection: Option<&str>) -> Result<Vec<Stmt>, ConvertError> {
+    convert_stmts_with(input, collection, &ConvertOptions::default())
+}
+
+/// [`convert_stmts`] with placeholder expansion and file-body resolution.
+pub fn convert_stmts_with(
+    input: &str,
+    collection: Option<&str>,
+    options: &ConvertOptions<'_>,
+) -> Result<Vec<Stmt>, ConvertError> {
     let owned;
     let trimmed = match strip_fence_lines(input.trim()) {
         Some(unfenced) => {
@@ -28,10 +38,14 @@ pub fn convert_stmts(input: &str, collection: Option<&str>) -> Result<Vec<Stmt>,
     if trimmed.is_empty() {
         return Err(ConvertError::undecodable("no input"));
     }
+    let expanded = expand_vars(trimmed, options.vars)?;
+    let trimmed = expanded.as_ref();
     match serde_json::from_str::<Value>(trimmed) {
         Ok(value) => convert_value(&value, collection),
         Err(json_err) => {
-            if let Some(pasted) = crate::snippet::convert_pasted(trimmed, collection) {
+            if let Some(pasted) =
+                crate::snippet::convert_pasted(trimmed, collection, options.read_file)
+            {
                 return pasted;
             }
             let nonempty = trimmed
@@ -41,7 +55,7 @@ pub fn convert_stmts(input: &str, collection: Option<&str>) -> Result<Vec<Stmt>,
             if nonempty < 2 {
                 return Err(ConvertError::InvalidJson(json_err.to_string()));
             }
-            convert_jsonl(trimmed, collection)
+            convert_jsonl(trimmed, collection, options.read_file)
         }
     }
 }
@@ -56,32 +70,165 @@ pub fn convert_stmts(input: &str, collection: Option<&str>) -> Result<Vec<Stmt>,
 /// assert_eq!(stmts, ["QUERY POINTS (1) FROM docs"]);
 /// ```
 pub fn convert(input: &str, collection: Option<&str>) -> Result<Vec<String>, ConvertError> {
-    Ok(convert_stmts(input, collection)?
+    convert_with(input, collection, &ConvertOptions::default())
+}
+
+/// [`convert`] with placeholder expansion and file-body resolution.
+pub fn convert_with(
+    input: &str,
+    collection: Option<&str>,
+    options: &ConvertOptions<'_>,
+) -> Result<Vec<String>, ConvertError> {
+    Ok(convert_stmts_with(input, collection, options)?
         .iter()
         .map(format_stmt)
         .collect())
 }
 
-fn convert_jsonl(input: &str, collection: Option<&str>) -> Result<Vec<Stmt>, ConvertError> {
+fn convert_jsonl(
+    input: &str,
+    collection: Option<&str>,
+    read_file: ReadFile<'_>,
+) -> Result<Vec<Stmt>, ConvertError> {
     let mut statements = Vec::new();
     let mut entries = 0usize;
+    let options = ConvertOptions {
+        vars: &[],
+        read_file,
+    };
     for (index, raw) in input.lines().enumerate() {
         let line = raw.trim();
         if line.is_empty() {
             continue;
         }
         entries += 1;
-        let converted =
-            convert_stmts(line, collection).map_err(|source| ConvertError::InvalidLine {
+        let converted = convert_stmts_with(line, collection, &options).map_err(|source| {
+            ConvertError::InvalidLine {
                 line: index + 1,
                 source: Box::new(source),
-            })?;
+            }
+        })?;
         statements.extend(converted);
     }
     if entries == 0 {
         return Err(ConvertError::undecodable("no JSON lines in capture"));
     }
     Ok(statements)
+}
+
+/// Expand `$NAME`, `${NAME}`, and `<NAME>` before anything is classified.
+///
+/// The tokenizer is the wrong place for this: it rejects `$VAR` inside double
+/// quotes, so a substitution pass after tokenizing would never see the common
+/// `-H "Authorization: $TOKEN"` shape. Text already pasted into JSON gets the
+/// same treatment. Only provided names expand; `$NAME`, `${NAME}`, and
+/// identifier-shaped `<NAME>` references with no value fail closed. Any other
+/// `<…>` text is left for the existing placeholder handling downstream.
+fn expand_vars<'a>(
+    input: &'a str,
+    vars: &[(String, String)],
+) -> Result<Cow<'a, str>, ConvertError> {
+    if vars.is_empty() {
+        return Ok(Cow::Borrowed(input));
+    }
+    let lookup = |name: &str| {
+        vars.iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    };
+    let mut out = String::with_capacity(input.len());
+    let mut unresolved: Vec<String> = Vec::new();
+    let mut rest = input;
+    while let Some(offset) = rest.find(['$', '<']) {
+        out.push_str(&rest[..offset]);
+        let tail = &rest[offset..];
+        if let Some(after) = tail.strip_prefix('$') {
+            let (name, consumed) = variable_ref(after);
+            match name {
+                Some(name) => match lookup(name) {
+                    Some(value) => {
+                        out.push_str(value);
+                        rest = &after[consumed..];
+                    }
+                    None => {
+                        unresolved.push(name.to_string());
+                        out.push('$');
+                        rest = after;
+                    }
+                },
+                None => {
+                    out.push('$');
+                    rest = after;
+                }
+            }
+        } else {
+            match tail[1..].find('>') {
+                Some(end) => {
+                    let name = &tail[1..1 + end];
+                    if !is_var_name(name) {
+                        out.push('<');
+                        rest = &tail[1..];
+                        continue;
+                    }
+                    match lookup(name) {
+                        Some(value) => {
+                            out.push_str(value);
+                            rest = &tail[end + 2..];
+                        }
+                        None => {
+                            unresolved.push(name.to_string());
+                            out.push('<');
+                            rest = &tail[1..];
+                        }
+                    }
+                }
+                None => {
+                    out.push('<');
+                    rest = &tail[1..];
+                }
+            }
+        }
+    }
+    out.push_str(rest);
+    if !unresolved.is_empty() {
+        unresolved.sort();
+        unresolved.dedup();
+        return Err(ConvertError::UnresolvedVariables { names: unresolved });
+    }
+    Ok(Cow::Owned(out))
+}
+
+/// The `$NAME` / `${NAME}` reference in `after` (the text following `$`), with
+/// the number of bytes it spans. `None` when the shape is not a recognizable
+/// name, so the text passes through for the tokenizer to judge.
+fn variable_ref(after: &str) -> (Option<&str>, usize) {
+    if let Some(braced) = after.strip_prefix('{') {
+        let Some(end) = braced.find('}') else {
+            return (None, 0);
+        };
+        let name = &braced[..end];
+        return if is_var_name(name) {
+            (Some(name), end + 2)
+        } else {
+            (None, 0)
+        };
+    }
+    let len = after
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(after.len());
+    let name = &after[..len];
+    if is_var_name(name) {
+        (Some(name), len)
+    } else {
+        (None, 0)
+    }
+}
+
+fn is_var_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn convert_value(raw: &Value, collection: Option<&str>) -> Result<Vec<Stmt>, ConvertError> {

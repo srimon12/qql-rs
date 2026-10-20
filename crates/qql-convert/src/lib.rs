@@ -14,7 +14,9 @@
 //!    docs and blogs (full URLs and an `HTTP/x` suffix are accepted).
 //! 5. **`curl` command** — a pasted invocation (`-X`, `-d`, `--header`, …,
 //!    multi-line continuations, several commands). Shell-dynamic constructs
-//!    (`$VAR`, `@file`, pipes) fail closed;
+//!    fail closed unless resolved up front: [`ConvertOptions::vars`] expands
+//!    placeholders before tokenizing, and [`ConvertOptions::read_file`]
+//!    resolves `@file` bodies. Pipes and command substitution always fail;
 //!
 //! Markdown fences around any of the above are stripped as paste noise.
 //!
@@ -39,8 +41,29 @@ mod request;
 mod shell;
 mod snippet;
 
-pub use convert::{convert, convert_stmts};
+pub use convert::{convert, convert_stmts, convert_stmts_with, convert_with};
 use std::fmt;
+
+/// Resolves a curl `@file` body from a path.
+pub(crate) type ReadFile<'a> = Option<&'a dyn Fn(&str) -> Result<String, String>>;
+
+/// Inputs beyond the text itself: placeholders to expand and file bodies to
+/// read.
+///
+/// The crate stays I/O-free. [`Self::read_file`] is the injection point: the
+/// `qql` CLI supplies a `std::fs::read_to_string` closure, tests supply an
+/// in-memory map, and a caller that omits it keeps the fail-closed
+/// `--data @file` error.
+#[derive(Default)]
+pub struct ConvertOptions<'a> {
+    /// Values for `$NAME`, `${NAME}`, and `<NAME>`, expanded before parsing.
+    /// The last entry for a name wins.
+    pub vars: &'a [(String, String)],
+    /// Resolves a curl `@file` body. Its error string is reported alongside
+    /// the path that failed.
+    #[allow(clippy::type_complexity)]
+    pub read_file: Option<&'a dyn Fn(&str) -> Result<String, String>>,
+}
 
 /// Typed conversion failure.
 ///
@@ -76,6 +99,12 @@ pub enum ConvertError {
         /// The conversion error raised for that line.
         source: Box<ConvertError>,
     },
+    /// `$NAME` / `${NAME}` placeholders had no `--var` value. Holds every
+    /// unresolved name, deduped and sorted.
+    UnresolvedVariables {
+        /// Names that were referenced but never supplied.
+        names: Vec<String>,
+    },
 }
 
 impl ConvertError {
@@ -105,6 +134,11 @@ impl fmt::Display for ConvertError {
             Self::UndecodableBody { detail } => write!(f, "cannot decode request body: {detail}"),
             Self::InvalidField { path, detail } => write!(f, "invalid field '{path}': {detail}"),
             Self::InvalidLine { line, source } => write!(f, "line {line}: {source}"),
+            Self::UnresolvedVariables { names } => write!(
+                f,
+                "unresolved variables: {} (pass --var NAME=value)",
+                names.join(", ")
+            ),
         }
     }
 }

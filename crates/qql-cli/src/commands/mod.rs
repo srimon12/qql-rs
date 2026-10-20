@@ -13,6 +13,7 @@ mod runtime;
 mod setup;
 mod version;
 
+pub(crate) use convert::parse_convert_vars;
 #[cfg(test)]
 pub(crate) use convert::source_is_canonical;
 pub use convert::{handle_convert, handle_fmt};

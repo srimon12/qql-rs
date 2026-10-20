@@ -1,8 +1,30 @@
 //! `qql convert` and `qql fmt`.
 
+/// Parse repeatable `--var KEY=VALUE` flags. A later value for the same key
+/// replaces an earlier one.
+pub(crate) fn parse_convert_vars(
+    raw: &[String],
+) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+    let mut vars: Vec<(String, String)> = Vec::new();
+    for item in raw {
+        let Some((key, value)) = item.split_once('=') else {
+            return Err(format!("--var expects KEY=VALUE, got `{item}`").into());
+        };
+        if key.is_empty() {
+            return Err(format!("--var expects a non-empty key, got `{item}`").into());
+        }
+        match vars.iter_mut().find(|(name, _)| name == key) {
+            Some((_, slot)) => *slot = value.to_string(),
+            None => vars.push((key.to_string(), value.to_string())),
+        }
+    }
+    Ok(vars)
+}
+
 pub fn handle_convert(
     path: Option<&str>,
     collection: Option<&str>,
+    vars: &[(String, String)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let input = if let Some(p) = path {
         std::fs::read_to_string(p).map_err(|e| format!("cannot read file: {}", e))?
@@ -18,7 +40,14 @@ pub fn handle_convert(
         return Err("no input provided".into());
     }
 
-    let statements = qql_convert::convert(&input, collection)?;
+    let read_file = |body_path: &str| {
+        std::fs::read_to_string(body_path).map_err(|e| format!("{body_path}: {e}"))
+    };
+    let options = qql_convert::ConvertOptions {
+        vars,
+        read_file: Some(&read_file),
+    };
+    let statements = qql_convert::convert_with(&input, collection, &options)?;
 
     for stmt in &statements {
         // `format_stmt` renders no terminator; the CLI prints canonical QQL,
