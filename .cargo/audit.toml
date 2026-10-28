@@ -1,8 +1,10 @@
 # cargo audit configuration, used by the weekly Security workflow.
 #
-# Every advisory still fails the run unless it is listed here, and each entry
-# must say why it cannot be fixed from this workspace. Keep the list mirrored
-# in deny.toml ([advisories] ignore).
+# Every vulnerability still fails the run unless it is listed here, and each
+# entry must say why it cannot be fixed from this workspace. Keep the
+# vulnerability entries mirrored in deny.toml ([advisories] ignore); that file
+# also lists unmaintained advisories, which `cargo audit` reports as
+# non-failing warnings and cargo-deny as errors.
 
 [advisories]
 ignore = [
