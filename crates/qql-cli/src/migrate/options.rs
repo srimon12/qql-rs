@@ -170,7 +170,8 @@ pub struct MigrateOptions {
     pub recreate: bool,
     /// Pause between ingest windows (ms) to spare a loaded cluster.
     pub batch_delay_ms: u64,
-    /// Maximum upsert batch requests per second across all workers (0 = unlimited).
+    /// Maximum upsert batch requests per second across all workers in this
+    /// process (0 = unlimited). Concurrent migrates do not share the budget.
     pub max_rps: u64,
 }
 

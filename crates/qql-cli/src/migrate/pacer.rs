@@ -4,13 +4,15 @@
 //! dispatches that many concurrent upserts, so a window can still burst. The
 //! pacer hands out one dispatch slot per `1 / max_rps` across every worker.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 /// Shared next-slot limiter. Burst is one: the first dispatch runs immediately.
+///
+/// One pacer covers every worker in this process. Two concurrent `qql migrate`
+/// runs do not share a budget.
 #[derive(Debug)]
 pub(crate) struct Pacer {
     interval: Duration,
@@ -32,10 +34,15 @@ impl Pacer {
     /// Reserve the next slot, then sleep for it without holding the lock.
     ///
     /// An idle pacer must not bank credit: the first slot after a quiet period
-    /// is immediate, and the next one is a full interval later.
+    /// is immediate, and the next one is a full interval later. A waiter
+    /// cancelled mid-sleep has already reserved its slot, so the next caller
+    /// still waits for the interval.
     pub(crate) async fn acquire(&self) {
         let wait = {
-            let mut next = self.next.lock().await;
+            let mut next = self
+                .next
+                .lock()
+                .expect("pacer mutex is never held across an await");
             let now = Instant::now();
             if *next < now {
                 *next = now;

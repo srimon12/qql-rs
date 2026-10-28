@@ -303,7 +303,8 @@ struct MigrateArgs {
     /// Pause between ingest windows in milliseconds (throttles a loaded cluster)
     #[arg(long, default_value_t = migrate::DEFAULT_BATCH_DELAY_MS)]
     batch_delay_ms: u64,
-    /// Maximum upsert batch requests per second across all workers (0 = unlimited)
+    /// Maximum upsert batch requests per second across this process's workers
+    /// (0 = unlimited; two concurrent migrates do not share the budget)
     #[arg(long, default_value_t = 0)]
     max_rps: u64,
     /// Output as JSON
