@@ -19,6 +19,7 @@ mod checkpoint;
 mod cutover;
 pub(crate) mod discover;
 mod options;
+mod pacer;
 mod pipeline;
 mod retry;
 mod schema;
