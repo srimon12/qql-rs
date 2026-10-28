@@ -1,0 +1,16 @@
+# cargo audit configuration, used by the weekly Security workflow.
+#
+# Every advisory still fails the run unless it is listed here, and each entry
+# must say why it cannot be fixed from this workspace. Keep the list mirrored
+# in deny.toml ([advisories] ignore).
+
+[advisories]
+ignore = [
+    # zstd 0.13.3 and zstd-safe 7.3.0 via include-flate-compress 0.3.4
+    # (jieba-rs -> charabia -> qdrant-edge). include-flate-compress pins
+    # zstd 0.13, while the fixes ship in zstd 0.14.3 / zstd-safe 8.2.0.
+    # Drop these entries as soon as qdrant-edge's tokenizer chain allows it.
+    "RUSTSEC-2026-0391", # zstd: data leaks between reused streams
+    "RUSTSEC-2026-0398", # zstd-safe: Seekable sets a length past capacity
+    "RUSTSEC-2026-0403", # zstd-safe: uninitialized memory on legacy streams
+]
