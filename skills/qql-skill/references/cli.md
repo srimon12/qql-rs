@@ -21,6 +21,7 @@ qql fmt script.qql --check
 qql fmt script.qql --write
 qql explain "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
 qql convert search.json
+qql convert curl.txt --var TENANT=acme --var COLLECTION=docs
 echo '{"ids": [1, "point-2"]}' | qql convert --collection docs
 qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.jsonl --qql-out capture.qql
 ```
@@ -28,7 +29,7 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --out capture.
 - `lint`: Static analysis and plan verification for QQL scripts. Recovers past syntax errors, compiles plans, flags redundant `WITH PAYLOAD true`, renders codeframes, and autofixes with `--fix` / `--write`. Binds `:name` / `?` via `-p`/`--params-file` or a `-- qql-params: {...}` header. Bare `qql lint` checks the working tree (pipes feed stdin).
 - `fmt`: Canonicalizes QQL. `--check` verifies formatting in CI. `--write` rewrites in place.
 - `explain`: Prints hierarchical ASCII plan tree with zero Qdrant I/O. Accepts `-p`/`--param` and `--params-file`.
-- `convert`: Translates REST JSON into typed QQL.
+- `convert`: Translates REST JSON, HTTP snippets, and curl commands into typed QQL. `--var NAME=value` substitutes `$NAME`, `${NAME}`, and `<NAME>`; curl `-d`/`--data*`/`--json` read `@file` bodies from disk while `--data-raw` stays literal.
 - `record`: Captures live proxy traffic and outputs JSONL and converted QQL (`--features record`).
 
 ### Tier 2: Live query execution & triage (Scoped to one query)

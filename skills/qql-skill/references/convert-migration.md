@@ -84,7 +84,33 @@ curl -X POST http://localhost:6333/collections/docs/points/count \
   -d '{"exact": true}' | qql convert
 ```
 
-Fail-closed paste rules: `$VAR` / `$(…)` / backticks, `--data @file`, pipes, `--data-urlencode` / `--config` / `-T`, and placeholder collections (`<your-collection>`, `{collection_name}`) all error with a typed `ConvertError` instead of emitting QQL that cannot re-parse. Replace placeholders and variables with literal values before converting.
+### Variables: `--var NAME=value`
+
+Pass `--var` once per placeholder. It is repeatable, and a duplicate key keeps the last value. Substitution is textual and runs before the input is parsed, so `$VAR` works inside double-quoted curl arguments too:
+
+```bash
+qql convert curl.txt --var TENANT=acme --var COLLECTION=docs
+```
+
+All three forms expand: `$NAME`, `${NAME}`, and `<NAME>`. `$NAME` / `${NAME}` accept `[A-Za-z_][A-Za-z0-9_]*`; angle placeholders are uppercase-only (`[A-Z_][A-Z0-9_]*`) so HTML tags such as `<b>` pass through untouched. `$$` emits a literal `$` (for example `costs $$USD`).
+
+Every `$NAME`, `${NAME}`, or `<NAME>` without a value fails closed with `UnresolvedVariables`, and the message lists all missing names. A typo never reaches the parser and never emits half-substituted QQL.
+
+Values are validated as single context-safe tokens before insertion. Allowed characters are `[A-Za-z0-9._:+=@-]`; a value must not start with `-` or `@`. Quotes, whitespace, `/`, `?`, `#`, `&`, `$`, backslash, backticks, and control characters fail with `UnsafeVariableValue`, naming the variable. The check runs before shell tokenizing and JSON parsing, so a crafted value cannot add a filter, a curl flag, or a path segment.
+
+### File bodies: `@file`
+
+`-d`, `--data`, `--data-ascii`, `--data-binary`, and `--json` read the body from a file when the value starts with `@`. Paths resolve against the CLI's working directory, not the input file's directory, and the contents are inlined before conversion. `@file` contents are **not** `--var`-expanded. The CLI accepts regular files only (directories, pipes, devices, and `@-` fail) and caps the body at 64 MiB. `-d@body.json` and quoted paths with spaces both work.
+
+```bash
+qql convert <<'EOF'
+curl -X POST http://localhost:6333/collections/docs/points/count -d @body.json
+EOF
+```
+
+`--data-raw @literal` keeps the `@` as a literal byte, as curl does. `--data @-` is rejected because stdin cannot be resolved here. The `qql-convert` library itself does no I/O; the CLI injects the reader.
+
+Fail-closed paste rules: unresolved `$VAR`, unsafe `--var` values, `$(…)` and backticks, `--data @-`, non-regular or oversized `@file` bodies, pipes, `--data-urlencode` / `--config` / `-T`, and placeholder collections (`<your-collection>`, `{collection_name}`) all error with a typed `ConvertError` instead of emitting QQL that cannot re-parse.
 
 ## Coverage and contract facts
 

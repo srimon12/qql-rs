@@ -101,6 +101,47 @@ echo '{"ids": [1, "7c9e6679-7425-40de-944b-e07fc1f90ae7"]}' | qql convert --coll
 Without `--collection`, a bare body fails with `MissingCollection` rather
 than inventing a collection name.
 
+## curl commands, variables, and file bodies
+
+A pasted `curl` command works directly, including `-X`, `-d` / `--data*` /
+`--json`, headers, `\` continuations, and several commands. Variables and
+`@file` bodies resolve before parsing so the converted text never contains a
+half-substituted placeholder.
+
+### Variables: `--var NAME=value`
+
+`--var` is repeatable; a duplicate key keeps the last value. `$NAME`,
+`${NAME}`, and uppercase `<NAME>` expand. Angle placeholders are uppercase-only
+so HTML tags such as `<b>` pass through, and `$$` emits a literal `$`.
+
+{% terminal title="Resolve curl placeholders" %}
+qql convert request.curl --var TENANT=acme --var COLLECTION=docs
+qql convert request.curl --var 'TOKEN=abc.def-123_xyz'
+{% /terminal %}
+
+Every placeholder without a value fails closed with `UnresolvedVariables`,
+listing every missing name. Values are validated as single context-safe
+tokens: letters, digits, `.`, `_`, `:`, `+`, `=`, `-`, and `@` are allowed, and a
+value must not start with `-` or `@`. Quotes, whitespace, `/`, `?`, `#`, `&`,
+`$`, backslash, backticks, and control characters fail with
+`UnsafeVariableValue` and name variable, because a raw value could otherwise
+add a filter, a curl flag, or a path segment.
+
+### File bodies: `@file`
+
+`-d`, `--data`, `--data-ascii`, `--data-binary`, and `--json` read a body from
+a file when the value starts with `@`. Paths resolve against the CLI's working
+directory, not the input file's directory, and the contents are not
+`--var`-expanded. Only regular files are accepted (directories, pipes, devices,
+and `@-` fail), and the body is capped at 64 MiB.
+
+{% terminal title="Inline a curl body from a file" %}
+qql convert request.curl
+# request.curl: curl -X POST http://localhost:6333/collections/docs/points/count -d @body.json
+{% /terminal %}
+
+`--data-raw @literal` keeps `@` as a literal byte, as curl does.
+
 ## What is covered
 
 Conversion is part of the same contract as execution: Qdrant's OpenAPI
