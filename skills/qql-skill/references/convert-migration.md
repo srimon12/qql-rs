@@ -221,11 +221,11 @@ The last executable line restores the source setting:
 ALTER COLLECTION my_collection WITH OPTIMIZERS (indexing_threshold = 12345);
 ```
 
-The restore copies the source `indexing_threshold`. When the source reports none, dump writes Qdrant's default of `20000` KB. Dump has no checkpoint, so if the replay stops early the bulk `ALTER` is still active on the target. Read the source value with `SHOW COLLECTION`, then restore it by hand:
+The restore copies the source `indexing_threshold`. When the source reports none, dump writes Qdrant 1.19's default of `10000` KB. Dump has no checkpoint, so if the replay stops early the bulk `ALTER` is still active on the target. `qql run` prints the trailing restore line in its error output; you can also read the source value with `SHOW COLLECTION`, then restore it by hand:
 
 ```bash
 qql --url http://target:6333 run "SHOW COLLECTION my_collection"
-qql --url http://target:6333 run "ALTER COLLECTION my_collection WITH OPTIMIZERS (indexing_threshold = 20000)"
+qql --url http://target:6333 run "ALTER COLLECTION my_collection WITH OPTIMIZERS (indexing_threshold = 10000)"
 ```
 
 Full product docs live at `website/src/content/docs/docs/operations/convert.mdoc` and `cluster-migration.mdoc`.

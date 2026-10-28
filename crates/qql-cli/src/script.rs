@@ -137,9 +137,28 @@ pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     split_statements(&data)
 }
 
+/// The trailing `ALTER COLLECTION ... WITH OPTIMIZERS (indexing_threshold = N)`
+/// of a dump script, if the last statement is one.
+///
+/// `qql dump` appends this line so a replay restores the source threshold.
+/// `qql run` uses it to print the exact recovery statement when a replay stops
+/// before reaching the end.
+pub fn trailing_restore_statement(statements: &[String]) -> Option<&str> {
+    let last = statements.last()?;
+    let Ok(qql_core::ast::Stmt::AlterCollection(alter)) = Parser::parse(last) else {
+        return None;
+    };
+    let threshold = alter
+        .config
+        .as_ref()
+        .and_then(|config| config.optimizers.as_ref())
+        .and_then(|optimizers| optimizers.indexing_threshold);
+    threshold.map(|_| last.as_str())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::split_statements;
+    use super::{split_statements, trailing_restore_statement};
 
     #[test]
     fn splits_top_level_semicolons_without_breaking_ctes() {
@@ -216,5 +235,29 @@ mod tests {
             statements[1]
         );
         assert!(statements[2].contains("'''line--one'''"));
+    }
+
+    #[test]
+    fn trailing_restore_statement_is_the_last_threshold_alter() {
+        let statements = vec![
+            "CREATE COLLECTION docs (dense VECTOR(2, COSINE))".to_string(),
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 2000000)".to_string(),
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 10000)".to_string(),
+        ];
+        assert_eq!(
+            trailing_restore_statement(&statements),
+            statements.last().map(String::as_str)
+        );
+    }
+
+    #[test]
+    fn trailing_restore_statement_ignores_other_tails() {
+        let show = vec!["SHOW COLLECTIONS".to_string()];
+        assert_eq!(trailing_restore_statement(&show), None);
+
+        let hnsw = vec!["ALTER COLLECTION docs WITH HNSW (m = 32)".to_string()];
+        assert_eq!(trailing_restore_statement(&hnsw), None);
+
+        assert_eq!(trailing_restore_statement(&[]), None);
     }
 }

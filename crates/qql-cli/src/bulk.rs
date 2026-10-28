@@ -12,8 +12,14 @@ use qql::backend::CollectionInfo;
 /// on typical migrations without pinning unbounded RAM. Override with
 /// `--bulk-threshold-kb`.
 pub const DEFAULT_BULK_INDEXING_THRESHOLD: u64 = 2_000_000;
-/// Qdrant default `indexing_threshold` (20 MB) restored after bulk load.
-pub const DEFAULT_INDEXING_THRESHOLD: u64 = 20_000;
+/// Qdrant 1.19 default optimizer `indexing_threshold` (10,000 KB) restored
+/// after bulk load.
+///
+/// Mirrors `DEFAULT_INDEXING_THRESHOLD_KB` in Qdrant's
+/// `lib/shard/src/optimizers/config.rs`. `ALTER COLLECTION` needs a concrete
+/// value, so a source that reports no explicit threshold is restored to this
+/// default.
+pub const DEFAULT_INDEXING_THRESHOLD: u64 = 10_000;
 
 /// Raise `indexing_threshold` so HNSW is not built concurrently with ingest.
 /// Returns the original threshold (if any) for later restore.
