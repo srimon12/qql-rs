@@ -25,6 +25,14 @@ ignore = [
     "RUSTSEC-2026-0391",
     "RUSTSEC-2026-0398",
     "RUSTSEC-2026-0403",
+    # zvariant / zvariant_derive / zbus_names via zbus -> cgroups-rs ->
+    # qdrant-edge. Upstream has no replacement release yet (announcement:
+    # https://github.com/z-galaxy/zbus/issues/2043), and cargo-deny fails on
+    # unmaintained advisories while `cargo audit` only warns, so they are
+    # listed here and stay visible in the weekly audit output.
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
 ]
 
 [licenses]
