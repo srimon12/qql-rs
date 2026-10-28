@@ -15,6 +15,7 @@ mod dump;
 mod fmt_tests;
 mod migrate;
 mod output;
+mod progress;
 mod record;
 #[cfg(test)]
 mod record_tests;
@@ -753,12 +754,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             json,
             quiet,
         } => {
-            use std::io::Write;
+            let progress_enabled = !json && !quiet && progress::stderr_is_tty();
+            let progress =
+                std::sync::Mutex::new(progress::Progress::new(progress_enabled, std::io::stderr()));
             let progress_fn = |p: dump::DumpProgress| {
-                eprint!("\rDumped {} points ({} batches)...", p.written, p.batches);
-                let _ = std::io::stderr().flush();
+                if let Ok(mut progress) = progress.lock() {
+                    progress.update(format!(
+                        "Dumped {} points ({} batches)...",
+                        p.written, p.batches
+                    ));
+                }
             };
-            let progress_cb: Option<&(dyn Fn(dump::DumpProgress) + Sync)> = if !json && !quiet {
+            let progress_cb: Option<&(dyn Fn(dump::DumpProgress) + Sync)> = if progress_enabled {
                 Some(&progress_fn)
             } else {
                 None
@@ -773,8 +780,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 progress_cb,
             )
             .await?;
-            if !json && !quiet && stats.batches > 0 {
-                eprintln!();
+            if let Ok(mut progress) = progress.lock() {
+                progress.finish();
             }
             let msg = format!(
                 "Dumped collection '{}' to {} ({} written, {} skipped, {} batches)",
@@ -800,7 +807,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         Command::Migrate(args) => {
-            use std::io::Write;
             let args = *args;
             let target_collection = args.to.unwrap_or_else(|| args.collection.clone());
             let target_url = args.target_url.unwrap_or_else(|| url.clone());
@@ -850,15 +856,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 batch_delay_ms: args.batch_delay_ms,
                 max_rps: args.max_rps,
             };
+            let progress_enabled =
+                !args.json && !args.quiet && !args.dry_run && progress::stderr_is_tty();
+            let progress =
+                std::sync::Mutex::new(progress::Progress::new(progress_enabled, std::io::stderr()));
             let progress_fn = |p: migrate::MigrateProgress| {
-                eprint!(
-                    "\r[{}] {} — {} / {} points ({} batches)...",
-                    p.phase, p.collection, p.written, p.source_count, p.batches
-                );
-                let _ = std::io::stderr().flush();
+                if let Ok(mut progress) = progress.lock() {
+                    progress.update(format!(
+                        "[{}] {} - {} / {} points ({} batches)...",
+                        p.phase, p.collection, p.written, p.source_count, p.batches
+                    ));
+                }
             };
             let progress_cb: Option<&(dyn Fn(migrate::MigrateProgress) + Sync)> =
-                if !args.json && !args.quiet && !args.dry_run {
+                if progress_enabled {
                     Some(&progress_fn)
                 } else {
                     None
@@ -873,8 +884,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 progress_cb,
             )
             .await?;
-            if !args.json && !args.quiet && stats.batches > 0 {
-                eprintln!();
+            if let Ok(mut progress) = progress.lock() {
+                progress.finish();
             }
             print_migrate_result(&args.collection, &target_collection, &stats, args.json)?;
             Ok(())

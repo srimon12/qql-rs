@@ -141,6 +141,97 @@ fn run_file_defaults_to_human_summary_and_respects_json_and_quiet() {
     );
 }
 
+fn temp_script(tag: &str, contents: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("qql-run-script-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join(format!("{tag}.qql"));
+    std::fs::write(&path, contents).expect("write script fixture");
+    path
+}
+
+#[test]
+fn run_progress_is_tty_gated_and_silenced_by_quiet_and_json() {
+    let script = temp_script("comment-only", "-- only a comment\n");
+    let path = script.to_str().unwrap();
+
+    // The test harness pipes stdout/stderr, so every run here is a non-TTY.
+    for args in [
+        vec!["run", path],
+        vec!["run", "--quiet", path],
+        vec!["run", "--json", path],
+    ] {
+        let out = qql(&args);
+        assert!(out.status.success(), "args: {args:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains('\r') && !stderr.contains("Running "),
+            "piped stderr must not carry progress, got: {stderr:?}"
+        );
+    }
+
+    let quiet = qql(&["run", "--quiet", path]);
+    assert!(quiet.status.success());
+    assert!(
+        quiet.stderr.is_empty(),
+        "--quiet must stay silent on stderr, got: {:?}",
+        String::from_utf8_lossy(&quiet.stderr)
+    );
+
+    // A failing statement exercises the progress update path; it still must
+    // not emit a carriage return when stderr is a pipe.
+    let failing = temp_script("failing", "SHOW COLLECTIONS;\n");
+    let out = qql(&[
+        "--url",
+        "http://127.0.0.1:1",
+        "run",
+        failing.to_str().unwrap(),
+    ]);
+    assert!(!out.status.success(), "no backend is listening on port 1");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains('\r') && !stderr.contains("Running "),
+        "piped stderr must not carry progress, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn failing_backend_stays_progress_free_with_json_and_quiet() {
+    let script = temp_script("failing-flags", "SHOW COLLECTIONS;\nSHOW COLLECTIONS;\n");
+
+    for flag in ["--json", "--quiet"] {
+        let out = qql(&[
+            "--url",
+            "http://127.0.0.1:1",
+            "run",
+            flag,
+            script.to_str().unwrap(),
+        ]);
+        assert!(!out.status.success(), "{flag}: no backend is listening");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains('\r') && !stderr.contains("Running "),
+            "{flag}: piped stderr must not carry progress, got: {stderr:?}"
+        );
+
+        if flag == "--json" {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("json report");
+            assert_eq!(parsed["ok"], false);
+            assert_eq!(parsed["failed"], 2);
+        } else {
+            assert!(
+                out.stdout.is_empty(),
+                "--quiet must print nothing, got: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+    }
+}
+
 #[test]
 fn explain_with_high_dimensional_vector_params_file() {
     // 384-dimensional vector
