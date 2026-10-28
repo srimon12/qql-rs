@@ -8,8 +8,11 @@
 use std::io::{IsTerminal, Write};
 
 /// Whether stderr is a terminal that can host a rewritten progress line.
+///
+/// `TERM=dumb` disables the escape sequences even when stderr is a terminal.
 pub(crate) fn stderr_is_tty() -> bool {
-    std::io::stderr().is_terminal()
+    std::env::var_os("TERM").is_none_or(|term| term.to_str() != Some("dumb"))
+        && std::io::stderr().is_terminal()
 }
 
 /// A single-line progress renderer over an arbitrary writer. Disabled
@@ -17,8 +20,6 @@ pub(crate) fn stderr_is_tty() -> bool {
 pub(crate) struct Progress<W: Write> {
     enabled: bool,
     writer: W,
-    statements_total: usize,
-    operations_total: usize,
     text: String,
     rendered: bool,
     finished: bool,
@@ -29,38 +30,18 @@ impl<W: Write> Progress<W> {
         Self {
             enabled,
             writer,
-            statements_total: 0,
-            operations_total: 0,
             text: String::new(),
             rendered: false,
             finished: false,
         }
     }
 
-    pub(crate) fn set_totals(&mut self, statements: usize, operations: usize) {
-        self.statements_total = statements;
-        self.operations_total = operations;
-    }
-
-    pub(crate) fn update(
-        &mut self,
-        statements_done: usize,
-        operations_done: usize,
-        succeeded: usize,
-        failed: usize,
-    ) {
-        if !self.enabled || self.finished {
+    /// Replace the line text and render it.
+    pub(crate) fn update(&mut self, text: impl Into<String>) {
+        if !self.is_live() {
             return;
         }
-        self.text = format!(
-            "Running {}/{} statements, {}/{} operations ({} ok, {} failed)",
-            statements_done,
-            self.statements_total,
-            operations_done,
-            self.operations_total,
-            succeeded,
-            failed
-        );
+        self.text = text.into();
         self.render();
     }
 
@@ -71,7 +52,7 @@ impl<W: Write> Progress<W> {
 
     /// Re-render the last text after [`Progress::suspend`].
     pub(crate) fn resume(&mut self) {
-        if self.enabled && !self.rendered && !self.finished && !self.text.is_empty() {
+        if self.is_live() && !self.rendered && !self.text.is_empty() {
             self.render();
         }
     }
@@ -80,6 +61,10 @@ impl<W: Write> Progress<W> {
     pub(crate) fn finish(&mut self) {
         self.clear();
         self.finished = true;
+    }
+
+    fn is_live(&self) -> bool {
+        self.enabled && !self.finished
     }
 
     fn render(&mut self) {
@@ -105,9 +90,64 @@ impl<W: Write> Drop for Progress<W> {
     }
 }
 
+/// `qql run`'s statement/operation counters over [`Progress`].
+pub(crate) struct RunProgress<W: Write> {
+    progress: Progress<W>,
+    statements_total: usize,
+    operations_total: usize,
+}
+
+impl<W: Write> RunProgress<W> {
+    pub(crate) fn new(enabled: bool, writer: W) -> Self {
+        Self {
+            progress: Progress::new(enabled, writer),
+            statements_total: 0,
+            operations_total: 0,
+        }
+    }
+
+    pub(crate) fn set_totals(&mut self, statements: usize, operations: usize) {
+        self.statements_total = statements;
+        self.operations_total = operations;
+    }
+
+    pub(crate) fn update(
+        &mut self,
+        statements_done: usize,
+        operations_done: usize,
+        succeeded: usize,
+        failed: usize,
+    ) {
+        if !self.progress.is_live() {
+            return;
+        }
+        self.progress.update(format!(
+            "Running {}/{} statements, {}/{} operations ({} ok, {} failed)",
+            statements_done,
+            self.statements_total,
+            operations_done,
+            self.operations_total,
+            succeeded,
+            failed
+        ));
+    }
+
+    pub(crate) fn suspend(&mut self) {
+        self.progress.suspend();
+    }
+
+    pub(crate) fn resume(&mut self) {
+        self.progress.resume();
+    }
+
+    pub(crate) fn finish(&mut self) {
+        self.progress.finish();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Progress;
+    use super::{Progress, RunProgress};
 
     fn text(buffer: &[u8]) -> String {
         String::from_utf8(buffer.to_vec()).expect("progress output is UTF-8")
@@ -116,8 +156,7 @@ mod tests {
     #[test]
     fn disabled_progress_writes_nothing() {
         let mut progress = Progress::new(false, Vec::new());
-        progress.set_totals(2, 5);
-        progress.update(1, 3, 2, 1);
+        progress.update("working");
         progress.suspend();
         progress.resume();
         progress.finish();
@@ -127,15 +166,11 @@ mod tests {
     #[test]
     fn enabled_progress_rewrites_one_line_and_finish_clears_it() {
         let mut progress = Progress::new(true, Vec::new());
-        progress.set_totals(40, 500);
-        progress.update(12, 130, 128, 2);
+        progress.update("hello");
 
         let rendered = text(&progress.writer);
         assert!(rendered.starts_with("\r\x1b[2K"), "got: {rendered:?}");
-        assert!(
-            rendered.contains("Running 12/40 statements, 130/500 operations (128 ok, 2 failed)"),
-            "got: {rendered:?}"
-        );
+        assert!(rendered.contains("hello"), "got: {rendered:?}");
         assert_eq!(rendered.matches('\r').count(), 1);
 
         progress.finish();
@@ -148,10 +183,22 @@ mod tests {
     }
 
     #[test]
+    fn run_progress_formats_statement_and_operation_counts() {
+        let mut progress = RunProgress::new(true, Vec::new());
+        progress.set_totals(40, 500);
+        progress.update(12, 130, 128, 2);
+
+        let rendered = text(&progress.progress.writer);
+        assert!(
+            rendered.contains("Running 12/40 statements, 130/500 operations (128 ok, 2 failed)"),
+            "got: {rendered:?}"
+        );
+    }
+
+    #[test]
     fn suspend_then_resume_rerenders_the_last_text() {
         let mut progress = Progress::new(true, Vec::new());
-        progress.set_totals(1, 1);
-        progress.update(1, 1, 1, 0);
+        progress.update("hello");
 
         progress.suspend();
         let suspended = text(&progress.writer);
@@ -159,9 +206,8 @@ mod tests {
 
         progress.resume();
         let resumed = text(&progress.writer);
-        let line = "Running 1/1 statements, 1/1 operations (1 ok, 0 failed)";
-        assert_eq!(resumed.matches(line).count(), 2, "got: {resumed:?}");
-        assert!(resumed.ends_with(line), "got: {resumed:?}");
+        assert_eq!(resumed.matches("hello").count(), 2, "got: {resumed:?}");
+        assert!(resumed.ends_with("hello"), "got: {resumed:?}");
     }
 
     #[test]
@@ -182,7 +228,7 @@ mod tests {
 
         let sink = Shared::default();
         let mut progress = Progress::new(true, sink.clone());
-        progress.update(1, 1, 1, 0);
+        progress.update("working");
         drop(progress);
 
         let dropped = text(&sink.0.borrow());

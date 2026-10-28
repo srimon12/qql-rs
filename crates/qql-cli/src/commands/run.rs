@@ -170,7 +170,7 @@ pub async fn handle_run_file(
         .map_or(0, |counts| counts.iter().sum());
     let mut statements_done = 0;
     let mut operations_done = 0;
-    let mut progress = progress::Progress::new(progress_enabled, std::io::stderr());
+    let mut progress = progress::RunProgress::new(progress_enabled, std::io::stderr());
     progress.set_totals(statements.len(), operation_total);
 
     for (index, statement) in statements.iter().enumerate() {
@@ -251,6 +251,7 @@ pub async fn handle_run_file(
         // A dump replay raises `indexing_threshold` in its prelude and restores
         // it on the final line. If the run stops early, name that exact line so
         // the operator can finish the restore without opening the file.
+        progress.suspend();
         output::print_error(&format!(
             "replay stopped before the restore statement; run: {restore};"
         ));

@@ -199,6 +199,40 @@ fn run_progress_is_tty_gated_and_silenced_by_quiet_and_json() {
 }
 
 #[test]
+fn failing_backend_stays_progress_free_with_json_and_quiet() {
+    let script = temp_script("failing-flags", "SHOW COLLECTIONS;\nSHOW COLLECTIONS;\n");
+
+    for flag in ["--json", "--quiet"] {
+        let out = qql(&[
+            "--url",
+            "http://127.0.0.1:1",
+            "run",
+            flag,
+            script.to_str().unwrap(),
+        ]);
+        assert!(!out.status.success(), "{flag}: no backend is listening");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains('\r') && !stderr.contains("Running "),
+            "{flag}: piped stderr must not carry progress, got: {stderr:?}"
+        );
+
+        if flag == "--json" {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("json report");
+            assert_eq!(parsed["ok"], false);
+            assert_eq!(parsed["failed"], 2);
+        } else {
+            assert!(
+                out.stdout.is_empty(),
+                "--quiet must print nothing, got: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+    }
+}
+
+#[test]
 fn explain_with_high_dimensional_vector_params_file() {
     // 384-dimensional vector
     let vec_384: Vec<f64> = (0..384).map(|i| (i as f64) * 0.001).collect();

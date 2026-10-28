@@ -169,6 +169,7 @@ Smart query runner that automatically detects whether the input argument is an i
 - **Parameter Binding**: Supports `-p key=value` / `--param key=value` and `--params-file <path>`.
 - **Output Options**: `--json` outputs structured JSON results; `-q`/`--quiet` suppresses banners.
 - **Script Options**: `--stop-on-error` halts execution on the first failing statement.
+- **Progress**: a script run shows a single stderr progress line with statement and operation counts, including `BATCH` members. It appears only when stderr is a terminal; `--quiet` and `--json` disable it.
 
 {% terminal title="Run queries and scripts" %}
 # Run inline statement
