@@ -40,7 +40,9 @@ binds them: the exact-case object `$payload` holds the colliding fields.
 ```sql
 UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2]} WITH PAYLOAD {id: 'legacy-1', vector: 'sparse_v1', category: 'tech'};
 ```
-{% /qqlExample %} A dict with a numeric `text` value stays a named vector.
+{% /qqlExample %}
+
+A dict with a numeric `text` value stays a named vector.
 
 {% qqlExample title="Per-point inference vectors" %}
 ```sql

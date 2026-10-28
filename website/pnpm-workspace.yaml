@@ -16,8 +16,19 @@ allowBuilds:
 # Security overrides for transitive Dependabot alerts (GHSA-2v37-7h3g-55p8,
 # GHSA-xcpc-8h2w-3j85, GHSA-5p4m-2wfm-xmqj, GHSA-7q85-xj36-vmfc,
 # GHSA-vwc7-r8mq-g2x9, GHSA-2883-xcg3-v3hh). Patched versions verified on npm.
+#
+# Kept current for the Astro toolchain advisories: `sharp` tracks the direct
+# dependency, and the transitive pins below are held at their patched release
+# inside the same major so the build keeps working (fast-uri 4.x and
+# postcss-selector-parser 7.x are major jumps their consumers do not accept).
 overrides:
   nanoid: 3.3.18
   adm-zip: 0.6.1
   js-yaml: 4.3.2
-  sharp: 0.35.4
+  sharp: 0.35.5
+  source-map-js: 1.2.2
+  zod: 4.6.7
+  undici: 8.12.3
+  fast-uri: 3.1.9
+  smol-toml: 1.9.1
+  postcss-selector-parser: 6.1.5
