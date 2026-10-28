@@ -145,6 +145,7 @@ qql explain --json "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
 Convert Qdrant REST JSON payloads to idiomatic QQL statements.
 
 - `qql convert [file.json]`: Reads JSON from a file or stdin and renders canonical QQL. Use `--collection <name>` for bare request bodies.
+- **curl paste**: `--var NAME=value` (repeatable) expands `$NAME`, `${NAME}`, and uppercase `<NAME>`; `$$` is a literal `$`; `-d` / `--data*` / `--json` resolve `@file` bodies (regular files, 64 MiB cap, working-directory paths). Unsafe values fail with `UnsafeVariableValue`.
 - `qql record`: Transparent proxy that records live application traffic to JSONL and produces converted QQL scripts.
 
 {% terminal title="Convert REST JSON" %}
@@ -169,6 +170,7 @@ Smart query runner that automatically detects whether the input argument is an i
 - **Parameter Binding**: Supports `-p key=value` / `--param key=value` and `--params-file <path>`.
 - **Output Options**: `--json` outputs structured JSON results; `-q`/`--quiet` suppresses banners.
 - **Script Options**: `--stop-on-error` halts execution on the first failing statement.
+- **Progress**: a script run shows a single stderr progress line with statement and operation counts, including `BATCH` members. It appears only when stderr is a terminal; `--quiet` and `--json` disable it.
 
 {% terminal title="Run queries and scripts" %}
 # Run inline statement
@@ -294,7 +296,7 @@ qql> \q
 
 Data movement utilities for collections.
 
-- `qql dump <collection> <output.qql>`: Exports collection schema and points into a portable `.qql` script (`--batch-size N`, default 100). See [Dump and restore](/docs/operations/backup-restore/).
+- `qql dump <collection> <output.qql>`: Exports collection schema and points into a portable `.qql` script (`--batch-size N`, default 100; `--bulk-threshold-kb N`, default 2000000). See [Dump and restore](/docs/operations/backup-restore/).
 - `qql migrate <collection>`: Copies schema and points directly to another collection or remote cluster.
 
 {% terminal title="Preview, run, and resume a migration" %}
@@ -308,6 +310,7 @@ qql migrate docs --to docs_copy --resume
 | `--dry-run` | Print the create plan and exit without writing |
 | `--recreate` | Drop and recreate the target collection |
 | `--workers N`, `--batch-size N` | Parallel upsert window |
+| `--max-rps N` | Cap upsert batch requests per second across this process's workers (`0` = unlimited) |
 | `--where "<filter>"` | Migrate only matching points |
 | `--shard-key-field <field>` | Route each point by its payload value |
 | `--resume`, `--restart`, `--cutover <alias>` | Resume recovery or point an alias at the target |

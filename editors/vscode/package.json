@@ -398,13 +398,14 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@types/node": "^26.6.4",
-    "@types/vscode": "^1.140.0",
+    "@types/vscode": "~1.138.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^7.0.2"
   },
   "overrides": {
     "js-yaml": "4.3.2",
     "brace-expansion": "5.0.12",
-    "qs": "6.16.0"
+    "qs": "6.17.0",
+    "@azure/msal-node": "7.1.2"
   }
 }

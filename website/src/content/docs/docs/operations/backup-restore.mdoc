@@ -21,6 +21,7 @@ qql dump docs docs.qql --json
 | Flag | Purpose |
 |---|---|
 | `--batch-size N` | Points per emitted `UPSERT` batch (default `100`, must be at least `1`) |
+| `--bulk-threshold-kb N` | Optimizer `indexing_threshold` (KB) during replay (default `2000000`, must be at least `1`) |
 | `--json` | Print a JSON summary instead of a human-readable line |
 | `-q`, `--quiet` | Suppress progress output |
 | `--url <URL>` | Source endpoint (global flag, defaults to `http://localhost:6333`) |
@@ -38,7 +39,7 @@ it holds a finished script with a footer, or it was never replaced.
 
 ## Emitted file layout
 
-Every file has the same four parts in order:
+Every file has the same six parts in order:
 
 1. `CREATE COLLECTION` rebuilt from the typed vector schema, with
    `WITH PARAMS`, `WITH HNSW`, `WITH OPTIMIZERS`, and `WITH QUANTIZATION`
@@ -49,9 +50,14 @@ Every file has the same four parts in order:
 2. One `CREATE INDEX` per payload index on the source.
 3. One `CREATE SHARD KEY` per custom shard key (custom-sharded collections
    only).
-4. One `UPSERT` per batch of points, each carrying its `SHARD` key on
-   custom-sharded collections, followed by a `-- Written / Skipped / Batches`
-   footer.
+4. One `ALTER COLLECTION` raising `indexing_threshold` to
+   `--bulk-threshold-kb`, so replay buffers points instead of building HNSW
+   segment by segment.
+5. One `UPSERT` per batch of points, each carrying its `SHARD` key on
+   custom-sharded collections.
+6. A trailing `ALTER COLLECTION` restoring the source `indexing_threshold`
+   (or Qdrant 1.19's default of `10000` KB when the source reports none),
+   followed by a `-- Written / Skipped / Batches` footer.
 
 {% qqlExample title="Dumped schema header" %}
 ```sql
@@ -61,8 +67,22 @@ CREATE COLLECTION docs (
 WITH HNSW (m = 16, ef_construct = 100);
 
 CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+
+ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 2000000);
 ```
 {% /qqlExample %}
+
+{% qqlExample title="Dumped restore footer" %}
+```sql
+ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 10000);
+```
+{% /qqlExample %}
+
+If a replay stops early, the bulk `ALTER` is still active on the target.
+`qql run` prints the trailing restore statement in its error output; run that
+line, or read the source value with `SHOW COLLECTION` and restore it by hand.
+Dump has no checkpoint, so an interrupted replay resumes only by running the
+file again from the start.
 
 {% qqlExample title="Dumped shard keys" %}
 ```sql

@@ -2,6 +2,7 @@
 
 use super::runtime::{executor, explain_query_bound, statements_need_embeddings};
 use crate::output;
+use crate::progress;
 use crate::script;
 
 pub async fn handle_run_smart(
@@ -156,8 +157,24 @@ pub async fn handle_run_file(
     }
     let mut ok_count = 0;
     let mut fail_count = 0;
+    let mut last_started = 0;
+    let progress_enabled = !quiet && !json && progress::stderr_is_tty();
+    let operation_counts: Option<Vec<usize>> = progress_enabled.then(|| {
+        statements
+            .iter()
+            .map(|statement| script::statement_operation_count(statement))
+            .collect()
+    });
+    let operation_total = operation_counts
+        .as_ref()
+        .map_or(0, |counts| counts.iter().sum());
+    let mut statements_done = 0;
+    let mut operations_done = 0;
+    let mut progress = progress::RunProgress::new(progress_enabled, std::io::stderr());
+    progress.set_totals(statements.len(), operation_total);
 
     for (index, statement) in statements.iter().enumerate() {
+        last_started = index;
         let on_err = if stop_on_error {
             qql::executor::OnError::Stop
         } else {
@@ -184,6 +201,7 @@ pub async fn handle_run_file(
                         .await
                 }
                 _ => {
+                    progress.finish();
                     return Err("--params-file must contain a JSON object or array".into());
                 }
             },
@@ -193,24 +211,54 @@ pub async fn handle_run_file(
                 ok_count += report.succeeded;
                 fail_count += report.failed;
                 for result in report.results.iter().filter(|result| !result.ok) {
+                    progress.suspend();
                     output::print_error(&format!(
                         "statement {} ({}): {}",
                         index + 1,
                         result.operation,
                         result.message
                     ));
+                    progress.resume();
                 }
+                statements_done += 1;
+                // A failed statement may not have run every planned operation:
+                // count only what actually ran so the total is never overstated.
+                let planned = operation_counts.as_ref().map_or(0, |counts| counts[index]);
+                operations_done += if report.failed == 0 {
+                    planned
+                } else {
+                    report.succeeded + report.failed
+                };
+                progress.update(statements_done, operations_done, ok_count, fail_count);
             }
             Err(error) => {
                 fail_count += 1;
+                statements_done += 1;
+                progress.suspend();
                 output::print_error(&format!("statement {}: {}", index + 1, error));
+                progress.resume();
+                progress.update(statements_done, operations_done, ok_count, fail_count);
                 if stop_on_error {
                     break;
                 }
             }
         }
     }
-    executor.close().await?;
+    if fail_count > 0
+        && last_started + 1 < statements.len()
+        && let Some(restore) = script::trailing_restore_statement(&statements)
+    {
+        // A dump replay raises `indexing_threshold` in its prelude and restores
+        // it on the final line. If the run stops early, name that exact line so
+        // the operator can finish the restore without opening the file.
+        progress.suspend();
+        output::print_error(&format!(
+            "replay stopped before the restore statement; run: {restore};"
+        ));
+    }
+    let closed = executor.close().await;
+    progress.finish();
+    closed?;
     finish_script(path, ok_count, fail_count, json, quiet)
 }
 

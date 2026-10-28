@@ -28,6 +28,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # `schemars` is only a typify-facing shim in qql-runtime's build.rs:
+    # `TypeSpace::add_ref_types` takes schemars 0.8 `schema::Schema` values,
+    # and typify still depends on `schemars ^0.8.22` even in 0.10.0-alpha.3.
+    # Revisit when typify moves to schemars 1.
+    ignore:
+      - dependency-name: schemars
+        versions: ["1.x"]
     groups:
       cargo:
         applies-to: version-updates
@@ -82,6 +89,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # @types/vscode must never move ahead of the extension's `engines.vscode`:
+    # `vsce package` refuses to build when the types are newer than the
+    # advertised engine ("@types/vscode ^1.140.0 greater than engines.vscode
+    # ^1.138.0"), which broke the editor job. Bump both together when a newer
+    # API is actually needed.
+    ignore:
+      - dependency-name: "@types/vscode"
     groups:
       vscode-ext:
         applies-to: version-updates

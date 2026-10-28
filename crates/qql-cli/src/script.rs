@@ -131,15 +131,60 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
     Ok(statements)
 }
 
+/// How many backend operations a statement plans to run. A `BATCH` statement
+/// is one statement but one operation per member; anything unparsable or
+/// non-batch counts as one, which is what progress totals assume.
+pub fn statement_operation_count(statement: &str) -> usize {
+    match Parser::parse(statement) {
+        Ok(qql_core::ast::Stmt::Batch(batch)) => batch.statements.len(),
+        _ => 1,
+    }
+}
+
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     let data = std::fs::read_to_string(path)
         .map_err(|e| QqlError::execution("QQL-CLI-IO", format!("cannot read file: {e}"), None))?;
     split_statements(&data)
 }
 
+/// The trailing `ALTER COLLECTION ... WITH OPTIMIZERS (indexing_threshold = N)`
+/// of a dump script, if the last statement is one.
+///
+/// `qql dump` appends this line so a replay restores the source threshold.
+/// `qql run` uses it to print the exact recovery statement when a replay stops
+/// before reaching the end.
+pub fn trailing_restore_statement(statements: &[String]) -> Option<&str> {
+    let last = statements.last()?;
+    let Ok(qql_core::ast::Stmt::AlterCollection(alter)) = Parser::parse(last) else {
+        return None;
+    };
+    let threshold = alter
+        .config
+        .as_ref()
+        .and_then(|config| config.optimizers.as_ref())
+        .and_then(|optimizers| optimizers.indexing_threshold);
+    threshold.map(|_| last.as_str())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::split_statements;
+    use super::{split_statements, statement_operation_count, trailing_restore_statement};
+
+    #[test]
+    fn batch_statements_count_their_members() {
+        let batch = "BATCH { QUERY [0.1] FROM docs LIMIT 1; QUERY [0.2] FROM docs LIMIT 1; }";
+        assert_eq!(statement_operation_count(batch), 2);
+        assert_eq!(
+            statement_operation_count("QUERY [0.1] FROM docs LIMIT 1"),
+            1,
+            "a plain statement is one operation"
+        );
+        assert_eq!(
+            statement_operation_count("not qql"),
+            1,
+            "an unparsable statement still counts as one"
+        );
+    }
 
     #[test]
     fn splits_top_level_semicolons_without_breaking_ctes() {
@@ -216,5 +261,29 @@ mod tests {
             statements[1]
         );
         assert!(statements[2].contains("'''line--one'''"));
+    }
+
+    #[test]
+    fn trailing_restore_statement_is_the_last_threshold_alter() {
+        let statements = vec![
+            "CREATE COLLECTION docs (dense VECTOR(2, COSINE))".to_string(),
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 2000000)".to_string(),
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 10000)".to_string(),
+        ];
+        assert_eq!(
+            trailing_restore_statement(&statements),
+            statements.last().map(String::as_str)
+        );
+    }
+
+    #[test]
+    fn trailing_restore_statement_ignores_other_tails() {
+        let show = vec!["SHOW COLLECTIONS".to_string()];
+        assert_eq!(trailing_restore_statement(&show), None);
+
+        let hnsw = vec!["ALTER COLLECTION docs WITH HNSW (m = 32)".to_string()];
+        assert_eq!(trailing_restore_statement(&hnsw), None);
+
+        assert_eq!(trailing_restore_statement(&[]), None);
     }
 }

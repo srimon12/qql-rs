@@ -13,11 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Language 1.8 — UPSERT payload-collision safety**: point literals accept a `WITH PAYLOAD { … }` suffix so payload fields named `id` or `vector` no longer collide with the point envelope; the formatter emits it only when needed and flat point sugar keeps its meaning ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 - **`$payload` batch binding**: whole-point params (`UPSERT INTO c VALUES :rows`) reserve the exact-case `$payload` dictionary to bind colliding payload entries; a literal `$payload` payload key is stored by nesting it inside `$payload` ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
+### 🧰 CLI
+- **`qql run` progress**: script execution reports a single rewritten stderr line with statement and operation counts, including `BATCH` members; `--quiet` and `--json` keep it silent ([#218](https://github.com/srimon12/qql-rs/pull/218)).
+
+### 🛠️ Workspace, Tooling & Verification
+- **`qql convert` variables and curl file bodies**: `--var NAME=value` expands `$NAME`, `${NAME}`, and uppercase `<NAME>` before parsing (`$$` is a literal `$`; missing names fail closed), and `-d` / `--data` / `--data-ascii` / `--data-binary` / `--json` resolve `@file` bodies from the CLI side while `--data-raw` stays literal and `@-` is rejected. Values are validated as single context-safe tokens, so an injected quote, flag, or path segment fails with the new `UnsafeVariableValue` error instead of changing the command; `ConvertError` and `ConvertOptions` are now `#[non_exhaustive]` with `ConvertOptions::new()` / `with_vars` / `with_read_file` ([#219](https://github.com/srimon12/qql-rs/pull/219)).
+
 ### 🐛 Bug Fixes
+- **TTY-gated CLI progress**: `qql run`, `qql dump`, and `qql migrate` only rewrite the progress line when stderr is a terminal — piped output and CI logs stay free of stray `\r`, and `--quiet` / `--json` remain silent ([#218](https://github.com/srimon12/qql-rs/pull/218)).
 - **CLI and convert**: `qql dump`, `qql migrate`, and `qql convert` no longer skip or reject points whose payload contains `id`/`vector` keys — dumped text emits `WITH PAYLOAD`, migrated rows bind through `$payload`, and `--shard-key-field` resolves shard keys from the packed payload ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ### ⚡ Performance & Internal Architecture
 - **Paced migration dispatch**: `qql migrate --max-rps N` caps upsert batch requests per second across all workers, closing the intra-window burst that `--workers` and `--batch-delay-ms` leave open; retries consume tokens and `0` disables the cap ([#216](https://github.com/srimon12/qql-rs/pull/216)).
+- **Fast-bulk `qql dump`**: dumped scripts raise the target optimizer `indexing_threshold` after the schema DDL (`--bulk-threshold-kb`, default `2000000`), replay the `UPSERT` batches with HNSW suppressed, then restore the source threshold (or Qdrant 1.19's 10,000 KB default when the source reports none) as an explicit trailing `ALTER COLLECTION` — so replay indexes once instead of per segment, and an interrupted replay can be recovered with one line. Dumps made before this change replay unchanged ([#217](https://github.com/srimon12/qql-rs/pull/217)).
 - **Smaller debug targets**: `[profile.dev] debug = "line-tables-only"` plus `debug = false` for dependencies shrinks debug artifacts and speeds local linking in the workspace and benchmark crate ([#202](https://github.com/srimon12/qql-rs/pull/202)).
 
 ## [0.5.0] - 2026-10-01

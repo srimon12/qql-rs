@@ -233,11 +233,14 @@ qql migrate docs --to docs_q --quantize scalar --dry-run
 Fast-bulk (on by default) raises `indexing_threshold` to
 `--bulk-threshold-kb` (default `2000000`, about 2 GB) during ingest so the
 target buffers points instead of building small HNSW graphs mid-stream,
-then restores the original threshold (or the Qdrant default `20000`) with
+then restores the original threshold (or Qdrant 1.19's default `10000`) with
 `ALTER COLLECTION` in the optimize phase. A very high threshold pins RAM,
 so lower `--bulk-threshold-kb` on small nodes. `--no-fast-bulk` keeps
 indexing active during ingest for small collections where the restore
 round trip is not worth it.
+
+`qql dump` replays use the same handshake: the dumped script raises the
+threshold before its `UPSERT` batches and restores it on the last line.
 
 Batch sizing follows Qdrant bulk-upload guidance: batches of `64` to
 `256` points with `2` to `4` parallel streams (defaults `--batch-size
@@ -299,6 +302,7 @@ for scripting.
 | `--target-api-key <key>` | API key for the target cluster (`QDRANT_TARGET_API_KEY` also works) |
 | `--batch-size N` | Scroll and upsert batch size (default `128`) |
 | `--workers N` | Concurrent upsert streams (default `2`) |
+| `--max-rps N` | Cap upsert batch requests per second across this process's workers (`0` = unlimited) |
 | `--shard-number N` | Override the target `shard_number` |
 | `--replication-factor N` | Override the target `replication_factor` |
 | `--sharding-method auto\|custom` | Override the sharding method |

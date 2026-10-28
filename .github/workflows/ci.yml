@@ -406,7 +406,14 @@ jobs:
         run: cargo run --locked -p qql-grammar-gen -- check
       - name: Install JS dependencies
         working-directory: crates/${{ matrix.package }}
-        run: npm install --no-package-lock --omit=optional --no-audit --no-fund
+        # Keep optional dependencies: TypeScript 7 ships the compiler as one
+        # platform package per OS/arch under `optionalDependencies`
+        # (@typescript/typescript-<platform>), so `--omit=optional` leaves
+        # `tsc` unable to resolve its binary ("Unable to resolve
+        # @typescript/typescript-linux-x64"). The binding's own optional
+        # platform packages are harmless here: `napi build` writes the local
+        # artifact the loader picks first.
+        run: npm install --no-package-lock --no-audit --no-fund
       - name: Warm embedding model cache (guarded download)
         if: matrix.package == 'nqql-edge'
         working-directory: crates/nqql-edge
