@@ -28,6 +28,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # `schemars` is only a typify-facing shim in qql-runtime's build.rs:
+    # `TypeSpace::add_ref_types` takes schemars 0.8 `schema::Schema` values,
+    # and typify still depends on `schemars ^0.8.22` even in 0.10.0-alpha.3.
+    # Revisit when typify moves to schemars 1.
+    ignore:
+      - dependency-name: schemars
+        versions: ["1.x"]
     groups:
       cargo:
         applies-to: version-updates
