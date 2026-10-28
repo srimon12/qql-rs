@@ -156,8 +156,10 @@ pub async fn handle_run_file(
     }
     let mut ok_count = 0;
     let mut fail_count = 0;
+    let mut last_started = 0;
 
     for (index, statement) in statements.iter().enumerate() {
+        last_started = index;
         let on_err = if stop_on_error {
             qql::executor::OnError::Stop
         } else {
@@ -209,6 +211,17 @@ pub async fn handle_run_file(
                 }
             }
         }
+    }
+    if fail_count > 0
+        && last_started + 1 < statements.len()
+        && let Some(restore) = script::trailing_restore_statement(&statements)
+    {
+        // A dump replay raises `indexing_threshold` in its prelude and restores
+        // it on the final line. If the run stops early, name that exact line so
+        // the operator can finish the restore without opening the file.
+        output::print_error(&format!(
+            "replay stopped before the restore statement; run: {restore};"
+        ));
     }
     executor.close().await?;
     finish_script(path, ok_count, fail_count, json, quiet)

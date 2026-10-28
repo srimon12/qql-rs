@@ -1289,6 +1289,62 @@ fn alter_collection_applies_engine_config() {
     });
 }
 
+/// A `qql dump` replay raises the bulk threshold and restores the source one
+/// on edge; qdrant-edge exposes both optimizer setters, so dump scripts stay
+/// replayable against `--edge`.
+#[test]
+fn dump_bulk_threshold_replay_applies_on_edge() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let dir = temp_dir("dump-bulk-threshold");
+        let _ = std::fs::remove_dir_all(&dir);
+        let backend = EdgeQdrant::new(&dir, false);
+        backend
+            .execute_planned(&plan_one(
+                "CREATE COLLECTION docs (dense VECTOR(3, COSINE)) \
+                 WITH OPTIMIZERS (indexing_threshold = 12345)",
+            ))
+            .await
+            .expect("create collection");
+
+        backend
+            .execute_planned(&plan_one(
+                "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 2000000)",
+            ))
+            .await
+            .expect("dump bulk ALTER must apply on edge");
+        {
+            let shard = backend.open_shard("docs").await.expect("open shard");
+            assert_eq!(
+                shard.config().optimizers().indexing_threshold,
+                Some(2_000_000),
+                "bulk threshold must be visible while replaying"
+            );
+        }
+
+        backend
+            .execute_planned(&plan_one(
+                "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 10000)",
+            ))
+            .await
+            .expect("dump restore ALTER must apply on edge");
+        {
+            let shard = backend.open_shard("docs").await.expect("open shard");
+            assert_eq!(
+                shard.config().optimizers().indexing_threshold,
+                Some(10_000),
+                "restore must return the source threshold"
+            );
+        }
+
+        backend.close().await.expect("close edge backend");
+        let _ = std::fs::remove_dir_all(dir);
+    });
+}
+
 /// Per-vector `ALTER COLLECTION`: HNSW patches field-merge over the
 /// vector's effective config and persist across reopen; every other
 /// per-vector field and all sparse diffs reject per field, only when

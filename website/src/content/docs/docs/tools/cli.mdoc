@@ -294,7 +294,7 @@ qql> \q
 
 Data movement utilities for collections.
 
-- `qql dump <collection> <output.qql>`: Exports collection schema and points into a portable `.qql` script (`--batch-size N`, default 100). See [Dump and restore](/docs/operations/backup-restore/).
+- `qql dump <collection> <output.qql>`: Exports collection schema and points into a portable `.qql` script (`--batch-size N`, default 100; `--bulk-threshold-kb N`, default 2000000). See [Dump and restore](/docs/operations/backup-restore/).
 - `qql migrate <collection>`: Copies schema and points directly to another collection or remote cluster.
 
 {% terminal title="Preview, run, and resume a migration" %}
@@ -308,6 +308,7 @@ qql migrate docs --to docs_copy --resume
 | `--dry-run` | Print the create plan and exit without writing |
 | `--recreate` | Drop and recreate the target collection |
 | `--workers N`, `--batch-size N` | Parallel upsert window |
+| `--max-rps N` | Cap upsert batch requests per second across this process's workers (`0` = unlimited) |
 | `--where "<filter>"` | Migrate only matching points |
 | `--shard-key-field <field>` | Route each point by its payload value |
 | `--resume`, `--restart`, `--cutover <alias>` | Resume recovery or point an alias at the target |

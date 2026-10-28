@@ -1,7 +1,8 @@
 use qql::backend::{
     CollectionInfo, CollectionParamsSpec, CollectionSchema, PayloadIndexSpec, VectorSpec,
 };
-use qql::executor::{BackendResponse, ExecData};
+use qql::executor::{BackendResponse, ExecData, Executor};
+use qql_core::ast::ShardKey;
 use qql_plan::semantic::PlanPointId;
 use serde_json::json;
 
@@ -9,6 +10,10 @@ use super::escape::*;
 use super::point::*;
 use super::quant::*;
 use super::*;
+use crate::bulk::{
+    DEFAULT_BULK_INDEXING_THRESHOLD, DEFAULT_INDEXING_THRESHOLD, indexing_threshold_statement,
+    restore_optimizers_statement,
+};
 
 fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> CollectionInfo {
     CollectionInfo {
@@ -948,4 +953,136 @@ fn dump_emits_sparse_full_config_and_sharding_method() {
     assert!(stmt.contains("shard_number = 3"));
     qql_core::parser::Parser::parse(&format!("{};", stmt))
         .expect("dumped sparse CREATE should re-parse");
+}
+
+#[test]
+fn bulk_and_restore_threshold_statements() {
+    let bulk = indexing_threshold_statement("docs", DEFAULT_BULK_INDEXING_THRESHOLD);
+    assert_eq!(
+        bulk,
+        format!(
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = {DEFAULT_BULK_INDEXING_THRESHOLD})"
+        )
+    );
+
+    let restore = restore_optimizers_statement("docs", Some(12_345));
+    assert!(
+        restore.contains("indexing_threshold = 12345"),
+        "restore must keep the source threshold: {restore}"
+    );
+
+    let defaulted = restore_optimizers_statement("docs", None);
+    assert!(
+        defaulted.contains(&format!(
+            "indexing_threshold = {DEFAULT_INDEXING_THRESHOLD}"
+        )),
+        "missing source threshold falls back to Qdrant's default: {defaulted}"
+    );
+
+    for stmt in [&bulk, &restore, &defaulted] {
+        qql_core::parser::Parser::parse(&format!("{stmt};"))
+            .unwrap_or_else(|e| panic!("'{stmt}' must re-parse: {e}"));
+    }
+}
+
+#[test]
+fn prelude_orders_create_indexes_shard_keys_then_bulk_alter() {
+    let mut info = info_with_vectors(
+        vec![VectorSpec {
+            name: None,
+            size: 4,
+            distance: "Cosine".into(),
+            hnsw: None,
+            quantization: None,
+            multivector: None,
+            on_disk: None,
+            datatype: None,
+            memory: None,
+        }],
+        vec![],
+    );
+    info.schema.payload_indexes = vec![PayloadIndexSpec {
+        field: "title".into(),
+        data_type: "text".into(),
+        params: serde_json::Map::new(),
+        is_tenant: None,
+    }];
+    let shard_keys = vec![ShardKey::Keyword("acme".into())];
+
+    let prelude = generate_prelude("docs", &info, &shard_keys, DEFAULT_BULK_INDEXING_THRESHOLD);
+
+    let create = prelude.find("CREATE COLLECTION docs").expect("CREATE");
+    let index = prelude.find("CREATE INDEX").expect("CREATE INDEX");
+    let shard = prelude.find("CREATE SHARD KEY").expect("CREATE SHARD KEY");
+    let bulk = prelude.find("ALTER COLLECTION docs").expect("bulk ALTER");
+    assert!(create < index, "CREATE must precede indexes");
+    assert!(index < shard, "indexes must precede shard keys");
+    assert!(shard < bulk, "shard keys must precede the bulk ALTER");
+    assert!(prelude[bulk..].contains(&format!(
+        "indexing_threshold = {DEFAULT_BULK_INDEXING_THRESHOLD}"
+    )));
+
+    let statements = crate::script::split_statements(&prelude).expect("prelude splits");
+    assert_eq!(statements.len(), 4, "prelude: {prelude}");
+    for stmt in &statements {
+        qql_core::parser::Parser::parse(stmt)
+            .unwrap_or_else(|e| panic!("prelude statement must parse: {e}; {stmt}"));
+    }
+}
+
+fn unique_dump_path(tag: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    std::env::temp_dir().join(format!("qql-dump-{tag}-{}-{nanos}.qql", std::process::id()))
+}
+
+#[tokio::test]
+async fn dump_rejects_zero_bulk_threshold_before_backend() {
+    let executor = Executor::new(Box::new(scroll_fake::FakeScrollOps::new(Vec::new())), None);
+    let output = unique_dump_path("zero-bulk-threshold");
+    let err = dump_collection(&executor, "docs", output.to_str().unwrap(), 10, 0, None)
+        .await
+        .expect_err("zero bulk threshold must be rejected");
+    assert!(
+        err.to_string().contains("bulk-threshold-kb must be >= 1"),
+        "unexpected error: {err}"
+    );
+    assert!(!output.exists(), "validation must fail before writing");
+    assert!(!output.with_extension("qql.tmp").exists());
+}
+
+#[tokio::test]
+async fn empty_dump_still_restores_indexing_threshold() {
+    let executor = Executor::new(Box::new(scroll_fake::FakeScrollOps::new(Vec::new())), None);
+    let output = unique_dump_path("empty-restore");
+    let stats = dump_collection(
+        &executor,
+        "docs",
+        output.to_str().unwrap(),
+        10,
+        DEFAULT_BULK_INDEXING_THRESHOLD,
+        None,
+    )
+    .await
+    .expect("empty collection dumps");
+    assert_eq!(stats.written, 0);
+
+    let text = std::fs::read_to_string(&output).expect("dump file");
+    let _ = std::fs::remove_file(&output);
+    let statements = crate::script::split_statements(&text).expect("dump splits");
+    assert_eq!(statements.len(), 3, "no upserts expected: {text}");
+    assert!(
+        statements[1].contains(&format!(
+            "indexing_threshold = {DEFAULT_BULK_INDEXING_THRESHOLD}"
+        )),
+        "bulk ALTER missing: {text}"
+    );
+    assert!(
+        statements[2].contains(&format!(
+            "indexing_threshold = {DEFAULT_INDEXING_THRESHOLD}"
+        )),
+        "restore ALTER must be written even with zero points: {text}"
+    );
 }

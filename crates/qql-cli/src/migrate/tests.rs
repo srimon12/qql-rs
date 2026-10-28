@@ -6,8 +6,7 @@ use serde_json::json;
 
 use super::checkpoint::{self, Checkpoint, Phase};
 use super::options::{
-    DEFAULT_BULK_INDEXING_THRESHOLD, DEFAULT_INDEXING_THRESHOLD, MigrateOptions, MissingShardKey,
-    QuantizeKind, QuantizeSpec,
+    DEFAULT_BULK_INDEXING_THRESHOLD, MigrateOptions, MissingShardKey, QuantizeKind, QuantizeSpec,
 };
 use super::pipeline::split_by_shard;
 use super::schema::{
@@ -15,6 +14,7 @@ use super::schema::{
     suppress_indexing,
 };
 use super::validate_endpoints;
+use crate::bulk::DEFAULT_INDEXING_THRESHOLD;
 use crate::dump::generate_create_statement;
 
 fn sample_info() -> CollectionInfo {

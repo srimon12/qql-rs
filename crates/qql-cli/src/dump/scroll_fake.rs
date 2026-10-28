@@ -1,14 +1,16 @@
-//! Test-only in-memory `QdrantOps` for scroll pagination.
+//! Test-only in-memory `QdrantOps` for scroll pagination and empty dumps.
 //!
 //! Implements Qdrant's inclusive-offset scroll semantics over a fixed point
 //! list: `offset = Some(id)` starts at `id` (not after it), which is exactly
-//! the behavior the `ScrollPages` repeat-drop must tolerate.
+//! the behavior the `ScrollPages` repeat-drop must tolerate. Collection
+//! metadata answers `exists` plus a default schema so `dump_collection` can run
+//! against an empty collection.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use qql::client::{AliasAction, QdrantOps};
+use qql::client::{AliasAction, CollectionInfo, QdrantOps};
 use qql::executor::{BackendResponse, ExecData, SearchHit};
 use qql_core::error::QqlError;
 use qql_plan::semantic::PlanPointId;
@@ -47,14 +49,14 @@ impl QdrantOps for FakeScrollOps {
     }
 
     async fn collection_exists(&self, _name: &str) -> Result<bool, QqlError> {
-        unimplemented!("FakeScrollOps only implements scroll")
+        Ok(true)
     }
 
     async fn get_collection_info(
         &self,
         _name: &str,
     ) -> Result<qql::client::CollectionInfo, QqlError> {
-        unimplemented!("FakeScrollOps only implements scroll")
+        Ok(CollectionInfo::default())
     }
 
     async fn create_collection(
@@ -94,8 +96,14 @@ impl QdrantOps for FakeScrollOps {
     }
 
     async fn execute_planned(&self, op: &PlannedOperation) -> Result<BackendResponse, QqlError> {
+        if matches!(op, PlannedOperation::ListShardKeys { .. }) {
+            return Ok(BackendResponse {
+                data: ExecData::ShardKeys(Vec::new()),
+                telemetry: None,
+            });
+        }
         let PlannedOperation::Scroll { request, .. } = op else {
-            unimplemented!("FakeScrollOps only implements scroll")
+            unimplemented!("FakeScrollOps only implements scroll, shard keys, and metadata")
         };
         let limit = request.limit.unwrap_or(10);
         self.limits.lock().expect("limits lock").push(limit);

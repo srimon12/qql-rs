@@ -18,10 +18,10 @@ use serde_json::Value;
 
 use super::checkpoint::Checkpoint;
 use super::discover::merge_shard_key_statements;
-use super::options::{
-    DEFAULT_INDEXING_THRESHOLD, MigrateOptions, MigratePlan, QuantizeKind, QuantizeSpec,
-};
+use super::options::{MigrateOptions, MigratePlan, QuantizeKind, QuantizeSpec};
 use crate::dump::{format_ident, generate_create_statement, generate_index_statements};
+
+pub use crate::bulk::{restore_optimizers_statement, suppress_indexing};
 
 /// Standalone Qdrant rejects `CreateShardKey` but the RPC can stall the ingest
 /// pipeline; fail closed well before that.
@@ -49,15 +49,6 @@ pub fn apply_overrides(info: &mut CollectionInfo, opts: &MigrateOptions) {
             vector.quantization = Some(q_value.clone());
         }
     }
-}
-
-/// Raise `indexing_threshold` so HNSW is not built concurrently with ingest.
-/// Returns the original threshold (if any) for later restore.
-pub fn suppress_indexing(info: &mut CollectionInfo, threshold_kb: u64) -> Option<u64> {
-    let optimizers = info.schema.optimizers.get_or_insert_with(Default::default);
-    let original = optimizers.indexing_threshold;
-    optimizers.indexing_threshold = Some(threshold_kb);
-    original
 }
 
 /// Typed quantization config for a migrate `--quantize` override.
@@ -107,15 +98,6 @@ fn turbo_bits_label(bits: &str) -> String {
         "4" => "bits4".into(),
         other => format!("bits{other}"),
     }
-}
-
-/// `ALTER COLLECTION … WITH OPTIMIZERS (indexing_threshold = N)`.
-pub fn restore_optimizers_statement(collection: &str, original: Option<u64>) -> String {
-    format!(
-        "ALTER COLLECTION {} WITH OPTIMIZERS (indexing_threshold = {})",
-        format_ident(collection),
-        original.unwrap_or(DEFAULT_INDEXING_THRESHOLD)
-    )
 }
 
 /// Build the declarative target plan from source info + overrides.

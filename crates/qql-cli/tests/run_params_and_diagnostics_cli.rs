@@ -5,14 +5,21 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_json(tag: &str, contents: &str) -> PathBuf {
+    temp_file(&format!("{tag}.json"), contents)
+}
+
+fn temp_file(name: &str, contents: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("qql-params-it-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "qql-params-it-{name}-{}-{nanos}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
-    let path = dir.join(format!("{tag}.json"));
-    std::fs::write(&path, contents).expect("write json fixture");
+    let path = dir.join(name);
+    std::fs::write(&path, contents).expect("write fixture");
     path
 }
 
@@ -161,6 +168,36 @@ fn explain_with_high_dimensional_vector_params_file() {
     assert!(
         stdout.contains("Query Nearest") || stdout.contains("docs"),
         "expected plan output, got: {stdout}"
+    );
+}
+
+#[test]
+fn stopped_replay_prints_the_trailing_restore_statement() {
+    let script = temp_file(
+        "restore.qql",
+        concat!(
+            "CREATE COLLECTION docs (dense VECTOR(2, COSINE));\n",
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 2000000);\n",
+            "ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 10000);\n",
+        ),
+    );
+    let out = qql(&[
+        "--url",
+        "http://127.0.0.1:1",
+        "run",
+        "--stop-on-error",
+        script.to_str().expect("utf8 path"),
+    ]);
+
+    assert!(!out.status.success(), "stopped replay must exit non-zero");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("replay stopped before the restore statement"),
+        "expected the recovery hint, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("ALTER COLLECTION docs WITH OPTIMIZERS (indexing_threshold = 10000)"),
+        "the hint must name the exact restore statement, got: {stderr}"
     );
 }
 
