@@ -15,8 +15,12 @@
 //! 5. **`curl` command** — a pasted invocation (`-X`, `-d`, `--header`, …,
 //!    multi-line continuations, several commands). Shell-dynamic constructs
 //!    fail closed unless resolved up front: [`ConvertOptions::vars`] expands
-//!    placeholders before tokenizing, and [`ConvertOptions::read_file`]
-//!    resolves `@file` bodies. Pipes and command substitution always fail;
+//!    `$NAME` / `${NAME}` / uppercase `<NAME>` before tokenizing (`$$` is a
+//!    literal `$`), and [`ConvertOptions::read_file`] resolves `@file` bodies.
+//!    Values are validated as context-safe tokens, so quotes, whitespace, `/`,
+//!    `$`, and shell metacharacters fail with
+//!    [`ConvertError::UnsafeVariableValue`] rather than changing the command.
+//!    Pipes and command substitution always fail.
 //!
 //! Markdown fences around any of the above are stripped as paste noise.
 //!
@@ -55,9 +59,10 @@ pub(crate) type ReadFile<'a> = Option<&'a dyn Fn(&str) -> Result<String, String>
 /// in-memory map, and a caller that omits it keeps the fail-closed
 /// `--data @file` error.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct ConvertOptions<'a> {
-    /// Values for `$NAME`, `${NAME}`, and `<NAME>`, expanded before parsing.
-    /// The last entry for a name wins.
+    /// Values for `$NAME`, `${NAME}`, and uppercase `<NAME>`, expanded before
+    /// parsing. The last entry for a name wins.
     pub vars: &'a [(String, String)],
     /// Resolves a curl `@file` body. Its error string is reported alongside
     /// the path that failed.
@@ -65,10 +70,36 @@ pub struct ConvertOptions<'a> {
     pub read_file: Option<&'a dyn Fn(&str) -> Result<String, String>>,
 }
 
+impl<'a> ConvertOptions<'a> {
+    /// Empty options: no variables and no file resolver.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the `$NAME` / `${NAME}` / uppercase `<NAME>` values. The last entry
+    /// for a name wins.
+    #[must_use]
+    pub fn with_vars(mut self, vars: &'a [(String, String)]) -> Self {
+        self.vars = vars;
+        self
+    }
+
+    /// Set the curl `@file` resolver.
+    #[must_use]
+    #[allow(clippy::type_complexity)]
+    pub fn with_read_file(mut self, read_file: &'a dyn Fn(&str) -> Result<String, String>) -> Self {
+        self.read_file = Some(read_file);
+        self
+    }
+}
+
 /// Typed conversion failure.
 ///
-/// Returned by [`convert`] and [`convert_stmts`].
+/// Returned by [`convert`], [`convert_with`], [`convert_stmts`], and
+/// [`convert_stmts_with`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConvertError {
     /// The input is not valid JSON. Holds the underlying parse message.
     InvalidJson(String),
@@ -99,11 +130,19 @@ pub enum ConvertError {
         /// The conversion error raised for that line.
         source: Box<ConvertError>,
     },
-    /// `$NAME` / `${NAME}` placeholders had no `--var` value. Holds every
-    /// unresolved name, deduped and sorted.
+    /// `$NAME` / `${NAME}` / uppercase `<NAME>` placeholders had no `--var`
+    /// value. Holds every unresolved name, deduped and sorted.
     UnresolvedVariables {
         /// Names that were referenced but never supplied.
         names: Vec<String>,
+    },
+    /// A `--var` value would change the meaning of the curl command or JSON
+    /// body if inserted raw.
+    UnsafeVariableValue {
+        /// Variable name as passed to `--var`.
+        name: String,
+        /// Why the value is rejected.
+        reason: String,
     },
 }
 
@@ -139,6 +178,9 @@ impl fmt::Display for ConvertError {
                 "unresolved variables: {} (pass --var NAME=value)",
                 names.join(", ")
             ),
+            Self::UnsafeVariableValue { name, reason } => {
+                write!(f, "--var {name}: {reason}")
+            }
         }
     }
 }

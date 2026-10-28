@@ -24,25 +24,11 @@ fn convert_files(input: &str, files: &[(&str, &str)]) -> Result<Vec<String>, Con
             .map(|(_, body)| (*body).to_string())
             .ok_or_else(|| format!("{path}: no such file"))
     };
-    convert_with(
-        input,
-        None,
-        &ConvertOptions {
-            vars: &[],
-            read_file: Some(&read),
-        },
-    )
+    convert_with(input, None, &ConvertOptions::new().with_read_file(&read))
 }
 
 fn convert_vars(input: &str, vars: &[(String, String)]) -> Result<Vec<String>, ConvertError> {
-    convert_with(
-        input,
-        None,
-        &ConvertOptions {
-            vars,
-            read_file: None,
-        },
-    )
+    convert_with(input, None, &ConvertOptions::new().with_vars(vars))
 }
 
 // ── HTTP snippet: `METHOD path` line + JSON body ────────────────────────────
@@ -189,15 +175,8 @@ fn curl_data_raw_keeps_at_literal() {
     let read = |_: &str| -> Result<String, String> { panic!("--data-raw must never read a file") };
     let input =
         "curl -X POST http://localhost:6333/collections/docs/points/count --data-raw @literal";
-    let error = convert_with(
-        input,
-        None,
-        &ConvertOptions {
-            vars: &[],
-            read_file: Some(&read),
-        },
-    )
-    .expect_err("@literal is not JSON");
+    let error = convert_with(input, None, &ConvertOptions::new().with_read_file(&read))
+        .expect_err("@literal is not JSON");
     assert!(
         matches!(error, ConvertError::InvalidJson(_)),
         "got {error:?}"
@@ -289,12 +268,104 @@ fn non_identifier_angle_placeholder_keeps_the_collection_error() {
 }
 
 #[test]
-fn var_value_with_quote_breaks_json_instead_of_emitting() {
+fn unsafe_var_value_is_rejected_before_parsing() {
     let input = "curl -X POST http://localhost:6333/collections/docs/points/count -d '{\"filter\": {\"must\": [{\"key\": \"tenant\", \"match\": {\"value\": \"$TENANT\"}}]}}'";
     let vars = var_pairs(&[("TENANT", "ac\"me")]);
-    let error = convert_vars(input, &vars).expect_err("broken JSON must fail");
+    let error = convert_vars(input, &vars).expect_err("quote must fail");
+    match &error {
+        ConvertError::UnsafeVariableValue { name, reason } => {
+            assert_eq!(name, "TENANT");
+            assert!(reason.contains('"'), "got {reason}");
+        }
+        other => panic!("expected UnsafeVariableValue, got {other:?}"),
+    }
     assert!(
-        matches!(error, ConvertError::InvalidJson(_)),
+        error.to_string().starts_with("--var TENANT:"),
+        "got {error}"
+    );
+}
+
+#[test]
+fn var_value_cannot_inject_a_second_filter() {
+    let input = "curl -X POST http://localhost:6333/collections/docs/points/count -d '{\"filter\": {\"must\": [{\"key\": \"tenant\", \"match\": {\"value\": \"$TENANT\"}}]}}'";
+    let vars = var_pairs(&[(
+        "TENANT",
+        "acme\"}},{\"key\":\"role\",\"match\":{\"value\":\"admin",
+    )]);
+    let error = convert_vars(input, &vars).expect_err("injection must fail");
+    assert!(
+        matches!(error, ConvertError::UnsafeVariableValue { ref name, .. } if name == "TENANT"),
+        "got {error:?}"
+    );
+}
+
+#[test]
+fn var_value_cannot_inject_curl_flags_or_paths() {
+    let input =
+        "curl -X POST http://localhost:6333/collections/$COLL/points/count -d '{\"exact\": true}'";
+    let vars = var_pairs(&[("COLL", "docs -d @/etc/hostname")]);
+    let error = convert_vars(input, &vars).expect_err("flags must fail");
+    assert!(
+        matches!(error, ConvertError::UnsafeVariableValue { ref name, .. } if name == "COLL"),
+        "got {error:?}"
+    );
+}
+
+#[test]
+fn var_value_cannot_start_a_flag_or_at() {
+    for value in ["@body.json", "-s"] {
+        let vars = var_pairs(&[("V", value)]);
+        let error = convert_vars(
+            "curl http://localhost:6333/collections/docs/points/count -d $V",
+            &vars,
+        )
+        .expect_err("leading flag/file marker must fail");
+        assert!(
+            matches!(error, ConvertError::UnsafeVariableValue { ref name, .. } if name == "V"),
+            "got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn var_value_cannot_be_empty_or_a_dot_segment() {
+    for value in ["", ".."] {
+        let vars = var_pairs(&[("V", value)]);
+        let error = convert_vars(
+            "curl http://localhost:6333/collections/$V/points/count -d '{\"exact\": true}'",
+            &vars,
+        )
+        .expect_err("empty/dot value must fail");
+        assert!(
+            matches!(error, ConvertError::UnsafeVariableValue { ref name, .. } if name == "V"),
+            "got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn html_angle_tag_passes_through_unresolved() {
+    let input = "curl -X PUT http://localhost:6333/collections/docs/points -d '{\"points\":[{\"id\":1,\"vector\":[0.1,0.2],\"payload\":{\"html\":\"<b>x</b>\"}}]}'";
+    let vars = var_pairs(&[("OTHER", "unused")]);
+    let statements = convert_vars(input, &vars).expect("<b> is not a variable");
+    assert!(statements[0].contains("<b>x</b>"), "got {statements:?}");
+}
+
+#[test]
+fn double_dollar_escapes_a_literal_dollar() {
+    let input = "curl -X PUT http://localhost:6333/collections/docs/points -d '{\"points\":[{\"id\":1,\"vector\":[0.1,0.2],\"payload\":{\"price\":\"costs $$USD\"}}]}'";
+    let vars = var_pairs(&[("OTHER", "unused")]);
+    let statements = convert_vars(input, &vars).expect("$$ escapes the dollar");
+    assert!(statements[0].contains("costs $USD"), "got {statements:?}");
+}
+
+#[test]
+fn unknown_dollar_variable_still_fails_closed() {
+    let input = "curl -X PUT http://localhost:6333/collections/docs/points -d '{\"points\":[{\"id\":1,\"vector\":[0.1,0.2],\"payload\":{\"price\":\"costs $USD\"}}]}'";
+    let vars = var_pairs(&[("OTHER", "unused")]);
+    let error = convert_vars(input, &vars).expect_err("$USD must fail without --var");
+    assert!(
+        matches!(error, ConvertError::UnresolvedVariables { ref names } if names == &["USD".to_string()]),
         "got {error:?}"
     );
 }

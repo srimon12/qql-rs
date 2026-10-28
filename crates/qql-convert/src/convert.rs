@@ -116,20 +116,28 @@ fn convert_jsonl(
     Ok(statements)
 }
 
-/// Expand `$NAME`, `${NAME}`, and `<NAME>` before anything is classified.
+/// Expand `$NAME`, `${NAME}`, and uppercase `<NAME>` before anything is
+/// classified. `$$` emits a literal `$`.
 ///
 /// The tokenizer is the wrong place for this: it rejects `$VAR` inside double
 /// quotes, so a substitution pass after tokenizing would never see the common
 /// `-H "Authorization: $TOKEN"` shape. Text already pasted into JSON gets the
 /// same treatment. Only provided names expand; `$NAME`, `${NAME}`, and
-/// identifier-shaped `<NAME>` references with no value fail closed. Any other
-/// `<…>` text is left for the existing placeholder handling downstream.
+/// uppercase `<NAME>` references with no value fail closed. Any other `<…>`
+/// text (including HTML tags such as `<b>`) is left for the existing
+/// placeholder handling downstream. Values are validated once as context-safe
+/// tokens before insertion, so a quote, whitespace, `/`, or shell metacharacter
+/// fails with [`ConvertError::UnsafeVariableValue`] instead of changing the
+/// parsed command.
 fn expand_vars<'a>(
     input: &'a str,
     vars: &[(String, String)],
 ) -> Result<Cow<'a, str>, ConvertError> {
     if vars.is_empty() {
         return Ok(Cow::Borrowed(input));
+    }
+    for (name, value) in vars {
+        validate_var_value(name, value)?;
     }
     let lookup = |name: &str| {
         vars.iter()
@@ -144,6 +152,11 @@ fn expand_vars<'a>(
         out.push_str(&rest[..offset]);
         let tail = &rest[offset..];
         if let Some(after) = tail.strip_prefix('$') {
+            if let Some(escaped) = after.strip_prefix('$') {
+                out.push('$');
+                rest = escaped;
+                continue;
+            }
             let (name, consumed) = variable_ref(after);
             match name {
                 Some(name) => match lookup(name) {
@@ -166,7 +179,7 @@ fn expand_vars<'a>(
             match tail[1..].find('>') {
                 Some(end) => {
                     let name = &tail[1..1 + end];
-                    if !is_var_name(name) {
+                    if !is_angle_var_name(name) {
                         out.push('<');
                         rest = &tail[1..];
                         continue;
@@ -229,6 +242,45 @@ fn is_var_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Angle placeholders are uppercase-only so HTML tags such as `<b>` survive.
+fn is_angle_var_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_uppercase() || c == '_')
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Values are inserted raw, before shell tokenizing and JSON parsing, so they
+/// must stay within one shell/URL/JSON token. Quotes, whitespace, `/`, `$`,
+/// `?`, `#`, `&`, and control characters would change the command's meaning.
+fn validate_var_value(name: &str, value: &str) -> Result<(), ConvertError> {
+    if value.is_empty() {
+        return Err(unsafe_value(name, "is empty"));
+    }
+    if value.starts_with('-') || value.starts_with('@') {
+        return Err(unsafe_value(name, "must not start with '-' or '@'"));
+    }
+    if value.chars().all(|c| c == '.') {
+        return Err(unsafe_value(name, "is a dot path segment"));
+    }
+    for c in value.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '+' | '=' | '-' | '@') {
+            continue;
+        }
+        return Err(unsafe_value(
+            name,
+            format!("contains {c:?}; --var values are inserted raw"),
+        ));
+    }
+    Ok(())
+}
+
+fn unsafe_value(name: &str, reason: impl Into<String>) -> ConvertError {
+    ConvertError::UnsafeVariableValue {
+        name: name.to_string(),
+        reason: reason.into(),
+    }
 }
 
 fn convert_value(raw: &Value, collection: Option<&str>) -> Result<Vec<Stmt>, ConvertError> {

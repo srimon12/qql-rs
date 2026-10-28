@@ -145,6 +145,7 @@ qql explain --json "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 1"
 Convert Qdrant REST JSON payloads to idiomatic QQL statements.
 
 - `qql convert [file.json]`: Reads JSON from a file or stdin and renders canonical QQL. Use `--collection <name>` for bare request bodies.
+- **curl paste**: `--var NAME=value` (repeatable) expands `$NAME`, `${NAME}`, and uppercase `<NAME>`; `$$` is a literal `$`; `-d` / `--data*` / `--json` resolve `@file` bodies (regular files, 64 MiB cap, working-directory paths). Unsafe values fail with `UnsafeVariableValue`.
 - `qql record`: Transparent proxy that records live application traffic to JSONL and produces converted QQL scripts.
 
 {% terminal title="Convert REST JSON" %}

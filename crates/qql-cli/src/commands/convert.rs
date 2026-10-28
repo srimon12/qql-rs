@@ -1,5 +1,24 @@
 //! `qql convert` and `qql fmt`.
 
+/// Maximum curl `@file` body size read by the CLI (64 MiB).
+const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read a curl `@file` body, rejecting directories, pipes, devices, and
+/// oversized files. Paths resolve against the process working directory.
+fn read_body(body_path: &str) -> Result<String, String> {
+    let meta = std::fs::metadata(body_path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("not a regular file".to_string());
+    }
+    if meta.len() > MAX_BODY_BYTES {
+        return Err(format!(
+            "file is too large ({} bytes, limit {MAX_BODY_BYTES})",
+            meta.len()
+        ));
+    }
+    std::fs::read_to_string(body_path).map_err(|e| e.to_string())
+}
+
 /// Parse repeatable `--var KEY=VALUE` flags. A later value for the same key
 /// replaces an earlier one.
 pub(crate) fn parse_convert_vars(
@@ -40,13 +59,10 @@ pub fn handle_convert(
         return Err("no input provided".into());
     }
 
-    let read_file = |body_path: &str| {
-        std::fs::read_to_string(body_path).map_err(|e| format!("{body_path}: {e}"))
-    };
-    let options = qql_convert::ConvertOptions {
-        vars,
-        read_file: Some(&read_file),
-    };
+    let read_file = read_body;
+    let options = qql_convert::ConvertOptions::new()
+        .with_vars(vars)
+        .with_read_file(&read_file);
     let statements = qql_convert::convert_with(&input, collection, &options)?;
 
     for stmt in &statements {
