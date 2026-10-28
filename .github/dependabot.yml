@@ -82,6 +82,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # @types/vscode must never move ahead of the extension's `engines.vscode`:
+    # `vsce package` refuses to build when the types are newer than the
+    # advertised engine ("@types/vscode ^1.140.0 greater than engines.vscode
+    # ^1.138.0"), which broke the editor job. Bump both together when a newer
+    # API is actually needed.
+    ignore:
+      - dependency-name: "@types/vscode"
     groups:
       vscode-ext:
         applies-to: version-updates
