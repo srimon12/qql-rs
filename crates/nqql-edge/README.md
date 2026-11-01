@@ -84,6 +84,19 @@ options — `url`, `apiKey`/`api_key`, `useGrpc`/`use_grpc`,
 `routeAffinity`/`route_affinity`, `embedder` — are rejected with a `TypeError`
 pointing at `@veristamp/nqql` instead of being silently ignored.
 
+## Qdrant 1.20 and BM25
+
+qdrant-edge **0.8** has none of the Qdrant 1.20 server features: server-side
+BM25 on text indexes, the `code` tokenizer, `nested` indexes, `substring`
+match, `turbo8` / `turbo16`, or `bits8`. When the QQL syntax for them lands,
+edge will reject them with explicit `QQL-EDGE-UNSUPPORTED-*` errors and never
+fall back silently.
+
+BM25 on edge is **client sparse BM25**: a `qdrant/bm25`-compatible local
+encoder writing to a sparse vector (`USING sparse`, `AS SPARSE`), tuned by
+`httpExecutor(…, {bm25K1, bm25B, bm25AvgLen, …})`. That is the supported lexical path here. See the
+[BM25 design note](https://github.com/srimon12/qql-rs/blob/main/docs/design/bm25-server-side-1.20.md).
+
 ## Docs
 
 - [qql-edge](https://github.com/srimon12/qql-rs/blob/main/crates/qql-edge/README.md) · [Gaps](https://github.com/srimon12/qql-rs/blob/main/skills/qql-skill/references/qql-gaps.md) · [Syntax](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)

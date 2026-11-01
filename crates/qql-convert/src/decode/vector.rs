@@ -5,6 +5,7 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::pending;
 use crate::json::{self, child, index, invalid, type_name};
 use qql_core::ast::{LookupSpec, PointId, PointVectors, QueryInput, ShardKey, VectorValue};
 
@@ -226,6 +227,15 @@ pub(crate) fn query_input(value: &Value, path: &str) -> Result<QueryInput, Conve
                 return Ok(QueryInput::Vector(sparse(value, path)?));
             }
             if obj.contains_key("text") {
+                // Qdrant 1.20 `TextQuery` (`{"text": "…"}` or
+                // `{"text": {"query", "scoring"}}`) shares the `text` key with
+                // `Document`, which always carries `model`.
+                if !obj.contains_key("model") {
+                    return Err(pending::pending(
+                        path,
+                        "BM25 `text` query over a text index",
+                    ));
+                }
                 return document(obj, path);
             }
             if obj.contains_key("image") {

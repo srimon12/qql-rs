@@ -113,6 +113,23 @@ re-parse.
 | `InvalidField` | Recognized body with an invalid/unrepresentable field (holds `path` + reason) |
 | `InvalidLine` | A JSONL line failed (holds the 1-based line number + source error) |
 
+## Qdrant 1.20 shapes
+
+Request shapes that are new in Qdrant 1.20 and that QQL cannot spell yet fail
+closed with `ConvertError::InvalidField`. The `detail` starts with
+`Qdrant 1.20`, and `path` points at the exact field:
+
+- BM25 `text` queries (`{"text": "…"}` / `{"text": {"query", "scoring"}}`, top level or in `prefetch`)
+- text-index `scoring` (BM25), `nested` payload indexes, the `code` tokenizer
+- `match.substring`
+- `turbo8` / `turbo16` datatypes, TurboQuant `bits8`
+- `id_tracker` on create or update
+
+An inference `Document` (`{"text": …, "model": …}`) still converts as before.
+These arms switch to real mappings when the core grammar lands. The planned
+REST → QQL table is in
+[`docs/design/bm25-server-side-1.20.md`](https://github.com/srimon12/qql-rs/blob/main/docs/design/bm25-server-side-1.20.md#qql-convert-mappings-activate-with-the-grammar).
+
 ## Contract sources
 
 * `crates/qql-runtime/openapi.json` — request schemas per path (the input

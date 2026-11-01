@@ -176,7 +176,9 @@ export interface HttpEmbedderOptions {
   rerankModel?: string;
   rerank_model?: string;
   /** Client-side BM25 `k1` for the local sparse document encoder (default 1.2;
-   * write-path only — does not change query weights or server-side inference) */
+   * write-path only — does not change query weights or server-side inference).
+   * Client sparse path only: never applies to Qdrant 1.20 server-side BM25 on
+   * a `scoring = 'bm25'` text index (`QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)`). */
   bm25K1?: number;
   bm25_k1?: number;
   /** Client-side BM25 `b` length normalization in [0, 1] (default 0.75) */

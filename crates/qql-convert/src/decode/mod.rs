@@ -12,6 +12,7 @@ pub(crate) mod modes;
 pub(crate) mod mutation;
 pub(crate) mod params;
 pub(crate) mod payload;
+pub(crate) mod pending;
 pub(crate) mod points;
 pub(crate) mod predicates;
 pub(crate) mod prefetch;

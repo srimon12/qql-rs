@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::ConvertError;
 use crate::decode::DecodeCtx;
+use crate::decode::pending;
 use crate::json::{self, child, invalid, type_name};
 use qql_core::ast::{CreateIndexStmt, Value as AstValue};
 
@@ -106,6 +107,14 @@ fn index_options(schema: &json::Obj, path: &str) -> Result<Vec<(String, AstValue
             "stopwords" => {
                 options.push((key.clone(), decode_stopwords(value, &child(path, key))?));
             }
+            other if pending::is_new(&pending::INDEX_OPTIONS_1_20, other) => {
+                let feature = if other == "scoring" {
+                    "BM25 text-index scoring (`scoring`)"
+                } else {
+                    "per-element payload index (`nested`)"
+                };
+                return Err(pending::pending(child(path, other), feature));
+            }
             other => {
                 return Err(invalid(child(path, other), "unknown field_schema option"));
             }
@@ -121,6 +130,9 @@ fn index_options(schema: &json::Obj, path: &str) -> Result<Vec<(String, AstValue
 fn validate_tokenizer(raw: &str, path: &str) -> Result<String, ConvertError> {
     match raw.to_ascii_lowercase().as_str() {
         "word" | "whitespace" | "prefix" | "multilingual" => Ok(raw.to_ascii_lowercase()),
+        _ if pending::is_new(&pending::TOKENIZERS_1_20, raw) => {
+            Err(pending::pending(path, &format!("text tokenizer '{raw}'")))
+        }
         _ => Err(invalid(path, format!("unknown text tokenizer '{raw}'"))),
     }
 }

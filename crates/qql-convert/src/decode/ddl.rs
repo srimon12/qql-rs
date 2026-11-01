@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::ConvertError;
 use crate::decode::DecodeCtx;
+use crate::decode::pending;
 use crate::decode::vector;
 use crate::decode::{config, quantization};
 use crate::json::{self, child, invalid};
@@ -25,6 +26,12 @@ pub(crate) fn create_collection(
     ctx.opts.reject_read()?;
     let path = "body";
     let obj = json::object(body, path)?;
+    if obj.contains_key("id_tracker") {
+        return Err(pending::pending(
+            child(path, "id_tracker"),
+            "id-tracker memory tier (`id_tracker`)",
+        ));
+    }
     json::reject_unknown(
         obj,
         path,
