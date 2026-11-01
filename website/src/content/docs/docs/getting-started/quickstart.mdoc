@@ -13,10 +13,10 @@ need no embedder, then add text embeddings once Ollama is running.
 1. Start Qdrant
 
    {% terminal title="Qdrant" %}
-   docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.19.0
+   docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.20.0
    {% /terminal %}
 
-   QQL requires Qdrant 1.19.0 or newer. The tag above pins the version.
+   QQL requires Qdrant 1.19.0 or newer and is tested against 1.20.0. The tag above pins the recommended version.
 
 2. Query with literal vectors (no embedder)
 

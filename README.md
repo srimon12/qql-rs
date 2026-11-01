@@ -99,7 +99,7 @@ What the language layer adds:
 - **Typed plan.** The planner emits one transport-neutral `PlannedOperation`. REST, gRPC, and the edge engine are projections of it, so every transport executes the same plan.
 - **Standalone runtimes.** PyO3, N-API, and wasm-bindgen bindings, plus the Rust crate, talk to Qdrant directly.
 - **Fail-closed isolation.** `inject_filter` rewrites the AST with a tenant predicate and rejects statements it cannot rewrite.
-- **Qdrant 1.19 surface.** Quotas, memory placement, `MATCH PREFIX`, `SLICE`, sparse `idf`, and `turbo4`, on the backends that support each.
+- **Qdrant 1.20 protocol pin.** Quotas, memory placement, `MATCH PREFIX`, `SLICE`, sparse `idf`, and `turbo4` on the backends that support each. Full-text BM25, the `code` tokenizer, `turbo8` / `turbo16`, `bits8`, nested indexes, and `SUBSTRING` land in follow-up PRs.
 
 ## Quickstart
 
@@ -388,7 +388,7 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --qql-out app_
 | Guide | Covers |
 |-------|--------|
 | [Documentation site](https://qql.veristamp.in/docs/) | Rendered guides for the language, SDKs, and operations |
-| [Documentation index](docs/README.md) | Architecture, typed pipeline, Qdrant 1.19 language highlights |
+| [Documentation index](docs/README.md) | Architecture, typed pipeline, Qdrant 1.20 language highlights |
 | [Syntax reference](docs/syntax.md) | `QUERY`, `HYBRID`, `RERANK`, `BATCH`, `FUSION`, `FACET`, DML, DDL |
 | [Filters and operators](docs/filters.md) | `WHERE`, `IN`, ranges, geo predicates, `MATCH PREFIX`, `SLICE` |
 | [Parameters](docs/parameters.md) | `:name` and `?` binding, prepared statements |
@@ -404,7 +404,7 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --qql-out app_
 
 ## Compatibility
 
-- Qdrant server: `>= 1.19.0` (quotas, `memory` tiers, `MATCH PREFIX`, `SLICE`, sparse `idf`, `turbo4`)
+- Qdrant server: `>= 1.19.0`, tested on `1.20.0` (quotas, `memory` tiers, `MATCH PREFIX`, `SLICE`, sparse `idf`, `turbo4`)
 - Python: `3.10+`
 - Node.js: `18+`
 - Rust: `1.98+` (2024 edition)
