@@ -423,6 +423,8 @@ pub(crate) fn collection_params_diff(
             .map(|memory| qdrant::PayloadStorageParams {
                 memory: Some(memory_to_proto(memory)),
             }),
+        // Qdrant 1.20 ID-tracker memory tier; not yet exposed in QQL.
+        id_tracker: None,
     })
 }
 
@@ -437,6 +439,7 @@ pub(crate) fn payload_index_params(request: &CreateIndexRequest) -> qdrant::Payl
             enable_hnsw: options.enable_hnsw,
             prefix: options.prefix.map(|_| qdrant::KeywordPrefixParams {}),
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Integer => IndexParams::IntegerIndexParams(qdrant::IntegerIndexParams {
             lookup: options.lookup,
@@ -445,34 +448,40 @@ pub(crate) fn payload_index_params(request: &CreateIndexRequest) -> qdrant::Payl
             on_disk: options.on_disk,
             enable_hnsw: options.enable_hnsw,
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Float => IndexParams::FloatIndexParams(qdrant::FloatIndexParams {
             on_disk: options.on_disk,
             is_principal: options.is_principal,
             enable_hnsw: options.enable_hnsw,
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Geo => IndexParams::GeoIndexParams(qdrant::GeoIndexParams {
             on_disk: options.on_disk,
             enable_hnsw: options.enable_hnsw,
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Bool => IndexParams::BoolIndexParams(qdrant::BoolIndexParams {
             on_disk: options.on_disk,
             enable_hnsw: options.enable_hnsw,
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Datetime => IndexParams::DatetimeIndexParams(qdrant::DatetimeIndexParams {
             on_disk: options.on_disk,
             is_principal: options.is_principal,
             enable_hnsw: options.enable_hnsw,
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Uuid => IndexParams::UuidIndexParams(qdrant::UuidIndexParams {
             is_tenant: options.is_tenant,
             on_disk: options.on_disk,
             enable_hnsw: options.enable_hnsw,
             memory: options.memory.map(memory_to_proto),
+            nested: None,
         }),
         IndexFieldType::Text => IndexParams::TextIndexParams(text_index_params(options)),
     };
@@ -521,6 +530,9 @@ pub(crate) fn text_index_params(options: &IndexOptions) -> qdrant::TextIndexPara
         ascii_folding: options.ascii_folding,
         enable_hnsw: options.enable_hnsw,
         memory: options.memory.map(memory_to_proto),
+        // Qdrant 1.20 BM25 scoring and per-element indexing; not yet exposed in QQL.
+        scoring: None,
+        nested: None,
     }
 }
 

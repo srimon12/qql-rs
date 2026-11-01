@@ -165,7 +165,7 @@ server-side branch rules are therefore mandatory.
 5. If the Qdrant protocol pin moves, re-sync the vendored API surfaces:
 
    ```bash
-   python3 scripts/sync_qdrant_api.py --update --ref v1.19.0
+   python3 scripts/sync_qdrant_api.py --update --ref v1.20.0
    ```
 
    This refreshes `crates/qql-runtime/openapi.json` and the vendored protos
