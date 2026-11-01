@@ -404,7 +404,7 @@ qql record --listen 127.0.0.1:6334 --target http://127.0.0.1:6333 --qql-out app_
 
 ## Compatibility
 
-- Qdrant server: `>= 1.19.0`, tested on `1.20.0` (quotas, `memory` tiers, `MATCH PREFIX`, `SLICE`, sparse `idf`, `turbo4`)
+- Qdrant server: `>= 1.19.0`, vendored OpenAPI / protos pinned to `1.20.0` (quotas, `memory` tiers, `MATCH PREFIX`, `SLICE`, sparse `idf`, `turbo4`)
 - Python: `3.10+`
 - Node.js: `18+`
 - Rust: `1.98+` (2024 edition)
