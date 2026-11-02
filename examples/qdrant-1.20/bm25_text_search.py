@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """BM25 without embeddings: Qdrant 1.20 server-side BM25 over a full-text index.
 
-DRAFT: uses the proposed QQL syntax (docs/design/bm25-server-side-1.20.md).
-Prints "pending QQL grammar" for statements the current parser rejects.
+QQL 1.9 syntax (docs/design/bm25-server-side-1.20.md): a text index with
+`scoring = 'bm25'` plus `QUERY BM25 '…' USING <field>`. No embedder involved.
 
 Offline:  python3 examples/qdrant-1.20/bm25_text_search.py
 Live:     QDRANT_URL=http://localhost:6333 python3 examples/qdrant-1.20/bm25_text_search.py
@@ -21,7 +21,6 @@ import pyqql  # noqa: E402
 
 COLLECTION = "movies_bm25"
 
-# One constant per statement: swap to Core Rust's final spelling here.
 SETUP = [
     # No vectors needed for pure lexical search; a tiny placeholder keeps the
     # collection valid on servers that require a vector config.
@@ -44,8 +43,7 @@ QUERIES = [
 
 def check(stmt: str) -> bool:
     ok = pyqql.is_valid(stmt)
-    label = "ok" if ok else "pending QQL grammar"
-    print(f"[{label}] {stmt}")
+    print(f"[{'ok' if ok else 'INVALID'}] {stmt}")
     if ok:
         route = pyqql.compile(stmt)
         print(f"         -> {route.get('method')} {route.get('path')}")
@@ -54,13 +52,11 @@ def check(stmt: str) -> bool:
 
 def main() -> None:
     print(f"pyqql {getattr(pyqql, '__version__', '?')}: server-side BM25 (Qdrant >= 1.20)\n")
-    ready = all([check(s) for s in SETUP + QUERIES])
+    if not all([check(s) for s in SETUP + QUERIES]):
+        sys.exit("\nSome statements failed to parse; is pyqql built from this branch?")
     url = os.environ.get("QDRANT_URL")
     if not url:
         print("\nOffline only. Set QDRANT_URL to run against Qdrant 1.20.")
-        return
-    if not ready:
-        print("\nSkipping live run: grammar not landed yet.")
         return
     client = pyqql.Client(url, api_key=os.environ.get("QDRANT_API_KEY"))
     for stmt in SETUP:

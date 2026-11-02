@@ -1,8 +1,9 @@
 //! Qdrant 1.20 request shapes fail closed with one recognizable diagnostic.
 //!
-//! QQL cannot spell these yet (BM25 `text` queries, `scoring` / `nested`
-//! payload indexes, the `code` tokenizer, `substring` match, `turbo8` /
-//! `turbo16`, `bits8`, `id_tracker`). Each case asserts a typed
+//! QQL cannot spell these yet (`nested` payload indexes, `substring` match,
+//! `turbo8` / `turbo16`, `bits8`, `id_tracker`). BM25 `text` queries,
+//! text-index `scoring`, and the `code` tokenizer convert now; see
+//! `qdrant_1_20_bm25.rs`. Each case asserts a typed
 //! [`ConvertError::InvalidField`] whose detail starts with `Qdrant 1.20` at
 //! the exact offending path. When core grammar support lands, flip the case
 //! into a round-trip test in `roundtrip.rs`.
@@ -31,103 +32,6 @@ fn assert_pending(input: &str, want_path: &str, want_feature: &str) {
         }
         other => panic!("expected InvalidField for {input}, got {other:?}"),
     }
-}
-
-#[test]
-fn pending_text_query_plain_string() {
-    let input = wrapped(
-        "POST",
-        "/collections/docs/points/query",
-        json!({"query": {"text": "time travel"}, "using": "title", "limit": 10}),
-    );
-    assert_pending(&input, "body.query", "BM25 `text` query");
-}
-
-#[test]
-fn pending_text_query_with_bm25_params() {
-    let input = wrapped(
-        "POST",
-        "/collections/docs/points/query",
-        json!({
-            "query": {"text": {"query": "time travel", "scoring": {"bm25": {"k": 1.2, "b": 0.75}}}},
-            "using": "title"
-        }),
-    );
-    assert_pending(&input, "body.query", "BM25 `text` query");
-}
-
-#[test]
-fn pending_text_query_inside_prefetch() {
-    let input = wrapped(
-        "POST",
-        "/collections/docs/points/query",
-        json!({
-            "prefetch": [
-                {"query": [0.1, 0.2, 0.3], "using": "dense", "limit": 20},
-                {"query": {"text": "time travel"}, "using": "title", "limit": 20}
-            ],
-            "query": {"fusion": "rrf"},
-            "limit": 10
-        }),
-    );
-    match convert(&input, None) {
-        Err(ConvertError::InvalidField { path, detail }) => {
-            assert!(path.contains("prefetch"), "path: {path}");
-            assert!(detail.starts_with("Qdrant 1.20 "), "detail: {detail}");
-        }
-        other => panic!("expected InvalidField, got {other:?}"),
-    }
-}
-
-#[test]
-fn document_query_with_model_still_converts() {
-    // The 1.20 TextQuery guard must not swallow inference Documents.
-    let input = wrapped(
-        "POST",
-        "/collections/docs/points/query",
-        json!({"query": {"text": "time travel", "model": "bm25"}, "using": "sparse", "limit": 5}),
-    );
-    let stmts = convert(&input, None).expect("Document query converts");
-    assert_eq!(stmts.len(), 1);
-}
-
-#[test]
-fn pending_text_index_bm25_scoring() {
-    let input = wrapped(
-        "PUT",
-        "/collections/docs/index",
-        json!({"field_name": "title", "field_schema": {"type": "text", "scoring": {"type": "bm25"}}}),
-    );
-    assert_pending(
-        &input,
-        "body.field_schema.scoring",
-        "BM25 text-index scoring",
-    );
-
-    let input = wrapped(
-        "PUT",
-        "/collections/docs/index",
-        json!({"field_name": "title", "field_schema": {"type": "text", "scoring": true}}),
-    );
-    assert_pending(
-        &input,
-        "body.field_schema.scoring",
-        "BM25 text-index scoring",
-    );
-}
-
-#[test]
-fn pending_code_tokenizer() {
-    let input = wrapped(
-        "PUT",
-        "/collections/docs/index",
-        json!({"field_name": "body", "field_schema": {"type": "text", "tokenizer": "code"}}),
-    );
-    assert_pending(
-        &input,
-        "body.field_schema.tokenizer",
-        "text tokenizer 'code'",
-    );
 }
 
 #[test]
@@ -263,13 +167,5 @@ fn spec_1_20_enums_are_covered() {
             json!({"vectors": {"size": 4, "distance": "Dot"}, "quantization_config": {"turbo": {"bits": "bits8"}}}),
         );
         assert_pending(&input, "body.quantization_config.turbo.bits", "bits8");
-    }
-    if enum_has("TokenizerType", "code") {
-        let input = wrapped(
-            "PUT",
-            "/collections/docs/index",
-            json!({"field_name": "body", "field_schema": {"type": "text", "tokenizer": "code"}}),
-        );
-        assert_pending(&input, "body.field_schema.tokenizer", "code");
     }
 }

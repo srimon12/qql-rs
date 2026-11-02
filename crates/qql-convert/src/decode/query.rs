@@ -152,6 +152,13 @@ pub(crate) fn core_query(
         params.rrf_k = rrf.k;
         params.rrf_weights = rrf.weights;
     }
+    if let Some(bm25) = interface.bm25
+        && (bm25.k.is_some() || bm25.b.is_some())
+    {
+        let params = params.get_or_insert_with(SearchParams::default);
+        params.bm25_k = bm25.k;
+        params.bm25_b = bm25.b;
+    }
 
     Ok(CoreQuery {
         expression,

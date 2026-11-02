@@ -142,21 +142,23 @@ console.log(client.routeAffinity); // "session-acme-42"
 ## Qdrant 1.20 and BM25
 
 Everything documented above keeps working unchanged on **Qdrant 1.19 and
-1.20**. Qdrant 1.20 adds server-side BM25 over full-text indexes, the `code`
-tokenizer, `nested` payload indexes, `substring` match, `turbo8` / `turbo16`,
-and `bits8`. QQL syntax for these is **in progress** in the core crates. Until
-it lands, they fail closed at parse or plan time, and nothing is sent to Qdrant.
+1.20**. Qdrant 1.20 adds server-side BM25 over full-text indexes and the `code`
+tokenizer, which QQL 1.9 supports (`QUERY BM25`, `scoring = 'bm25'`,
+`tokenizer = 'code'`; remote Qdrant ≥ 1.20 only, edge fails with a typed
+error). `nested` payload indexes, `substring` match, `turbo8` / `turbo16`, and
+`bits8` are still **in progress** and fail closed at parse or plan time, so
+nothing is sent to Qdrant.
 
 Which BM25 path applies:
 
 | Path | When | Tuned by |
 |------|------|----------|
 | **Client sparse BM25** (ships today) | Qdrant < 1.20, existing `qdrant/bm25` sparse vectors (`USING sparse`, `AS SPARSE`) | embedder `bm25K1` / `bm25B` / `bm25AvgLen` (+ language, tokenizer, …). Write-path document encoder only |
-| **Server BM25** (planned) | Qdrant ≥ 1.20 and a text index with `scoring = 'bm25'` | `CREATE INDEX … TYPE text WITH (scoring = 'bm25', tokenizer = …)` and `QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)` |
+| **Server BM25** (QQL 1.9) | Qdrant ≥ 1.20 and a text index with `scoring = 'bm25'` | `CREATE INDEX … TYPE text WITH (scoring = 'bm25', tokenizer = …)` and `QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)` |
 
 The client options never change a server BM25 query, and a query leg never runs
 both paths. See the [BM25 design note](https://github.com/srimon12/qql-rs/blob/main/docs/design/bm25-server-side-1.20.md) and the
-[draft 1.20 examples](https://github.com/srimon12/qql-rs/tree/main/examples/qdrant-1.20).
+[1.20 examples](https://github.com/srimon12/qql-rs/tree/main/examples/qdrant-1.20).
 
 ## Docs
 

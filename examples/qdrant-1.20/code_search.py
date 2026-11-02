@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Code search on Qdrant 1.20: `code` tokenizer + BM25 + SUBSTRING path filter.
 
-DRAFT: proposed QQL syntax (docs/design/bm25-server-side-1.20.md). The
-`code` tokenizer splits identifiers such as `parseHttpRequest` and
-`parse_http_request` into searchable parts.
+QQL 1.9 syntax (docs/design/bm25-server-side-1.20.md). The `code` tokenizer
+splits identifiers such as `parseHttpRequest` and `parse_http_request` into
+searchable parts.
+
+The `SUBSTRING` path filter is still pending QQL grammar (Qdrant 1.20
+`match.substring`); that one statement soft-fails until it lands.
 """
 
 from __future__ import annotations
@@ -24,15 +27,27 @@ STATEMENTS = [
     f"CREATE INDEX ON COLLECTION {COLLECTION} FOR body TYPE text WITH (scoring = 'bm25', tokenizer = 'code')",
     # `prefix = true` keyword index serves SUBSTRING from its key dictionary.
     f"CREATE INDEX ON COLLECTION {COLLECTION} FOR path TYPE keyword WITH (prefix = true)",
+    f"QUERY BM25 'http request parser' FROM {COLLECTION} USING body LIMIT 10",
+]
+
+# Not in QQL yet: Qdrant 1.20 substring match. Kept as a soft-fail preview.
+PENDING = [
     f"QUERY BM25 'http request parser' FROM {COLLECTION} USING body "
     "WHERE path SUBSTRING 'src/' LIMIT 10",
 ]
 
 
 def main() -> None:
+    ok = True
     for stmt in STATEMENTS:
+        valid = pyqql.is_valid(stmt)
+        ok &= valid
+        print(f"[{'ok' if valid else 'INVALID'}] {stmt}")
+    for stmt in PENDING:
         label = "ok" if pyqql.is_valid(stmt) else "pending QQL grammar"
         print(f"[{label}] {stmt}")
+    if not ok:
+        sys.exit("Some statements failed to parse; is pyqql built from this branch?")
 
 
 if __name__ == "__main__":

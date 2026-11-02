@@ -3,10 +3,10 @@
 //! Qdrant 1.20 added BM25 `text` queries, `scoring` / `nested` on payload
 //! indexes, the `code` tokenizer, `substring` match, the `turbo8` /
 //! `turbo16` datatypes, `bits8` TurboQuant, and the id-tracker memory tier.
-//! Until the QQL grammar and AST grow these, `qql convert` fails closed on
-//! them with one recognizable diagnostic instead of a generic "unknown
-//! field" (or, for the `text` query, a misleading "missing model" from the
-//! `Document` decoder). When core support lands, the matching arm here is
+//! BM25 `text` queries (`QUERY BM25`), text-index `scoring = 'bm25'`, and
+//! `tokenizer = 'code'` now convert (QQL 1.9). For the rest, until the QQL
+//! grammar and AST grow them, `qql convert` fails closed on them with one
+//! recognizable diagnostic instead of a generic "unknown field". When core support lands, the matching arm here is
 //! replaced by a real decode and its `pending_*` test flips to a round-trip.
 
 use crate::ConvertError;
@@ -21,12 +21,6 @@ pub(crate) const DATATYPES_1_20: [&str; 2] = ["turbo8", "turbo16"];
 
 /// TurboQuant bit-size labels introduced in Qdrant 1.20.
 pub(crate) const TURBO_BITS_1_20: [&str; 1] = ["bits8"];
-
-/// Text tokenizers introduced in Qdrant 1.20.
-pub(crate) const TOKENIZERS_1_20: [&str; 1] = ["code"];
-
-/// Payload-index `field_schema` options introduced in Qdrant 1.20.
-pub(crate) const INDEX_OPTIONS_1_20: [&str; 2] = ["scoring", "nested"];
 
 /// Fail closed on a Qdrant 1.20 feature that QQL cannot express yet.
 pub(crate) fn pending(path: impl Into<String>, feature: &str) -> ConvertError {

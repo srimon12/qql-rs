@@ -21,6 +21,16 @@ pub(crate) struct RrfParams {
 pub(crate) struct Interface {
     pub(crate) expression: QueryExpr,
     pub(crate) rrf: Option<RrfParams>,
+    /// Server BM25 scorer params carried by a Qdrant 1.20 `TextQuery`
+    /// (`text.scoring.bm25`). They lower to `PARAMS (k, b)` on `QUERY BM25`.
+    pub(crate) bm25: Option<Bm25Params>,
+}
+
+/// `Bm25Params` from a `TextQuery`'s `scoring.bm25` (both optional).
+#[derive(Default)]
+pub(crate) struct Bm25Params {
+    pub(crate) k: Option<f64>,
+    pub(crate) b: Option<f64>,
 }
 
 /// Decode a `QueryInterface` value (`Query` union or bare `VectorInput`).
@@ -39,6 +49,7 @@ pub(crate) fn query_interface(
                 mmr: None,
             },
             rrf: None,
+            bm25: None,
         });
     };
 
@@ -64,6 +75,23 @@ pub(crate) fn query_interface(
         ));
     }
     let Some(kind) = known.first() else {
+        // Qdrant 1.20 `TextQuery` (`{"text": "…"}` / `{"text": {query,
+        // scoring}}`) shares the `text` key with the inference `Document`,
+        // which always carries `model`. Model-less means server-side BM25
+        // over a text index → `QUERY BM25`, never the embed `TEXT` path.
+        if obj.contains_key("text") && !obj.contains_key("model") {
+            let (text, bm25) = text_query(obj, path)?;
+            return Ok(Interface {
+                expression: QueryExpr::Bm25 {
+                    text,
+                    field: String::new(),
+                    prefetch: Vec::new(),
+                    text_param: None,
+                },
+                rrf: None,
+                bm25: Some(bm25),
+            });
+        }
         // Not a Query union member: document / image / sparse VectorInput.
         return Ok(Interface {
             expression: QueryExpr::Nearest {
@@ -73,6 +101,7 @@ pub(crate) fn query_interface(
                 mmr: None,
             },
             rrf: None,
+            bm25: None,
         });
     };
 
@@ -94,6 +123,7 @@ pub(crate) fn query_interface(
                     prefetch: Vec::new(),
                 },
                 rrf: Some(rrf),
+                bm25: None,
             });
         }
         // Drift guard: `kind` comes from the fixed `known` key table above,
@@ -109,7 +139,74 @@ pub(crate) fn query_interface(
     Ok(Interface {
         expression,
         rrf: None,
+        bm25: None,
     })
+}
+
+/// Decode a Qdrant 1.20 `TextQuery`: `{"text": TextInterface}` where
+/// `TextInterface` is a bare string or `{query, scoring?: {bm25: {k?, b?}}}`.
+fn text_query(obj: &json::Obj, path: &str) -> Result<(String, Bm25Params), ConvertError> {
+    json::reject_unknown(obj, path, &["text"])?;
+    let text_path = child(path, "text");
+    let value = json::required(obj, "text", path)?;
+    let (text, params) = match value {
+        Value::String(text) => (text.clone(), Bm25Params::default()),
+        Value::Object(input) => {
+            json::reject_unknown(input, &text_path, &["query", "scoring"])?;
+            let text = json::string_at(
+                json::required(input, "query", &text_path)?,
+                &child(&text_path, "query"),
+            )?
+            .to_string();
+            let params = match input.get("scoring").filter(|v| !v.is_null()) {
+                None => Bm25Params::default(),
+                Some(scoring) => bm25_scoring(scoring, &child(&text_path, "scoring"))?,
+            };
+            (text, params)
+        }
+        other => {
+            return Err(invalid(
+                text_path,
+                format!(
+                    "expected a text query string or {{query, scoring}} object, got {}",
+                    json::type_name(other)
+                ),
+            ));
+        }
+    };
+    if text.trim().is_empty() {
+        return Err(invalid(text_path, "BM25 text query must not be empty"));
+    }
+    Ok((text, params))
+}
+
+/// Decode `TextQueryScoring` (`{"bm25": {k?, b?}}`), mirroring the parser's
+/// bounds: `k >= 0`, `b` in `[0, 1]`.
+fn bm25_scoring(value: &Value, path: &str) -> Result<Bm25Params, ConvertError> {
+    let obj = json::object(value, path)?;
+    json::reject_unknown(obj, path, &["bm25"])?;
+    let bm25_path = child(path, "bm25");
+    let Some(params) = obj.get("bm25").filter(|v| !v.is_null()) else {
+        return Ok(Bm25Params::default());
+    };
+    let params = json::object(params, &bm25_path)?;
+    json::reject_unknown(params, &bm25_path, &["k", "b"])?;
+    let k = json::opt_f64(params, "k", &bm25_path)?;
+    let b = json::opt_f64(params, "b", &bm25_path)?;
+    if let Some(k) = k
+        && (!k.is_finite() || k < 0.0)
+    {
+        return Err(invalid(child(&bm25_path, "k"), "BM25 k must be >= 0"));
+    }
+    if let Some(b) = b
+        && (!b.is_finite() || !(0.0..=1.0).contains(&b))
+    {
+        return Err(invalid(
+            child(&bm25_path, "b"),
+            "BM25 b must be within [0, 1]",
+        ));
+    }
+    Ok(Bm25Params { k, b })
 }
 
 /// Decode `{"nearest": VectorInput, "mmr": …}`.

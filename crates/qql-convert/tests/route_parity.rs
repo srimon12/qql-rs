@@ -127,6 +127,12 @@ const QUERY_CORPUS: &[&str] = &[
     // 11. HYBRID (plans as fusion + two prefetches)
     "QUERY HYBRID TEXT 'ai search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
     "QUERY HYBRID TEXT 'q' MODEL 'bge' DENSE dense SPARSE sparse FUSION DBSF FROM docs LIMIT 5;",
+    // 11b. Server BM25 (Qdrant 1.20 TextQuery over a scoring = 'bm25' text index)
+    "QUERY BM25 'time travel' FROM docs USING title LIMIT 10;",
+    "QUERY BM25 'time travel' FROM docs USING title WHERE lang = 'en' PARAMS (k = 1.2, b = 0.75) LIMIT 10;",
+    "QUERY BM25 'parseHttpHeader' FROM docs USING code PARAMS (b = 0.5) LIMIT 5;",
+    "QUERY FUSION RRF FROM docs PREFETCH (QUERY TEXT 'time travel' MODEL 'e5' USING dense LIMIT 50, QUERY BM25 'time travel' USING title LIMIT 50) LIMIT 10;",
+    "QUERY FUSION RRF FROM docs PREFETCH (QUERY BM25 'time travel' USING title PARAMS (k = 0.9) LIMIT 50) LIMIT 10;",
     // 12. RERANK (plans as nearest with model + prefetch)
     "QUERY RERANK TEXT 'travel tips' MODEL 'colbert-v2' FROM docs USING colbert PREFETCH (QUERY TEXT 'travel tips' MODEL 'e5' FROM docs USING dense LIMIT 50) LIMIT 10;",
     // GROUP BY
@@ -255,6 +261,9 @@ const DDL_CORPUS: &[&str] = &[
     "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (lowercase = true, ascii_folding = true, phrase_matching = true, min_token_len = 2, max_token_len = 10, tokenizer = 'word', stemmer = 'english', stopwords = ['the', 'a']);",
     "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = 'english');",
     "CREATE INDEX ON COLLECTION docs FOR body TYPE text WITH (stopwords = {languages: ['english', 'german'], custom: ['foo']});",
+    "CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (scoring = 'bm25', tokenizer = 'code', lowercase = true);",
+    "CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (scoring = 'bm25');",
+    "CREATE INDEX ON COLLECTION docs FOR src TYPE text WITH (tokenizer = 'code');",
     "CREATE INDEX ON COLLECTION docs FOR n TYPE integer WITH (lookup = true, range = false, is_principal = true);",
     "DROP INDEX ON COLLECTION docs FOR city;",
     "CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 3, replication_factor = 2);",

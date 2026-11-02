@@ -92,6 +92,12 @@ pub(crate) fn attach_using(
     path: &str,
 ) -> Result<QueryExpr, ConvertError> {
     let Some(name) = using else {
+        if matches!(expression, QueryExpr::Bm25 { .. }) {
+            return Err(invalid(
+                child(path, "using"),
+                "BM25 `text` query requires `using` (a payload field with a scoring = 'bm25' text index)",
+            ));
+        }
         return Ok(expression);
     };
     let target = || VectorTarget {
@@ -155,6 +161,18 @@ pub(crate) fn attach_using(
             using: Some(target()),
             prefetch,
         },
+        // `using` on a 1.20 TextQuery names the payload field, not a vector.
+        QueryExpr::Bm25 {
+            text,
+            prefetch,
+            text_param,
+            ..
+        } => QueryExpr::Bm25 {
+            text,
+            field: name.to_string(),
+            prefetch,
+            text_param,
+        },
         other => {
             let _ = other;
             return Err(invalid(
@@ -213,6 +231,17 @@ pub(crate) fn attach_prefetch(
             prefetch,
         },
         QueryExpr::Fusion { method, .. } => QueryExpr::Fusion { method, prefetch },
+        QueryExpr::Bm25 {
+            text,
+            field,
+            text_param,
+            ..
+        } => QueryExpr::Bm25 {
+            text,
+            field,
+            prefetch,
+            text_param,
+        },
         QueryExpr::Formula {
             expression: formula,
             defaults,

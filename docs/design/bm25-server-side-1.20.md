@@ -7,7 +7,9 @@
 > `QQL-VALIDATION-BM25`), `QQL-PLAN-BM25`, `QQL-EDGE-UNSUPPORTED-TEXT-BM25`,
 > `QQL-EDGE-UNSUPPORTED-CODE-TOKENIZER`, and `QQL-BACKEND-VERSION`. The rest of
 > this note is the original SDK-side contract (routing rules, binding options,
-> examples, and `qql convert` mappings, which still fail closed).
+> examples, and `qql convert` mappings). SDK follow-up on the same PR: `qql
+> convert` now emits `QUERY BM25` / `scoring = 'bm25'` / `tokenizer = 'code'`,
+> and the `examples/qdrant-1.20/` scripts are out of draft.
 
 ## Background
 
@@ -113,15 +115,16 @@ Still open, for Core Rust:
    `text.scoring.bm25`, not into `params` (Qdrant `SearchParams`). On a
    non-BM25 query, `k`/`b` should fail closed.
 
-## `qql convert` mappings (activate with the grammar)
+## `qql convert` mappings
 
-`qql convert` currently **fails closed** on every 1.20 shape with an
-`InvalidField` whose detail starts with `Qdrant 1.20 …`. See
+The first six rows below are **live** (`crates/qql-convert/tests/qdrant_1_20_bm25.rs`
+plus `route_parity.rs` plan-back cases). The rest still **fail closed** with an
+`InvalidField` whose detail starts with `Qdrant 1.20 …` (see
 `crates/qql-convert/src/decode/pending.rs` and
-`crates/qql-convert/tests/qdrant_1_20_pending.rs`. Once the AST exists, each
-row below replaces a `pending(...)` arm, and its test changes to a round trip.
+`crates/qql-convert/tests/qdrant_1_20_pending.rs`) until Core lands their
+grammar; each then replaces a `pending(...)` arm and its test becomes a round trip.
 
-| Qdrant 1.20 REST | QQL (proposed) |
+| Qdrant 1.20 REST | QQL |
 |------------------|----------------|
 | `{"query": {"text": "q"}, "using": "title"}` | `QUERY BM25 'q' FROM c USING title` |
 | `{"query": {"text": {"query": "q", "scoring": {"bm25": {"k": 1.5, "b": 0.5}}}}, "using": "title"}` | `QUERY BM25 'q' FROM c USING title PARAMS (k = 1.5, b = 0.5)` |
@@ -136,8 +139,8 @@ row below replaces a `pending(...)` arm, and its test changes to a round trip.
 | `id_tracker.memory` | `WITH PARAMS (id_tracker_memory = 'cold')` (TBD by Core) |
 
 A `{"text": …}` object **with** `model` is still an inference `Document` and
-keeps converting as it does today. The 1.20 guard only claims `text` objects
-without `model`.
+keeps converting as it does today (`QUERY TEXT … MODEL …`). Only `text` objects
+without `model` become `QUERY BM25`, and they require `using`.
 
 ## Rollout
 

@@ -1,11 +1,11 @@
 # Qdrant 1.20 examples: BM25 without embeddings, hybrid, code search
 
-> **DRAFT.** The server-side BM25 statements here use the **proposed** QQL
-> syntax from [`docs/design/bm25-server-side-1.20.md`](../../docs/design/bm25-server-side-1.20.md).
-> (`CREATE INDEX ON COLLECTION c FOR field TYPE text WITH (scoring = 'bm25', tokenizer = …)` and `QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)`, as locked by Core Rust). They do not parse on `dev` until Core Rust lands the BM25 grammar. Each
-> script checks `is_valid` first and prints `pending QQL grammar` instead of
-> failing, so CI and curious users can run them today. Each file keeps its
-> QQL in one constant, so switching to Core's final spelling is a one-line change.
+> Server-side BM25 uses QQL 1.9 syntax (see
+> [`docs/design/bm25-server-side-1.20.md`](../../docs/design/bm25-server-side-1.20.md)):
+> `CREATE INDEX ON COLLECTION c FOR field TYPE text WITH (scoring = 'bm25', tokenizer = …)`
+> and `QUERY BM25 '…' FROM c USING field [PARAMS (k = …, b = …)]`. Scripts exit
+> non-zero if a statement fails to parse. Only the `SUBSTRING` path filter in
+> `code_search.py` is still pending QQL grammar and soft-fails.
 
 | Script | Path | Needs |
 |--------|------|-------|
