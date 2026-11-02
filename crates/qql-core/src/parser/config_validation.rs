@@ -459,6 +459,17 @@ pub fn validate_index_options(options: &[(String, Value)], span: Span) -> Result
                     ));
                 }
             }
+            "scoring" => {
+                // Server-side relevance scoring (Qdrant >= 1.20). Only BM25
+                // exists; TYPE text is enforced by the CREATE INDEX parser.
+                if !matches!(v, Value::Str(s) if s.eq_ignore_ascii_case("bm25")) {
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-TEXT-INDEX",
+                        "scoring must be 'bm25'",
+                        Some(span),
+                    ));
+                }
+            }
             "tokenizer" | "stemmer" => {
                 if !matches!(v, Value::Str(_)) {
                     return Err(validation_err(

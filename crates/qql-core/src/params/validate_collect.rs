@@ -540,6 +540,11 @@ impl Census {
                 query_param,
                 prefetch,
                 ..
+            }
+            | QueryExpr::Bm25 {
+                text_param: query_param,
+                prefetch,
+                ..
             } => {
                 if let Some(param) = query_param {
                     self.param_str(param, None);

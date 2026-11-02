@@ -74,6 +74,8 @@ pub enum TextTokenizer {
     Word,
     /// Language-aware tokenization.
     Multilingual,
+    /// Source-code identifiers: splits camelCase / snake_case (Qdrant ≥ 1.20).
+    Code,
 }
 
 impl TextTokenizer {
@@ -84,6 +86,7 @@ impl TextTokenizer {
             Self::Whitespace => "whitespace",
             Self::Word => "word",
             Self::Multilingual => "multilingual",
+            Self::Code => "code",
         }
     }
 
@@ -94,6 +97,7 @@ impl TextTokenizer {
             "whitespace" => Some(Self::Whitespace),
             "word" => Some(Self::Word),
             "multilingual" => Some(Self::Multilingual),
+            "code" => Some(Self::Code),
             _ => None,
         }
     }
@@ -201,6 +205,43 @@ pub struct IndexOptions {
     /// Memory placement of the index.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryPlacement>,
+    /// Server-side relevance scoring (text indexes, Qdrant ≥ 1.20).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scoring: Option<TextScoring>,
+}
+
+/// OpenAPI `TextScoringParams`: the scorer a text index keeps statistics
+/// for. Serialized as `{"type": "bm25"}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextScoring {
+    /// Okapi BM25 (`scoring = 'bm25'`).
+    Bm25,
+}
+
+impl TextScoring {
+    /// Canonical lowercase wire name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bm25 => "bm25",
+        }
+    }
+
+    /// Parse a scorer name (case-insensitive). Unknown → `None`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "bm25" => Some(Self::Bm25),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for TextScoring {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry("type", self.as_str())?;
+        map.end()
+    }
 }
 
 impl IndexOptions {

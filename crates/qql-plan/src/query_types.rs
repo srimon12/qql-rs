@@ -315,6 +315,72 @@ pub enum QueryVariant {
         /// Positive/negative feedback inputs with weights.
         relevance_feedback: RelevanceFeedbackInput,
     },
+    /// Server-side BM25 over the text index of the payload field named by
+    /// `using` (`{"text": …}`, Qdrant ≥ 1.20). Never embedded client-side.
+    Text(TextQuery),
+}
+
+/// OpenAPI `TextQuery`: `{"text": "<q>"}` or `{"text": {"query", "scoring"}}`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TextQuery {
+    /// Text to search, optionally with scorer parameters.
+    pub text: TextInterface,
+}
+
+/// OpenAPI `TextInterface`: bare string, or the text with scorer params.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum TextInterface {
+    /// Bare query text, scored with the index's defaults.
+    Plain(String),
+    /// Query text with explicit scorer parameters.
+    WithScoring(TextQueryInput),
+}
+
+impl TextInterface {
+    /// Query text regardless of form.
+    pub fn query(&self) -> &str {
+        match self {
+            Self::Plain(text) => text,
+            Self::WithScoring(input) => &input.query,
+        }
+    }
+
+    /// BM25 parameters when present.
+    pub fn bm25(&self) -> Option<&Bm25Params> {
+        match self {
+            Self::Plain(_) => None,
+            Self::WithScoring(input) => input.scoring.as_ref().map(|s| &s.bm25),
+        }
+    }
+}
+
+/// OpenAPI `TextQueryInput`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TextQueryInput {
+    /// Text to search for, tokenized by the field's text index.
+    pub query: String,
+    /// Scorer parameters keyed by scorer name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scoring: Option<Bm25Scoring>,
+}
+
+/// OpenAPI `Bm25Scoring`: `{"bm25": {k, b}}`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Bm25Scoring {
+    /// BM25 scorer parameters.
+    pub bm25: Bm25Params,
+}
+
+/// OpenAPI `Bm25Params` (query-time BM25 tuning).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Bm25Params {
+    /// Term-frequency saturation (`k >= 0`, server default 1.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub k: Option<f64>,
+    /// Length normalization (`b` in `[0, 1]`, server default 0.75).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub b: Option<f64>,
 }
 
 /// Reciprocal-rank-fusion parameters.

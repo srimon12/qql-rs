@@ -38,6 +38,9 @@ pub(crate) fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(using) = query_expr_using(&query.expression) {
         parts.push(format!("USING {}", render_vector_target(using)));
+    } else if let crate::ast::QueryExpr::Bm25 { field, .. } = &query.expression {
+        // BM25 USING names a payload field, never a vector target.
+        parts.push(format!("USING {}", render_name(field)));
     }
     let prefetch = query_expr_prefetch(&query.expression);
     if !prefetch.is_empty() {

@@ -363,6 +363,28 @@ pub enum QueryExpr {
         )]
         query_param: Option<String>,
     },
+    /// `QUERY BM25 '…' FROM c USING <field> [PARAMS (k = …, b = …)]` —
+    /// server-side BM25 over a payload field's full-text index (Qdrant ≥ 1.20).
+    ///
+    /// Never embedded: the text is sent verbatim as a Qdrant `text` query and
+    /// tokenized by the field's text index. `k` / `b` live in the statement's
+    /// [`SearchParams::bm25_k`] / [`SearchParams::bm25_b`] and lower into the
+    /// query's `scoring.bm25`, not into body search params. Distinct from
+    /// `QUERY TEXT … USING bm25` (client sparse BM25 via `qql-embed`).
+    Bm25 {
+        /// Query text, tokenized server-side by the field's text index.
+        text: String,
+        /// Payload field (with a `scoring = 'bm25'` text index) named by `USING`.
+        field: String,
+        /// Optional `PREFETCH` candidate stages to rescore with BM25.
+        prefetch: Vec<Prefetch>,
+        /// Parameter placeholder (`:name` or `?idx`) when the text was not provided as a literal string.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        text_param: Option<String>,
+    },
 }
 
 /// `PARAMS (quantization = {…})` overrides for quantized index search.
@@ -399,6 +421,19 @@ pub struct SearchParams {
     pub rrf_weights: Option<Vec<f64>>,
     /// Per-query IDF corpus for sparse vectors. `None` = collection-wide (global).
     pub idf: Option<IdfParams>,
+    /// Server BM25 term-frequency saturation `k` (`PARAMS (k = …)`, `QUERY BM25` only).
+    /// Lowered into the text query's `scoring.bm25.k`, never body `SearchParams`.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub bm25_k: Option<f64>,
+    /// Server BM25 length normalization `b` in `[0, 1]` (`PARAMS (b = …)`, `QUERY BM25` only).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub bm25_b: Option<f64>,
     /// Request-level timeout in **seconds** (OpenAPI query param / proto field).
     /// Not part of body `SearchParams`.
     pub timeout: Option<u64>,

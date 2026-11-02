@@ -232,6 +232,41 @@ where
                 bind_prefetch(p, lookup, positional)?;
             }
         }
+        QueryExpr::Bm25 {
+            text: query,
+            text_param: query_param,
+            prefetch,
+            ..
+        } => {
+            if let Some(param) = query_param.take() {
+                let val = if let Some(param_name) = param.strip_prefix(':') {
+                    super::value::resolve_param(param_name, None, lookup)?
+                } else if let Some(idx_str) = param.strip_prefix('?') {
+                    let idx = idx_str.parse::<usize>().map_err(|_| {
+                        QqlError::validation(
+                            "QQL-BIND-INVALID-PARAMS",
+                            format!("invalid positional parameter index '?{idx_str}'"),
+                            None,
+                        )
+                    })?;
+                    super::value::resolve_positional(idx, None, positional)?
+                } else {
+                    super::value::resolve_param(&param, None, lookup)?
+                };
+                if let Value::Str(s) = val {
+                    *query = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        format!("parameter '{param}' for BM25 query must be a string"),
+                        None,
+                    ));
+                }
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
     }
     Ok(())
 }

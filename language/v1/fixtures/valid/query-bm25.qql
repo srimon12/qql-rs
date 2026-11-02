@@ -1,0 +1,26 @@
+-- query-bm25.qql — Server-side BM25 over a full-text index (QQL 1.9, Qdrant >= 1.20)
+
+-- Text index with BM25 scoring and the code tokenizer
+CREATE INDEX ON COLLECTION books FOR title TYPE text WITH (scoring = 'bm25', tokenizer = 'code', lowercase = true);
+
+-- BM25 query; USING names the payload field with the BM25 text index
+QUERY BM25 'time travel'
+FROM books
+USING title
+LIMIT 10;
+
+-- BM25 scorer parameters
+QUERY BM25 'time travel'
+FROM books
+USING title
+PARAMS (k = 1.2, b = 0.75)
+LIMIT 10;
+
+-- Hybrid: dense embedding leg + server BM25 leg fused with RRF
+WITH
+  dense AS (QUERY TEXT 'time travel' USING dense LIMIT 50),
+  lexical AS (QUERY BM25 'time travel' USING title PARAMS (k = 1.2, b = 0.75) LIMIT 50)
+QUERY FUSION RRF
+FROM books
+PREFETCH (dense, lexical)
+LIMIT 10;

@@ -294,6 +294,20 @@ pub(crate) fn build_query_with_prefetch(
                 pf_requests,
             ))
         }
+        QueryExpr::Bm25 {
+            text,
+            field,
+            prefetch,
+            text_param,
+        } => {
+            let variant =
+                lower_bm25_query(text, text_param.as_deref(), field, query.params.as_ref())?;
+            let pf_requests: Vec<PrefetchRequest> = prefetch
+                .iter()
+                .map(|p| lower_prefetch_with_ctes(p, ctes))
+                .collect::<Result<_, _>>()?;
+            Ok((variant, Some(field.clone()), pf_requests))
+        }
         _ => {
             let mut variant = lower_query_expr(&query.expression)?;
             if let Some(params) = &query.params
@@ -323,6 +337,69 @@ pub(crate) fn build_query_with_prefetch(
             Ok((variant, using, pf_requests))
         }
     }
+}
+
+/// Lower `QUERY BM25 '…' USING <field> [PARAMS (k, b)]` to the Qdrant 1.20
+/// `{"text": …}` query. `k` / `b` come from the statement's `PARAMS` and go
+/// into `text.scoring.bm25`; they never reach body `SearchParams`.
+pub(crate) fn lower_bm25_query(
+    text: &str,
+    text_param: Option<&str>,
+    field: &str,
+    params: Option<&qql_core::ast::SearchParams>,
+) -> Result<QueryVariant, QqlError> {
+    if let Some(param) = text_param {
+        return Err(QqlError::validation(
+            "QQL-PLAN-UNBOUND-PARAM",
+            format!("QUERY BM25 text parameter '{param}' is unbound; bind it before planning"),
+            None,
+        ));
+    }
+    if field.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-BM25-USING",
+            "QUERY BM25 requires USING <payload field> (a text index with scoring = 'bm25')",
+            None,
+        ));
+    }
+    if text.trim().is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-BM25",
+            "QUERY BM25 text must not be empty",
+            None,
+        ));
+    }
+    let k = params.and_then(|p| p.bm25_k);
+    let b = params.and_then(|p| p.bm25_b);
+    if let Some(k) = k
+        && (!k.is_finite() || k < 0.0)
+    {
+        return Err(QqlError::validation(
+            "QQL-PLAN-BM25",
+            format!("BM25 k must be a finite number >= 0, got {k}"),
+            None,
+        ));
+    }
+    if let Some(b) = b
+        && (!b.is_finite() || !(0.0..=1.0).contains(&b))
+    {
+        return Err(QqlError::validation(
+            "QQL-PLAN-BM25",
+            format!("BM25 b must be within [0, 1], got {b}"),
+            None,
+        ));
+    }
+    let text = if k.is_none() && b.is_none() {
+        TextInterface::Plain(text.to_string())
+    } else {
+        TextInterface::WithScoring(TextQueryInput {
+            query: text.to_string(),
+            scoring: Some(Bm25Scoring {
+                bm25: Bm25Params { k, b },
+            }),
+        })
+    };
+    Ok(QueryVariant::Text(TextQuery { text }))
 }
 
 /// Single definition of the `USING bm25` model default: an unspecified
@@ -369,7 +446,8 @@ fn expression_prefetch(expr: &QueryExpr) -> &[qql_core::ast::Prefetch] {
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. } => prefetch,
         _ => &[],
     }
 }

@@ -176,6 +176,17 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
             options = self.parse_config_block()?;
             super::validate_index_options(&options, span)?;
+            if field_type != "text"
+                && options
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case("scoring"))
+            {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-TEXT-INDEX",
+                    alloc::format!("scoring = 'bm25' requires TYPE text (got TYPE {field_type})"),
+                    Some(span),
+                ));
+            }
         }
         let wait = self.parse_optional_wait()?;
         Ok(Stmt::CreateIndex(Box::new(CreateIndexStmt {

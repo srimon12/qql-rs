@@ -256,7 +256,8 @@ pub(crate) fn expression_prefetch(expression: &QueryExpr) -> &[Prefetch] {
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom

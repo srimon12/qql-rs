@@ -212,6 +212,9 @@ fn convert_prefetch(request: &PrefetchRequest) -> Result<Prefetch, QqlError> {
 
 fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQuery, QqlError> {
     match query {
+        QueryVariant::Text(_) => {
+            Err(crate::backend::unsupported::EdgeUnsupported::TextBm25.error())
+        }
         QueryVariant::Nearest(nearest) => {
             let vector = plan_input_to_vector_internal(&nearest.nearest)?;
             if let Some(mmr) = &nearest.mmr {

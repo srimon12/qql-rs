@@ -74,6 +74,7 @@ fn expression_needs_kind<'a>(expression: &'a QueryExpr, stack: &mut Vec<&'a Quer
         }
         // Cross-encoder has no USING vector; only nested prefetches need topology.
         QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. }
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. } => {
             stack.extend(prefetch_queries(prefetch));
@@ -331,7 +332,7 @@ fn configure_expr(
             resolve_using(collection, using, Some(VectorKind::Dense), topology)?;
             configure_prefetches(collection, prefetch, topology, depth)
         }
-        QueryExpr::CrossRerank { prefetch, .. } => {
+        QueryExpr::CrossRerank { prefetch, .. } | QueryExpr::Bm25 { prefetch, .. } => {
             configure_prefetches(collection, prefetch, topology, depth)
         }
         QueryExpr::Hybrid {

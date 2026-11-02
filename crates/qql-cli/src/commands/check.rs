@@ -502,6 +502,7 @@ fn collect_expr_collections(e: &qql_core::ast::QueryExpr, out: &mut Vec<String>)
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
         | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. }
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
@@ -676,6 +677,7 @@ fn check_expr_using(
             Ok(())
         }
         QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. }
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. } => check_prefetches(prefetch),
         QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => Ok(()),

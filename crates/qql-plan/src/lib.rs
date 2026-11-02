@@ -36,6 +36,7 @@ pub mod routing;
 pub mod semantic;
 /// AST → plan and plan → wire conversions for [`semantic`] primitives.
 mod semantic_conv;
+mod server_features;
 /// Wire and plan-IR request types shared by the REST projection and gRPC conversion.
 pub mod types;
 mod validate;
@@ -54,5 +55,6 @@ pub use semantic::{
     PlanFacetValue, PlanGroupId, PlanPointId, PlanPointVectors, PlanQueryInput, PlanShardKey,
     PlanVectorStruct, PlanVectorValue,
 };
+pub use server_features::{QDRANT_TEXT_BM25_MIN_VERSION, query_request_feature};
 pub use types::*;
 pub use value_serde::value_error_text;

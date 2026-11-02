@@ -247,6 +247,13 @@ impl Executor {
                     }
                 }
                 Err(error) => {
+                    let error = super::version_gate::gate_qdrant_1_20(
+                        batch
+                            .searches
+                            .iter()
+                            .find_map(qql_plan::query_request_feature),
+                        error,
+                    );
                     if stop_on_error {
                         return Err(error);
                     }

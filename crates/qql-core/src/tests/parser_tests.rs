@@ -1427,7 +1427,8 @@ fn count_query_stmts(query: &crate::ast::QueryStmt) -> usize {
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch.as_slice(),
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. } => prefetch.as_slice(),
         _ => &[],
     };
     for prefetch in prefetches {

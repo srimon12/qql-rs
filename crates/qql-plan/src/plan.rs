@@ -952,6 +952,8 @@ fn batch_shared_read_opts(
         ("rrf_k", params.rrf_k.is_some()),
         ("rrf_weights", params.rrf_weights.is_some()),
         ("idf", params.idf.is_some()),
+        ("k", params.bm25_k.is_some()),
+        ("b", params.bm25_b.is_some()),
     ];
     if let Some((name, _)) = present.iter().find(|(_, is_some)| *is_some) {
         return Err(QqlError::validation(

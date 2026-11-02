@@ -434,6 +434,7 @@ fn query_target_vector(expression: &QueryExpr) -> Option<String> {
             };
             Some(format!("dense='{}', sparse='{}', fusion={}", d, s, f))
         }
+        QueryExpr::Bm25 { field, .. } => Some(format!("text index on payload field '{}'", field)),
         _ => None,
     }
 }
@@ -463,6 +464,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Hybrid { .. } => "hybrid shorthand (dense + sparse)",
         QueryExpr::Rerank { .. } => "late-interaction prefetched rerank",
         QueryExpr::CrossRerank { .. } => "cross-encoder pair rerank of prefetched candidates",
+        QueryExpr::Bm25 { .. } => "server-side BM25 over a full-text index",
     }
 }
 
@@ -476,7 +478,8 @@ fn query_prefetches(expression: &QueryExpr) -> Option<Vec<String>> {
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => Some(
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. } => Some(
             prefetch
                 .iter()
                 .map(|p| match &p.source {

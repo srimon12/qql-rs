@@ -53,6 +53,30 @@ impl<'a> AstLowerer<'a> {
                         "indexed_only" => {
                             params.indexed_only = Some(boolean(value, &key, key_span)?)
                         }
+                        // Server BM25 scorer (QUERY BM25 only; checked by the
+                        // query clause validator). Bounds mirror Qdrant Bm25Params.
+                        "k" => {
+                            let k = finite_number(value, &key, key_span)?;
+                            if k < 0.0 {
+                                return Err(QqlError::validation(
+                                    "QQL-VALIDATION-BM25-PARAMS",
+                                    "BM25 k must be >= 0",
+                                    Some(key_span),
+                                ));
+                            }
+                            params.bm25_k = Some(k);
+                        }
+                        "b" => {
+                            let b = finite_number(value, &key, key_span)?;
+                            if !(0.0..=1.0).contains(&b) {
+                                return Err(QqlError::validation(
+                                    "QQL-VALIDATION-BM25-PARAMS",
+                                    "BM25 b must be within [0, 1]",
+                                    Some(key_span),
+                                ));
+                            }
+                            params.bm25_b = Some(b);
+                        }
                         "rrf_k" => params.rrf_k = Some(positive_integer(value, &key, key_span)?),
                         "rrf_weights" => {
                             params.rrf_weights = Some(float_list(value, &key, key_span)?)
@@ -300,6 +324,24 @@ fn float_list(value: Value, key: &str, span: Span) -> Result<Vec<f64>, QqlError>
         }
     }
     Ok(res)
+}
+
+/// Finite number (int or float) for BM25 `k` / `b`.
+fn finite_number(value: Value, key: &str, span: Span) -> Result<f64, QqlError> {
+    let number = match value {
+        Value::Int(v) => v as f64,
+        Value::Float(v) => v,
+        _ => f64::NAN,
+    };
+    if number.is_finite() {
+        Ok(number)
+    } else {
+        Err(QqlError::validation(
+            "QQL-VALIDATION-SEARCH-PARAM",
+            alloc::format!("{key} must be a finite number"),
+            Some(span),
+        ))
+    }
 }
 
 /// Number in (0, 1] for ACORN max_selectivity.

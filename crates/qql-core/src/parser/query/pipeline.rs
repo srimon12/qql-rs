@@ -266,6 +266,29 @@ pub(crate) fn attach_pipeline(
             }
             *nested = prefetch;
         }
+        QueryExpr::Bm25 {
+            field,
+            prefetch: nested,
+            ..
+        } => {
+            // USING names a payload field with a BM25-scored text index.
+            let target = using.ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-VALIDATION-BM25-USING",
+                    "QUERY BM25 requires USING <payload field> (a text index with scoring = 'bm25')",
+                    Some(span),
+                )
+            })?;
+            if target.kind.is_some() || target.multi {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-BM25-USING",
+                    "QUERY BM25 USING names a payload field, not a vector; drop AS DENSE/SPARSE/MULTI",
+                    Some(span),
+                ));
+            }
+            *field = target.name;
+            *nested = prefetch;
+        }
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom
@@ -309,7 +332,8 @@ pub(crate) fn validate_prefetch_references(
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom
@@ -344,6 +368,19 @@ pub(crate) fn validate_common_clauses(
         return Err(QqlError::validation(
             "QQL-VALIDATION-SCORE",
             "score threshold must be finite",
+            Some(span),
+        ));
+    }
+    // `k` / `b` are server BM25 scorer params: they only mean something on a
+    // `QUERY BM25` leg and must never silently ride along another expression.
+    if let Some(p) = params
+        && (p.bm25_k.is_some() || p.bm25_b.is_some())
+        && !matches!(expression, QueryExpr::Bm25 { .. })
+    {
+        return Err(QqlError::validation(
+            // Keeps the pre-1.9 code for the legacy RRF short form `k`.
+            "QQL-VALIDATION-SEARCH-PARAM",
+            "PARAMS k / b apply only to QUERY BM25 (server-side BM25); use rrf_k for RRF fusion; client sparse BM25 is tuned via the embedder (bm25_k1 / bm25_b)",
             Some(span),
         ));
     }
