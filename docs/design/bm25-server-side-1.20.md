@@ -1,11 +1,13 @@
 # BM25 on Qdrant 1.20: server-side text index vs client-side sparse
 
-> **Status: DRAFT (SDK side).** The QQL syntax below is the surface locked by
-> Core Rust: `QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)` and
-> `CREATE INDEX … TYPE text WITH (scoring = 'bm25', …)`. Nothing here parses
-> on `dev` yet. The grammar, AST, and planner are owned by Core Rust. This document fixes
-> the SDK-side contract: routing rules, error behavior, binding options,
-> examples, and `qql convert` mappings. Those pieces should land with the grammar.
+> **Status: grammar landed (Core, PR #240).** `QUERY BM25 '…' FROM c USING field
+> PARAMS (k = …, b = …)` and `CREATE INDEX … TYPE text WITH (scoring = 'bm25',
+> tokenizer = 'code', …)` now parse, plan, and route (REST + gRPC). Core used
+> `QQL-VALIDATION-BM25-USING` / `QQL-VALIDATION-BM25-PARAMS` (rather than a single
+> `QQL-VALIDATION-BM25`), `QQL-PLAN-BM25`, `QQL-EDGE-UNSUPPORTED-TEXT-BM25`,
+> `QQL-EDGE-UNSUPPORTED-CODE-TOKENIZER`, and `QQL-BACKEND-VERSION`. The rest of
+> this note is the original SDK-side contract (routing rules, binding options,
+> examples, and `qql convert` mappings, which still fail closed).
 
 ## Background
 
