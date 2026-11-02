@@ -195,3 +195,24 @@ fn code_tokenizer_with_scoring() {
         "CREATE INDEX ON COLLECTION docs FOR src TYPE text WITH (tokenizer = 'code')",
     );
 }
+
+#[test]
+fn rejects_idf_on_bm25() {
+    match convert(
+        &query(json!({
+            "query": {"text": "q"},
+            "using": "title",
+            "params": {"idf": "global"}
+        })),
+        Some("docs"),
+    ) {
+        Err(ConvertError::InvalidField { path, detail }) => {
+            assert!(path.contains("idf"), "{path}");
+            assert!(
+                detail.contains("sparse-vector") || detail.contains("QUERY BM25"),
+                "{detail}"
+            );
+        }
+        other => panic!("expected InvalidField, got {other:?}"),
+    }
+}

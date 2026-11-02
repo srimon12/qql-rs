@@ -35,9 +35,9 @@ SETUP = [
 QUERIES = [
     # Server BM25 with Qdrant defaults (k = 1.2, b = 0.75).
     f"QUERY BM25 'time travel' FROM {COLLECTION} USING title LIMIT 10",
-    # Per-query k / b; IDF scoped with the existing PARAMS (idf = …) corpus filter.
+    # Per-query k / b only — idf is sparse-vector PARAMS, not server BM25.
     f"QUERY BM25 'time travel' FROM {COLLECTION} USING title "
-    "PARAMS (k = 1.5, b = 0.5, idf = 'global') LIMIT 10",
+    "PARAMS (k = 1.5, b = 0.5) LIMIT 10",
 ]
 
 

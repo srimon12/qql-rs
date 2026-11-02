@@ -31,8 +31,8 @@ POST /collections/docs/points/query
 ```
 
 Server-side BM25 needs no sparse vector, no write-path encoder, and no
-re-upload: the index records document lengths, and `k` and `b` are set per
-query. IDF can be scoped with the existing `params.idf` corpus filter.
+re-upload: the index records document lengths and IDF, and `k` and `b` are
+set per query. Sparse-vector `PARAMS (idf = …)` does **not** apply here.
 
 ## Routing rules
 
@@ -77,7 +77,7 @@ The codes are proposals. Core Rust owns the final registry.
 | `bm25_language`, `bm25_tokenizer`, `bm25_stopwords`, `bm25_stemmer`, … | same | Client sparse path only |
 | `CREATE INDEX … TYPE text WITH (scoring = 'bm25', tokenizer = …, stemmer = …, stopwords = …)` | QQL text | **Server path** (rule 1): tokenization and length stats live in the Qdrant index |
 | `QUERY BM25 … PARAMS (k = …, b = …)` | QQL text | **Server path** only. Defaults are `1.2` / `0.75` (Qdrant) |
-| `PARAMS (idf = 'global' \| WHERE …)` | QQL text | Both paths. For server BM25 the corpus filter also scopes the average document length |
+| `PARAMS (idf = 'global' \| WHERE …)` | QQL text | **Client sparse path only.** Do not put `idf` on `QUERY BM25` |
 
 No binding signature changes are needed: server BM25 is pure QQL text, so it
 works through every binding's `execute()` once the grammar lands.
@@ -104,8 +104,8 @@ WITH
 QUERY FUSION RRF FROM books PREFETCH (dense, lexical) LIMIT 10;
 ```
 
-`k` and `b` share the `PARAMS (…)` block with `idf`, so a scoped corpus reads
-`PARAMS (k = 1.2, b = 0.75, idf = WHERE tenant_id = 'acme')`.
+`PARAMS` on `QUERY BM25` takes only `k` and `b`. Use a `WHERE` filter for
+tenant scoping; leave `idf` for sparse-vector queries.
 
 Still open, for Core Rust:
 
