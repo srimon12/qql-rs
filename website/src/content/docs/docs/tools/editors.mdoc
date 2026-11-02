@@ -116,7 +116,8 @@ Suggestions are contextual: modes after `QUERY`, fusion methods after
 open file, and CTE names are suggested inside `PREFETCH`. Snippet prefixes
 include `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`,
 `qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, and
-`qslice`.
+`qslice`. Server BM25 on Qdrant 1.20+ has `qbm25` (`QUERY BM25`),
+`qbm25hybrid` (dense + server BM25 RRF), and `qbm25index` (BM25 text index).
 
 ### Settings
 

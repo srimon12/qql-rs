@@ -22,6 +22,18 @@ Build dense and sparse candidate stages, then fuse them with RRF or DBSF.
 [Open the guide](/docs/guides/hybrid-retrieval/)
 {% /glassCard %}
 
+{% glassCard title="Server BM25 (Qdrant 1.20)" %}
+Keyword search on a BM25 text index with `QUERY BM25` — no sparse vectors, per-query `k` and `b`.
+
+[Open the guide](/docs/guides/bm25-server/)
+{% /glassCard %}
+
+{% glassCard title="Migrate sparse BM25 to server BM25" %}
+Add a BM25 text index on existing payload text and switch queries — no re-upload.
+
+[Open the guide](/docs/guides/migrate-sparse-bm25/)
+{% /glassCard %}
+
 {% glassCard title="Multitenancy & routing" %}
 Keep isolation, shard routing, index layout, and partition lifecycle distinct.
 
