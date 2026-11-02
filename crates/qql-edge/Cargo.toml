@@ -32,7 +32,7 @@ fastembed = { version = "7", optional = true, default-features = false, features
     "hf-hub-rustls-tls",
     "image-models",
 ] }
-qdrant-edge = "0.8"
+qdrant-edge = "0.9"
 
 tokio = { workspace = true, features = ["rt", "sync"] }
 async-trait = { workspace = true }
