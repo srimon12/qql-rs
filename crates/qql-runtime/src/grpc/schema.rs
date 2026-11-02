@@ -102,6 +102,8 @@ pub(crate) fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> Coll
                                 qdrant::Datatype::Uint8 => "uint8",
                                 qdrant::Datatype::Float16 => "float16",
                                 qdrant::Datatype::Turbo4 => "turbo4",
+                                qdrant::Datatype::Turbo8 => "turbo8",
+                                qdrant::Datatype::Turbo16 => "turbo16",
                                 qdrant::Datatype::Default => "default",
                             };
                             map.insert("datatype".into(), serde_json::Value::String(name.into()));
@@ -202,6 +204,8 @@ fn vector_params_to_spec(name: Option<String>, p: &qdrant::VectorParams) -> Vect
                 qdrant::Datatype::Uint8 => "uint8",
                 qdrant::Datatype::Float16 => "float16",
                 qdrant::Datatype::Turbo4 => "turbo4",
+                qdrant::Datatype::Turbo8 => "turbo8",
+                qdrant::Datatype::Turbo16 => "turbo16",
                 qdrant::Datatype::Default => "default",
             }
             .to_string()
@@ -353,6 +357,7 @@ fn quantization_config_to_spec(q: &qdrant::QuantizationConfig) -> Option<Quantiz
                         qdrant::TurboQuantBitSize::Bits15 => "bits1_5",
                         qdrant::TurboQuantBitSize::Bits2 => "bits2",
                         qdrant::TurboQuantBitSize::Bits4 => "bits4",
+                        qdrant::TurboQuantBitSize::Bits8 => "bits8",
                     }
                     .to_string()
                 });
@@ -503,6 +508,7 @@ fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_j
                     qdrant::TurboQuantBitSize::Bits15 => "bits1_5",
                     qdrant::TurboQuantBitSize::Bits2 => "bits2",
                     qdrant::TurboQuantBitSize::Bits4 => "bits4",
+                    qdrant::TurboQuantBitSize::Bits8 => "bits8",
                 };
                 map.insert("bits".into(), serde_json::Value::String(label.into()));
             }

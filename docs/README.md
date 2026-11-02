@@ -4,7 +4,7 @@
 
 # QQL Documentation
 
-**QQL** is a typed query language for [Qdrant](https://qdrant.tech): one grammar, one plan IR, three backends (REST, gRPC, edge). The language surface tracks **Qdrant ≥ 1.19.0** (OpenAPI / public protos pinned in `qql-runtime`).
+**QQL** is a typed query language for [Qdrant](https://qdrant.tech): one grammar, one plan IR, three backends (REST, gRPC, edge). The language surface tracks **Qdrant ≥ 1.19.0**; the OpenAPI schema and public protos vendored in `qql-runtime` are pinned to Qdrant **1.20.0**.
 
 ## Proposition
 

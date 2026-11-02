@@ -62,8 +62,8 @@ batches). Implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant` (other crate
 
 | Backend | Port (typical) | Notes |
 |---------|----------------|--------|
-| REST | 6333 | OpenAPI **1.19.0** JSON body (`openapi.json`) |
-| gRPC | 6334 | tonic + public protos in `proto/` (1.19.0 pin) |
+| REST | 6333 | OpenAPI JSON body (`openapi.json`, vendored from Qdrant **1.20.0**; servers ≥ 1.19.0 supported) |
+| gRPC | 6334 | tonic + public protos in `proto/` (1.20.0 pin; servers ≥ 1.19.0 supported) |
 | Edge | n/a | qdrant-edge **0.8** (IDF + ACORN + GROUP BY yes; quotas / SHARD / LOOKUP FROM no) |
 
 API key: REST header `api-key`; gRPC `ApiKeyInterceptor`.

@@ -1,11 +1,11 @@
 {
   "repo": "qdrant/qdrant",
-  "ref": "master",
-  "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de",
+  "ref": "v1.20.0",
+  "commit": "222b2e44ab1c3f17e8246396ead6558e45041df7",
   "sources": {
     "collections.proto": {
       "path": "lib/api/src/grpc/proto/collections.proto",
-      "sha256": "3c2c3391d899a7f7162d859cedebfbde0f4efd5dbc907fa64d3e18c68a616251"
+      "sha256": "401d7d9f9792ca79fd0ff704f7141c6dcf116719df6b414f5ce5127f6bc3e699"
     },
     "collections_service.proto": {
       "path": "lib/api/src/grpc/proto/collections_service.proto",
@@ -17,7 +17,7 @@
     },
     "points.proto": {
       "path": "lib/api/src/grpc/proto/points.proto",
-      "sha256": "3e1c47c437694e6e69b0ba4b83380174acabbc0631dd9eaa563dccd321716f62"
+      "sha256": "15769869371a00aebe65c6b3dc282c34429447bff54391e6bca019bcc0b46fc4"
     },
     "points_service.proto": {
       "path": "lib/api/src/grpc/proto/points_service.proto",
@@ -25,7 +25,7 @@
     },
     "qdrant_common.proto": {
       "path": "lib/api/src/grpc/proto/qdrant_common.proto",
-      "sha256": "a77f0c15d232b36f40e5682211db923e4ba8b8f4f300757811255d86024061fc"
+      "sha256": "c76269ca6c8d725ec6c675ab827031b04a70d48f06e7176ac6065c007d631002"
     },
     "snapshots_service.proto": {
       "path": "lib/api/src/grpc/proto/snapshots_service.proto",
@@ -41,7 +41,7 @@
     },
     "openapi.json": {
       "path": "docs/redoc/master/openapi.json",
-      "sha256": "eb3e5d71ba74e1d99124ca1a77d563bbfa47084f04a13ef9b197e339f5a4ce0a"
+      "sha256": "a8dab6917779c13ef6babcf4834a968fb65b95d34979a7479d1f607bffe84ed8"
     }
   }
 }

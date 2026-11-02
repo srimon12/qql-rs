@@ -7,12 +7,17 @@ sidebar:
 
 ## Prerequisites
 
-QQL targets Qdrant 1.19.0 or newer. Pin the server version when running it
-in Docker:
+QQL targets Qdrant 1.19.0 or newer; its bundled API definitions are pinned
+to **1.20.0**. Pin the server version when running it in Docker:
 
 {% terminal title="Qdrant" %}
-docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.19.0
+docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.20.0
 {% /terminal %}
+
+Pin `v1.20.0` for the current supported surface. New Qdrant 1.20 language
+features (full-text BM25 scoring, the `code` tokenizer, `turbo8` / `turbo16`,
+`bits8` quantization, nested payload indexes, and `substring` match) land in
+follow-up QQL releases and will require a 1.20+ server.
 
 Text embedding (any `USING` step) needs an OpenAI-compatible endpoint. With
 Ollama, start the server and pull the model before configuring QQL:
