@@ -74,8 +74,9 @@ QUERY BM25 'time travel' FROM books USING title PARAMS (k = 1.2, b = 0.75) LIMIT
 ```
 {% /qqlExample %}
 
-`k` and `b` share the `PARAMS (…)` block with `idf`, so a tenant-scoped
-corpus is `PARAMS (k = 1.2, b = 0.75, idf = WHERE tenant_id = 'acme')`.
+`PARAMS` on `QUERY BM25` only takes `k` and `b`. Tenant or corpus
+scoping for server BM25 comes from the full-text index and ordinary
+`WHERE` filters — not from sparse-vector `idf`.
 
 ## Hybrid: dense + server BM25
 
