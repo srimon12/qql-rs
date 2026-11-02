@@ -292,6 +292,35 @@ impl<'a> AstLowerer<'a> {
         })
     }
 
+    /// `BM25 '<text>' | BM25 :name | BM25 ?` — server-side BM25 text query.
+    /// `USING <field>` is attached by [`attach_pipeline`](super::pipeline::attach_pipeline).
+    pub(crate) fn parse_bm25(&mut self) -> Result<QueryExpr, QqlError> {
+        self.advance()?;
+        let (text, text_param) = if self.peek()?.kind == TokenKind::Colon {
+            self.advance()?;
+            let name = self.parse_param_name()?;
+            (String::new(), Some(alloc::format!(":{}", name)))
+        } else if self.peek()?.kind == TokenKind::Question {
+            self.advance()?;
+            let idx = self.next_positional_param();
+            (String::new(), Some(alloc::format!("?{}", idx)))
+        } else if self.peek()?.kind == TokenKind::String {
+            (self.parse_string()?, None)
+        } else {
+            return Err(QqlError::parse(
+                "QQL-PARSE-BM25",
+                "QUERY BM25 requires a string query or placeholder",
+                self.peek()?.span,
+            ));
+        };
+        Ok(QueryExpr::Bm25 {
+            text,
+            field: String::new(),
+            prefetch: Vec::new(),
+            text_param,
+        })
+    }
+
     pub(crate) fn parse_cross_rerank(&mut self) -> Result<QueryExpr, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Rerank)?;

@@ -497,6 +497,7 @@ pub(crate) fn text_index_params(options: &IndexOptions) -> qdrant::TextIndexPara
         qql_plan::TextTokenizer::Whitespace => qdrant::TokenizerType::Whitespace,
         qql_plan::TextTokenizer::Multilingual => qdrant::TokenizerType::Multilingual,
         qql_plan::TextTokenizer::Word => qdrant::TokenizerType::Word,
+        qql_plan::TextTokenizer::Code => qdrant::TokenizerType::Code,
     };
     let stopwords = options.stopwords.as_ref().map(|set| qdrant::StopwordsSet {
         languages: set.languages.clone(),
@@ -530,8 +531,13 @@ pub(crate) fn text_index_params(options: &IndexOptions) -> qdrant::TextIndexPara
         ascii_folding: options.ascii_folding,
         enable_hnsw: options.enable_hnsw,
         memory: options.memory.map(memory_to_proto),
-        // Qdrant 1.20 BM25 scoring and per-element indexing; not yet exposed in QQL.
-        scoring: None,
+        // Qdrant 1.20 server-side BM25 (`WITH (scoring = 'bm25')`).
+        scoring: options.scoring.map(|scoring| match scoring {
+            qql_plan::TextScoring::Bm25 => qdrant::TextScoringParams {
+                r#type: qdrant::TextScoringType::Bm25 as i32,
+            },
+        }),
+        // Per-element (nested) text indexing is not yet exposed in QQL.
         nested: None,
     }
 }
@@ -580,6 +586,30 @@ mod tests {
                 "query_encoding = {raw}"
             );
         }
+    }
+
+    #[test]
+    fn text_bm25_scoring_and_code_tokenizer_convert_to_proto() {
+        let options = IndexOptions {
+            tokenizer: Some(qql_plan::TextTokenizer::Code),
+            lowercase: Some(true),
+            scoring: Some(qql_plan::TextScoring::Bm25),
+            ..Default::default()
+        };
+        let proto = text_index_params(&options);
+        assert_eq!(proto.tokenizer, qdrant::TokenizerType::Code as i32);
+        assert_eq!(proto.lowercase, Some(true));
+        assert_eq!(
+            proto.scoring,
+            Some(qdrant::TextScoringParams {
+                r#type: qdrant::TextScoringType::Bm25 as i32,
+            })
+        );
+        assert!(
+            text_index_params(&IndexOptions::default())
+                .scoring
+                .is_none()
+        );
     }
 
     #[test]

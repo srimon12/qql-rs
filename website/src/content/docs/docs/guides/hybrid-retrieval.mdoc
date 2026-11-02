@@ -8,6 +8,15 @@ sidebar:
 Hybrid retrieval combines semantic dense similarity with lexical sparse
 matching. QQL exposes a shorthand and an explicit multi-stage form.
 
+{% aside type="tip" title="On Qdrant 1.20+? Prefer server BM25" %}
+When the text is already in the payload, a remote Qdrant 1.20+ server can
+score BM25 itself with `QUERY BM25 '…' USING <field>` — no sparse vector, no
+embedding step. The sparse examples on this page are **client sparse BM25**,
+which stays the path for edge and Qdrant < 1.20. See
+[Server BM25 on Qdrant 1.20](/docs/guides/bm25-server/) and
+[Migrate sparse BM25 to server BM25](/docs/guides/migrate-sparse-bm25/).
+{% /aside %}
+
 ## Shorthand
 
 {% qqlExample title="Schema-resolved hybrid search" %}
@@ -45,15 +54,22 @@ LIMIT 10;
 Use the explicit form when candidate limits, filters, or weights differ by
 stage. `rrf_weights` length must equal the prefetch count.
 
-`USING bm25` without an explicit model resolves to the server-side
-`Qdrant/bm25` model — queries embed with unit weights and documents with tf
-saturation, staying wire-compatible with Qdrant's `qdrant/bm25`:
+## Client sparse BM25
 
-{% qqlExample title="bm25 defaults" %}
+`USING bm25` without an explicit model resolves to the `Qdrant/bm25` sparse
+model — queries embed with unit weights and documents with tf saturation,
+staying wire-compatible with Qdrant's `qdrant/bm25`. This leg searches a
+sparse vector, so it runs on edge and on any Qdrant version:
+
+{% qqlExample title="Client sparse bm25 defaults" %}
 ```sql
 QUERY 'zero downtime deployment' FROM runbooks USING bm25 LIMIT 10;
 ```
 {% /qqlExample %}
+
+For a server-scored lexical leg on Qdrant 1.20+, swap it for
+`QUERY BM25 '…' USING <field>` inside `PREFETCH`; see
+[Hybrid: dense + server BM25](/docs/guides/bm25-server/#hybrid-dense--server-bm25).
 
 ## RRF or DBSF?
 

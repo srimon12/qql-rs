@@ -6,7 +6,7 @@ Native Python bindings for QQL (parser, plan, execute) via PyO3.
 
 Write Qdrant operations as QQL instead of hand-built JSON. Same language as the
 CLI and other SDKs: hybrid search, multitenancy (`inject_filter` + `SHARD`),
-schema-as-code, REST or gRPC. Language surface tracks **Qdrant ≥ 1.19**
+schema-as-code, REST or gRPC. Language surface tracks **Qdrant ≥ 1.19** (1.20 additions in progress, see below)
 (quotas, `memory` placement, `MATCH PREFIX` / `SLICE`, sparse `idf`, `turbo4`).
 
 ## Install
@@ -148,6 +148,27 @@ report = client.execute("""
 > In the official Qdrant Python SDK, `FormulaQuery` expects an object tree of `Expression` classes (e.g. `models.SumExpression(...)`), not query text. Pass formula queries directly to `client.execute()`.
 >
 > **Shell quoting**: Prefer bare `score` instead of `$score`. While `$score` works inside Python strings, POSIX shells (bash, zsh) interpolate `$score` into `""` when run via CLI or shell scripts. Bare `score` is shell-safe across all environments.
+
+## Qdrant 1.20 and BM25
+
+Everything documented above keeps working unchanged on **Qdrant 1.19 and
+1.20**. Qdrant 1.20 adds server-side BM25 over full-text indexes and the `code`
+tokenizer, which QQL 1.9 supports (`QUERY BM25`, `scoring = 'bm25'`,
+`tokenizer = 'code'`; remote Qdrant ≥ 1.20 only, edge fails with a typed
+error). `nested` payload indexes, `substring` match, `turbo8` / `turbo16`, and
+`bits8` are still **in progress** and fail closed at parse or plan time, so
+nothing is sent to Qdrant.
+
+Which BM25 path applies:
+
+| Path | When | Tuned by |
+|------|------|----------|
+| **Client sparse BM25** (ships today) | Qdrant < 1.20, existing `qdrant/bm25` sparse vectors (`USING sparse`, `AS SPARSE`) | `HttpEmbedder(bm25_k1=…, bm25_b=…, bm25_avg_len=…, …)`. Write-path document encoder only |
+| **Server BM25** (QQL 1.9) | Qdrant ≥ 1.20 and a text index with `scoring = 'bm25'` | `CREATE INDEX … TYPE text WITH (scoring = 'bm25', tokenizer = …)` and `QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)` |
+
+The client options never change a server BM25 query, and a query leg never runs
+both paths. See the [BM25 design note](https://github.com/srimon12/qql-rs/blob/main/docs/design/bm25-server-side-1.20.md) and the
+[1.20 examples](https://github.com/srimon12/qql-rs/tree/main/examples/qdrant-1.20).
 
 ## Docs
 

@@ -34,6 +34,14 @@ pub(crate) fn edge_payload_field_schema(
     if request.options.is_empty() {
         return Ok(PayloadFieldSchema::FieldType(schema_type));
     }
+    // Qdrant 1.20 text-index features have no qdrant-edge 0.8 equivalent:
+    // fail with a typed error instead of a silent drop or an engine error.
+    if request.options.scoring.is_some() {
+        return Err(super::unsupported::EdgeUnsupported::TextBm25.error());
+    }
+    if request.options.tokenizer == Some(TextTokenizer::Code) {
+        return Err(super::unsupported::EdgeUnsupported::CodeTokenizer.error());
+    }
     reject_incompatible_index_options(request.field_schema, &request.options)?;
     Ok(PayloadFieldSchema::FieldParams(index_params(
         request.field_schema,
@@ -102,6 +110,7 @@ fn index_params(
             tokenizer: options
                 .tokenizer
                 .map(edge_tokenizer)
+                .transpose()?
                 .unwrap_or(TokenizerType::Word),
             min_token_len: options
                 .min_token_len
@@ -162,13 +171,16 @@ where
     })
 }
 
-fn edge_tokenizer(tokenizer: TextTokenizer) -> TokenizerType {
-    match tokenizer {
+fn edge_tokenizer(tokenizer: TextTokenizer) -> Result<TokenizerType, QqlError> {
+    Ok(match tokenizer {
         TextTokenizer::Prefix => TokenizerType::Prefix,
         TextTokenizer::Whitespace => TokenizerType::Whitespace,
         TextTokenizer::Word => TokenizerType::Word,
         TextTokenizer::Multilingual => TokenizerType::Multilingual,
-    }
+        TextTokenizer::Code => {
+            return Err(super::unsupported::EdgeUnsupported::CodeTokenizer.error());
+        }
+    })
 }
 
 fn reject_incompatible_index_options(
@@ -204,7 +216,8 @@ fn reject_incompatible_index_options(
             || options.max_token_len.is_some()
             || options.tokenizer.is_some()
             || options.stemmer.is_some()
-            || options.stopwords.is_some())
+            || options.stopwords.is_some()
+            || options.scoring.is_some())
     {
         unknown.push("text tokenizer options");
     }
@@ -283,6 +296,30 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    #[test]
+    fn bm25_scoring_and_code_tokenizer_fail_closed_offline() {
+        let error = edge_payload_field_schema(&request(
+            IndexFieldType::Text,
+            IndexOptions {
+                scoring: Some(qql_plan::TextScoring::Bm25),
+                ..Default::default()
+            },
+        ))
+        .expect_err("scoring is Qdrant 1.20 only");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-TEXT-BM25");
+
+        let error = edge_payload_field_schema(&request(
+            IndexFieldType::Text,
+            IndexOptions {
+                tokenizer: Some(TextTokenizer::Code),
+                lowercase: Some(true),
+                ..Default::default()
+            },
+        ))
+        .expect_err("code tokenizer is Qdrant 1.20 only");
+        assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-CODE-TOKENIZER");
     }
 
     /// `StemmingAlgorithm`/`StopwordsInterface` are not re-exported, but the

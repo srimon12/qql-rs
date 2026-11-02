@@ -125,10 +125,10 @@ Jump from a CTE reference in `PREFETCH (…)` back to its `name AS (` definition
 - **Contextual follow-ups** — after `QUERY` suggest modes; after `FUSION` suggest `RRF`/`DBSF`; after `TYPE` suggest index types; …
 - **Collection names** harvested from the current file
 - **CTE names** suggested inside `PREFETCH`
-- **Snippets** for hybrid, CTE fusion, rerank, recommend, DDL, shards (keyword + numeric), quotas, ALTER vector/sparse diffs, WAIT durability, `:name` params, MATCH PREFIX, SLICE, memory placement, …
+- **Snippets** for hybrid (client sparse), server BM25 (`QUERY BM25`, BM25 text index), CTE fusion, rerank, recommend, DDL, shards (keyword + numeric), quotas, ALTER vector/sparse diffs, WAIT durability, `:name` params, MATCH PREFIX, SLICE, memory placement, …
 - Full keyword list still available for filter-as-you-type
 
-Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`, `qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, `qslice`, `qalter`, `qaltersparse`, `qalterhnsw`, `qshardnum`, `qshardkeynum`, `qparams`.
+Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`, `qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, `qslice`, `qalter`, `qaltersparse`, `qalterhnsw`, `qshardnum`, `qshardkeynum`, `qparams`, plus server BM25 (Qdrant 1.20+): `qbm25`, `qbm25hybrid`, `qbm25index`.
 
 ### Query parameters (`:name` / `?`)
 

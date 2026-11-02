@@ -7,7 +7,7 @@ WebAssembly bindings for QQL: parse, plan, optional browser execute (`fetch`).
 Run the same QQL frontend offline in the browser (or Workers/Deno/Bun with the
 right wasm-bindgen target). Optional `Client` posts **REST** to Qdrant and can
 attach HTTP/JS embedders. Plan IR is shared with native crates. Language
-surface tracks **Qdrant ≥ 1.19** (parse/plan/compile always; live quotas and
+surface tracks **Qdrant ≥ 1.19**, with 1.20 additions in progress (parse/plan/compile always; live quotas and
 1.19 body fields need a ≥ 1.19 server when executing).
 
 ## Install
@@ -137,6 +137,27 @@ await client.execute(
   "QUERY TEXT 'q' FROM docs USING dense WHERE title MATCH PREFIX 'Comp' LIMIT 5"
 );
 ```
+
+## Qdrant 1.20 and BM25
+
+Everything documented above keeps working unchanged on **Qdrant 1.19 and
+1.20**. Qdrant 1.20 adds server-side BM25 over full-text indexes and the `code`
+tokenizer, which QQL 1.9 supports (`QUERY BM25`, `scoring = 'bm25'`,
+`tokenizer = 'code'`; remote Qdrant ≥ 1.20 only, edge fails with a typed
+error). `nested` payload indexes, `substring` match, `turbo8` / `turbo16`, and
+`bits8` are still **in progress** and fail closed at parse or plan time, so
+nothing is sent to Qdrant.
+
+Which BM25 path applies:
+
+| Path | When | Tuned by |
+|------|------|----------|
+| **Client sparse BM25** (ships today) | Qdrant < 1.20, existing `qdrant/bm25` sparse vectors (`USING sparse`, `AS SPARSE`) | `Client.setBm25Params(k1, b, avgLen)`. Write-path document encoder only |
+| **Server BM25** (QQL 1.9) | Qdrant ≥ 1.20 and a text index with `scoring = 'bm25'` | `CREATE INDEX … TYPE text WITH (scoring = 'bm25', tokenizer = …)` and `QUERY BM25 '…' FROM c USING field PARAMS (k = …, b = …)` |
+
+The client options never change a server BM25 query, and a query leg never runs
+both paths. See the [BM25 design note](https://github.com/srimon12/qql-rs/blob/main/docs/design/bm25-server-side-1.20.md) and the
+[1.20 examples](https://github.com/srimon12/qql-rs/tree/main/examples/qdrant-1.20).
 
 ## Docs
 

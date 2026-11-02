@@ -140,6 +140,7 @@ fn query_expr_needs_embeddings(e: &qql_core::ast::QueryExpr) -> bool {
             input, prefetch, ..
         } => input_needs(input) || prefetch_needs(prefetch),
         QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. }
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. } => prefetch_needs(prefetch),
         QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => false,

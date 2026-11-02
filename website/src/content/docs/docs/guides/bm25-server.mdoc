@@ -1,0 +1,113 @@
+---
+title: "Server BM25 on Qdrant 1.20"
+description: "Run BM25 keyword search on a Qdrant 1.20 full-text index with QUERY BM25 — no sparse vectors, no embedding step, per-query k and b."
+sidebar:
+  order: 2
+---
+
+Qdrant 1.20 can score BM25 directly on a full-text payload index. QQL 1.9
+exposes that as `QUERY BM25`: the server tokenizes, tracks document lengths,
+and ranks. There is no sparse vector to store and nothing to embed.
+
+{% aside type="note" title="Two BM25 paths" %}
+**Server BM25** (`QUERY BM25 … USING <field>`) needs remote Qdrant ≥ 1.20 and
+scores a payload field. **Client sparse BM25** (`QUERY TEXT … USING sparse` /
+`USING bm25`) encodes text into a sparse vector on the client and still runs
+everywhere, including edge and Qdrant < 1.20. A query leg uses exactly one
+of them; QQL never scores the same leg twice.
+{% /aside %}
+
+## When to prefer it
+
+Use server BM25 on remote Qdrant 1.20+ when the text already lives in the
+payload:
+
+- No sparse named vector and no write-path BM25 encoder.
+- The server owns `avg_len`, so it stays correct as the corpus changes.
+- `k` and `b` are set per query instead of baked into stored vectors.
+
+Keep the [client sparse path](/docs/guides/hybrid-retrieval/) on edge, on
+servers older than 1.20, and on collections that already rely on a sparse
+vector. To move an existing sparse setup over, follow
+[Migrate sparse BM25 to server BM25](/docs/guides/migrate-sparse-bm25/).
+
+## Create a BM25 text index
+
+BM25 scoring is an option on a `text` payload index:
+
+{% qqlExample title="BM25-scored text index" %}
+```sql
+CREATE INDEX ON COLLECTION books FOR title TYPE text
+  WITH (scoring = 'bm25', tokenizer = 'word', lowercase = true);
+```
+{% /qqlExample %}
+
+For source code, use the 1.20 `code` tokenizer, which splits identifiers
+such as `camelCase` and `snake_case`:
+
+{% qqlExample title="BM25 index for code search" %}
+```sql
+CREATE INDEX ON COLLECTION repo FOR body TYPE text
+  WITH (scoring = 'bm25', tokenizer = 'code', lowercase = true);
+```
+{% /qqlExample %}
+
+Tokenizer, stemmer, and stopword options belong to the index, not the query.
+
+## Query with QUERY BM25
+
+`USING` names the **payload field** that carries the BM25 index — not a
+vector.
+
+{% qqlExample title="Server BM25 query" %}
+```sql
+QUERY BM25 'time travel' FROM books USING title LIMIT 10;
+```
+{% /qqlExample %}
+
+Tune saturation (`k`) and length normalization (`b`) per query. Omitted
+values use Qdrant's defaults, `k = 1.2` and `b = 0.75`:
+
+{% qqlExample title="Per-query k and b" %}
+```sql
+QUERY BM25 'time travel' FROM books USING title PARAMS (k = 1.2, b = 0.75) LIMIT 10;
+```
+{% /qqlExample %}
+
+`PARAMS` on `QUERY BM25` only takes `k` and `b`. Tenant or corpus
+scoping for server BM25 comes from the full-text index and ordinary
+`WHERE` filters — not from sparse-vector `idf`.
+
+## Hybrid: dense + server BM25
+
+Each `PREFETCH` leg is routed on its own. The dense leg embeds with
+`QUERY TEXT`; the lexical leg is a server BM25 `text` query. RRF fuses them:
+
+{% qqlExample title="Dense + server BM25 with RRF" %}
+```sql
+WITH
+  dense AS (QUERY TEXT 'time travel' USING dense LIMIT 50),
+  lexical AS (QUERY BM25 'time travel' USING title PARAMS (k = 1.2, b = 0.75) LIMIT 50)
+QUERY FUSION RRF FROM books PREFETCH (dense, lexical) LIMIT 10;
+```
+{% /qqlExample %}
+
+The rest of [Hybrid retrieval](/docs/guides/hybrid-retrieval/) — RRF vs DBSF,
+per-leg limits, `rrf_weights` — applies unchanged.
+
+## Version gate
+
+`QUERY BM25` and `scoring = 'bm25'` fail closed **before** any request is
+sent:
+
+| Target | Result |
+|---|---|
+| Remote Qdrant ≥ 1.20 | Server BM25 |
+| Remote Qdrant < 1.20 | Typed QQL version error, not a raw Qdrant 400 |
+| qdrant-edge | Typed edge-unsupported error; use `QUERY TEXT … USING sparse` |
+| Field without a BM25-scored text index | Typed validation error naming the `CREATE INDEX` to run |
+
+Client BM25 options — `bm25_k1`, `bm25_b`, `bm25_avg_len`,
+`setBm25Params`, language and tokenizer knobs — only shape the client sparse
+encoder. They never change a `QUERY BM25` leg. See
+[Edge models](/docs/edge/models/) for the client path.

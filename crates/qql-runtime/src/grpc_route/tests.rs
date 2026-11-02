@@ -1864,3 +1864,62 @@ fn bulk_upsert_copy_bench_report() {
         "bulk upsert {N}x{DIM}: plan min {plan_best:.2}ms, plan→proto min {proto_best:.2}ms, plan→REST min {rest_best:.2}ms"
     );
 }
+
+fn grpc_query(source: &str) -> qdrant::QueryPoints {
+    let stmt = Parser::parse(source).unwrap_or_else(|e| panic!("parse {source}: {e}"));
+    let op = qql_plan::plan(&stmt).unwrap_or_else(|e| panic!("plan {source}: {e}"));
+    match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => to_query_points(request, collection).expect("grpc query"),
+        other => panic!("expected Query, got {:?}", other),
+    }
+}
+
+/// QQL 1.9 `QUERY BM25` → proto `Query.text` (Qdrant 1.20 server-side BM25).
+#[test]
+fn bm25_query_routes_to_grpc_text_query() {
+    let qp = grpc_query(
+        "QUERY BM25 'time travel' FROM books USING title PARAMS (k = 1.2, b = 0.75) LIMIT 10;",
+    );
+    assert_eq!(qp.using.as_deref(), Some("title"));
+    assert!(qp.params.is_none(), "k/b must not become SearchParams");
+    match qp.query.and_then(|q| q.variant) {
+        Some(qdrant::query::Variant::Text(text)) => {
+            assert_eq!(text.query, "time travel");
+            assert_eq!(
+                text.scoring,
+                Some(qdrant::text_query::Scoring::Bm25(qdrant::Bm25Params {
+                    k: Some(1.2),
+                    b: Some(0.75),
+                }))
+            );
+        }
+        other => panic!("expected Text variant, got {other:?}"),
+    }
+
+    let plain = grpc_query("QUERY BM25 'x' FROM books USING title LIMIT 10;");
+    match plain.query.and_then(|q| q.variant) {
+        Some(qdrant::query::Variant::Text(text)) => {
+            assert_eq!(text.query, "x");
+            assert!(text.scoring.is_none());
+        }
+        other => panic!("expected Text variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn bm25_prefetch_leg_routes_to_grpc_text_query() {
+    let qp = grpc_query(
+        "QUERY FUSION RRF FROM books PREFETCH (\
+         QUERY BM25 'time travel' FROM books USING title LIMIT 50, \
+         QUERY VECTOR [0.1, 0.2] FROM books USING dense LIMIT 50) LIMIT 10;",
+    );
+    assert_eq!(qp.prefetch.len(), 2);
+    assert_eq!(qp.prefetch[0].using.as_deref(), Some("title"));
+    assert!(matches!(
+        qp.prefetch[0].query.as_ref().and_then(|q| q.variant.as_ref()),
+        Some(qdrant::query::Variant::Text(text)) if text.query == "time travel"
+    ));
+}

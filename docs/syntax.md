@@ -392,6 +392,43 @@ QUERY TEXT 'search' FROM docs USING dense
 Edge rejects request-level `timeout` / `consistency` with
 `QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` (fail-loud).
 
+#### Server-side BM25 (QQL 1.9, Qdrant ≥ 1.20)
+
+`QUERY BM25` scores a full-text payload index on the server. `USING` names the
+**payload field** (not a vector), and the field needs a `TYPE text` index with
+`scoring = 'bm25'`:
+
+```sql
+CREATE INDEX ON COLLECTION books FOR title TYPE text
+  WITH (scoring = 'bm25', tokenizer = 'code', lowercase = true);
+
+QUERY BM25 'time travel' FROM books USING title
+  PARAMS (k = 1.2, b = 0.75)
+  LIMIT 10;
+```
+
+- Wire shape: `{"query": {"text": "…"}, "using": "<field>"}`, plus
+  `scoring.bm25 {k, b}` only when `k` / `b` are given (`k ≥ 0`, `0 ≤ b ≤ 1`,
+  `QQL-VALIDATION-BM25-PARAMS`). `k` / `b` on any other query form are
+  `QQL-VALIDATION-SEARCH-PARAM`; `QUERY BM25` without `USING` is `QQL-VALIDATION-BM25-USING`.
+- Works as a `PREFETCH` / CTE leg, so dense + server BM25 fusion is:
+
+  ```sql
+  WITH
+    dense AS (QUERY TEXT 'time travel' USING dense LIMIT 50),
+    lexical AS (QUERY BM25 'time travel' USING title LIMIT 50)
+  QUERY FUSION RRF FROM books PREFETCH (dense, lexical) LIMIT 10;
+  ```
+- `QUERY TEXT '…' USING <vector>` is unchanged: it still embeds client-side, and
+  **client sparse BM25** (`qdrant/bm25` sparse vectors) stays the path for edge
+  and Qdrant < 1.20. `BM25` is contextual, so `USING bm25` vector names still work.
+- **qdrant-edge** rejects server BM25 and the `code` tokenizer with
+  `QQL-EDGE-UNSUPPORTED-TEXT-BM25` / `QQL-EDGE-UNSUPPORTED-CODE-TOKENIZER`.
+- **Remote version gate**: QQL does not probe the server version. When a
+  pre-1.20 server rejects the 1.20 request shape, the backend error is
+  re-raised as `QQL-BACKEND-VERSION` (fields `required_qdrant = 1.20`,
+  `feature`). Older servers on gRPC may ignore the index `scoring` field.
+
 ### Examples
 
 ```sql
@@ -884,7 +921,7 @@ alongside the legacy `on_disk` boolean where applicable.
 | `integer` | `lookup`, `range`, `is_principal`, `on_disk`, `enable_hnsw` |
 | `float` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `geo` | `on_disk`, `enable_hnsw` |
-| `text` | `tokenizer` (word/prefix/whitespace/multilingual), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords` (list, bare language, or `{languages, custom}` set), `phrase_matching`, `ascii_folding`, `stemmer` (e.g. `'english'`) |
+| `text` | `tokenizer` (word/prefix/whitespace/multilingual/code — `code` needs Qdrant ≥ 1.20), `scoring` (`'bm25'`, Qdrant ≥ 1.20), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords` (list, bare language, or `{languages, custom}` set), `phrase_matching`, `ascii_folding`, `stemmer` (e.g. `'english'`) |
 | `bool` | `on_disk`, `enable_hnsw` |
 | `datetime` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `uuid` | `is_tenant`, `on_disk`, `enable_hnsw` |

@@ -1,0 +1,107 @@
+---
+title: "Migrate sparse BM25 to server BM25"
+description: "Move a client-side sparse BM25 setup to Qdrant 1.20 server BM25: add a BM25 text index on the existing payload field and switch queries — no re-upload."
+sidebar:
+  order: 3
+---
+
+If your collection stores BM25 as a sparse named vector and also keeps the
+source text in the payload, you can move to
+[server BM25](/docs/guides/bm25-server/) on Qdrant 1.20 without re-uploading
+a single point.
+
+{% aside type="tip" title="No re-upload" %}
+Server BM25 indexes the payload text you already have. Creating the index is
+the whole data migration; existing points and the sparse vector stay as they
+are.
+{% /aside %}
+
+## Before: client sparse BM25
+
+The client encodes text with the `qdrant/bm25` model in `qql-embed` and
+searches a sparse vector:
+
+{% qqlExample title="Before: client sparse BM25" %}
+```sql
+QUERY TEXT 'time travel' FROM books USING sparse LIMIT 10;
+```
+{% /qqlExample %}
+
+`USING bm25` with no explicit model resolves to the same `qdrant/bm25`
+sparse path.
+
+## Step 1: index the payload field
+
+Create a BM25-scored text index on the field the sparse vectors were built
+from. Match the old encoder's tokenizer, language, stopwords, and stemmer so
+rankings stay comparable:
+
+{% qqlExample title="Add a BM25 text index" %}
+```sql
+CREATE INDEX ON COLLECTION books FOR title TYPE text
+  WITH (scoring = 'bm25', tokenizer = 'word', lowercase = true);
+```
+{% /qqlExample %}
+
+The client `qdrant/bm25` default is the `word` tokenizer with English
+stopwords and stemming. If you changed `bm25_language`, `bm25_tokenizer`,
+`bm25_stopwords`, or `bm25_stemmer`, set the equivalent index options.
+
+## Step 2: switch the query
+
+{% qqlExample title="After: server BM25" %}
+```sql
+QUERY BM25 'time travel' FROM books USING title LIMIT 10;
+```
+{% /qqlExample %}
+
+`USING` changes meaning here: `sparse` was a vector name, `title` is a
+payload field.
+
+## Hybrid queries
+
+Only the lexical leg changes. The dense leg keeps embedding with
+`QUERY TEXT`:
+
+{% qqlExample title="Before: dense + client sparse" %}
+```sql
+WITH
+  dense AS (QUERY TEXT 'time travel' USING dense LIMIT 50),
+  lexical AS (QUERY TEXT 'time travel' USING sparse LIMIT 50)
+QUERY FUSION RRF FROM books PREFETCH (dense, lexical) LIMIT 10;
+```
+{% /qqlExample %}
+
+{% qqlExample title="After: dense + server BM25" %}
+```sql
+WITH
+  dense AS (QUERY TEXT 'time travel' USING dense LIMIT 50),
+  lexical AS (QUERY BM25 'time travel' USING title PARAMS (k = 1.2, b = 0.75) LIMIT 50)
+QUERY FUSION RRF FROM books PREFETCH (dense, lexical) LIMIT 10;
+```
+{% /qqlExample %}
+
+## What to drop
+
+For migrated legs, the client BM25 knobs no longer apply:
+
+| Client sparse knob | Server BM25 equivalent |
+|---|---|
+| `bm25_k1` / `bm25_b`, `setBm25Params(k1, b, …)` | `PARAMS (k = …, b = …)` on the query |
+| `bm25_avg_len`, `estimate_bm25_avg_len` | None — the server tracks document lengths |
+| `bm25_language`, `bm25_tokenizer`, stopwords, stemmer | `CREATE INDEX … WITH (…)` options |
+
+Keep the client options only if some legs still query the sparse vector or
+the same code also runs on edge. Once nothing queries the sparse vector, you
+can stop writing it on upsert.
+
+## When not to migrate yet
+
+- **Edge.** qdrant-edge has no server BM25; `QUERY BM25` fails with a typed
+  error. Keep `USING sparse`.
+- **Qdrant < 1.20.** Upgrade the server first; QQL rejects `QUERY BM25` with
+  a version error instead of sending the request.
+- **The sparse vector serves something else**, such as a learned sparse model
+  (SPLADE, BGE-M3) or another consumer reading it directly.
+- **The text is not in the payload.** Server BM25 can only score stored
+  payload text; without it you would need a re-upload.

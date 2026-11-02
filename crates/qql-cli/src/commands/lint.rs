@@ -274,6 +274,7 @@ fn count_expr_payload(e: &QueryExpr) -> usize {
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
         | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. }
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. } => prefetch,
         QueryExpr::Hybrid { .. } => return 0,

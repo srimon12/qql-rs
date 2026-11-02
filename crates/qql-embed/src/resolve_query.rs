@@ -271,8 +271,9 @@ fn collect_expr_jobs(
                 text: text.clone(),
             });
         }
-        QueryExpr::CrossRerank { prefetch, .. } => {
-            // Query string is scored by the pair model, not embedded.
+        QueryExpr::CrossRerank { prefetch, .. } | QueryExpr::Bm25 { prefetch, .. } => {
+            // Query string is scored by the pair model (CROSS RERANK) or tokenized
+            // server-side (BM25), never embedded.
             collect_prefetches_jobs(prefetch, jobs, depth)?;
         }
         QueryExpr::Rerank {
@@ -974,7 +975,7 @@ fn apply_expr_embeddings<'a>(
                 apply_input(input, emb, cursor)?;
                 apply_prefetches_embeddings(prefetch, cursor).await?;
             }
-            QueryExpr::CrossRerank { prefetch, .. } => {
+            QueryExpr::CrossRerank { prefetch, .. } | QueryExpr::Bm25 { prefetch, .. } => {
                 apply_prefetches_embeddings(prefetch, cursor).await?;
             }
             _ => {}

@@ -59,3 +59,15 @@ QUERY 'x' FROM docs PARAMS (idf = 'collection') LIMIT 5;
 -- @case idf-json-corpus
 -- @error QQL-VALIDATION-IDF
 QUERY 'x' FROM docs PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}) LIMIT 5;
+
+-- @case bm25-without-using
+-- @error QQL-VALIDATION-BM25-USING
+QUERY BM25 'time travel' FROM books LIMIT 10;
+
+-- @case bm25-params-on-non-bm25-query
+-- @error QQL-VALIDATION-SEARCH-PARAM
+QUERY TEXT 'time travel' FROM books USING dense PARAMS (k = 1.2) LIMIT 10;
+
+-- @case bm25-scoring-on-non-text-index
+-- @error QQL-VALIDATION-TEXT-INDEX
+CREATE INDEX ON COLLECTION books FOR title TYPE keyword WITH (scoring = 'bm25');

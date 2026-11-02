@@ -55,6 +55,10 @@ pub enum EdgeUnsupported {
     StrictMode,
     /// `WITH METADATA` (no collection metadata in qdrant-edge).
     Metadata,
+    /// `QUERY BM25 …` / text index `scoring = 'bm25'` (Qdrant >= 1.20 server BM25).
+    TextBm25,
+    /// Text index `tokenizer = 'code'` (Qdrant >= 1.20).
+    CodeTokenizer,
 }
 
 impl EdgeUnsupported {
@@ -80,6 +84,8 @@ impl EdgeUnsupported {
             Self::Wal => "QQL-EDGE-UNSUPPORTED-WAL",
             Self::StrictMode => "QQL-EDGE-UNSUPPORTED-STRICT-MODE",
             Self::Metadata => "QQL-EDGE-UNSUPPORTED-METADATA",
+            Self::TextBm25 => "QQL-EDGE-UNSUPPORTED-TEXT-BM25",
+            Self::CodeTokenizer => "QQL-EDGE-UNSUPPORTED-CODE-TOKENIZER",
         }
     }
 
@@ -114,6 +120,8 @@ impl EdgeUnsupported {
             Self::Wal => "collection WITH WAL",
             Self::StrictMode => "collection WITH STRICT_MODE",
             Self::Metadata => "collection WITH METADATA",
+            Self::TextBm25 => "server-side BM25 (QUERY BM25 / text index scoring = 'bm25')",
+            Self::CodeTokenizer => "text index tokenizer = 'code'",
         }
     }
 
@@ -178,6 +186,12 @@ impl EdgeUnsupported {
             Self::Metadata => {
                 "qdrant-edge collection configs do not store arbitrary collection metadata"
             }
+            Self::TextBm25 => {
+                "qdrant-edge 0.8 has no text query variant and no text index scoring (Qdrant 1.20 feature)"
+            }
+            Self::CodeTokenizer => {
+                "qdrant-edge 0.8 TokenizerType has prefix / whitespace / word / multilingual only (code arrived in Qdrant 1.20)"
+            }
         }
     }
 
@@ -195,6 +209,12 @@ impl EdgeUnsupported {
                 Some("Use remote Qdrant (REST or gRPC) for strict mode enforcement")
             }
             Self::Metadata => Some("Use remote Qdrant (REST or gRPC) for collection metadata"),
+            Self::TextBm25 => Some(
+                "Use client-side sparse BM25 offline (QUERY TEXT '…' USING <sparse vector> with a Qdrant/bm25 model), or remote Qdrant >= 1.20 for QUERY BM25",
+            ),
+            Self::CodeTokenizer => Some(
+                "Use tokenizer word / whitespace / prefix / multilingual offline, or remote Qdrant >= 1.20 for tokenizer = 'code'",
+            ),
             _ => Some("Use remote Qdrant (REST or gRPC) for this feature"),
         }
     }
@@ -338,6 +358,8 @@ mod tests {
             EdgeUnsupported::Wal,
             EdgeUnsupported::StrictMode,
             EdgeUnsupported::Metadata,
+            EdgeUnsupported::TextBm25,
+            EdgeUnsupported::CodeTokenizer,
         ];
         let mut codes = std::collections::BTreeSet::new();
         for f in features {

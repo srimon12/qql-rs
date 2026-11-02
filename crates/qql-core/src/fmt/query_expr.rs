@@ -198,6 +198,15 @@ pub(crate) fn render_query_expr(expression: &QueryExpr) -> String {
             }
             out
         }
+        QueryExpr::Bm25 {
+            text, text_param, ..
+        } => {
+            if let Some(param) = text_param {
+                format!("BM25 {}", render_placeholder(param))
+            } else {
+                format!("BM25 '{}'", escape_string(text))
+            }
+        }
     }
 }
 
@@ -223,7 +232,8 @@ pub(crate) fn query_expr_prefetch(expression: &QueryExpr) -> &[Prefetch] {
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
+        | QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Bm25 { prefetch, .. } => prefetch,
         _ => &[],
     }
 }
@@ -416,6 +426,12 @@ pub(crate) fn render_search_params(params: &SearchParams) -> String {
             entries.push(format!("oversampling: {}", render_f64(value)));
         }
         parts.push(format!("quantization = {{{}}}", entries.join(", ")));
+    }
+    if let Some(value) = params.bm25_k {
+        parts.push(format!("k = {}", render_f64(value)));
+    }
+    if let Some(value) = params.bm25_b {
+        parts.push(format!("b = {}", render_f64(value)));
     }
     if let Some(idf) = &params.idf {
         match &idf.corpus {

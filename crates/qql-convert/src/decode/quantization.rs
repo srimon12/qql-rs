@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::ConvertError;
 use crate::decode::config::memory;
+use crate::decode::pending;
 use crate::json::{self, child, invalid};
 use qql_core::ast::{QuantizationConfig, QuantizationType, QuantizationUpdate};
 
@@ -119,6 +120,12 @@ pub(crate) fn quantization(value: &Value, path: &str) -> Result<QuantizationConf
             bits: match json::opt_string(params, "bits", &params_path)? {
                 None => None,
                 Some(label) => Some(turbo_bits(&label).ok_or_else(|| {
+                    if pending::is_new(&pending::TURBO_BITS_1_20, &label) {
+                        return pending::pending(
+                            child(&params_path, "bits"),
+                            &format!("TurboQuant bit size '{label}'"),
+                        );
+                    }
                     invalid(
                         child(&params_path, "bits"),
                         format!("unknown turbo bit size '{label}'"),

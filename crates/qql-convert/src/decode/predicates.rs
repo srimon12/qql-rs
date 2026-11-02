@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::pending;
 use crate::json::{self, child, index, invalid};
 use qql_core::ast::{ComparisonOp, FilterExpr, GeoPoint, Value as AstValue};
 
@@ -124,6 +125,12 @@ pub(crate) fn decode_match(
                         .and_then(|v| json::bool_at(v, &child(path, "boolean")))?,
                 ),
             },
+            "substring" => {
+                return Err(pending::pending(
+                    child(path, "substring"),
+                    "substring match (`match.substring`)",
+                ));
+            }
             "text_any" => FilterExpr::MatchTokens {
                 field: field.to_string(),
                 text: json::required(obj, "text_any", path)

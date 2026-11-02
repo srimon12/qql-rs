@@ -226,6 +226,16 @@ pub(crate) fn query_input(value: &Value, path: &str) -> Result<QueryInput, Conve
                 return Ok(QueryInput::Vector(sparse(value, path)?));
             }
             if obj.contains_key("text") {
+                // A model-less `text` object is a Qdrant 1.20 `TextQuery`
+                // (server BM25). It is a `Query` union member, valid only as
+                // the top-level or prefetch `query`, never a `VectorInput`.
+                if !obj.contains_key("model") {
+                    return Err(invalid(
+                        path,
+                        "a model-less `text` object is a Qdrant 1.20 BM25 TextQuery; \
+                         it is only valid as a request or prefetch `query`, not a VectorInput",
+                    ));
+                }
                 return document(obj, path);
             }
             if obj.contains_key("image") {

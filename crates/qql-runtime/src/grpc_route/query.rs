@@ -356,6 +356,15 @@ pub(crate) fn to_query_variant(
                 strategy,
             })
         }
+        QueryVariant::Text(text_query) => Variant::Text(qdrant::TextQuery {
+            query: text_query.text.query().to_string(),
+            scoring: text_query.text.bm25().map(|bm25| {
+                qdrant::text_query::Scoring::Bm25(qdrant::Bm25Params {
+                    k: bm25.k.map(|k| k as f32),
+                    b: bm25.b.map(|b| b as f32),
+                })
+            }),
+        }),
     };
     Ok(qdrant::Query {
         variant: Some(variant),

@@ -642,3 +642,19 @@ fn test_compound_filter_passes_through_unchanged() {
         })
     );
 }
+
+/// Qdrant 1.20 server-side BM25 has no qdrant-edge 0.8 query variant: the
+/// converter must fail with the typed catalog error, never an engine error.
+#[test]
+fn bm25_text_query_is_rejected_offline_with_typed_error() {
+    let query = QueryVariant::Text(qql_plan::types::TextQuery {
+        text: qql_plan::types::TextInterface::Plain("time travel".into()),
+    });
+    let error = convert_query(&query, Some("title")).expect_err("BM25 is remote-only");
+    assert_eq!(error.code, "QQL-EDGE-UNSUPPORTED-TEXT-BM25");
+    assert!(
+        error.message.contains("USING <sparse vector>"),
+        "{}",
+        error.message
+    );
+}

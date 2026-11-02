@@ -152,6 +152,22 @@ pub(crate) fn core_query(
         params.rrf_k = rrf.k;
         params.rrf_weights = rrf.weights;
     }
+    if let Some(bm25) = interface.bm25
+        && (bm25.k.is_some() || bm25.b.is_some())
+    {
+        let params = params.get_or_insert_with(SearchParams::default);
+        params.bm25_k = bm25.k;
+        params.bm25_b = bm25.b;
+    }
+    // Sparse-vector IDF corpus does not apply to server BM25 (`QUERY BM25`).
+    if matches!(expression, QueryExpr::Bm25 { .. })
+        && params.as_ref().is_some_and(|p| p.idf.is_some())
+    {
+        return Err(invalid(
+            &child(path, "params.idf"),
+            "params.idf is for sparse-vector queries; QUERY BM25 only takes k/b (IDF comes from the text index)",
+        ));
+    }
 
     Ok(CoreQuery {
         expression,

@@ -113,6 +113,33 @@ re-parse.
 | `InvalidField` | Recognized body with an invalid/unrepresentable field (holds `path` + reason) |
 | `InvalidLine` | A JSONL line failed (holds the 1-based line number + source error) |
 
+## Qdrant 1.20 shapes
+
+Server-side BM25 converts to QQL 1.9 syntax:
+
+| Qdrant 1.20 REST | QQL |
+|------------------|-----|
+| `{"query": {"text": "q"}, "using": "title"}` | `QUERY BM25 'q' FROM c USING title` |
+| `{"query": {"text": {"query": "q", "scoring": {"bm25": {"k": 1.5, "b": 0.5}}}}, "using": "title"}` | `QUERY BM25 'q' FROM c USING title PARAMS (k = 1.5, b = 0.5)` |
+| `prefetch[i].query = {"text": …}` | the same leg inside `PREFETCH (…)` |
+| `field_schema.scoring = {"type": "bm25"}` or `true` | `WITH (scoring = 'bm25')` (`false` omits it) |
+| `field_schema.tokenizer = "code"` | `WITH (tokenizer = 'code')` |
+
+A `text` query needs `using` (the BM25-scored payload field). An inference
+`Document` (`{"text": …, "model": …}`) still converts to the embed path
+(`QUERY TEXT … MODEL …`), never to `QUERY BM25`.
+
+The remaining 1.20 shapes QQL cannot spell yet fail closed with
+`ConvertError::InvalidField`. The `detail` starts with `Qdrant 1.20`, and
+`path` points at the exact field:
+
+- `nested` payload indexes
+- `match.substring`
+- `turbo8` / `turbo16` datatypes, TurboQuant `bits8`
+- `id_tracker` on create or update
+
+See [`docs/design/bm25-server-side-1.20.md`](https://github.com/srimon12/qql-rs/blob/main/docs/design/bm25-server-side-1.20.md#qql-convert-mappings).
+
 ## Contract sources
 
 * `crates/qql-runtime/openapi.json` — request schemas per path (the input

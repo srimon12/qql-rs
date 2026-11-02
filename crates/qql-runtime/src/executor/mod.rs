@@ -24,6 +24,7 @@ pub(crate) mod prepared;
 pub(crate) mod response;
 /// Phase-1 telemetry types: client phase timings plus server `time`/`usage`.
 pub mod telemetry;
+pub(crate) mod version_gate;
 
 pub use prepared::PreparedStatement;
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};

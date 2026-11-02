@@ -208,6 +208,16 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
                 None,
             ));
         }
+        // BM25 reads `k` / `b` from the statement PARAMS, which this
+        // expression-only lowering cannot see; dropping them would silently
+        // score with server defaults.
+        QueryExpr::Bm25 { .. } => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-UNSUPPORTED-PREFETCH",
+                "BM25 must be lowered through the prefetch pipeline",
+                None,
+            ));
+        }
         // Points / CrossRerank are planned by plan() special-cases and cannot
         // be represented as a QueryVariant. Reaching this arm means one leaked
         // into a prefetch source — a structured error, never a panic.

@@ -16,9 +16,9 @@ const root = path.join(__dirname, "..");
 const completions = fs.readFileSync(path.join(root, "src", "providers", "completions.ts"), "utf8");
 const keywords = fs.readFileSync(path.join(root, "src", "keywords.generated.ts"), "utf8");
 
-test("snippet count matches the documented claim (README: 44)", () => {
+test("snippet count matches the documented claim (README: 47)", () => {
   const labels = [...completions.matchAll(/^\s*label: "([^"]+)",$/gm)].map((m) => m[1]);
-  assert.strictEqual(labels.length, 44, "expected exactly 44 snippets");
+  assert.strictEqual(labels.length, 47, "expected exactly 47 snippets");
   assert.strictEqual(new Set(labels).size, labels.length, "snippet labels must be unique");
 });
 
@@ -57,8 +57,8 @@ test("snippet insertText values are well-formed", () => {
   const detailCount = (snippetBlock.match(/\bdetail:/g) || []).length;
   // One declaration belongs to the QqlSnippet interface; every concrete
   // snippet contributes exactly one additional property.
-  assert.strictEqual(insertTextCount, 45, "every snippet must have insertText");
-  assert.strictEqual(detailCount, 45, "every snippet must have a detail");
+  assert.strictEqual(insertTextCount, 48, "every snippet must have insertText");
+  assert.strictEqual(detailCount, 48, "every snippet must have a detail");
 });
 
 test("1.7 statement starters and follow-ups are registered", () => {
@@ -104,14 +104,14 @@ test("1.7 snippets exist in completions", () => {
 });
 
 test("every snippets/qql.json body matches a providers/completions.ts value", () => {
-  // snippets/qql.json is a curated subset of the 44 provider snippets (native
+  // snippets/qql.json is a curated subset of the 47 provider snippets (native
   // editor snippets vs. completion items). The bodies must still be exact
   // copies — never drifted edits. Evaluates the template-literal insertTexts
   // with a single-pass unescape so `\\` sequences can't double-convert.
   const values = new Set(
     [...completions.matchAll(/insertText: `([^`]*)`,/g)].map((m) => unescapeTemplate(m[1]))
   );
-  assert.ok(values.size >= 44, `expected 44 snippet values, got ${values.size}`);
+  assert.ok(values.size >= 47, `expected 47 snippet values, got ${values.size}`);
   const snippets = JSON.parse(fs.readFileSync(path.join(root, "snippets", "qql.json"), "utf8"));
   for (const [name, snippet] of Object.entries(snippets)) {
     const body = snippet.body.join("\n");

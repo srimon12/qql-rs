@@ -4,6 +4,7 @@
 use serde_json::Value;
 
 use crate::ConvertError;
+use crate::decode::pending;
 use crate::decode::quantization::quantization;
 use crate::json::{self, child, invalid, type_name};
 use qql_core::ast::{
@@ -130,6 +131,9 @@ pub(crate) fn storage_fields(
         match json::opt_string(obj, "datatype", path)? {
             None => None,
             Some(raw) => Some(VectorDatatype::parse(&raw).ok_or_else(|| {
+                if pending::is_new(&pending::DATATYPES_1_20, &raw) {
+                    return pending::pending(child(path, "datatype"), &format!("datatype '{raw}'"));
+                }
                 invalid(
                     child(path, "datatype"),
                     format!("unknown vector datatype '{raw}'"),
@@ -351,6 +355,12 @@ pub(crate) fn update_params(
             | "read_fan_out_delay_ms"
             | "on_disk_payload"
             | "payload" => {}
+            "id_tracker" => {
+                return Err(pending::pending(
+                    child(path, "id_tracker"),
+                    "id-tracker memory tier (`id_tracker`)",
+                ));
+            }
             other => {
                 return Err(invalid(
                     child(path, other),

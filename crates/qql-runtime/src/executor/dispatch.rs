@@ -94,7 +94,9 @@ impl Executor {
         &self,
         op: &PlannedOperation,
     ) -> Result<BackendResponse, QqlError> {
-        let response = self.client.execute_planned(op).await?;
+        let response = self.client.execute_planned(op).await.map_err(|error| {
+            super::version_gate::gate_qdrant_1_20(op.qdrant_1_20_feature(), error)
+        })?;
         match op {
             PlannedOperation::CreateCollection { collection, .. }
             | PlannedOperation::UpdateCollection { collection, .. }

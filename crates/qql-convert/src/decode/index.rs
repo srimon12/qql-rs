@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::ConvertError;
 use crate::decode::DecodeCtx;
+use crate::decode::pending;
 use crate::json::{self, child, invalid, type_name};
 use qql_core::ast::{CreateIndexStmt, Value as AstValue};
 
@@ -106,6 +107,20 @@ fn index_options(schema: &json::Obj, path: &str) -> Result<Vec<(String, AstValue
             "stopwords" => {
                 options.push((key.clone(), decode_stopwords(value, &child(path, key))?));
             }
+            // Qdrant 1.20 `TextScoringInterface`: `true` / `{"type": "bm25"}`
+            // → `scoring = 'bm25'`; `false` (disabled, the default) emits
+            // nothing. QQL only accepts it on `TYPE text`.
+            "scoring" => {
+                if let Some(scoring) = decode_scoring(value, &child(path, key))? {
+                    options.push((key.clone(), AstValue::Str(scoring)));
+                }
+            }
+            "nested" => {
+                return Err(pending::pending(
+                    child(path, "nested"),
+                    "per-element payload index (`nested`)",
+                ));
+            }
             other => {
                 return Err(invalid(child(path, other), "unknown field_schema option"));
             }
@@ -120,8 +135,37 @@ fn index_options(schema: &json::Obj, path: &str) -> Result<Vec<(String, AstValue
 
 fn validate_tokenizer(raw: &str, path: &str) -> Result<String, ConvertError> {
     match raw.to_ascii_lowercase().as_str() {
-        "word" | "whitespace" | "prefix" | "multilingual" => Ok(raw.to_ascii_lowercase()),
+        // `code` (Qdrant 1.20) splits camelCase / snake_case identifiers.
+        "word" | "whitespace" | "prefix" | "multilingual" | "code" => Ok(raw.to_ascii_lowercase()),
         _ => Err(invalid(path, format!("unknown text tokenizer '{raw}'"))),
+    }
+}
+
+/// Decode `TextScoringInterface` (bool or `{"type": "bm25"}`) into the QQL
+/// `scoring` option value; `None` when scoring is disabled.
+fn decode_scoring(value: &Value, path: &str) -> Result<Option<String>, ConvertError> {
+    match value {
+        Value::Bool(true) => Ok(Some("bm25".to_string())),
+        Value::Bool(false) => Ok(None),
+        Value::Object(obj) => {
+            json::reject_unknown(obj, path, &["type"])?;
+            let raw = json::string_at(json::required(obj, "type", path)?, &child(path, "type"))?;
+            if raw.eq_ignore_ascii_case("bm25") {
+                Ok(Some("bm25".to_string()))
+            } else {
+                Err(invalid(
+                    child(path, "type"),
+                    format!("unknown text scoring type '{raw}'"),
+                ))
+            }
+        }
+        other => Err(invalid(
+            path,
+            format!(
+                "expected a boolean or {{type: \"bm25\"}} text scoring, got {}",
+                type_name(other)
+            ),
+        )),
     }
 }
 

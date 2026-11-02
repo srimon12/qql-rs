@@ -689,6 +689,59 @@ mod tests {
         });
     }
 
+    /// QQL 1.9 server-side BM25 and the code tokenizer are Qdrant >= 1.20
+    /// features: offline execution reports the typed catalog codes end to end.
+    #[test]
+    fn edge_rejects_server_bm25_and_code_tokenizer_with_typed_errors() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let data_dir =
+                std::env::temp_dir().join(format!("qql-edge-bm25-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&data_dir);
+            let executor =
+                custom_executor(&data_dir, false, Arc::new(TestEmbedder)).expect("custom executor");
+            let report = executor
+                .execute("CREATE COLLECTION docs HYBRID", OnError::Stop)
+                .await
+                .expect("create collection");
+            assert!(report.ok);
+            for (source, code) in [
+                (
+                    "QUERY BM25 'hello' FROM docs USING text LIMIT 1",
+                    "QQL-EDGE-UNSUPPORTED-TEXT-BM25",
+                ),
+                (
+                    "QUERY FUSION RRF FROM docs PREFETCH (QUERY BM25 'hello' FROM docs USING text LIMIT 5) LIMIT 1",
+                    "QQL-EDGE-UNSUPPORTED-TEXT-BM25",
+                ),
+                (
+                    "CREATE INDEX ON COLLECTION docs FOR text TYPE text WITH (scoring = 'bm25')",
+                    "QQL-EDGE-UNSUPPORTED-TEXT-BM25",
+                ),
+                (
+                    "CREATE INDEX ON COLLECTION docs FOR text TYPE text WITH (tokenizer = 'code', lowercase = true)",
+                    "QQL-EDGE-UNSUPPORTED-CODE-TOKENIZER",
+                ),
+            ] {
+                let report = executor
+                    .execute(source, OnError::Continue)
+                    .await
+                    .unwrap_or_else(|e| panic!("{source}: {e}"));
+                assert!(!report.ok, "{source} must fail offline");
+                assert!(
+                    report.results[0].message.contains(code),
+                    "{source}: {}",
+                    report.results[0].message
+                );
+            }
+            executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(data_dir);
+        });
+    }
+
     #[test]
     fn edge_reads_do_not_create_missing_collections() {
         // Regression (B-2): read operations against a missing collection must

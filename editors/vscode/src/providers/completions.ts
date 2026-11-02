@@ -36,7 +36,7 @@ const SNIPPETS: QqlSnippet[] = [
   FUSION RRF
   FROM \${4:collection}
   LIMIT \${5:10};`,
-    detail: "Hybrid dense+sparse RRF search",
+    detail: "Hybrid dense + client sparse RRF search",
   },
   {
     label: "QUERY HYBRID DBSF",
@@ -45,7 +45,7 @@ const SNIPPETS: QqlSnippet[] = [
   FUSION DBSF
   FROM \${4:collection}
   LIMIT \${5:10};`,
-    detail: "Hybrid dense+sparse DBSF search",
+    detail: "Hybrid dense + client sparse DBSF search",
   },
   {
     label: "CTE + FUSION",
@@ -56,7 +56,26 @@ QUERY FUSION RRF
   FROM \${6:collection}
   PREFETCH (\${1:dense}, \${4:sparse})
   LIMIT \${7:10};`,
-    detail: "Multi-stage retrieval with CTEs and RRF fusion",
+    detail: "Multi-stage CTEs + RRF (dense + client sparse)",
+  },
+  {
+    label: "QUERY BM25",
+    insertText: `QUERY BM25 '\${1:search term}'
+  FROM \${2:collection} USING \${3:field}
+  PARAMS (k = \${4:1.2}, b = \${5:0.75})
+  LIMIT \${6:10};`,
+    detail: "Server BM25 on a text payload field (Qdrant 1.20+)",
+  },
+  {
+    label: "CTE + SERVER BM25 FUSION",
+    insertText: `WITH
+  \${1:dense} AS (QUERY TEXT '\${2:search}' USING \${3:dense} LIMIT 50),
+  \${4:lexical} AS (QUERY BM25 '\${2:search}' USING \${5:field} PARAMS (k = 1.2, b = 0.75) LIMIT 50)
+QUERY FUSION RRF
+  FROM \${6:collection}
+  PREFETCH (\${1:dense}, \${4:lexical})
+  LIMIT \${7:10};`,
+    detail: "Dense + server BM25 hybrid with RRF (Qdrant 1.20+)",
   },
   {
     label: "CTE + RERANK",
@@ -144,6 +163,12 @@ QUERY RERANK TEXT '\${2:search}' MODEL '\${4:reranker}'
   WITH (\${4})
   WAIT \${5|true,false|};`,
     detail: "Create a payload index (durable with WAIT)",
+  },
+  {
+    label: "CREATE INDEX BM25",
+    insertText: `CREATE INDEX ON COLLECTION \${1:collection} FOR \${2:field} TYPE text
+  WITH (scoring = 'bm25', tokenizer = '\${3|word,code|}', lowercase = true);`,
+    detail: "BM25-scored text index for QUERY BM25 (Qdrant 1.20+)",
   },
   {
     label: "SCROLL",
@@ -357,6 +382,7 @@ const AFTER: Record<
   QUERY: [
     { label: "TEXT", detail: "Nearest from text" },
     { label: "HYBRID", detail: "Dense + sparse fusion" },
+    { label: "BM25", detail: "Server BM25 on a text field (Qdrant 1.20+)" },
     { label: "RECOMMEND", detail: "Positive/negative examples" },
     { label: "DISCOVER", detail: "Target + context pairs" },
     { label: "FORMULA", detail: "Score shaping" },

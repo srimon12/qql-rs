@@ -41,8 +41,26 @@ pub fn lower_create_index(stmt: &CreateIndexStmt) -> Result<CreateIndexRequest, 
                     QqlError::validation(
                         "QQL-PLAN-INDEX-OPTION",
                         format!(
-                            "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual"
+                            "unsupported text tokenizer '{raw}'. Expected: word, whitespace, prefix, multilingual, code"
                         ),
+                        value.param_span(),
+                    )
+                })?);
+            }
+            "scoring" => {
+                let raw = index_str(key, value)?;
+                if field_schema != IndexFieldType::Text {
+                    return Err(index_option_error(
+                        format!(
+                            "scoring = '{raw}' requires TYPE text (got TYPE {})",
+                            field_schema.as_str()
+                        ),
+                        value.param_span(),
+                    ));
+                }
+                options.scoring = Some(TextScoring::parse(raw).ok_or_else(|| {
+                    index_option_error(
+                        format!("unsupported text scoring '{raw}'. Expected: bm25"),
                         value.param_span(),
                     )
                 })?);

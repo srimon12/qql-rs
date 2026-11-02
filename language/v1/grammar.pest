@@ -103,10 +103,18 @@ query_expr = _{
     // Cross-encoder pair scorer (client-side). Distinct from late-interaction RERANK.
     | cross_rerank
     | rerank
+    // Server-side BM25 over a full-text payload index (Qdrant >= 1.20).
+    // Distinct from embed `TEXT`: never goes through an embedder.
+    | bm25
     | nearest
 }
 
 points = { ^"POINTS" ~ point_id_list }
+// QUERY BM25 '<text>' FROM c USING <payload field> [PARAMS (k = …, b = …)].
+// `USING` names a payload field with a `scoring = 'bm25'` text index, not a
+// vector. `BM25` contains digits, so it is a contextual word, not a reserved
+// keyword (`USING bm25` on the client sparse path keeps working).
+bm25 = { ^"BM25" ~ (param | string) }
 nearest = { ^"NEAREST"? ~ query_input }
 
 query_input = _{
@@ -676,6 +684,9 @@ search_param = _{
     | ^"quantization" ~ "=" ~ quantization_search
     // Per-query IDF corpus for sparse vectors: global scope or a QQL filter.
     | ^"idf" ~ "=" ~ idf_param
+    // Server BM25 scorer params (QUERY BM25 only): k >= 0, b in [0, 1].
+    | ^"k" ~ "=" ~ number
+    | ^"b" ~ "=" ~ number
     // Request-level (REST query string / gRPC fields) — seconds, min 1
     | ^"timeout" ~ "=" ~ positive_integer
     // ReadConsistency: non-negative integer factor N, or majority | quorum | all

@@ -1,0 +1,226 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "CreateIndex": {
+        "collection": "books",
+        "field": "title",
+        "field_type": "text",
+        "options": [
+          [
+            "scoring",
+            {
+              "Str": "bm25"
+            }
+          ],
+          [
+            "tokenizer",
+            {
+              "Str": "code"
+            }
+          ],
+          [
+            "lowercase",
+            {
+              "Bool": true
+            }
+          ]
+        ],
+        "wait": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "books"
+        },
+        "ctes": [],
+        "expression": {
+          "Bm25": {
+            "field": "title",
+            "prefetch": [],
+            "text": "time travel"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "books"
+        },
+        "ctes": [],
+        "expression": {
+          "Bm25": {
+            "field": "title",
+            "prefetch": [],
+            "text": "time travel"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "bm25_b": 0.75,
+          "bm25_k": 1.2,
+          "consistency": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "idf": null,
+          "indexed_only": null,
+          "max_selectivity": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null,
+          "timeout": null
+        },
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "books"
+        },
+        "ctes": [
+          {
+            "name": "dense",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "time travel"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "multi": false,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 50,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "name": "lexical",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Bm25": {
+                  "field": "title",
+                  "prefetch": [],
+                  "text": "time travel"
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 50,
+                "offset": null
+              },
+              "params": {
+                "acorn": null,
+                "bm25_b": 0.75,
+                "bm25_k": 1.2,
+                "consistency": null,
+                "exact": null,
+                "hnsw_ef": null,
+                "idf": null,
+                "indexed_only": null,
+                "max_selectivity": null,
+                "quantization": null,
+                "rrf_k": null,
+                "rrf_weights": null,
+                "timeout": null
+              },
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Rrf",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "dense"
+                }
+              },
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "lexical"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

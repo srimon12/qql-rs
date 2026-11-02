@@ -108,6 +108,16 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::Rerank {
             return self.parse_rerank();
         }
+        // `BM25` is a contextual word (digits keep it out of the keyword
+        // table), only claimed when followed by a string or placeholder.
+        if self.peek_word("BM25")?
+            && matches!(
+                self.peek_nth(1).kind,
+                TokenKind::String | TokenKind::Colon | TokenKind::Question
+            )
+        {
+            return self.parse_bm25();
+        }
 
         self.parse_query_input().map(|input| QueryExpr::Nearest {
             input,
