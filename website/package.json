@@ -22,9 +22,9 @@
 		"typecheck": "astro check"
 	},
 	"dependencies": {
-		"@astrojs/markdoc": "^2.1.1",
+		"@astrojs/markdoc": "^2.1.3",
 		"@astrojs/sitemap": "^3.7.4",
-		"@astrojs/starlight": "^0.42.7",
+		"@astrojs/starlight": "^0.42.9",
 		"@astrojs/starlight-markdoc": "^0.7.0",
 		"@codemirror/autocomplete": "^6.20.4",
 		"@codemirror/commands": "^6.11.1",
@@ -39,7 +39,7 @@
 		"@huggingface/transformers": "4.2.0",
 		"@lezer/highlight": "^1.2.5",
 		"@qql/ui": "workspace:*",
-		"astro": "^7.4.2",
+		"astro": "^7.4.7",
 		"codemirror": "^6.0.2",
 		"sharp": "0.35.5",
 		"starlight-llms-txt": "^0.12.0"
@@ -47,9 +47,9 @@
 	"devDependencies": {
 		"@astrojs/check": "^0.9.12",
 		"@astrojs/starlight-tailwind": "^5.0.0",
-		"@biomejs/biome": "^2.6.3",
-		"@tailwindcss/vite": "^4.3.3",
-		"tailwindcss": "^4.3.3",
+		"@biomejs/biome": "^2.6.5",
+		"@tailwindcss/vite": "^4.3.4",
+		"tailwindcss": "^4.3.4",
 		"typescript": "^6.0.3"
 	}
 }
